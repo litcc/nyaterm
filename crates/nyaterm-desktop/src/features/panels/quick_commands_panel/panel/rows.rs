@@ -116,12 +116,15 @@ impl NyaTermApp {
                         )
                         // Tauri's tile hover is the full command card, not a text
                         // blurb: in tile mode it is the only way to read the command.
-                        .tooltip({
+                        // Hoverable so the pointer can enter the card and copy, as
+                        // it can in Tauri's non-`disableHoverableContent` tooltip.
+                        .hoverable_tooltip({
                             let tooltip_command = command.clone();
                             let tooltip_category = quick_command_category_label(
                                 self.commands.quick_command_categories(),
                                 &command,
                             );
+                            let tooltip_app = cx.entity().downgrade();
                             move |_, cx| {
                                 cx.new(|_| {
                                     QuickCommandTooltip::new(
@@ -130,6 +133,7 @@ impl NyaTermApp {
                                         tooltip_command.clone(),
                                         tooltip_category.clone(),
                                         badge_mode,
+                                        tooltip_app.clone(),
                                     )
                                 })
                                 .into()

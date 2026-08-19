@@ -1,18 +1,20 @@
 //! The 320px command card shared by the tile hover tooltip and the eye popover.
 //!
 //! Tauri renders the same block in both places (`renderCommandDetailsPopover` and
-//! the tile `TooltipContent`); the only differences are the shell around it, the
-//! execution-mode line the tile adds, and the copy button, which needs a click and
-//! so cannot live in a tooltip.
+//! the tile `TooltipContent`); the only difference is the shell around it and the
+//! execution-mode line the tile adds. Both carry the copy button: the tile card is
+//! a *hoverable* tooltip, which gpui keeps alive while the pointer is over it and
+//! does not dismiss on mouse-down, so a click target is legal there.
 
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, Render, SharedString, Window, div, prelude::*,
-    px, rgb, rgba, svg,
+    AnyElement, Context, FontWeight, IntoElement, Render, SharedString, WeakEntity, Window, div,
+    prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::QuickCommand;
 use nyaterm_ui::NyaScrollable;
 
 use super::super::quick_command_icon_mark;
+use crate::features::NyaTermApp;
 
 pub(in crate::features) struct QuickCommandCardContent<'a> {
     pub command: &'a QuickCommand,
@@ -175,12 +177,17 @@ pub(in crate::features) fn quick_command_detail_card(
 
 /// The tile hover card. A tooltip rather than an in-tree popover: the panel clips
 /// its overflow, and tiles painted after the hovered one would cover it.
+///
+/// Built for `hoverable_tooltip`, so the pointer can travel into the card to
+/// scroll the command or press copy. `app` is weak because the tooltip is its own
+/// entity with a lifetime gpui controls, not a child of the app entity.
 pub(in crate::features) struct QuickCommandTooltip {
     palette: crate::theme::ThemePalette,
     surface: gpui::Rgba,
     command: QuickCommand,
     category: String,
     execution_mode: QuickCommandCardExecutionMode,
+    app: WeakEntity<NyaTermApp>,
 }
 
 impl QuickCommandTooltip {
@@ -190,6 +197,7 @@ impl QuickCommandTooltip {
         command: QuickCommand,
         category: String,
         execution_mode: QuickCommandCardExecutionMode,
+        app: WeakEntity<NyaTermApp>,
     ) -> Self {
         Self {
             palette,
@@ -197,14 +205,55 @@ impl QuickCommandTooltip {
             command,
             category,
             execution_mode,
+            app,
         }
     }
 }
 
 impl Render for QuickCommandTooltip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let palette = self.palette;
+        let copy_text = self.command.command.clone();
+        let app = self.app.clone();
+        let copy_button = div()
+            .id(SharedString::from("quick-command-tile-copy"))
+            .absolute()
+            .top(px(6.))
+            .right(px(6.))
+            .size(px(24.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_sm()
+            .cursor_pointer()
+            .hover(move |this| this.bg(rgb(palette.hover)))
+            .child(
+                svg()
+                    .size(px(13.))
+                    .flex_none()
+                    .path("icons/copy.svg")
+                    .text_color(rgb(palette.text_muted)),
+            )
+            // No nested tooltip here: `prepaint_tooltip` fixes its candidate range
+            // before the tooltip subtree prepaints and returns on the first visible
+            // request, so a tooltip inside a tooltip can never render. The eye
+            // popover's copy button is not nested and keeps its label.
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                let text = copy_text.clone();
+                app.update(cx, |app, cx| app.copy_quick_command_text(text, cx))
+                    .ok();
+            })
+            .into_any_element();
+
         div()
             .w(px(320.))
+            // Without a blocking hitbox the card is visually on top but mouse-
+            // transparent, so whatever sits behind it keeps taking hover. The
+            // tooltip prepaints after the root tree and the deferred draws, so this
+            // hitbox is the topmost one; the copy button is a child and stays above
+            // it.
+            .occlude()
             .overflow_hidden()
             .rounded_lg()
             .border_1()
@@ -217,7 +266,7 @@ impl Render for QuickCommandTooltip {
                     command: &self.command,
                     category: &self.category,
                     execution_mode: Some(self.execution_mode),
-                    copy_button: None,
+                    copy_button: Some(copy_button),
                 },
             ))
     }
