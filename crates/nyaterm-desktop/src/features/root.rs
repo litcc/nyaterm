@@ -9,7 +9,9 @@ use gpui::{
 
 use super::NyaTermApp;
 use super::terminal::{FULL_SHELL_PAINT_COUNT, terminal_surface_paint_count};
-use super::view_widgets::full_window_input_layer;
+use super::view_widgets::{
+    full_window_input_layer, full_window_overlay_layer, passive_overlay_layer,
+};
 use crate::features::perf::{GpuiPerfContext, record_gpui_perf_sample};
 use crate::features::runtime_jobs::ActivitySide;
 use crate::theme::ThemePalette;
@@ -500,157 +502,159 @@ impl NyaTermApp {
 
         content
             .when(overlay.tab_actions_open, |this| {
-                this.child(
-                    full_window_input_layer("tab-actions-input-layer")
-                        .child(self.tab_actions_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "tab-actions-input-layer",
+                    self.tab_actions_overlay(cx),
+                ))
             })
             .when(overlay.color_picker_open, |this| {
-                this.child(
-                    full_window_input_layer("tab-color-input-layer")
-                        .child(self.tab_color_picker_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "tab-color-input-layer",
+                    self.tab_color_picker_overlay(cx),
+                ))
             })
             .when(overlay.session_info_open, |this| {
-                this.child(
-                    full_window_input_layer("session-info-input-layer")
-                        .child(self.session_info_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "session-info-input-layer",
+                    self.session_info_overlay(cx),
+                ))
             })
             .when(self.transfer.transfer_job_menu().is_some(), |this| {
-                this.child(
-                    full_window_input_layer("transfer-job-menu-input-layer")
-                        .child(self.transfer_job_menu_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "transfer-job-menu-input-layer",
+                    self.transfer_job_menu_overlay(cx),
+                ))
             })
             .when(transfer_editor_open, |this| {
-                this.child(
-                    full_window_input_layer("transfer-editor-input-layer")
-                        .child(self.transfer_editor_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "transfer-editor-input-layer",
+                    self.transfer_editor_overlay(cx),
+                ))
             })
             .when(transfer_external_sync_open, |this| {
-                this.child(
-                    full_window_input_layer("transfer-external-sync-input-layer")
-                        .child(self.transfer_external_sync_prompt_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "transfer-external-sync-input-layer",
+                    self.transfer_external_sync_prompt_overlay(cx),
+                ))
             })
             .when(
                 self.transfer.browser_view().favorites_menu.is_some(),
                 |this| {
-                    this.child(
-                        full_window_input_layer("transfer-favorites-menu-input-layer")
-                            .child(self.transfer_browser_favorites_menu_overlay(cx)),
-                    )
+                    this.child(full_window_overlay_layer(
+                        "transfer-favorites-menu-input-layer",
+                        self.transfer_browser_favorites_menu_overlay(cx),
+                    ))
                 },
             )
             .when(self.transfer.browser_view().path_menu.is_some(), |this| {
-                this.child(
-                    full_window_input_layer("transfer-path-menu-input-layer")
-                        .child(self.transfer_browser_path_menu_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "transfer-path-menu-input-layer",
+                    self.transfer_browser_path_menu_overlay(cx),
+                ))
             })
             .when(self.transfer.browser_view().upload_menu.is_some(), |this| {
-                this.child(
-                    full_window_input_layer("transfer-upload-menu-input-layer")
-                        .child(self.transfer_browser_upload_menu_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "transfer-upload-menu-input-layer",
+                    self.transfer_browser_upload_menu_overlay(cx),
+                ))
             })
             .when(overlay.multi_line_paste_open, |this| {
-                this.child(
-                    full_window_input_layer("multi-line-paste-input-layer")
-                        .child(self.multi_line_paste_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "multi-line-paste-input-layer",
+                    self.multi_line_paste_overlay(cx),
+                ))
             })
             .when(overlay.terminal_actions_open, |this| {
-                this.child(
-                    full_window_input_layer("terminal-actions-input-layer")
-                        .child(self.terminal_actions_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "terminal-actions-input-layer",
+                    self.terminal_actions_overlay(cx),
+                ))
             })
             .when(overlay.action_link_menu_open, |this| {
-                this.child(
-                    full_window_input_layer("action-link-menu-input-layer")
-                        .child(self.action_link_menu_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "action-link-menu-input-layer",
+                    self.action_link_menu_overlay(cx),
+                ))
             })
             .when(
                 overlay.action_link_tooltip_open
                     && !overlay.action_link_menu_open
                     && !self.translation.dialog_is_open(),
-                |this| this.child(self.action_link_tooltip_overlay(cx)),
+                |this| this.child(passive_overlay_layer(self.action_link_tooltip_overlay(cx))),
             )
             .when(overlay.command_suggestions_open, |this| {
-                this.child(self.command_suggestions_overlay(cx))
+                this.child(passive_overlay_layer(self.command_suggestions_overlay(cx)))
             })
             .when(overlay.credential_suggestions_open, |this| {
-                this.child(self.credential_suggestions_overlay(cx))
+                this.child(passive_overlay_layer(
+                    self.credential_suggestions_overlay(cx),
+                ))
             })
             .when(self.sync_input.is_open(), |this| {
-                this.child(
-                    full_window_input_layer("sync-groups-input-layer")
-                        .child(self.sync_groups_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "sync-groups-input-layer",
+                    self.sync_groups_overlay(cx),
+                ))
             })
             .when_some(
                 self.connection_state.inline_editor_panel_draft(),
                 |this, editor| {
-                    this.child(
-                        full_window_input_layer("connection-editor-input-layer")
-                            .child(self.connection_editor_panel(editor, cx)),
-                    )
+                    this.child(full_window_overlay_layer(
+                        "connection-editor-input-layer",
+                        self.connection_editor_panel(editor, cx),
+                    ))
                 },
             )
             .when(self.commands.quick_editor_is_inline(), |this| {
-                this.child(
-                    full_window_input_layer("quick-command-editor-input-layer")
-                        .child(self.quick_command_editor_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "quick-command-editor-input-layer",
+                    self.quick_command_editor_overlay(cx),
+                ))
             })
             .when(self.commands.quick_details().is_some(), |this| {
-                this.child(
-                    full_window_input_layer("quick-command-details-input-layer")
-                        .child(self.quick_command_details_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "quick-command-details-input-layer",
+                    self.quick_command_details_overlay(cx),
+                ))
             })
             .when(self.commands.quick_variable_prompt().is_some(), |this| {
-                this.child(
-                    full_window_input_layer("quick-command-variable-input-layer")
-                        .child(self.quick_command_variable_prompt_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "quick-command-variable-input-layer",
+                    self.quick_command_variable_prompt_overlay(cx),
+                ))
             })
             .when(quick_switch_open, |this| {
-                this.child(
-                    full_window_input_layer("quick-switch-input-layer")
-                        .child(self.quick_switch_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "quick-switch-input-layer",
+                    self.quick_switch_overlay(cx),
+                ))
             })
             .when(self.shell.activity_bar_context_menu().is_some(), |this| {
-                this.child(
-                    full_window_input_layer("activity-context-input-layer")
-                        .child(self.activity_bar_context_menu_overlay(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "activity-context-input-layer",
+                    self.activity_bar_context_menu_overlay(cx),
+                ))
             })
             .when(overlay.locked, |this| {
-                this.child(
-                    full_window_input_layer("lock-screen-input-layer")
-                        .child(self.lock_screen_overlay(window, cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "lock-screen-input-layer",
+                    self.lock_screen_overlay(window, cx),
+                ))
             })
             .when(self.modal_child_window_open(), |this| {
-                this.child(
-                    full_window_input_layer("modal-owner-input-layer")
-                        .child(self.modal_owner_backdrop(cx)),
-                )
+                this.child(full_window_overlay_layer(
+                    "modal-owner-input-layer",
+                    self.modal_owner_backdrop(cx),
+                ))
             })
             // Background SSH operations can request credentials while another
             // modal is open, so authentication must be the topmost overlay.
             .when(ssh_auth_prompt_open, |this| {
                 this.child(
-                    deferred(
-                        full_window_input_layer("ssh-auth-prompt-input-layer")
-                            .child(self.ssh_auth_prompt_overlay(cx)),
-                    )
+                    deferred(full_window_overlay_layer(
+                        "ssh-auth-prompt-input-layer",
+                        self.ssh_auth_prompt_overlay(cx),
+                    ))
                     .with_priority(SSH_AUTH_PROMPT_PRIORITY),
                 )
             })

@@ -1,6 +1,6 @@
 use gpui::{
     AnyElement, App, ClickEvent, FontWeight, IntoElement, MouseButton, SharedString, Stateful,
-    TitlebarOptions, Window, WindowControlArea, div, prelude::*, px, rgb, rgba, svg,
+    TitlebarOptions, Window, WindowControlArea, deferred, div, prelude::*, px, rgb, rgba, svg,
 };
 
 use crate::theme::ThemePalette;
@@ -301,6 +301,32 @@ pub(in crate::features) fn full_window_input_layer(id: impl Into<String>) -> Sta
         .on_mouse_up(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
         .on_mouse_up(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .on_mouse_move(|_, _, cx| cx.stop_propagation())
+}
+
+/// Deferred priority for the app's own overlays.
+///
+/// The resize handles are `deferred()` at the default priority `0`, and deferred
+/// draws paint after the whole normal tree, so a handle would otherwise draw its
+/// border line across an overlay and win hit-testing inside its 5px band. `1`
+/// matches the window-wide contract documented in `nyaterm_ui::root`: above the
+/// main-interface dividers, below `gpui-component` popups and tooltips.
+pub(in crate::features) const APP_OVERLAY_PRIORITY: usize = 1;
+
+/// `full_window_input_layer` lifted above the resize handles.
+///
+/// Deferring also drops the ancestor content mask, so an overlay positioned near
+/// a panel edge is no longer clipped by it.
+pub(in crate::features) fn full_window_overlay_layer(
+    id: impl Into<String>,
+    content: impl IntoElement,
+) -> gpui::Deferred {
+    deferred(full_window_input_layer(id).child(content)).with_priority(APP_OVERLAY_PRIORITY)
+}
+
+/// Lifts an overlay that deliberately owns no input layer above the resize
+/// handles. Hover-driven surfaces must not block the pointer underneath them.
+pub(in crate::features) fn passive_overlay_layer(content: impl IntoElement) -> gpui::Deferred {
+    deferred(content).with_priority(APP_OVERLAY_PRIORITY)
 }
 
 /// Dimmed full-area modal shell (Tauri Dialog backdrop + centered card).
