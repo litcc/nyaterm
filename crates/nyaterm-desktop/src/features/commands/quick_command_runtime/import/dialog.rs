@@ -121,7 +121,7 @@ impl NyaTermApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(SharedString::from(kind.prompt_label())),
+            prompt: Some(SharedString::from(self.tr(kind.prompt_label_key()))),
         };
         let receiver = cx.prompt_for_paths(options);
         let store = self.store_blocking_client();

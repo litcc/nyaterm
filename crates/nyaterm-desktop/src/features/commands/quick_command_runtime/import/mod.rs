@@ -41,11 +41,14 @@ struct ImportCommand {
 }
 
 impl QuickCommandImportPathPromptKind {
-    fn prompt_label(self) -> &'static str {
+    /// i18n key for the native file picker's prompt. The picker is OS chrome the
+    /// user reads, so it has to be localized; resolving happens at the call site,
+    /// which owns `tr`.
+    fn prompt_label_key(self) -> &'static str {
         match self {
-            Self::NyatermJson => "Import NyaTerm quick commands JSON",
-            Self::WindTermQuickbar => "Import WindTerm quickbar.config",
-            Self::XshellXts => "Import Xshell quick buttons .xts",
+            Self::NyatermJson => "quickCommands.importPromptNyaTermJson",
+            Self::WindTermQuickbar => "quickCommands.importPromptWindTerm",
+            Self::XshellXts => "quickCommands.importPromptXshell",
         }
     }
 
