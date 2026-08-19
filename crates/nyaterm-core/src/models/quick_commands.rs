@@ -64,6 +64,66 @@ pub enum QuickCommandCategoryPosition {
     Inside,
 }
 
+/// One parent's children in the order the sidebar renders them: `sort_order`,
+/// then name, then id.
+///
+/// This is the single authority for that order, so "move up" in the group menu
+/// always means "the row above". A `parent_id` that names no existing category is
+/// treated as a root, matching how the sidebar recovers from orphaned rows.
+pub fn quick_command_category_sibling_order<'a>(
+    categories: &'a [QuickCommandCategory],
+    parent_id: Option<&str>,
+) -> Vec<&'a QuickCommandCategory> {
+    let ids = categories
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut children = categories
+        .iter()
+        .filter(|category| {
+            let effective = category
+                .parent_id
+                .as_deref()
+                .filter(|parent| ids.contains(parent));
+            effective == parent_id
+        })
+        .collect::<Vec<_>>();
+    children.sort_by(|left, right| {
+        left.sort_order
+            .cmp(&right.sort_order)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    children
+}
+
+/// The sibling a category would swap with when moved up or down, or `None` when it
+/// already sits at that end of its run. Drives both the move action and whether the
+/// menu item is enabled.
+pub fn quick_command_category_move_neighbor(
+    categories: &[QuickCommandCategory],
+    category_id: &str,
+    up: bool,
+) -> Option<String> {
+    let ids = categories
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let category = categories.iter().find(|item| item.id == category_id)?;
+    let parent_id = category
+        .parent_id
+        .as_deref()
+        .filter(|parent| ids.contains(parent));
+    let siblings = quick_command_category_sibling_order(categories, parent_id);
+    let index = siblings.iter().position(|item| item.id == category_id)?;
+    let neighbor = if up {
+        index.checked_sub(1)?
+    } else {
+        index.checked_add(1).filter(|next| *next < siblings.len())?
+    };
+    Some(siblings[neighbor].id.clone())
+}
+
 impl QuickCommandsConfig {
     /// Moves a command relative to another command. Pinned and unpinned commands
     /// remain separate visual partitions; dropping across the boundary adopts the

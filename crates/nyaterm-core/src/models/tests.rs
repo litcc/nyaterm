@@ -5,8 +5,8 @@ use super::{
     QuickCommandCategoryPosition, QuickCommandRelativePosition, QuickCommandsConfig, RecordingMode,
     RecordingRotationPolicy, RestorableOpenTab, SavedConnection, SessionsConfig, SftpCwdFollowMode,
     SftpSettings, SshAgentEndpoint, SshAlgorithmMode, SshAlgorithmPreferences, SshKey, SshProfile,
-    SshTerminalType, default_sftp_shell_detection_timeout_ms, resolve_ssh_terminal_type,
-    validate_sftp_settings,
+    SshTerminalType, default_sftp_shell_detection_timeout_ms, quick_command_category_move_neighbor,
+    quick_command_category_sibling_order, resolve_ssh_terminal_type, validate_sftp_settings,
 };
 
 #[test]
@@ -651,6 +651,115 @@ fn quick_command_reorder_adopts_target_partition_and_normalizes_order() {
             .and_then(|item| item.sort_order),
         Some(2)
     );
+}
+
+#[test]
+fn category_sibling_order_follows_sort_order_then_name() {
+    let categories = vec![
+        quick_category("zeta", None, 0),
+        quick_category("alpha", None, 0),
+        quick_category("later", None, 5),
+        quick_category("nested", Some("alpha"), 0),
+    ];
+    let roots = quick_command_category_sibling_order(&categories, None)
+        .into_iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    // Equal sort_order falls back to name, so "alpha" precedes "zeta".
+    assert_eq!(roots, vec!["alpha", "zeta", "later"]);
+    let children = quick_command_category_sibling_order(&categories, Some("alpha"))
+        .into_iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(children, vec!["nested"]);
+}
+
+#[test]
+fn category_sibling_order_treats_orphaned_parent_as_root() {
+    let categories = vec![
+        quick_category("kept", None, 0),
+        quick_category("orphan", Some("missing"), 1),
+    ];
+    let roots = quick_command_category_sibling_order(&categories, None)
+        .into_iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(roots, vec!["kept", "orphan"]);
+    assert!(quick_command_category_sibling_order(&categories, Some("missing")).is_empty());
+}
+
+#[test]
+fn category_move_neighbor_is_none_at_each_end_of_a_sibling_run() {
+    let categories = vec![
+        quick_category("first", None, 0),
+        quick_category("middle", None, 1),
+        quick_category("last", None, 2),
+        quick_category("child", Some("first"), 0),
+    ];
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "first", true),
+        None
+    );
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "last", false),
+        None
+    );
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "middle", true).as_deref(),
+        Some("first")
+    );
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "middle", false).as_deref(),
+        Some("last")
+    );
+    // An only child cannot move within its own parent.
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "child", true),
+        None
+    );
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "child", false),
+        None
+    );
+    assert_eq!(
+        quick_command_category_move_neighbor(&categories, "absent", true),
+        None
+    );
+}
+
+#[test]
+fn category_move_up_and_down_swap_adjacent_siblings() {
+    let mut config = QuickCommandsConfig {
+        commands: vec![],
+        categories: vec![
+            quick_category("first", None, 0),
+            quick_category("middle", None, 1),
+            quick_category("last", None, 2),
+        ],
+    };
+
+    let order = |config: &QuickCommandsConfig| {
+        quick_command_category_sibling_order(&config.categories, None)
+            .into_iter()
+            .map(|item| item.id.clone())
+            .collect::<Vec<_>>()
+    };
+
+    let target = quick_command_category_move_neighbor(&config.categories, "last", true)
+        .expect("last has a neighbor above");
+    assert!(config.move_category("last", &target, QuickCommandCategoryPosition::Before));
+    assert_eq!(order(&config), vec!["first", "last", "middle"]);
+
+    let target = quick_command_category_move_neighbor(&config.categories, "first", false)
+        .expect("first has a neighbor below");
+    assert!(config.move_category("first", &target, QuickCommandCategoryPosition::After));
+    assert_eq!(order(&config), vec!["last", "first", "middle"]);
+
+    // Round trip restores the original order.
+    let target = quick_command_category_move_neighbor(&config.categories, "last", false)
+        .expect("last is no longer at the bottom");
+    assert!(config.move_category("last", &target, QuickCommandCategoryPosition::After));
+    assert_eq!(order(&config), vec!["first", "last", "middle"]);
 }
 
 #[test]
