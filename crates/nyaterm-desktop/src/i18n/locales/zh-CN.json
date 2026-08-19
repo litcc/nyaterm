@@ -1215,6 +1215,7 @@
     "commandPlaceholder": "例如：ls -la\n使用 {{变量名}} 注入动态参数。",
     "commandScript": "命令脚本",
     "compactListMode": "紧凑列表",
+    "copyCommand": "复制命令",
     "createCategory": "创建 \"{{name}}\"",
     "delete": "删除",
     "deleteCategory": "删除分类",
@@ -1271,6 +1272,7 @@
     "sortByUseCount": "按使用频次",
     "sortCustom": "自定义顺序",
     "tileMode": "堆叠模式",
+    "title": "快捷命令",
     "uncategorized": "未分类",
     "view": "查看",
     "viewMode": "视图模式"

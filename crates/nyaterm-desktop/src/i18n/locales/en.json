@@ -1215,6 +1215,7 @@
     "commandPlaceholder": "e.g. ls -la\nUse {{varName}} for variables.",
     "commandScript": "Script",
     "compactListMode": "Compact list",
+    "copyCommand": "Copy command",
     "createCategory": "Create \"{{name}}\"",
     "delete": "Delete",
     "deleteCategory": "Delete Category",
@@ -1271,6 +1272,7 @@
     "sortByUseCount": "Usage",
     "sortCustom": "Custom order",
     "tileMode": "Stacked mode",
+    "title": "Quick Commands",
     "uncategorized": "Uncat.",
     "view": "View",
     "viewMode": "View mode"
