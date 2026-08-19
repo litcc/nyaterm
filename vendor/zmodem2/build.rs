@@ -17,9 +17,10 @@ fn main() {
             println!("cargo:rustc-env=ZMODEM_RZ_BIN={}", rz_path.display());
             println!("cargo:rustc-env=ZMODEM_SZ_BIN={}", sz_path.display());
         }
-        _ => {
-            println!("cargo:warning=lrzsz not found");
-        }
+        // NyaTerm: deliberately silent. `has_lrzsz` only gates this crate's own
+        // integration tests, which the NyaTerm workspace never builds, so an
+        // absent lrzsz is the normal case and must not warn on every build.
+        _ => {}
     }
 }
 

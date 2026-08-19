@@ -32,7 +32,6 @@ rand = { version = "0.9", features = ["std"] } # TODO: dependency injection?
 tracing = { version = "0.1", features = ["log"] }
 picky-asn1-der = "0.5"
 picky-asn1-x509 = "0.15"
-picky = { version = "=7.0.0-rc.26", default-features = false, features = ["x509"] } # NyaTerm: CredSSP only uses PrivateKey; avoid unused JOSE/PKCS12 prerelease crypto dependencies.
 
 [lints]
 workspace = true
