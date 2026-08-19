@@ -513,14 +513,6 @@ impl ShellFeatureState {
         self.panels.multi_open
     }
 
-    pub(in crate::features) fn left_panel_collapsed(&self) -> bool {
-        self.panels.left_collapsed
-    }
-
-    pub(in crate::features) fn right_panel_collapsed(&self) -> bool {
-        self.panels.right_collapsed
-    }
-
     pub(in crate::features) fn mobile_left_panel_open(&self) -> bool {
         self.panels.mobile_left_open
     }
@@ -1276,8 +1268,8 @@ mod tests {
 
         assert!(shell.finish_settings_navigation());
         assert_eq!(shell.main_mode(), MainMode::Workspace);
-        assert!(!shell.left_panel_collapsed());
-        assert!(shell.right_panel_collapsed());
+        assert!(!shell.panels.left_collapsed);
+        assert!(shell.panels.right_collapsed);
         assert_eq!(shell.navigation.settings.previous_left_collapsed, None);
         assert_eq!(shell.navigation.settings.previous_right_collapsed, None);
     }

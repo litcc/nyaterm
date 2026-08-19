@@ -105,6 +105,7 @@ impl NyaTermApp {
                     placeholder: secret_placeholder.into(),
                     masked: true,
                     multi_line: false,
+                    code: false,
                 },
                 cx,
             ))

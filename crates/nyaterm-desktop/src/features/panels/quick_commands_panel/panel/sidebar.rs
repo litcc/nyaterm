@@ -20,7 +20,9 @@ impl NyaTermApp {
             .w(px(176.))
             .h_full()
             .flex_shrink_0()
-            .overflow_scrollbar()
+            // Vertical only. Scrolling both axes lets the rows size to their
+            // intrinsic width, which pushed every count pill past the 176px clip.
+            .overflow_y_scrollbar()
             .p(px(6.))
             .border_r_1()
             .border_color(rgb(palette.border))
@@ -43,6 +45,7 @@ impl NyaTermApp {
                 )))
                 .relative()
                 .h(px(32.))
+                .w_full()
                 .px_2()
                 .flex()
                 .items_center()
@@ -62,34 +65,43 @@ impl NyaTermApp {
                 })
                 .cursor_pointer()
                 .hover(move |this| this.bg(rgb(palette.hover)))
-                .child(div().size(px(6.)).rounded_full().bg(if selected {
-                    rgb(palette.link)
-                } else {
-                    rgb(palette.text_dimmed)
-                }))
+                .child(
+                    div()
+                        .size(px(6.))
+                        .flex_none()
+                        .rounded_full()
+                        .when(!selected, |this| this.opacity(0.6))
+                        .bg(if selected {
+                            rgb(palette.link)
+                        } else {
+                            rgb(palette.text_dimmed)
+                        }),
+                )
                 .child(
                     div()
                         .min_w_0()
                         .flex_1()
-                        .overflow_hidden()
+                        .truncate()
                         .font_weight(FontWeight(500.))
                         .child(option.label),
                 )
                 .child(
                     div()
+                        .flex_none()
                         .rounded_sm()
-                        .px_2()
-                        .py(px(1.))
+                        .px(px(6.))
+                        .py(px(2.))
                         .bg(if selected {
                             rgba((palette.primary << 8) | 0x24)
                         } else {
                             rgb(palette.hover)
                         })
                         .text_size(px(10.))
+                        .line_height(px(10.))
                         .text_color(if selected {
                             rgb(palette.primary)
                         } else {
-                            rgb(palette.text_muted)
+                            rgb(palette.text_dimmed)
                         })
                         .child(option.count.to_string()),
                 )

@@ -43,7 +43,7 @@ impl NyaTermApp {
                     .grid()
                     .grid_cols(if narrow { 2 } else { 3 })
                     .gap_3()
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-nyaterm",
                         "nyaterm",
@@ -57,7 +57,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-xshell",
                         "color/brand/xshell.png",
@@ -71,7 +71,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-mobaxterm",
                         "color/brand/mobaxterm.png",
@@ -85,7 +85,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-windterm",
                         "color/brand/windterm.png",
@@ -99,7 +99,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-securecrt",
                         "color/brand/securecrt.png",
@@ -113,7 +113,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-finalshell",
                         "color/brand/finalshell.png",
@@ -127,7 +127,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-termius",
                         "color/brand/termius.png",
@@ -141,7 +141,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-electerm",
                         "color/brand/electerm.png",
@@ -155,7 +155,7 @@ impl NyaTermApp {
                             );
                         }),
                     ))
-                    .child(connection_import_source_card(
+                    .child(import_source_card(
                         palette,
                         "connection-import-json",
                         "icons/files.svg",
@@ -199,35 +199,21 @@ impl NyaTermApp {
                                     .child(self.tr("savedConnections.importMergeHint")),
                             ),
                     )
-                    .child(
-                        div()
-                            .id("connection-import-docs")
-                            .h(px(28.))
-                            .px_2()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .rounded_sm()
-                            .text_size(px(11.))
-                            .text_color(rgb(palette.link))
-                            .cursor_pointer()
-                            .hover(|this| this.bg(rgb(palette.hover)))
-                            .child(self.tr("savedConnections.importDocs"))
-                            .child(
-                                svg()
-                                    .size(px(12.))
-                                    .path("icons/menu/export.svg")
-                                    .text_color(rgb(palette.link)),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_external_url_for_ui(docs_url, cx);
-                            })),
-                    ),
+                    .child(import_docs_link(
+                        palette,
+                        "connection-import-docs",
+                        self.tr("savedConnections.importDocs"),
+                        cx.listener(move |this, _, _, cx| {
+                            this.open_external_url_for_ui(docs_url, cx);
+                        }),
+                    )),
             )
     }
 }
 
-fn connection_import_source_card(
+/// One vendor tile in an import dialog. Shared with the quick command importer:
+/// both are Tauri's `min-h-32` card with a 40px logo, a name, and an extension hint.
+pub(in crate::features::panels) fn import_source_card(
     palette: ThemePalette,
     id: &'static str,
     icon: &'static str,
@@ -259,7 +245,9 @@ fn connection_import_source_card(
             // Vendor logos are full-color rasters; they cannot go through svg().
             color_icon(icon, 40.).into_any_element()
         } else {
-            mono_icon(icon, rgb(palette.text).into(), 40.).into_any_element()
+            // Tauri tints every non-logo tile icon with `--df-primary` in both import
+            // dialogs, so the shared card does the same.
+            mono_icon(icon, rgb(palette.primary).into(), 40.).into_any_element()
         })
         .child(
             div()
@@ -276,4 +264,36 @@ fn connection_import_source_card(
                 .text_color(rgb(palette.text_dimmed))
                 .child(hint),
         )
+}
+
+/// Tauri renders the docs affordance as a primary-colored link with an
+/// external-link glyph, not as a secondary button.
+pub(in crate::features::panels) fn import_docs_link(
+    palette: ThemePalette,
+    id: &'static str,
+    label: &'static str,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .h(px(28.))
+        .px_2()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_1()
+        .rounded_sm()
+        .text_size(px(11.))
+        .text_color(rgb(palette.link))
+        .cursor_pointer()
+        .hover(|this| this.bg(rgb(palette.hover)))
+        .child(label)
+        .child(
+            svg()
+                .size(px(12.))
+                .flex_none()
+                .path("icons/menu/export.svg")
+                .text_color(rgb(palette.link)),
+        )
+        .on_click(on_click)
 }

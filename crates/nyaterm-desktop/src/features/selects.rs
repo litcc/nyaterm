@@ -356,6 +356,14 @@ impl NyaTermApp {
                     self.update_ai_smart_auto_execute_max_risk(risk, cx);
                 }
             }
+            id if id.starts_with("quick-command.variable.") => {
+                if let Some(index) = id
+                    .strip_prefix("quick-command.variable.")
+                    .and_then(|index| index.parse::<usize>().ok())
+                {
+                    self.apply_quick_command_variable(index, value.to_string(), cx);
+                }
+            }
             id if id.starts_with("connection-editor-") => {
                 let select = match id {
                     "connection-editor-group-select" => ConnectionEditorSelect::Group,

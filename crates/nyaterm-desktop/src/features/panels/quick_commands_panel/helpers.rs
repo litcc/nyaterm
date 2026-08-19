@@ -1,12 +1,13 @@
-use gpui::{IntoElement, SharedString, div, prelude::*, px, rgb, svg};
+use gpui::{IntoElement, SharedString, div, prelude::*, px, rgb, rgba, svg};
 use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem};
-
-use crate::widgets::status_pill;
 
 pub(super) struct QuickCommandRowPresentation<'a> {
     pub command_id: &'a str,
     pub show_badge: bool,
     pub execution_mode: &'a str,
+    /// Localized badge text. This helper is a free function with no translator of
+    /// its own, so the row supplies the string it already looked up.
+    pub badge_label: &'static str,
 }
 
 pub(super) struct QuickCommandRowHandlers<OnRun, OnDetails> {
@@ -28,6 +29,7 @@ where
         command_id,
         show_badge,
         execution_mode,
+        badge_label,
     } = presentation;
     let QuickCommandRowHandlers {
         on_run,
@@ -41,22 +43,10 @@ where
         .gap_1()
         .flex_none()
         .when(show_badge, |this| {
-            this.child(status_pill(
-                if execution_mode == "append" {
-                    "append"
-                } else {
-                    "exec"
-                },
-                if execution_mode == "append" {
-                    rgb(palette.warning)
-                } else {
-                    rgb(palette.success)
-                },
-                if execution_mode == "append" {
-                    rgb(0x32280f)
-                } else {
-                    rgb(palette.hover)
-                },
+            this.child(quick_command_execution_badge(
+                palette,
+                execution_mode == "append",
+                badge_label,
             ))
         })
         .child(quick_command_action_icon_button(
@@ -78,6 +68,42 @@ where
                 .min_width(px(148.))
                 .items(menu_items),
         )
+}
+
+/// Tauri's execution-mode badge: an outline chip carrying the mode's own glyph and
+/// its localized name, rather than a colored `exec` / `append` tag.
+fn quick_command_execution_badge(
+    palette: crate::theme::ThemePalette,
+    append: bool,
+    label: &'static str,
+) -> impl IntoElement {
+    let icon = if append {
+        "icons/keyboard-return.svg"
+    } else {
+        "icons/conn/flash.svg"
+    };
+    div()
+        .flex_none()
+        .max_w(px(104.))
+        .px(px(6.))
+        .flex()
+        .items_center()
+        .gap_1()
+        .rounded_md()
+        .border_1()
+        .border_color(rgba((palette.border << 8) | 0x66))
+        .bg(rgba((palette.bg << 8) | 0x59))
+        .text_size(px(10.))
+        .line_height(px(16.))
+        .text_color(rgb(palette.text_muted))
+        .child(
+            svg()
+                .size(px(12.))
+                .flex_none()
+                .path(icon)
+                .text_color(rgb(palette.text_muted)),
+        )
+        .child(div().min_w_0().truncate().child(label))
 }
 
 fn quick_command_action_icon_button(

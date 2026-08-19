@@ -159,6 +159,7 @@ impl NyaTermApp {
                                 placeholder: self.tr("settings.keyContentPlaceholder").into(),
                                 masked: false,
                                 multi_line: true,
+                                code: false,
                             },
                             cx,
                         ))
@@ -249,6 +250,7 @@ impl NyaTermApp {
                                     placeholder: self.tr("settings.certContentPlaceholder").into(),
                                     masked: false,
                                     multi_line: true,
+                                    code: false,
                                 },
                                 cx,
                             ))
@@ -295,6 +297,7 @@ impl NyaTermApp {
                             placeholder: "".into(),
                             masked: !editor.show_passphrase,
                             multi_line: false,
+                            code: false,
                         },
                         cx,
                     )))

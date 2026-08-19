@@ -1,10 +1,7 @@
-use gpui::{
-    Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
-};
-use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaScrollable;
+use gpui::{Context, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba, svg};
+use nyaterm_ui::NyaTooltip;
 
-use super::quick_command_icon_mark;
+use super::quick_commands_panel::{QuickCommandCardContent, quick_command_detail_card};
 use crate::features::NyaTermApp;
 
 impl NyaTermApp {
@@ -22,14 +19,11 @@ impl NyaTermApp {
         let anchor_y = details.y;
         let command = details.command;
         let category = details.category.trim().to_string();
-        let show_category = !category.is_empty();
-        let description = command
+        let has_description = command
             .description
             .as_deref()
-            .map(str::trim)
-            .filter(|description| !description.is_empty());
-        let command_text = command.command.clone();
-        let estimated_h = if description.is_some() { 224. } else { 182. };
+            .is_some_and(|description| !description.trim().is_empty());
+        let estimated_h = if has_description { 224. } else { 182. };
         let (viewport_w, viewport_h) = self.shell.viewport_size();
         let (popover_x, popover_y) = quick_command_details_popover_position(
             f32::from(anchor_x) - 304.,
@@ -39,6 +33,33 @@ impl NyaTermApp {
             viewport_w,
             viewport_h,
         );
+        let copy_label = self.tr("quickCommands.copyCommand");
+        let copy_text = command.command.clone();
+        let copy_button = div()
+            .id(SharedString::from("quick-command-details-copy"))
+            .absolute()
+            .top(px(6.))
+            .right(px(6.))
+            .size(px(24.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_sm()
+            .cursor_pointer()
+            .hover(|this| this.bg(rgb(palette.hover)))
+            .child(
+                svg()
+                    .size(px(13.))
+                    .flex_none()
+                    .path("icons/copy.svg")
+                    .text_color(rgb(palette.text_muted)),
+            )
+            .tooltip(move |window, cx| NyaTooltip::new(copy_label).build(window, cx))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.copy_quick_command_text(copy_text.clone(), cx);
+            }))
+            .into_any_element();
 
         div()
             .id(SharedString::from("quick-command-details-overlay"))
@@ -75,82 +96,17 @@ impl NyaTermApp {
                         cx.stop_propagation();
                         cx.notify();
                     }))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .border_b_1()
-                            .border_color(rgba((palette.border << 8) | 0x4d))
-                            .bg(rgba((palette.surface_elevated << 8) | 0x4d))
-                            .p_3()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(quick_command_icon_mark(
-                                palette,
-                                command.icon_tag.as_deref(),
-                                command.color_tag.as_deref(),
-                            ))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .text_sm()
-                                    .font_weight(FontWeight(700.))
-                                    .text_color(rgb(palette.text))
-                                    .overflow_hidden()
-                                    .child(truncate_preview(&command.label, 48)),
-                            )
-                            .when(show_category, |this| {
-                                this.child(
-                                    div()
-                                        .max_w(px(112.))
-                                        .rounded_full()
-                                        .border_1()
-                                        .border_color(rgba((palette.primary << 8) | 0x33))
-                                        .bg(rgba((palette.primary << 8) | 0x1a))
-                                        .px_2()
-                                        .py(px(1.))
-                                        .text_size(px(10.))
-                                        .font_weight(FontWeight(600.))
-                                        .text_color(rgb(palette.link))
-                                        .overflow_hidden()
-                                        .child(truncate_preview(&category, 16)),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .p_3()
-                            .when_some(description, |this, description| {
-                                this.child(
-                                    div()
-                                        .text_xs()
-                                        .line_height(px(18.))
-                                        .text_color(rgb(palette.text_muted))
-                                        .child(description.to_string()),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .id(SharedString::from("quick-command-details-command-scroll"))
-                                    .max_h(px(120.))
-                                    .overflow_scrollbar()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(rgba((palette.border << 8) | 0x66))
-                                    .bg(rgba((palette.bg << 8) | 0x80))
-                                    .p(px(10.))
-                                    .font_family(crate::features::shell::gpui_code_font_family())
-                                    .text_size(px(11.))
-                                    .line_height(px(17.))
-                                    .text_color(rgb(palette.text))
-                                    .child(command_text),
-                            ),
-                    ),
+                    .child(quick_command_detail_card(
+                        palette,
+                        QuickCommandCardContent {
+                            command: &command,
+                            category: &category,
+                            // Tauri's eye popover omits the execution-mode line: the row
+                            // already carries that badge right beside this button.
+                            execution_mode: None,
+                            copy_button: Some(copy_button),
+                        },
+                    )),
             )
     }
 }

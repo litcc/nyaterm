@@ -133,6 +133,9 @@ pub(crate) struct QuickCommandEditorState {
     pub(crate) pinned: bool,
     pub(crate) execution_mode: String,
     pub(crate) error: Option<String>,
+    /// Which field the error belongs to. `None` is a general error, which the
+    /// dialog shows in its own box instead of beside a caption.
+    pub(crate) error_field: Option<QuickCommandEditorField>,
 }
 
 #[derive(Debug, Clone)]
@@ -187,7 +190,6 @@ pub(crate) struct QuickCommandVariablePromptState {
     pub(crate) execute: bool,
     pub(crate) send_to_all: bool,
     pub(crate) variables: Vec<QuickCommandVariableDef>,
-    pub(crate) focused_index: usize,
 }
 
 impl QuickCommandEditorState {
@@ -205,6 +207,7 @@ impl QuickCommandEditorState {
             pinned: false,
             execution_mode: "execute".to_string(),
             error: None,
+            error_field: None,
         }
     }
 
@@ -224,6 +227,7 @@ impl QuickCommandEditorState {
                 .clone()
                 .unwrap_or_else(|| "execute".to_string()),
             error: None,
+            error_field: None,
             original: Some(command),
         }
     }

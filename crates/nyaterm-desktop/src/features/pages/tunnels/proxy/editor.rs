@@ -105,6 +105,7 @@ pub(in crate::features::pages::tunnels) fn network_proxy_editor_content(
                 placeholder: password_placeholder.into(),
                 masked: true,
                 multi_line: false,
+                code: false,
             },
             cx,
         )

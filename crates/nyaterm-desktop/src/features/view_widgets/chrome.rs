@@ -375,6 +375,24 @@ pub(in crate::features) fn dialog_action_button(
         .on_click(on_click)
 }
 
+/// A dialog's primary action that can be inert.
+///
+/// Painting a disabled look-alike instead would drift from the enabled button's
+/// metrics and hover behavior the moment either changes.
+pub(in crate::features) fn dialog_primary_button(
+    id: impl Into<String>,
+    label: &'static str,
+    enabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    NyaButton::new(id.into(), label)
+        .variant(NyaButtonVariant::Primary)
+        .small()
+        .compact()
+        .disabled(!enabled)
+        .on_click(on_click)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

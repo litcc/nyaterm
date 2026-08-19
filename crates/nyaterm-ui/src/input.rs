@@ -5,7 +5,9 @@ use gpui::{
     px,
 };
 use gpui_component::input::SelectAll;
-use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_component::input::{
+    Editor, EditorState, Input, InputEvent, InputState, Textarea, TextareaState,
+};
 use gpui_component::{Icon, IconName, Sizable, Size};
 
 use crate::input_focus::{preserve_nya_input_focus_on_pointer_down, register_nya_input_focus};
@@ -21,6 +23,9 @@ pub enum NyaInputEvent {
 enum ComponentState {
     Input(Entity<InputState>),
     Textarea(Entity<TextareaState>),
+    /// A code surface: the same editing engine as `Textarea`, plus the line-number
+    /// gutter and soft-wrap control that a script box needs.
+    Editor(Entity<EditorState>),
 }
 
 impl ComponentState {
@@ -28,6 +33,7 @@ impl ComponentState {
         match self {
             Self::Input(state) => state.read(cx).value().to_string(),
             Self::Textarea(state) => state.read(cx).value().to_string(),
+            Self::Editor(state) => state.read(cx).value().to_string(),
         }
     }
 
@@ -35,6 +41,7 @@ impl ComponentState {
         match self {
             Self::Input(state) => state.read(cx).focus_handle(cx),
             Self::Textarea(state) => state.read(cx).focus_handle(cx),
+            Self::Editor(state) => state.read(cx).focus_handle(cx),
         }
     }
 
@@ -42,6 +49,7 @@ impl ComponentState {
         match self {
             Self::Input(state) => state.update(cx, |state, cx| state.focus(window, cx)),
             Self::Textarea(state) => state.update(cx, |state, cx| state.focus(window, cx)),
+            Self::Editor(state) => state.update(cx, |state, cx| state.focus(window, cx)),
         }
     }
 
@@ -51,6 +59,9 @@ impl ComponentState {
                 state.update(cx, |state, cx| state.set_value(value.clone(), window, cx))
             }
             Self::Textarea(state) => {
+                state.update(cx, |state, cx| state.set_value(value.clone(), window, cx))
+            }
+            Self::Editor(state) => {
                 state.update(cx, |state, cx| state.set_value(value.clone(), window, cx))
             }
         }
@@ -65,6 +76,7 @@ pub struct NyaInputState {
     masked: bool,
     applied_masked: bool,
     multi_line: bool,
+    code: bool,
     rows: Option<usize>,
     disabled: bool,
     readonly: bool,
@@ -85,6 +97,7 @@ impl NyaInputState {
             masked: false,
             applied_masked: false,
             multi_line: false,
+            code: false,
             rows: None,
             disabled: false,
             readonly: false,
@@ -102,6 +115,14 @@ impl NyaInputState {
 
     pub fn multi_line(mut self, rows: Option<usize>) -> Self {
         self.multi_line = true;
+        self.rows = rows;
+        self
+    }
+
+    /// A multi-line box that is source code: line-number gutter, no soft wrap.
+    pub fn code(mut self, rows: Option<usize>) -> Self {
+        self.multi_line = true;
+        self.code = true;
         self.rows = rows;
         self
     }
@@ -213,7 +234,20 @@ impl NyaInputState {
         let multi_line = self.multi_line;
         let placeholder = component_placeholder(self.placeholder.clone(), multi_line);
         let rows = self.rows;
-        let (state, subscription) = if multi_line {
+        let (state, subscription) = if multi_line && self.code {
+            let state = cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .default_value(value)
+                    .placeholder(placeholder)
+                    // A shell script's own newlines are the structure; wrapping them
+                    // would make the gutter numbers stop matching the visible lines.
+                    .soft_wrap(false)
+            });
+            let subscription = cx.subscribe(&state, |this, input, event: &InputEvent, cx| {
+                forward_input_event(this, input.read(cx).value().to_string(), event, cx)
+            });
+            (ComponentState::Editor(state), subscription)
+        } else if multi_line {
             let state = cx.new(|cx| {
                 let mut input = TextareaState::new(window, cx)
                     .default_value(value)
@@ -322,6 +356,11 @@ impl Render for NyaInputState {
                 .readonly(self.readonly)
                 .h_full()
                 .into_any_element(),
+            ComponentState::Editor(state) => Editor::new(&state)
+                .disabled(self.disabled)
+                .readonly(self.readonly)
+                .h_full()
+                .into_any_element(),
         }
     }
 }
@@ -354,6 +393,14 @@ impl RenderOnce for NyaInput {
                 .readonly(readonly)
                 .into_any_element(),
             ComponentState::Textarea(state) => Textarea::new(&state)
+                .appearance(false)
+                .bordered(false)
+                .disabled(disabled)
+                .readonly(readonly)
+                .h_full()
+                .text_xs()
+                .into_any_element(),
+            ComponentState::Editor(state) => Editor::new(&state)
                 .appearance(false)
                 .bordered(false)
                 .disabled(disabled)
@@ -500,6 +547,13 @@ impl RenderOnce for NyaInputShell {
                 .disabled(disabled)
                 .readonly(readonly)
                 .h(px(88.))
+                .into_any_element(),
+            ComponentState::Editor(state) => Editor::new(&state)
+                .disabled(disabled)
+                .readonly(readonly)
+                // A script box needs more than the two-line note height a textarea
+                // gets; the gutter makes short boxes read as cramped.
+                .h(px(168.))
                 .into_any_element(),
         };
 

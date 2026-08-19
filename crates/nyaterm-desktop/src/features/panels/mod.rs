@@ -33,10 +33,11 @@ const TAB_PRESET_COLORS: [(&str, u32); 11] = [
 ];
 
 pub(in crate::features::panels) use helpers::{
-    QuickCommandCategoryOption, filtered_quick_commands, quick_command_category_options,
-    quick_command_color, quick_command_editor_field, quick_command_editor_script_field,
-    quick_command_icon_mark, quick_command_pin_mark, send_command_hex_byte_count,
-    send_command_hex_guide_rows, send_command_hex_preview, terminal_action_prompt_text,
+    QuickCommandCategoryOption, QuickCommandEditorFieldSpec, filtered_quick_commands,
+    quick_command_category_options, quick_command_color, quick_command_editor_field,
+    quick_command_editor_script_field, quick_command_icon_mark, quick_command_pin_mark,
+    quick_command_single_line, send_command_hex_byte_count, send_command_hex_guide_rows,
+    send_command_hex_preview, terminal_action_prompt_text,
 };
 
 mod send_command_helpers;

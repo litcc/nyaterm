@@ -1,8 +1,7 @@
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
-use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaScrollable;
+use nyaterm_ui::{NyaScrollable, NyaSelectOption};
 
 use crate::features::view_widgets::dialog_action_button;
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -23,7 +22,6 @@ impl NyaTermApp {
                 execute: true,
                 send_to_all: false,
                 variables: Vec::new(),
-                focused_index: 0,
             },
         );
         let mut preview = prompt.command.clone();
@@ -37,7 +35,6 @@ impl NyaTermApp {
             .flex_col()
             .gap_4();
         for (index, variable) in prompt.variables.iter().cloned().enumerate() {
-            let focused = prompt.focused_index == index;
             let variable_name = variable.name.clone();
             let field_id = format!("quick-command-variable-{index}");
             let field = if variable.options.is_empty() {
@@ -49,57 +46,28 @@ impl NyaTermApp {
                 )
                 .into_any_element()
             } else {
-                div()
-                    .h(px(32.))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(if focused {
-                        rgb(palette.primary)
-                    } else {
-                        rgb(palette.border)
+                // Tauri offers the whole option list at once. Stepping through it with
+                // arrows hid every value but the current one.
+                let options = variable
+                    .options
+                    .iter()
+                    .map(|option| {
+                        let label = if option.is_empty() {
+                            "-"
+                        } else {
+                            option.as_str()
+                        };
+                        NyaSelectOption::new(option.clone(), label.to_string())
                     })
-                    .bg(rgb(palette.input))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .font_family(crate::features::shell::gpui_code_font_family())
-                            .text_xs()
-                            .text_color(rgb(palette.text))
-                            .child(if variable.value.is_empty() {
-                                "-".to_string()
-                            } else {
-                                variable.value.clone()
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(small_button(
-                                palette,
-                                format!("quick-command-variable-prev-{index}"),
-                                "<",
-                                cx.listener(move |this, _, _, cx| {
-                                    this.cycle_quick_command_variable_option(index, -1, cx);
-                                }),
-                            ))
-                            .child(small_button(
-                                palette,
-                                format!("quick-command-variable-next-{index}"),
-                                ">",
-                                cx.listener(move |this, _, _, cx| {
-                                    this.cycle_quick_command_variable_option(index, 1, cx);
-                                }),
-                            )),
-                    )
-                    .into_any_element()
+                    .collect::<Vec<_>>();
+                self.form_select_control(
+                    format!("quick-command.variable.{index}"),
+                    options,
+                    Some(variable.value.clone()),
+                    false,
+                    cx,
+                )
+                .into_any_element()
             };
             rows = rows.child(
                 div()
@@ -107,16 +75,12 @@ impl NyaTermApp {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.focus_quick_command_variable(index, cx);
-                        window.focus(this.commands.quick_variable_focus(), cx);
-                    }))
                     .child(
                         div()
                             .text_size(px(11.))
                             .text_color(rgb(palette.text_muted))
-                            .child(truncate_preview(&variable_name, 48)),
+                            .truncate()
+                            .child(variable_name),
                     )
                     .child(field),
             );
@@ -193,9 +157,11 @@ impl NyaTermApp {
                                         div()
                                             .text_size(px(10.))
                                             .text_color(rgb(palette.text_muted))
-                                            .child(self.tr("quickCommands.view")),
+                                            .child(self.tr("quickCommands.preview")),
                                     )
                                     .child(
+                                        // The resolved command in full: this is the last
+                                        // look before it runs, so nothing is cut off.
                                         div()
                                             .mt_1()
                                             .font_family(
@@ -205,9 +171,9 @@ impl NyaTermApp {
                                             .line_height(px(18.))
                                             .text_color(rgb(palette.text_muted))
                                             .child(if preview.trim().is_empty() {
-                                                self.tr("quickCommands.noCommandsFound").to_string()
+                                                self.tr("quickCommands.emptyCommand").to_string()
                                             } else {
-                                                truncate_preview(&preview, 280)
+                                                preview
                                             }),
                                     ),
                             ),

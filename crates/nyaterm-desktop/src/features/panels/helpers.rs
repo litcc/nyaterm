@@ -219,21 +219,27 @@ pub(in crate::features::panels) fn filtered_quick_commands(
     filtered
 }
 
+/// The command's icon, or a colored dot when it has none.
+///
+/// `icon_size_px` tracks the view mode, as Tauri's `renderCommandIcon` className
+/// does (12px tile, 12.8px compact, 14.4px list). The dot stays 10px everywhere,
+/// matching Tauri's fixed `h-2.5 w-2.5`.
 pub(in crate::features::panels) fn quick_command_icon_mark(
     palette: crate::theme::ThemePalette,
     icon_tag: Option<&str>,
     color_tag: Option<&str>,
+    icon_size_px: f32,
 ) -> impl IntoElement {
     match icon_tag.and_then(quick_command_icon) {
         Some(def) => crate::features::view_widgets::mono_icon(
             def.path,
             rgb(def.tint(palette).unwrap_or(palette.text)).into(),
-            16.,
+            icon_size_px,
         )
         .into_any_element(),
         // No icon chosen: the command still gets its color, as a plain dot.
         None => div()
-            .size(px(9.))
+            .size(px(10.))
             .flex_none()
             .rounded_full()
             .bg(quick_command_color(palette, color_tag))
@@ -241,14 +247,30 @@ pub(in crate::features::panels) fn quick_command_icon_mark(
     }
 }
 
+/// The pin marker, sized with its row.
+///
+/// Tauri's `MdPushPin` inherits the row's text color at `opacity-60`, so a pinned
+/// command reads as a quiet marker rather than a warning.
 pub(in crate::features::panels) fn quick_command_pin_mark(
     palette: crate::theme::ThemePalette,
+    size_px: f32,
 ) -> impl IntoElement {
     svg()
-        .size(px(12.))
+        .size(px(size_px))
         .flex_none()
-        .text_color(rgb(palette.warning))
+        .opacity(0.6)
+        .text_color(rgb(palette.text_muted))
         .path("icons/pin.svg")
+}
+
+/// One-line preview of a possibly multi-line command.
+///
+/// CSS `white-space: nowrap` collapses newlines, so Tauri's `truncate` rows show a
+/// multi-line script as one line. GPUI cannot: `shape_text` always splits on a
+/// newline regardless of `white_space`, so the text has to be flattened before
+/// it reaches a `.truncate()` row or it renders as several clipped lines.
+pub(in crate::features::panels) fn quick_command_single_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(in crate::features::panels) fn quick_command_color(
@@ -260,60 +282,100 @@ pub(in crate::features::panels) fn quick_command_color(
         "green" => rgb(palette.success),
         "blue" => rgb(palette.link),
         "yellow" => rgb(palette.warning),
-        "purple" => rgb(palette.link),
+        // Not a palette token: `link` is already blue, so routing purple there
+        // makes the two tags indistinguishable. Tauri's `bg-purple-500`.
+        "purple" => rgb(0xa855f7),
         _ => rgb(palette.text_muted),
     }
+}
+
+/// One field of the quick command editor.
+pub(in crate::features::panels) struct QuickCommandEditorFieldSpec {
+    pub field: QuickCommandEditorField,
+    pub label: &'static str,
+    pub placeholder: &'static str,
+    pub value: String,
+    /// Shown beside the caption, as Tauri shows `errors.label` / `errors.command`.
+    pub error: Option<String>,
 }
 
 /// A captioned box hosting one of the quick command editor's inputs.
 pub(in crate::features::panels) fn quick_command_editor_field(
     app: &mut NyaTermApp,
-    field: QuickCommandEditorField,
-    label: &'static str,
-    placeholder: &'static str,
-    value: String,
+    spec: QuickCommandEditorFieldSpec,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::AnyElement {
-    quick_command_editor_input(app, field, label, placeholder, value, false, cx)
+    quick_command_editor_input(app, spec, false, cx)
 }
 
 /// The script box, which is the one that takes newlines.
 pub(in crate::features::panels) fn quick_command_editor_script_field(
     app: &mut NyaTermApp,
-    field: QuickCommandEditorField,
-    label: &'static str,
-    placeholder: &'static str,
-    value: String,
+    spec: QuickCommandEditorFieldSpec,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::AnyElement {
-    quick_command_editor_input(app, field, label, placeholder, value, true, cx)
+    quick_command_editor_input(app, spec, true, cx)
 }
 
 fn quick_command_editor_input(
     app: &mut NyaTermApp,
-    field: QuickCommandEditorField,
-    label: &'static str,
-    placeholder: &'static str,
-    value: String,
+    spec: QuickCommandEditorFieldSpec,
     multi_line: bool,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::AnyElement {
+    let QuickCommandEditorFieldSpec {
+        field,
+        label,
+        placeholder,
+        value,
+        error,
+    } = spec;
+    let palette = app.theme_palette();
     let setup = if multi_line {
-        TextInputSetup::multi_line(placeholder)
+        TextInputSetup::code(placeholder)
     } else {
         TextInputSetup::placeholder(placeholder)
     };
-    app.text_input_field(
+    let input = app.text_input_box(
         format!(
             "quick-command.editor.{}",
             quick_command_editor_field_key(field)
         ),
-        label,
         &value,
         setup,
         cx,
-    )
-    .into_any_element()
+    );
+    div()
+        .min_w_0()
+        .when(multi_line, |this| this.flex_1())
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(palette.text_muted))
+                        .child(label),
+                )
+                .when_some(error, |this, error| {
+                    this.child(
+                        div()
+                            .min_w_0()
+                            .text_size(px(11.))
+                            .text_color(rgb(palette.danger))
+                            .truncate()
+                            .child(error),
+                    )
+                }),
+        )
+        .child(input)
+        .into_any_element()
 }
 
 /// The stable part of a quick command field's input id.
@@ -385,4 +447,35 @@ pub(in crate::features::panels) fn terminal_action_prompt_text(
         .rev()
         .collect::<String>();
     format!("[truncated to last {max_chars} chars]\n{tail}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quick_command_single_line;
+
+    #[test]
+    fn single_line_collapses_a_multi_line_script_the_way_css_nowrap_does() {
+        assert_eq!(
+            quick_command_single_line("# depth arg\nsh -c 'find \"$dir\"'"),
+            "# depth arg sh -c 'find \"$dir\"'"
+        );
+    }
+
+    #[test]
+    fn single_line_collapses_tabs_and_runs_of_spaces() {
+        assert_eq!(
+            quick_command_single_line("iostat\t-dxm   1\r\n"),
+            "iostat -dxm 1"
+        );
+    }
+
+    #[test]
+    fn single_line_leaves_an_already_flat_command_alone() {
+        assert_eq!(quick_command_single_line("stty cols"), "stty cols");
+    }
+
+    #[test]
+    fn single_line_of_blank_input_is_empty() {
+        assert_eq!(quick_command_single_line("  \n\t "), "");
+    }
 }

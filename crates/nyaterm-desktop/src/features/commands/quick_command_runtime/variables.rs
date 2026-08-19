@@ -37,27 +37,6 @@ impl NyaTermApp {
         );
     }
 
-    pub(in crate::features) fn focus_quick_command_variable(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if self.commands.focus_quick_variable(index) {
-            cx.notify();
-        }
-    }
-
-    pub(in crate::features) fn cycle_quick_command_variable_option(
-        &mut self,
-        index: usize,
-        delta: isize,
-        cx: &mut Context<Self>,
-    ) {
-        if self.commands.cycle_quick_variable_option(index, delta) {
-            cx.notify();
-        }
-    }
-
     pub(in crate::features) fn handle_quick_command_variable_key_down(
         &mut self,
         event: &KeyDownEvent,
@@ -70,22 +49,11 @@ impl NyaTermApp {
             return;
         }
 
-        // The boxes own the text and the clipboard. What is left is the dialog's
-        // own keys, and the arrows that cycle an option list — a variable with
-        // options has no box of its own.
+        // Every field owns its own text, clipboard, and — for an option list — its
+        // own arrow keys. What is left is the dialog's own two keys.
         match keystroke.key.as_str() {
             "escape" => self.cancel_quick_command_variable_prompt(cx),
             "enter" => self.submit_quick_command_variable_prompt(cx),
-            "left" | "up" => {
-                if let Some(prompt) = self.commands.quick_variable_prompt() {
-                    self.cycle_quick_command_variable_option(prompt.focused_index, -1, cx);
-                }
-            }
-            "right" | "down" => {
-                if let Some(prompt) = self.commands.quick_variable_prompt() {
-                    self.cycle_quick_command_variable_option(prompt.focused_index, 1, cx);
-                }
-            }
             _ => {}
         }
     }

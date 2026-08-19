@@ -57,6 +57,8 @@ pub(in crate::features) struct TextInputSetup {
     pub placeholder: SharedString,
     pub masked: bool,
     pub multi_line: bool,
+    /// A multi-line box holding source, rendered with a line-number gutter.
+    pub code: bool,
 }
 
 impl TextInputSetup {
@@ -79,6 +81,18 @@ impl TextInputSetup {
             placeholder: placeholder.into(),
             masked: false,
             multi_line: true,
+            code: false,
+        }
+    }
+
+    /// A script box: multi-line, with the gutter Tauri hand-rolls for its command
+    /// editor.
+    pub fn code(placeholder: impl Into<SharedString>) -> Self {
+        Self {
+            placeholder: placeholder.into(),
+            masked: false,
+            multi_line: true,
+            code: true,
         }
     }
 }
@@ -138,7 +152,9 @@ impl NyaTermApp {
 
         let entity = cx.new(|cx| {
             let input = NyaInputState::new(cx, seed.to_string()).placeholder(setup.placeholder);
-            let input = if setup.multi_line {
+            let input = if setup.code {
+                input.code(Some(4))
+            } else if setup.multi_line {
                 input.multi_line(Some(4))
             } else {
                 input

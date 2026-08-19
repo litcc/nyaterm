@@ -1,4 +1,4 @@
-use gpui::{Context, ParentElement as _, Window, div};
+use gpui::{ClipboardItem, Context, ParentElement as _, Window, div};
 use nyaterm_store::{StoreDomain, store_request};
 use nyaterm_ui::{NyaConfirmDialog, NyaDialogFooter, NyaDialogWindowExt};
 
@@ -101,6 +101,23 @@ impl NyaTermApp {
         self.shell
             .set_status("quick command details opened".to_string());
         window.focus(self.commands.quick_details_focus(), cx);
+        cx.notify();
+    }
+
+    /// Copy a command verbatim, as the copy button on Tauri's details card does.
+    pub(in crate::features) fn copy_quick_command_text(
+        &mut self,
+        command: String,
+        cx: &mut Context<Self>,
+    ) {
+        if command.trim().is_empty() {
+            self.shell
+                .set_status("quick command has no text to copy".to_string());
+        } else {
+            cx.write_to_clipboard(ClipboardItem::new_string(command));
+            self.shell
+                .set_status("quick command copied to clipboard".to_string());
+        }
         cx.notify();
     }
 

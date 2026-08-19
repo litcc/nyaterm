@@ -231,7 +231,6 @@ impl NyaTermApp {
                     execute,
                     send_to_all,
                     variables,
-                    focused_index: 0,
                 });
             self.shell
                 .set_status("fill quick command variables".to_string());

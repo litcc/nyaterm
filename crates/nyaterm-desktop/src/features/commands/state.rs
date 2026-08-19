@@ -356,6 +356,7 @@ impl CommandFeatureState {
         editor.category_id = None;
         editor.category_draft = draft;
         editor.error = None;
+        editor.error_field = None;
         self.quick.editor.category_search_draft.clear();
         self.quick.editor.new_category_draft.clear();
         self.quick.editor.category_picker_open = false;
@@ -406,6 +407,7 @@ impl CommandFeatureState {
                 if let Some(editor) = self.quick.editor.draft.as_mut() {
                     editor.focused_field = field;
                     editor.error = None;
+                    editor.error_field = None;
                 }
             }
             return changed;
@@ -421,6 +423,7 @@ impl CommandFeatureState {
             QuickCommandEditorField::Category => unreachable!(),
         }
         editor.error = None;
+        editor.error_field = None;
         true
     }
 
@@ -435,6 +438,7 @@ impl CommandFeatureState {
         editor.category_id = category_id;
         editor.category_draft = category_draft;
         editor.error = None;
+        editor.error_field = None;
         self.quick.editor.category_search_draft.clear();
         self.quick.editor.new_category_draft.clear();
         self.quick.editor.category_picker_open = false;
@@ -451,6 +455,7 @@ impl CommandFeatureState {
         editor.color_tag = color_tag;
         editor.icon_tag = None;
         editor.error = None;
+        editor.error_field = None;
         self.quick.editor.icon_picker_open = false;
         true
     }
@@ -464,6 +469,7 @@ impl CommandFeatureState {
             editor.color_tag = None;
         }
         editor.error = None;
+        editor.error_field = None;
         self.quick.editor.icon_picker_open = false;
         true
     }
@@ -474,6 +480,7 @@ impl CommandFeatureState {
         };
         editor.pinned = !editor.pinned;
         editor.error = None;
+        editor.error_field = None;
         true
     }
 
@@ -488,6 +495,7 @@ impl CommandFeatureState {
         }
         .to_string();
         editor.error = None;
+        editor.error_field = None;
         true
     }
 
@@ -498,6 +506,7 @@ impl CommandFeatureState {
     ) {
         if let Some(editor) = self.quick.editor.draft.as_mut() {
             editor.error = Some(error);
+            editor.error_field = field;
             if let Some(field) = field {
                 editor.focused_field = field;
             }
@@ -665,17 +674,6 @@ impl CommandFeatureState {
         self.quick.dialogs.variable_prompt = None;
     }
 
-    pub(in crate::features) fn focus_quick_variable(&mut self, index: usize) -> bool {
-        let Some(prompt) = self.quick.dialogs.variable_prompt.as_mut() else {
-            return false;
-        };
-        if index >= prompt.variables.len() {
-            return false;
-        }
-        prompt.focused_index = index;
-        true
-    }
-
     pub(in crate::features) fn set_quick_variable_value(
         &mut self,
         index: usize,
@@ -693,38 +691,6 @@ impl CommandFeatureState {
                 variable.value = value.clone();
             }
         }
-        prompt.focused_index = index;
-        true
-    }
-
-    pub(in crate::features) fn cycle_quick_variable_option(
-        &mut self,
-        index: usize,
-        delta: isize,
-    ) -> bool {
-        let Some(prompt) = self.quick.dialogs.variable_prompt.as_mut() else {
-            return false;
-        };
-        let Some(variable) = prompt.variables.get(index) else {
-            return false;
-        };
-        if variable.options.is_empty() {
-            return false;
-        }
-        let current = variable
-            .options
-            .iter()
-            .position(|option| option == &variable.value)
-            .unwrap_or(0);
-        let next = (current as isize + delta).rem_euclid(variable.options.len() as isize) as usize;
-        let value = variable.options[next].clone();
-        let name = variable.name.clone();
-        for variable in &mut prompt.variables {
-            if variable.name == name {
-                variable.value = value.clone();
-            }
-        }
-        prompt.focused_index = index;
         true
     }
 
@@ -1101,7 +1067,6 @@ mod tests {
                     value: String::new(),
                 },
             ],
-            focused_index: 0,
         });
 
         assert!(state.set_quick_variable_value(1, "prod".to_string()));

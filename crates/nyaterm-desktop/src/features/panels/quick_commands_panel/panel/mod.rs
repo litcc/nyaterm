@@ -10,7 +10,6 @@ use crate::widgets::small_button;
 use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem, NyaScrollable, NyaSearchInput, NyaTooltip};
 
 mod rows;
-use rows::quick_command_tile_column_count;
 mod sidebar;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -146,6 +145,33 @@ impl NyaTermApp {
                 cx,
             )
             .into_any_element();
+        // Tauri shows a clear button inside the box while a query is present. It
+        // clears only the query; Escape below still drops the category filter too.
+        let clear_search = (!search_draft.trim().is_empty()).then(|| {
+            div()
+                .id(SharedString::from("quick-command-search-clear"))
+                .size(px(16.))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .cursor_pointer()
+                .hover(|this| this.bg(rgb(palette.hover)))
+                .child(
+                    svg()
+                        .size(px(11.))
+                        .flex_none()
+                        .path("icons/close.svg")
+                        .text_color(rgb(palette.text_dimmed)),
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.commands.set_quick_search_draft(String::new());
+                    this.reset_text_input("quick-command.search", "", cx);
+                    cx.notify();
+                }))
+                .into_any_element()
+        });
         let view_icon = match self.commands.quick_view_mode() {
             QuickCommandViewMode::List => "icons/view-list.svg",
             QuickCommandViewMode::Compact => "icons/view-compact.svg",
@@ -154,25 +180,16 @@ impl NyaTermApp {
 
         let category_sidebar = self.quick_command_category_sidebar(categories, palette, cx);
         let view_mode = self.commands.quick_view_mode();
-        let tile_columns = quick_command_tile_column_count(
-            self.shell.viewport_size().0,
-            self.shell.left_panel_width(),
-            self.shell.right_panel_width(),
-            !self.shell.left_panel_collapsed(),
-            !self.shell.right_panel_collapsed(),
-        );
         let row_scroll = self.commands.quick_row_scroll().clone();
+        // Row pitch for the virtualized modes: Tauri's row height plus its gap-1.5.
         let logical_row_height = match view_mode {
-            QuickCommandViewMode::Tile => 32.,
             QuickCommandViewMode::Compact => 38.,
-            QuickCommandViewMode::List => 50.,
+            QuickCommandViewMode::List | QuickCommandViewMode::Tile => 50.,
         };
         let rows = if filtered_commands.is_empty() {
             div()
-                .id(SharedString::from("quick-command-rows-scroll"))
                 .flex_1()
                 .min_h_0()
-                .overflow_scrollbar()
                 .child(
                     div()
                         .mt_8()
@@ -212,50 +229,47 @@ impl NyaTermApp {
                         }),
                 )
                 .into_any_element()
+        } else if view_mode == QuickCommandViewMode::Tile {
+            // Tauri lays tiles out with `flex flex-wrap`: chips keep their content
+            // width and wrap when the row fills. That cannot be expressed as
+            // uniform_list rows without guessing how many chips fit, and a wrong
+            // guess is exactly the ragged padding this replaces.
+            let tiles = self.quick_command_items(&filtered_commands, palette, cx);
+            div()
+                .id(SharedString::from("quick-command-tiles-scroll"))
+                .flex_1()
+                .min_h_0()
+                .flex()
+                .flex_wrap()
+                .content_start()
+                .gap(px(6.))
+                .children(tiles)
+                // In-flow container, so it owns its own bar; `quick_row_scroll` is a
+                // UniformListScrollHandle that only uniform_list can drive.
+                .overflow_y_scrollbar()
+                .into_any_element()
         } else {
-            let logical_row_count = match view_mode {
-                QuickCommandViewMode::Tile => filtered_commands.len().div_ceil(tile_columns),
-                QuickCommandViewMode::Compact | QuickCommandViewMode::List => {
-                    filtered_commands.len()
-                }
-            };
+            let logical_row_count = filtered_commands.len();
             uniform_list(
                 "quick-command-rows-scroll",
                 logical_row_count,
                 cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
                     let mut rows = Vec::with_capacity(range.len());
-                    for logical_index in range {
-                        let (start, end) = match view_mode {
-                            QuickCommandViewMode::Tile => {
-                                let start = logical_index.saturating_mul(tile_columns);
-                                (
-                                    start,
-                                    start
-                                        .saturating_add(tile_columns)
-                                        .min(filtered_commands.len()),
-                                )
-                            }
-                            QuickCommandViewMode::Compact | QuickCommandViewMode::List => {
-                                (logical_index, logical_index.saturating_add(1))
-                            }
-                        };
-                        if start >= end || end > filtered_commands.len() {
+                    for index in range {
+                        let Some(command) = filtered_commands.get(index) else {
                             continue;
-                        }
+                        };
                         let command_items =
-                            this.quick_command_items(&filtered_commands[start..end], palette, cx);
-                        let row = div()
-                            .h(px(logical_row_height))
-                            .w_full()
-                            .flex_none()
-                            .when(view_mode == QuickCommandViewMode::Tile, |this| {
-                                this.grid().grid_cols(tile_columns as u16).gap_1()
-                            })
-                            .when(view_mode != QuickCommandViewMode::Tile, |this| {
-                                this.flex().items_start()
-                            })
-                            .children(command_items);
-                        rows.push(row);
+                            this.quick_command_items(std::slice::from_ref(command), palette, cx);
+                        rows.push(
+                            div()
+                                .h(px(logical_row_height))
+                                .w_full()
+                                .flex_none()
+                                .flex()
+                                .items_start()
+                                .children(command_items),
+                        );
                     }
                     rows
                 }),
@@ -292,16 +306,18 @@ impl NyaTermApp {
                             .text_color(rgb(palette.text_muted))
                             .child(self.tr("panel.quickCommands")),
                     )
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(rgb(palette.text_dimmed))
-                            .child(if visible_commands == total_commands {
-                                total_commands.to_string()
-                            } else {
-                                format!("{visible_commands}/{total_commands}")
-                            }),
-                    )
+                    .when(total_commands > 0, |this| {
+                        this.child(
+                            div()
+                                .text_size(px(11.))
+                                .text_color(rgb(palette.text_dimmed))
+                                .child(if visible_commands == total_commands {
+                                    total_commands.to_string()
+                                } else {
+                                    format!("{visible_commands}/{total_commands}")
+                                }),
+                        )
+                    })
                     .child(div().flex_1())
                     .child(
                         div()
@@ -331,7 +347,11 @@ impl NyaTermApp {
                                                 cx.notify();
                                             }
                                         },
-                                    )),
+                                    ))
+                                    .map(|input| match clear_search {
+                                        Some(clear) => input.trailing(clear),
+                                        None => input,
+                                    }),
                             ),
                     )
                     .child(quick_command_toolbar_divider(palette))
@@ -430,7 +450,11 @@ impl NyaTermApp {
                             .flex()
                             .flex_col()
                             .child(rows)
-                            .vertical_scrollbar(&row_scroll),
+                            // Tile mode scrolls in-flow with its own bar; attaching this
+                            // one too would paint a second, idle track on the same edge.
+                            .when(view_mode != QuickCommandViewMode::Tile, |this| {
+                                this.vertical_scrollbar(&row_scroll)
+                            }),
                     ),
             )
     }
