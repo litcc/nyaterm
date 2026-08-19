@@ -1,5 +1,5 @@
 use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
-use nyaterm_ui::{NyaTabItem, NyaTabs};
+use nyaterm_ui::{NyaScrollable, NyaTabItem, NyaTabs};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::SecurityKeyEditorState;
@@ -63,7 +63,7 @@ impl NyaTermApp {
                     .id("security-private-key-content")
                     .min_h(px(288.))
                     .max_h(px(480.))
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
                     .p_3()
                     .rounded_md()
                     .border_1()

@@ -10,7 +10,7 @@ use gpui::{
 
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{SshAlgorithmOption, SshAlgorithmRisk};
-use nyaterm_ui::{NyaCheckbox, NyaTabItem, NyaTabs, NyaTooltip};
+use nyaterm_ui::{NyaCheckbox, NyaScrollable, NyaTabItem, NyaTabs, NyaTooltip};
 
 use crate::features::{NyaTermApp, connections::ConnectionEditorToggle};
 use crate::models::{
@@ -137,7 +137,7 @@ fn ssh_algorithm_list(
             "connection-ssh-algorithm-list-{tab:?}"
         )))
         .max_h(px(224.))
-        .overflow_y_scroll()
+        .overflow_y_scrollbar()
         .flex()
         .flex_col()
         .gap_1();

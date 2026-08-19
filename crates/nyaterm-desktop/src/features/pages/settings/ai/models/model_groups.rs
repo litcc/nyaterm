@@ -3,6 +3,7 @@ use gpui::{
     rgb,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::widgets::small_button;
@@ -303,7 +304,7 @@ impl NyaTermApp {
         div()
             .id("ai-model-groups-scroll")
             .max_h(px(352.))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .rounded_md()
             .border_1()
             .border_color(rgb(palette.border))

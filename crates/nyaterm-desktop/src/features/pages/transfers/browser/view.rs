@@ -23,7 +23,6 @@ use super::helpers::{
 
 const FILE_BROWSER_SCROLLBAR_GUTTER_PX: f32 = 12.;
 const FILE_BROWSER_SCROLLBAR_SIZE_PX: f32 = 16.;
-const FILE_BROWSER_SCROLLBAR_EDGE_INSET_PX: f32 = 4.;
 
 impl NyaTermApp {
     pub(in crate::features::pages::transfers) fn transfer_browser_view(
@@ -587,7 +586,7 @@ impl NyaTermApp {
                                 .absolute()
                                 .top(px(28.))
                                 .bottom(px(FILE_BROWSER_SCROLLBAR_GUTTER_PX))
-                                .right(px(-FILE_BROWSER_SCROLLBAR_EDGE_INSET_PX))
+                                .right_0()
                                 .w(px(FILE_BROWSER_SCROLLBAR_SIZE_PX))
                                 .child(NyaUniformListScrollbar::new(
                                     "transfer-browser-vertical-scrollbar",
@@ -600,12 +599,17 @@ impl NyaTermApp {
                             .absolute()
                             .left_0()
                             .right(px(FILE_BROWSER_SCROLLBAR_GUTTER_PX))
-                            .bottom(px(-FILE_BROWSER_SCROLLBAR_EDGE_INSET_PX))
+                            .bottom_0()
                             .h(px(FILE_BROWSER_SCROLLBAR_SIZE_PX))
-                            .child(NyaHorizontalScrollbar::new(
-                                "transfer-browser-horizontal-scrollbar",
-                                self.transfer.browser_view().horizontal_scroll,
-                            )),
+                            // A mouse reaches this axis only with shift held, so the
+                            // bar is the only cue that more columns exist.
+                            .child(
+                                NyaHorizontalScrollbar::new(
+                                    "transfer-browser-horizontal-scrollbar",
+                                    self.transfer.browser_view().horizontal_scroll,
+                                )
+                                .always_visible(),
+                            ),
                     ),
                 move |_, cx| {
                     app.update(cx, |this, cx| this.transfer_browser_context_menu_items(cx))

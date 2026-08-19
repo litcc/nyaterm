@@ -1,7 +1,7 @@
 use gpui::{AnyElement, Context, IntoElement, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{SftpFileProperties, SftpFileType};
-use nyaterm_ui::NyaCheckbox;
+use nyaterm_ui::{NyaCheckbox, NyaScrollable};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup, transfers::format_file_size};
 use crate::models::{TransferPermissionTarget, TransferPropertiesState};
@@ -56,8 +56,7 @@ impl NyaTermApp {
         div()
             .id("transfer-properties-dialog-content")
             .max_h(px(560.))
-            .overflow_y_scroll()
-            .scrollbar_width(px(8.))
+            .overflow_y_scrollbar()
             .when_some(properties, |this, properties| {
                 this.child(properties_summary(palette, &state, &properties, self))
                     .child(

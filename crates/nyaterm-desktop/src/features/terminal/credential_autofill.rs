@@ -1,3 +1,4 @@
+use nyaterm_ui::NyaScrollable;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{
@@ -628,7 +629,7 @@ impl NyaTermApp {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll();
+            .overflow_y_scrollbar();
 
         for (index, credential) in state.matches.iter().enumerate() {
             let selected = index == state.selected_index;

@@ -7,7 +7,7 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{RecordingMode, SessionInfo};
-use nyaterm_ui::NyaSearchInput;
+use nyaterm_ui::{NyaScrollable, NyaSearchInput};
 
 use crate::features::formatting::{session_kind_label, short_id};
 use crate::features::perf::record_gpui_perf_sample;
@@ -91,6 +91,7 @@ impl NyaTermApp {
             cx,
         );
 
+        let list_scroll = self.session.recording_list_scroll().clone();
         let session_list: AnyElement = if total_count == 0 {
             div()
                 .id(SharedString::from("recording-session-list"))
@@ -142,6 +143,7 @@ impl NyaTermApp {
             )
             .flex_1()
             .min_h_0()
+            .track_scroll(&list_scroll)
             .into_any_element()
         };
 
@@ -183,11 +185,13 @@ impl NyaTermApp {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .relative()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
                     .py_2()
-                    .child(session_list),
+                    .child(session_list)
+                    .vertical_scrollbar(&list_scroll),
             )
     }
 

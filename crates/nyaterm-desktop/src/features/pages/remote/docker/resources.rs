@@ -4,6 +4,7 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{DockerImage, DockerNetwork, DockerVolume};
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::{NyaTermApp, formatting::compact_id, shell::gpui_code_font_family};
 use crate::models::{DockerConfirmAction, DockerConfirmState};
@@ -282,8 +283,7 @@ pub(in crate::features::pages::remote) fn docker_resource_static_panel(
             title.to_ascii_lowercase()
         )))
         .size_full()
-        .overflow_scroll()
-        .scrollbar_width(px(6.))
+        .overflow_scrollbar()
         .flex()
         .flex_col()
         .gap(px(6.))

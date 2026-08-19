@@ -6,7 +6,7 @@ use gpui::{
 use std::collections::HashMap;
 
 use crate::models::NetworkTab;
-use nyaterm_ui::{NyaTabItem, NyaTabs};
+use nyaterm_ui::{NyaScrollable, NyaTabItem, NyaTabs};
 
 use super::super::NyaTermApp;
 
@@ -97,8 +97,7 @@ impl NyaTermApp {
                     div()
                         .id("network-list-scroll")
                         .size_full()
-                        .overflow_scroll()
-                        .scrollbar_width(px(6.))
+                        .overflow_scrollbar()
                         .p_3()
                         .flex()
                         .flex_col()

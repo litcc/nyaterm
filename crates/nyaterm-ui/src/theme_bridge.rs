@@ -1,6 +1,7 @@
 //! Bridge from NyaTerm's persisted theme palette to gpui-component's theme.
 
 use gpui::{App, Hsla, hsla, rgb, transparent_black};
+use gpui_component::scroll::ScrollbarMode;
 use gpui_component::{Theme, ThemeMode, ThemeTokens};
 
 use crate::theme::ThemePalette;
@@ -143,6 +144,10 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
     component_theme.colors.scrollbar = transparent_black();
     component_theme.colors.scrollbar_thumb = color(palette.border);
     component_theme.colors.scrollbar_thumb_hover = color(palette.text_dimmed);
+    // Zed-style auto-hide: fade the bar in while scrolling or hovering, and out
+    // after idle. This matches the gpui-component default, set explicitly so the
+    // behavior cannot change silently under a vendor bump.
+    component_theme.scrollbar_mode = ScrollbarMode::Scrolling;
     component_theme.colors.switch = color(palette.border);
     component_theme.colors.switch_thumb = color(palette.surface);
     component_theme.colors.tab = color(palette.input);
@@ -182,6 +187,7 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use gpui::TestAppContext;
+    use gpui_component::scroll::ScrollbarMode;
     use gpui_component::{Theme, ThemeMode};
 
     use super::{apply_component_theme, color};
@@ -274,6 +280,24 @@ mod tests {
             assert_eq!(
                 Theme::global(cx).colors.scrollbar,
                 gpui::transparent_black()
+            );
+        });
+    }
+
+    #[test]
+    fn scrollbars_auto_hide_after_idle_rather_than_staying_pinned() {
+        let cx = TestAppContext::single();
+
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            let palette = theme_palette("github-dark");
+
+            apply_component_theme(palette, cx);
+
+            assert_eq!(
+                Theme::global(cx).scrollbar_mode,
+                ScrollbarMode::Scrolling,
+                "panels fade their scrollbar in on scroll or hover and out after idle"
             );
         });
     }

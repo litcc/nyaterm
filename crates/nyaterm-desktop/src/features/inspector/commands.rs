@@ -1,5 +1,6 @@
 use gpui::{ClickEvent, Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 
@@ -70,8 +71,7 @@ impl NyaTermApp {
                     .id(SharedString::from("command-history-list"))
                     .flex_1()
                     .min_h_0()
-                    .overflow_scroll()
-                    .scrollbar_width(px(6.))
+                    .overflow_scrollbar()
                     .child(rows),
             )
     }

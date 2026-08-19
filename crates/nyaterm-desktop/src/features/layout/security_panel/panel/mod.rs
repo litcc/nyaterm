@@ -1,5 +1,5 @@
 use gpui::{App, ClickEvent, Context, FontWeight, IntoElement, Window, div, prelude::*, px, rgb};
-use nyaterm_ui::{NyaTabItem, NyaTabs};
+use nyaterm_ui::{NyaScrollable, NyaTabItem, NyaTabs};
 
 use crate::features::NyaTermApp;
 use crate::models::{NavItem, PanelSide, SecurityAuthTab};
@@ -26,7 +26,8 @@ impl NyaTermApp {
             SecurityAuthTab::Passwords => self.security_passwords_body(palette, cx),
             SecurityAuthTab::Credentials => self.security_credentials_body(palette, cx),
             SecurityAuthTab::Otp => self.security_otp_body(palette, cx),
-        };
+        }
+        .overflow_y_scrollbar();
 
         div()
             .size_full()
@@ -114,7 +115,6 @@ fn security_auth_body_base(id: &'static str) -> gpui::Stateful<gpui::Div> {
         .id(id)
         .flex_1()
         .min_h_0()
-        .overflow_y_scroll()
         .flex()
         .flex_col()
         .gap_2()

@@ -85,7 +85,7 @@ impl RenderOnce for NyaScrollArea {
                     .child(
                         Scrollbar::vertical(&scroll_handle)
                             .id(scrollbar_id)
-                            .mode(ScrollbarMode::Always),
+                            .viewport_from_layout(),
                     ),
             )
     }
@@ -112,6 +112,7 @@ impl NyaUniformListScrollbar {
 pub struct NyaHorizontalScrollbar {
     id: SharedString,
     handle: ScrollHandle,
+    always_visible: bool,
 }
 
 impl NyaHorizontalScrollbar {
@@ -119,7 +120,20 @@ impl NyaHorizontalScrollbar {
         Self {
             id: id.into(),
             handle: handle.clone(),
+            always_visible: false,
         }
+    }
+
+    /// Keep the bar visible while the content overflows instead of fading it out
+    /// after idle.
+    ///
+    /// Auto-hide assumes the user already knows the axis scrolls, because only a
+    /// real scroll on that axis reveals the bar. A mouse can only scroll
+    /// horizontally with shift held, so on a wide table the hidden bar is the
+    /// only hint that more columns exist. Opt in there; leave vertical bars alone.
+    pub fn always_visible(mut self) -> Self {
+        self.always_visible = true;
+        self
     }
 }
 
@@ -127,7 +141,8 @@ impl RenderOnce for NyaHorizontalScrollbar {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         Scrollbar::horizontal(&self.handle)
             .id(self.id)
-            .mode(ScrollbarMode::Always)
+            .viewport_from_layout()
+            .when(self.always_visible, |bar| bar.mode(ScrollbarMode::Always))
     }
 }
 
@@ -135,7 +150,7 @@ impl RenderOnce for NyaUniformListScrollbar {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         Scrollbar::vertical(&self.handle)
             .id(self.id)
-            .mode(ScrollbarMode::Always)
+            .viewport_from_layout()
     }
 }
 

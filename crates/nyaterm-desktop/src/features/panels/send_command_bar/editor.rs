@@ -7,7 +7,7 @@ use gpui::{
 use super::super::{send_command_hex_byte_count, send_command_hex_guide_rows};
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::send_command::{SendCommandDataType, format_send_command_hex_display};
-use nyaterm_ui::NyaTooltip;
+use nyaterm_ui::{NyaScrollable, NyaTooltip};
 
 impl NyaTermApp {
     pub(super) fn send_command_bar_editor(
@@ -232,8 +232,7 @@ impl NyaTermApp {
                                 .id(SharedString::from("bottom-command-hex-preview-scroll"))
                                 .min_h_0()
                                 .flex_1()
-                                .overflow_scroll()
-                                .scrollbar_width(px(6.))
+                                .overflow_scrollbar()
                                 .font_family(crate::features::shell::gpui_code_font_family())
                                 .text_size(px(11.))
                                 .line_height(px(15.))

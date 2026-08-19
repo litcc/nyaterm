@@ -5,6 +5,7 @@ use nyaterm_transport::{
     SftpDuplicateDecision, SshAgentPromptAction, SshAgentPromptPhase, SshCredentialPromptKind,
     SshCredentialPromptReason,
 };
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::formatting::download_file_name_from_remote_path;
 use crate::features::session::{
@@ -691,7 +692,6 @@ impl NyaTermApp {
             )))
             .w_full()
             .max_h(px((self.shell.viewport_size().1 - 32.).max(240.)))
-            .overflow_y_scroll()
             .rounded_md()
             .border_1()
             .border_color(rgb(palette.border))
@@ -706,6 +706,7 @@ impl NyaTermApp {
                 cx.stop_propagation();
                 this.handle_keyboard_interactive_key_down(event, window, cx);
             }))
+            .overflow_y_scrollbar()
             .child(
                 div()
                     .flex()

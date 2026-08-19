@@ -1,6 +1,7 @@
 use gpui::{Context, FontWeight, IntoElement, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{DockerContainer, DockerContainerDetails};
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::{
     NyaTermApp, formatting::compact_id, formatting::docker_state_color,
@@ -198,7 +199,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
     let card = div()
         .id("docker-details-scroll")
         .max_h(px(600.))
-        .overflow_scroll()
+        .overflow_scrollbar()
         .p_4()
         .flex()
         .flex_col()

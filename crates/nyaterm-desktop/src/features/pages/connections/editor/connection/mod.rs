@@ -18,7 +18,8 @@ use gpui::{
 };
 use nyaterm_core::{ConnectionType, Group, SavedConnection, natural_compare, truncate_preview};
 use nyaterm_ui::{
-    NyaInput, NyaPopover, NyaScrollArea, NyaSelectOption, NyaSelectState, NyaTabItem, NyaTabs,
+    NyaInput, NyaPopover, NyaScrollArea, NyaScrollable, NyaSelectOption, NyaSelectState,
+    NyaTabItem, NyaTabs,
 };
 
 use self::local::connection_editor_local_section;
@@ -1112,7 +1113,7 @@ impl NyaTermApp {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
                     .on_scroll_wheel(cx.listener(|this, _: &gpui::ScrollWheelEvent, window, cx| {
                         if this.connection_editor_select_menu_is_focused(window, cx) {
                             cx.stop_propagation();

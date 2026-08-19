@@ -5,6 +5,8 @@ use gpui::{
     prelude::*, px, rgb, rgba, svg,
 };
 
+use gpui_component::scroll::ScrollableElement;
+
 use crate::theme::{ThemePalette, theme_palette};
 use crate::tooltip::NyaTooltip;
 
@@ -275,7 +277,7 @@ fn settings_sidebar(
                 .min_h_0()
                 .when(compact, |this| this.px_2().py_3())
                 .when(!compact, |this| this.px_3().py_3())
-                .overflow_scroll()
+                .overflow_y_scrollbar()
                 .children(groups.into_iter().map(|group| {
                     settings_nav_group(
                         palette,
@@ -567,7 +569,7 @@ fn settings_content_panel(
                         .id(SharedString::from("settings-content-scroll"))
                         .flex_1()
                         .min_h_0()
-                        .overflow_scroll()
+                        .overflow_y_scrollbar()
                         .when(compact, |this| this.px_4().py_4())
                         .when(!compact && !wide, |this| this.px_6().py_6())
                         .when(wide, |this| this.px_8().py_8())

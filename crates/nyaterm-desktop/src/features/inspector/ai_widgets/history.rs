@@ -3,7 +3,7 @@ use gpui::{
     prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::{AgentCommandExecutionMode, truncate_preview};
-use nyaterm_ui::NyaSearchInput;
+use nyaterm_ui::{NyaScrollable, NyaSearchInput};
 
 use crate::features::formatting::group_ai_sessions_by_date;
 use crate::features::view_widgets::tab_menu_separator;
@@ -519,8 +519,7 @@ impl NyaTermApp {
                     .flex_1()
                     .min_h_0()
                     .max_h(px(280.))
-                    .overflow_scroll()
-                    .scrollbar_width(px(6.))
+                    .overflow_scrollbar()
                     .child(rows),
             )
     }

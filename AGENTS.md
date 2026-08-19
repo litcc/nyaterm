@@ -118,6 +118,38 @@ handlers must not immediately steal focus from a field. Keep controls usable
 with keyboard navigation and ensure overlays and child windows restore focus
 predictably.
 
+Every scroll container must render a scrollbar. GPUI's `overflow_y_scroll()`
+enables scrolling but paints nothing, and `scrollbar_width` only reserves gutter
+space, so use `NyaScrollable` (the `ScrollableElement` trait re-exported by
+`nyaterm-ui`):
+
+* In-flow containers: use `overflow_*_scrollbar()` instead of
+  `overflow_*_scroll()`, and do not also reserve a `scrollbar_width` gutter -
+  the bar overlays the content.
+* Virtualized lists (`uniform_list`) and any caller-owned scroll handle: keep
+  `track_scroll` on the list and attach `.vertical_scrollbar(&handle)` to the
+  non-scrolling parent. An absolutely positioned overlay inside a scrolling
+  element is translated by the scroll offset and would scroll away.
+* Absolutely positioned popups must not use `overflow_*_scrollbar()`. The
+  wrapper inherits only size and flex styles, so `position`/`top`/`left` would
+  move onto the inner content node and break the popup's placement. Give the
+  popup a non-scrolling shell and scroll an in-flow child instead.
+* A `Scrollbar` inside a caller-positioned overlay needs
+  `viewport_from_layout()`; otherwise it paints at the scroll handle's own
+  bounds and ignores the overlay.
+
+Scrollbars auto-hide (`ScrollbarMode::Scrolling`), installed once in
+`theme_bridge.rs`. Auto-hide reveals a bar only when that axis actually
+scrolls, so a horizontal bar whose only mouse route is shift+wheel is
+undiscoverable: prefer `NyaHorizontalScrollbar::always_visible()` on wide
+tables. Where the two axes ride different scroll handles they are separate
+`Scrollbar` elements with separate reveal state, so scrolling one does not
+reveal the other.
+
+The terminal scrollback scrollbar is hand-rolled as a reserved flex column with
+its own drag and overview ruler, and is deliberately exempt from all of the
+above.
+
 ## Persistence and Compatibility
 
 Changes involving redb, credentials, known hosts, OTP, cloud sync, portable

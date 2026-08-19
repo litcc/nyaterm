@@ -4,7 +4,7 @@ use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaSearchInput;
+use nyaterm_ui::{NyaScrollable, NyaSearchInput};
 
 use crate::features::formatting::session_kind_label;
 use crate::features::view_widgets::{dialog_action_button, full_window_input_layer};
@@ -60,7 +60,7 @@ impl NyaTermApp {
             .flex_1()
             .min_h_0()
             .max_h_full()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .flex()
             .flex_col()
             .gap_2();
@@ -167,7 +167,7 @@ impl NyaTermApp {
             .flex_1()
             .min_h_0()
             .max_h_full()
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .flex()
             .flex_col()
             .gap_2();

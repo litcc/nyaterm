@@ -3,7 +3,7 @@ use gpui::{
     div, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaInput;
+use nyaterm_ui::{NyaInput, NyaScrollable};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::QuickSwitchItem;
@@ -35,7 +35,7 @@ impl NyaTermApp {
         let mut rows = div()
             .id(SharedString::from("quick-switch-results"))
             .max_h(px(list_max_height))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .flex()
             .flex_col();
 

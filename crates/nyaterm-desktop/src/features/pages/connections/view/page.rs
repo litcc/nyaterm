@@ -3,11 +3,11 @@ use std::time::Instant;
 
 use gpui::{
     AnyElement, Context, IntoElement, KeyDownEvent, ListHorizontalSizingBehavior, MouseButton,
-    SharedString, div,
+    SharedString, UniformListScrollHandle, div,
     prelude::{InteractiveElement, ParentElement, StatefulInteractiveElement, Styled},
     px, rgb, svg, uniform_list,
 };
-use nyaterm_ui::{NyaContextMenu, NyaDropdownMenu, NyaSearchInput};
+use nyaterm_ui::{NyaContextMenu, NyaDropdownMenu, NyaScrollable, NyaSearchInput};
 
 use crate::features::{
     NyaTermApp, connections::ConnectionDragKind, connections::ConnectionDragPayload,
@@ -64,8 +64,18 @@ impl NyaTermApp {
         let nothing_matched = flat_rows.is_empty();
         let palette = self.theme_palette();
 
+        let list_scroll = window
+            .use_keyed_state(
+                SharedString::from("connections-list-scroll-handle"),
+                cx,
+                |_, _| UniformListScrollHandle::new(),
+            )
+            .read(cx)
+            .clone();
+
         let mut list = div()
             .id(SharedString::from("connections-list-scroll"))
+            .relative()
             .flex_1()
             .min_h_0()
             .p(px(6.))
@@ -199,10 +209,12 @@ impl NyaTermApp {
                 .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
                 .with_width_from_item(widest_row)
                 .flex_1()
-                .min_h_0(),
+                .min_h_0()
+                .track_scroll(&list_scroll),
             );
         }
 
+        let list = list.vertical_scrollbar(&list_scroll);
         let list = NyaContextMenu::new(list, self.connection_list_context_menu_items(cx));
 
         // Tauri: PanelHeader (shared stack) + search/action strip + flat tree list.

@@ -3,7 +3,7 @@ use gpui::{
     Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::{NyaPopover, NyaScrollArea, NyaSwitch};
+use nyaterm_ui::{NyaPopover, NyaScrollArea, NyaScrollable, NyaSwitch};
 
 use super::{
     quick_command_color, quick_command_editor_field, quick_command_editor_script_field,
@@ -449,7 +449,7 @@ impl NyaTermApp {
                             .id("quick-command-editor-body")
                             .flex_1()
                             .min_h_0()
-                            .overflow_y_scroll()
+                            .overflow_y_scrollbar()
                             .p_4()
                             .flex()
                             .flex_col()

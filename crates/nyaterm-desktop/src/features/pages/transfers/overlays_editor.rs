@@ -3,6 +3,7 @@ use gpui::{
     SharedString, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::transfers::RemoteTextEditor;
 use crate::features::view_widgets::full_window_input_layer;
@@ -361,7 +362,7 @@ impl NyaTermApp {
             .flex_1()
             .min_w_0()
             .flex()
-            .overflow_x_scroll();
+            .overflow_x_scrollbar();
         let tabs_menu_max_height = (self.shell.viewport_size().1 - 48.).clamp(160., 360.);
         let tabs_menu_bg = if standalone {
             rgb(palette.surface)

@@ -7,7 +7,7 @@ use gpui::{
 };
 use nyaterm_core::{RuntimeMode, truncate_preview};
 use nyaterm_transport::SessionInfo;
-use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem};
+use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem, NyaScrollable};
 
 use crate::features::formatting::{session_kind_label, status_label};
 use crate::features::perf::record_gpui_perf_sample;
@@ -85,6 +85,7 @@ impl NyaTermApp {
             query_active: _,
         } = model;
         let palette = self.theme_palette();
+        let list_scroll = self.session.active_list_scroll().clone();
         // Built before the panel, which reads `self` throughout: creating the
         // box needs it mutably.
         let search_draft = self.session.active_search_draft().to_string();
@@ -142,6 +143,7 @@ impl NyaTermApp {
             )
             .flex_1()
             .min_h_0()
+            .track_scroll(&list_scroll)
             .into_any_element()
         };
 
@@ -187,11 +189,13 @@ impl NyaTermApp {
                 div()
                     .flex_1()
                     .min_h_0()
+                    .relative()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
                     .py_2()
-                    .child(list),
+                    .child(list)
+                    .vertical_scrollbar(&list_scroll),
             )
     }
 

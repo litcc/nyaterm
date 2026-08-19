@@ -3,6 +3,7 @@ use gpui::{
     rgb, rgba, svg,
 };
 use nyaterm_core::{AiAction, AiMode, truncate_preview};
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::formatting::{session_kind_label, short_id};
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -253,8 +254,7 @@ impl NyaTermApp {
                     .id(SharedString::from("ai-transcript-scroll"))
                     .flex_1()
                     .min_h_0()
-                    .overflow_scroll()
-                    .scrollbar_width(px(6.))
+                    .overflow_scrollbar()
                     .px_3()
                     .py_2()
                     .flex()
@@ -719,8 +719,7 @@ impl NyaTermApp {
                                                                 "ai-model-choice-list",
                                                             ))
                                                             .max_h(px(220.))
-                                                            .overflow_y_scroll()
-                                                            .scrollbar_width(px(6.))
+                                                            .overflow_y_scrollbar()
                                                             .flex()
                                                             .flex_col();
                                                         for (index, (model, provider_label)) in

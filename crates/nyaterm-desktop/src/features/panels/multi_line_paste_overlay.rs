@@ -1,6 +1,7 @@
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 use crate::features::view_widgets::dialog_action_button;
@@ -37,7 +38,6 @@ impl NyaTermApp {
             .id(SharedString::from("multi-line-paste-text"))
             .mt_3()
             .h(px(preview_height))
-            .overflow_y_scroll()
             .rounded_sm()
             .border_1()
             .border_color(if can_send {
@@ -151,6 +151,7 @@ impl NyaTermApp {
                                 window.focus(this.terminal.paste_review().focus, cx);
                                 cx.notify();
                             }))
+                            .overflow_y_scrollbar()
                             .child(
                                 gpui::canvas(
                                     |_bounds, _window, _cx| {},

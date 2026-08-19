@@ -12,7 +12,7 @@ use crate::features::view_widgets::{
     CloudSyncHistoryRowLabels, cloud_sync_history_row, dialog_action_button,
 };
 use crate::widgets::small_button;
-use nyaterm_ui::NyaTooltip;
+use nyaterm_ui::{NyaScrollable, NyaTooltip};
 
 impl NyaTermApp {
     pub(in crate::features) fn sync_backup_history_panel(
@@ -445,7 +445,7 @@ impl NyaTermApp {
                     .id(SharedString::from("sync-backup-history-list"))
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
                     .child(rows),
             )
     }

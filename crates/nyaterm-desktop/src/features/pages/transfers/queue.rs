@@ -8,7 +8,7 @@ use crate::features::{
     NyaTermApp, shell::gpui_code_font_family, view_widgets::panel_header_with_actions,
 };
 use crate::models::{TransferJobState, TransferJobStatus};
-use nyaterm_ui::NyaTooltip;
+use nyaterm_ui::{NyaScrollable, NyaTooltip};
 
 use super::helpers::{TransferJobRowLabels, queue_action_button, transfer_job_row};
 
@@ -195,8 +195,7 @@ impl NyaTermApp {
                     .id(SharedString::from("transfer-queue-scroll"))
                     .flex_1()
                     .min_h_0()
-                    .overflow_scroll()
-                    .scrollbar_width(px(6.))
+                    .overflow_scrollbar()
                     .child(list),
             )
             .child(

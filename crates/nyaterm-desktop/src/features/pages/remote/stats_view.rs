@@ -6,6 +6,7 @@ use nyaterm_core::truncate_preview;
 use nyaterm_transport::{
     RemoteGpu, RemoteGpuOverview, RemoteGpuProcess, RemoteNpu, RemoteNpuOverview, RemoteNpuProcess,
 };
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::remote::{GpuPresentationState, NpuPresentationState};
 use crate::features::{
@@ -119,8 +120,7 @@ impl NyaTermApp {
                 div()
                     .id(SharedString::from("stats-scroll"))
                     .size_full()
-                    .overflow_scroll()
-                    .scrollbar_width(px(6.))
+                    .overflow_scrollbar()
                     .p(px(10.))
                     .flex()
                     .flex_col()
@@ -491,8 +491,7 @@ fn rich_gpu_panel(
     div()
         .id(SharedString::from("gpu-monitor-scroll"))
         .size_full()
-        .overflow_scroll()
-        .scrollbar_width(px(6.))
+        .overflow_scrollbar()
         .p(px(10.))
         .flex()
         .flex_col()
@@ -591,8 +590,7 @@ fn rich_npu_panel(
     div()
         .id(SharedString::from("npu-monitor-scroll"))
         .size_full()
-        .overflow_scroll()
-        .scrollbar_width(px(6.))
+        .overflow_scrollbar()
         .p(px(10.))
         .flex()
         .flex_col()

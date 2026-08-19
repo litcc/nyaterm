@@ -1,3 +1,4 @@
+use nyaterm_ui::NyaScrollable;
 use std::ops::Range;
 
 use gpui::{
@@ -873,7 +874,7 @@ impl Render for RemoteTextEditor {
         }
         let text = StyledText::new(display_text).with_highlights(highlights);
 
-        div()
+        let editor_surface = div()
             .id(SharedString::from(format!(
                 "remote-text-editor-{}",
                 self.tab_id
@@ -919,7 +920,15 @@ impl Render for RemoteTextEditor {
                         editor: cx.entity(),
                         text,
                     }),
-            )
+            );
+
+        // The editing surface is itself the scroller, so the bar has to hang off a
+        // non-scrolling parent or it would scroll away with the text.
+        div()
+            .size_full()
+            .relative()
+            .child(editor_surface)
+            .vertical_scrollbar(&self.scroll)
     }
 }
 

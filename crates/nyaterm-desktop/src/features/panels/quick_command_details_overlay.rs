@@ -2,6 +2,7 @@ use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use super::quick_command_icon_mark;
 use crate::features::NyaTermApp;
@@ -137,8 +138,7 @@ impl NyaTermApp {
                                 div()
                                     .id(SharedString::from("quick-command-details-command-scroll"))
                                     .max_h(px(120.))
-                                    .overflow_scroll()
-                                    .scrollbar_width(px(6.))
+                                    .overflow_scrollbar()
                                     .rounded_md()
                                     .border_1()
                                     .border_color(rgba((palette.border << 8) | 0x66))

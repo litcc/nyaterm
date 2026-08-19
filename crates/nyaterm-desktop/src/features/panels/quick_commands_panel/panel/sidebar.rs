@@ -1,5 +1,5 @@
 use gpui::{AppContext as _, Context, FontWeight, SharedString, div, prelude::*, px, rgb, rgba};
-use nyaterm_ui::{NyaContextMenu, NyaMenuItem};
+use nyaterm_ui::{NyaContextMenu, NyaMenuItem, NyaScrollable};
 
 use super::super::super::QuickCommandCategoryOption;
 use crate::features::{
@@ -14,14 +14,13 @@ impl NyaTermApp {
         categories: Vec<QuickCommandCategoryOption>,
         palette: crate::theme::ThemePalette,
         cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
+    ) -> gpui::AnyElement {
         let mut category_sidebar = div()
             .id(SharedString::from("quick-command-category-scroll"))
             .w(px(176.))
             .h_full()
             .flex_shrink_0()
-            .overflow_scroll()
-            .scrollbar_width(px(6.))
+            .overflow_scrollbar()
             .p(px(6.))
             .border_r_1()
             .border_color(rgb(palette.border))
@@ -187,7 +186,7 @@ impl NyaTermApp {
                 row.into_any_element()
             });
         }
-        category_sidebar
+        category_sidebar.into_any_element()
     }
 
     fn quick_command_category_menu_items(

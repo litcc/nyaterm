@@ -2,6 +2,7 @@ use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::view_widgets::dialog_action_button;
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -180,7 +181,7 @@ impl NyaTermApp {
                             .id("quick-command-variable-body")
                             .p_5()
                             .max_h(px((self.shell.viewport_size().1 * 0.6).clamp(180., 420.)))
-                            .overflow_y_scroll()
+                            .overflow_y_scrollbar()
                             .child(rows)
                             .child(
                                 div()

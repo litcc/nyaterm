@@ -2,6 +2,7 @@ use gpui::{ClipboardItem, Context, IntoElement, SharedString, Window, div, prelu
 use nyaterm_core::TranslationSettings;
 use nyaterm_store::{StoreDomain, store_request};
 use nyaterm_ui::NyaDialogWindowExt as _;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 use crate::http::translation::translate_text;
@@ -198,8 +199,7 @@ impl NyaTermApp {
             .bg(rgb(palette.input))
             .p_3()
             .max_h(px(120.))
-            .overflow_y_scroll()
-            .scrollbar_width(px(6.))
+            .overflow_y_scrollbar()
             .text_sm()
             .line_height(px(20.))
             .whitespace_normal()
@@ -215,8 +215,7 @@ impl NyaTermApp {
             .p_3()
             .min_h(px(60.))
             .max_h(px(200.))
-            .overflow_y_scroll()
-            .scrollbar_width(px(6.))
+            .overflow_y_scrollbar()
             .text_sm()
             .line_height(px(20.))
             .whitespace_normal()

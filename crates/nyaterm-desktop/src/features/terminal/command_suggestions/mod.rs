@@ -1,3 +1,4 @@
+use nyaterm_ui::NyaScrollable;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -1081,7 +1082,7 @@ impl NyaTermApp {
             .flex_col()
             .flex_1()
             .min_h_0()
-            .overflow_y_scroll();
+            .overflow_y_scrollbar();
         for (index, item) in state.items.iter().enumerate() {
             let selected = state.selected_index == Some(index);
             let source_icon = match item.source.as_str() {

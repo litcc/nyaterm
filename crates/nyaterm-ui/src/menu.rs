@@ -365,7 +365,10 @@ impl RenderOnce for NyaDropdownMenu {
         let min_width = self.min_width;
         let max_width = self.max_width;
         let max_height = self.max_height;
-        let scrollable = self.scrollable;
+        // A long flat menu should scroll rather than overflow the window. Submenus
+        // cannot render inside a scrolling popup, so auto-enable only when no item
+        // opens one; an explicit scrollable(true) still wins.
+        let scrollable = self.scrollable || items.iter().all(|item| item.children().is_none());
         trigger.disabled(self.disabled).dropdown_menu_with_anchor(
             self.anchor.component_anchor(),
             move |menu, window, cx| {
@@ -449,6 +452,9 @@ where
             .context_menu(move |menu, window, cx| {
                 let menu = menu.when_some(min_width, |menu, width| menu.min_w(width));
                 let items = items_builder(window, cx);
+                // Submenus cannot render inside a scrolling popup, so only bound
+                // the height when no item opens one.
+                let menu = menu.scrollable(items.iter().all(|item| item.children().is_none()));
                 items
                     .iter()
                     .fold(menu, |menu, item| item.append_to(menu, window, cx))

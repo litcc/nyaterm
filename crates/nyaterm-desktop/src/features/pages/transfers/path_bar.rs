@@ -4,7 +4,7 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::SftpFileEntry;
-use nyaterm_ui::NyaInput;
+use nyaterm_ui::{NyaInput, NyaScrollable};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::{
@@ -848,8 +848,7 @@ fn transfer_browser_path_history_list(
         .id(SharedString::from("transfer-browser-path-history-list"))
         .mt(px(1.))
         .max_h(px(120.))
-        .overflow_scroll()
-        .scrollbar_width(px(6.))
+        .overflow_scrollbar()
         .rounded_b_md()
         .border_1()
         .border_color(rgb(palette.border))

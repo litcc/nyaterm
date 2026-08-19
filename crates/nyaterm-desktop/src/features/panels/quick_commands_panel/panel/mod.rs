@@ -7,7 +7,7 @@ use super::super::{filtered_quick_commands, quick_command_category_options};
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::{QuickCommandSortMode, QuickCommandViewMode};
 use crate::widgets::small_button;
-use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem, NyaSearchInput, NyaTooltip};
+use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem, NyaScrollable, NyaSearchInput, NyaTooltip};
 
 mod rows;
 use rows::quick_command_tile_column_count;
@@ -161,6 +161,7 @@ impl NyaTermApp {
             !self.shell.left_panel_collapsed(),
             !self.shell.right_panel_collapsed(),
         );
+        let row_scroll = self.commands.quick_row_scroll().clone();
         let logical_row_height = match view_mode {
             QuickCommandViewMode::Tile => 32.,
             QuickCommandViewMode::Compact => 38.,
@@ -171,8 +172,7 @@ impl NyaTermApp {
                 .id(SharedString::from("quick-command-rows-scroll"))
                 .flex_1()
                 .min_h_0()
-                .overflow_scroll()
-                .scrollbar_width(px(6.))
+                .overflow_scrollbar()
                 .child(
                     div()
                         .mt_8()
@@ -262,6 +262,7 @@ impl NyaTermApp {
             )
             .flex_1()
             .min_h_0()
+            .track_scroll(&row_scroll)
             .into_any_element()
         };
 
@@ -425,9 +426,11 @@ impl NyaTermApp {
                             .min_h_0()
                             .h_full()
                             .p(px(6.))
+                            .relative()
                             .flex()
                             .flex_col()
-                            .child(rows),
+                            .child(rows)
+                            .vertical_scrollbar(&row_scroll),
                     ),
             )
     }

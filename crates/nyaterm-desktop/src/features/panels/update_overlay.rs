@@ -1,5 +1,6 @@
 use gpui::{Context, FontWeight, IntoElement, div, prelude::*, px, rgb};
 use nyaterm_core::RuntimeMode;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 use crate::features::view_widgets::dialog_action_button;
@@ -44,7 +45,7 @@ impl NyaTermApp {
             .flex_col()
             .gap_4()
             .max_h(px((viewport_h - 32.).max(220.)))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .child(
                 div()
                     .flex()
@@ -123,7 +124,7 @@ impl NyaTermApp {
                         div()
                             .id("update-release-notes")
                             .max_h(px((viewport_h * 0.42).clamp(120., 320.)))
-                            .overflow_y_scroll()
+                            .overflow_y_scrollbar()
                             .rounded_md()
                             .border_1()
                             .border_color(rgb(palette.border))

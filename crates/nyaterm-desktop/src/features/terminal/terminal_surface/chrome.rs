@@ -3,7 +3,7 @@ use gpui::{
     Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaInput;
+use nyaterm_ui::{NyaInput, NyaScrollable};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::TerminalSearchMode;
@@ -241,7 +241,6 @@ impl NyaTermApp {
             history_rows = history_rows
                 .mt_1()
                 .max_h(px(256.))
-                .overflow_y_scroll()
                 .flex()
                 .flex_col()
                 .gap_1()
@@ -346,6 +345,14 @@ impl NyaTermApp {
                 }
             }
         }
+
+        // Only the populated dropdown scrolls; wrapping the empty div would give
+        // the scroll wrapper a full-size root with nothing in it.
+        let history_rows = if show_history_results {
+            history_rows.overflow_y_scrollbar().into_any_element()
+        } else {
+            history_rows.into_any_element()
+        };
 
         div()
             .id(SharedString::from("terminal-search-bar"))

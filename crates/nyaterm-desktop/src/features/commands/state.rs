@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui::FocusHandle;
+use gpui::{FocusHandle, UniformListScrollHandle};
 use nyaterm_core::{
     CommandHistoryEntry, QuickCommand, QuickCommandCategory, QuickCommandCategoryPosition,
     QuickCommandRelativePosition, QuickCommandsConfig,
@@ -221,6 +221,10 @@ impl CommandFeatureState {
 
     pub(in crate::features) fn quick_search_draft(&self) -> &str {
         &self.quick.list.search_draft
+    }
+
+    pub(in crate::features) fn quick_row_scroll(&self) -> &UniformListScrollHandle {
+        &self.quick.list.row_scroll
     }
 
     pub(in crate::features) fn quick_selected_category(&self) -> &str {
@@ -828,6 +832,9 @@ struct QuickCommandListState {
     sort_mode: QuickCommandSortMode,
     view_mode: QuickCommandViewMode,
     drop_target: Option<QuickCommandDropTarget>,
+    /// Owned by the panel list so the row scrollbar and the virtualized list
+    /// share one scroll position across re-renders.
+    row_scroll: UniformListScrollHandle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -889,6 +896,7 @@ impl QuickCommandFeatureState {
                 sort_mode,
                 view_mode,
                 drop_target: None,
+                row_scroll: UniformListScrollHandle::new(),
             },
             editor: QuickCommandEditorFeatureState {
                 draft: None,

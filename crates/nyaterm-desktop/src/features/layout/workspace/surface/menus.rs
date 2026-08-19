@@ -1,3 +1,4 @@
+use nyaterm_ui::NyaScrollable;
 use std::collections::{HashMap, HashSet};
 
 use gpui::{
@@ -405,7 +406,7 @@ impl NyaTermApp {
             .id("workspace-new-session-dropdown-scroll")
             .w(px(NEW_SESSION_MENU_WIDTH))
             .max_h(px(460.))
-            .overflow_y_scroll()
+            .overflow_y_scrollbar()
             .rounded_md()
             .border_1()
             .border_color(rgb(palette.border))
