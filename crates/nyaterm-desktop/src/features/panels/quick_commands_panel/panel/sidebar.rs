@@ -309,23 +309,20 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use gpui::{AppContext as _, TestAppContext};
-    use nyaterm_core::{AppRuntime, QuickCommandCategory, RuntimeMode};
+    use nyaterm_core::{AppRuntime, QuickCommandCategory, RuntimeMode, uuid};
     use nyaterm_ui::NyaMenuItem;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
 
     fn menu_app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
+        // A uuid rather than a clock reading: these tests run in parallel and a
+        // nanosecond timestamp can repeat, which would share one config dir.
         let root = std::env::temp_dir().join(format!(
-            "nyaterm-quick-group-menu-{}-{nanos}",
-            std::process::id()
+            "nyaterm-quick-group-menu-{}-{}",
+            std::process::id(),
+            uuid()
         ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
