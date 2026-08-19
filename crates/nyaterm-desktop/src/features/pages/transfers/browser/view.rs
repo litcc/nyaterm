@@ -10,9 +10,10 @@ use crate::models::TransferBrowserSortColumn;
 
 use super::super::browser_filter::transfer_browser_footer_stats;
 use super::super::{
-    TransferBrowserAvailability, TransferBrowserEntryRowPresentation,
-    TransferBrowserSortHeaderState, normalized_transfer_browser_path, sort_header_cell,
-    transfer_browser_entry_row, transfer_browser_parent_entry_row, transfer_browser_table_width,
+    FILE_BROWSER_HEADER_HEIGHT_PX, TransferBrowserAvailability,
+    TransferBrowserEntryRowPresentation, TransferBrowserSortHeaderState,
+    normalized_transfer_browser_path, sort_header_cell, transfer_browser_entry_row,
+    transfer_browser_parent_entry_row, transfer_browser_table_width,
 };
 use super::helpers::{
     compact_transfer_footer_button, compact_transfer_footer_button_active,
@@ -21,7 +22,6 @@ use super::helpers::{
     transfer_toolbar_divider,
 };
 
-const FILE_BROWSER_SCROLLBAR_GUTTER_PX: f32 = 12.;
 const FILE_BROWSER_SCROLLBAR_SIZE_PX: f32 = 16.;
 
 impl NyaTermApp {
@@ -515,7 +515,6 @@ impl NyaTermApp {
                             .overflow_x_scroll()
                             .overflow_y_hidden()
                             .restrict_scroll_to_axis()
-                            .scrollbar_width(px(FILE_BROWSER_SCROLLBAR_GUTTER_PX))
                             .track_scroll(self.transfer.browser_view().horizontal_scroll)
                             .child(
                                 div()
@@ -582,12 +581,16 @@ impl NyaTermApp {
                     )
                     .when(show_list_scrollbar, |this| {
                         this.child(
+                            // Spans the row viewport rather than just the track strip:
+                            // the bar's hitbox is what hover-to-reveal watches, and it
+                            // also makes the thumb proportional to the real viewport.
+                            // `Scrollbar::vertical` still lays its track at the right edge.
                             div()
                                 .absolute()
-                                .top(px(28.))
-                                .bottom(px(FILE_BROWSER_SCROLLBAR_GUTTER_PX))
+                                .top(px(FILE_BROWSER_HEADER_HEIGHT_PX))
+                                .bottom_0()
+                                .left_0()
                                 .right_0()
-                                .w(px(FILE_BROWSER_SCROLLBAR_SIZE_PX))
                                 .child(NyaUniformListScrollbar::new(
                                     "transfer-browser-vertical-scrollbar",
                                     self.transfer.browser_view().list_scroll,
@@ -595,21 +598,18 @@ impl NyaTermApp {
                         )
                     })
                     .child(
+                        // Also viewport-spanning, and it keeps the header so hovering the
+                        // column titles reveals the bar too. Inset by a full track width
+                        // on the right: the two axes are independent `Scrollbar` elements,
+                        // so the vendor's own corner-avoidance does not apply.
                         div()
                             .absolute()
-                            .left_0()
-                            .right(px(FILE_BROWSER_SCROLLBAR_GUTTER_PX))
-                            .bottom_0()
-                            .h(px(FILE_BROWSER_SCROLLBAR_SIZE_PX))
-                            // A mouse reaches this axis only with shift held, so the
-                            // bar is the only cue that more columns exist.
-                            .child(
-                                NyaHorizontalScrollbar::new(
-                                    "transfer-browser-horizontal-scrollbar",
-                                    self.transfer.browser_view().horizontal_scroll,
-                                )
-                                .always_visible(),
-                            ),
+                            .inset_0()
+                            .right(px(FILE_BROWSER_SCROLLBAR_SIZE_PX))
+                            .child(NyaHorizontalScrollbar::new(
+                                "transfer-browser-horizontal-scrollbar",
+                                self.transfer.browser_view().horizontal_scroll,
+                            )),
                     ),
                 move |_, cx| {
                     app.update(cx, |this, cx| this.transfer_browser_context_menu_items(cx))

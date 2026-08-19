@@ -144,10 +144,10 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
     component_theme.colors.scrollbar = transparent_black();
     component_theme.colors.scrollbar_thumb = color(palette.border);
     component_theme.colors.scrollbar_thumb_hover = color(palette.text_dimmed);
-    // Zed-style auto-hide: fade the bar in while scrolling or hovering, and out
-    // after idle. This matches the gpui-component default, set explicitly so the
+    // Zed-style auto-hide: fade the bar in while the pointer is over the panel
+    // or that axis is scrolling, and out after idle. Set explicitly so the
     // behavior cannot change silently under a vendor bump.
-    component_theme.scrollbar_mode = ScrollbarMode::Scrolling;
+    component_theme.scrollbar_mode = ScrollbarMode::Hover;
     component_theme.colors.switch = color(palette.border);
     component_theme.colors.switch_thumb = color(palette.surface);
     component_theme.colors.tab = color(palette.input);
@@ -182,6 +182,12 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
     component_theme.colors.cyan = color(palette.link);
     component_theme.colors.cyan_light = color(palette.link);
     component_theme.tokens = ThemeTokens::from(&component_theme.colors);
+
+    // `Scrollbar` reads mode, motion, and thumb colors from the Base theme, and
+    // the assignments above only touch the component theme. Without this the bar
+    // keeps whatever projection the last `Theme::change` built - which happens
+    // only on a light/dark flip, from the built-in palette rather than ours.
+    Theme::sync_scrollbar_theme(cx);
 }
 
 #[cfg(test)]
@@ -285,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn scrollbars_auto_hide_after_idle_rather_than_staying_pinned() {
+    fn scrollbars_reveal_on_hover_and_fade_after_idle() {
         let cx = TestAppContext::single();
 
         cx.update(|cx| {
@@ -296,8 +302,41 @@ mod tests {
 
             assert_eq!(
                 Theme::global(cx).scrollbar_mode,
-                ScrollbarMode::Scrolling,
-                "panels fade their scrollbar in on scroll or hover and out after idle"
+                ScrollbarMode::Hover,
+                "panels fade their scrollbar in when the pointer enters or the axis \
+                 scrolls, and out after idle"
+            );
+            assert_eq!(
+                gpui_base::Theme::global(cx).scrollbar.mode(),
+                ScrollbarMode::Hover,
+                "the Base projection is what `Scrollbar` actually reads; assigning the \
+                 component-theme field alone leaves the painted bar on the old mode"
+            );
+        });
+    }
+
+    #[test]
+    fn applying_a_same_luminance_palette_still_reprojects_onto_base() {
+        let cx = TestAppContext::single();
+
+        cx.update(|cx| {
+            gpui_component::init(cx);
+
+            apply_component_theme(theme_palette("github-dark"), cx);
+
+            // Stand in for a projection left behind by an earlier theme. Only
+            // `Theme::change` and the bridge's sync rebuild it, and a dark -> dark
+            // apply skips the former - which is how the palette's scrollbar colors
+            // used to never reach the painted bar.
+            gpui_base::Theme::global_mut(cx).scrollbar =
+                gpui_base::ScrollbarTheme::new().with_mode(ScrollbarMode::Always);
+
+            apply_component_theme(theme_palette("gruvbox-dark"), cx);
+
+            assert_eq!(
+                gpui_base::Theme::global(cx).scrollbar.mode(),
+                ScrollbarMode::Hover,
+                "a palette change with no light/dark flip must still re-project"
             );
         });
     }

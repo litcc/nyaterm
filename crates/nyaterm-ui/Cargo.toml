@@ -11,4 +11,7 @@ gpui.workspace = true
 gpui-component.workspace = true
 
 [dev-dependencies]
+# Tests assert the Base scrollbar projection, which is the global the
+# `Scrollbar` element reads. Production code goes through gpui-component.
+gpui-base.workspace = true
 gpui = { workspace = true, features = ["test-support"] }

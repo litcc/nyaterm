@@ -7,7 +7,9 @@ use gpui::{
     prelude::{InteractiveElement, ParentElement, StatefulInteractiveElement, Styled},
     px, rgb, svg, uniform_list,
 };
-use nyaterm_ui::{NyaContextMenu, NyaDropdownMenu, NyaScrollable, NyaSearchInput};
+use nyaterm_ui::{
+    NyaContextMenu, NyaDropdownMenu, NyaScrollable, NyaScrollbarAxis, NyaSearchInput,
+};
 
 use crate::features::{
     NyaTermApp, connections::ConnectionDragKind, connections::ConnectionDragPayload,
@@ -214,7 +216,12 @@ impl NyaTermApp {
             );
         }
 
-        let list = list.vertical_scrollbar(&list_scroll);
+        // Both axes ride this one handle: rows are `Unconstrained` and their names
+        // are never clipped, so a long or deeply nested name overflows sideways.
+        // One `Scrollbar` for both is the right shape here - a shared reveal state
+        // matches a single scroll surface, and the vendor skips painting an axis
+        // whose content fits.
+        let list = list.scrollbar(&list_scroll, NyaScrollbarAxis::Both);
         let list = NyaContextMenu::new(list, self.connection_list_context_menu_items(cx));
 
         // Tauri: PanelHeader (shared stack) + search/action strip + flat tree list.

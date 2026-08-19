@@ -75,6 +75,33 @@ fn scrollbar_motion(mode: ScrollbarMode) -> gpui_base::ScrollbarMotion {
         })
 }
 
+/// The Base scrollbar projection this design system installs.
+///
+/// Both [`Theme::change`] and [`Theme::sync_scrollbar_theme`] build it here so a
+/// direct field assignment on [`Theme`] cannot leave the two out of step.
+fn scrollbar_theme(theme: &Theme) -> gpui_base::ScrollbarTheme {
+    gpui_base::ScrollbarTheme::new()
+        .with_mode(theme.scrollbar_mode)
+        .with_motion(scrollbar_motion(theme.scrollbar_mode))
+        .with_styles(
+            gpui_base::ScrollbarStyles::default()
+                .track(|style| style.bg(theme.scrollbar))
+                .track_hover(|style| style.bg(theme.scrollbar))
+                .track_active(|style| style.bg(theme.scrollbar).border_color(theme.border))
+                .thumb(|style| style.bg(theme.tokens.scrollbar_thumb).radius(theme.radius))
+                .thumb_hover(|style| {
+                    style
+                        .bg(theme.tokens.scrollbar_thumb_hover)
+                        .radius(theme.radius)
+                })
+                .thumb_active(|style| {
+                    style
+                        .bg(theme.tokens.scrollbar_thumb_hover)
+                        .radius(theme.radius)
+                }),
+        )
+}
+
 /// The global theme configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Theme {
@@ -211,12 +238,18 @@ impl Theme {
     /// Changes the scrollbar display mode and synchronizes the Base projection.
     pub fn set_scrollbar_mode(mode: ScrollbarMode, cx: &mut App) {
         Theme::global_mut(cx).scrollbar_mode = mode;
-        let base_theme = gpui_base::Theme::global_mut(cx);
-        base_theme.scrollbar = base_theme
-            .scrollbar
-            .clone()
-            .with_mode(mode)
-            .with_motion(scrollbar_motion(mode));
+        Self::sync_scrollbar_theme(cx);
+    }
+
+    /// Rebuild the Base scrollbar projection from the current theme.
+    ///
+    /// [`Scrollbar`](gpui_base::Scrollbar) reads mode, motion, and track/thumb
+    /// styles from [`gpui_base::Theme`], not from this one. Callers that assign
+    /// [`Self::scrollbar_mode`] or the `scrollbar*` colors directly must call
+    /// this afterwards or the painted bar keeps the previous projection.
+    pub fn sync_scrollbar_theme(cx: &mut App) {
+        let scrollbar = scrollbar_theme(Theme::global(cx));
+        gpui_base::Theme::global_mut(cx).scrollbar = scrollbar;
     }
 
     /// Change the theme mode.
@@ -239,26 +272,7 @@ impl Theme {
 
         let base_theme = gpui_base::Theme {
             tokens: theme.semantic_tokens(),
-            scrollbar: gpui_base::ScrollbarTheme::new()
-                .with_mode(theme.scrollbar_mode)
-                .with_motion(scrollbar_motion(theme.scrollbar_mode))
-                .with_styles(
-                    gpui_base::ScrollbarStyles::default()
-                        .track(|style| style.bg(theme.scrollbar))
-                        .track_hover(|style| style.bg(theme.scrollbar))
-                        .track_active(|style| style.bg(theme.scrollbar).border_color(theme.border))
-                        .thumb(|style| style.bg(theme.tokens.scrollbar_thumb).radius(theme.radius))
-                        .thumb_hover(|style| {
-                            style
-                                .bg(theme.tokens.scrollbar_thumb_hover)
-                                .radius(theme.radius)
-                        })
-                        .thumb_active(|style| {
-                            style
-                                .bg(theme.tokens.scrollbar_thumb_hover)
-                                .radius(theme.radius)
-                        }),
-                ),
+            scrollbar: scrollbar_theme(theme),
             resizable: gpui_base::ResizableTheme {
                 handle: theme.border,
                 active_handle: theme.drag_border,

@@ -138,13 +138,22 @@ space, so use `NyaScrollable` (the `ScrollableElement` trait re-exported by
   `viewport_from_layout()`; otherwise it paints at the scroll handle's own
   bounds and ignores the overlay.
 
-Scrollbars auto-hide (`ScrollbarMode::Scrolling`), installed once in
-`theme_bridge.rs`. Auto-hide reveals a bar only when that axis actually
-scrolls, so a horizontal bar whose only mouse route is shift+wheel is
-undiscoverable: prefer `NyaHorizontalScrollbar::always_visible()` on wide
-tables. Where the two axes ride different scroll handles they are separate
-`Scrollbar` elements with separate reveal state, so scrolling one does not
-reveal the other.
+Scrollbars auto-hide (`ScrollbarMode::Hover`), installed once in
+`theme_bridge.rs`. A bar fades in while the pointer is anywhere over its scroll
+viewport or that axis is scrolling, and out after idle, so a horizontal bar is
+discoverable without pinning it open. Two further consequences:
+
+* A hand-positioned `Scrollbar` overlay must span the whole scroll viewport,
+  not just the strip the track occupies. Reveal-on-hover watches the bar's own
+  hitbox, so a strip-sized overlay only reacts within a track width of the edge.
+  `overflow_*_scrollbar()` and `vertical_scrollbar(&handle)` already do this.
+* Where the two axes ride different scroll handles they are separate
+  `Scrollbar` elements with separate reveal state, and the vendor's
+  corner-avoidance does not apply, so inset one overlay by a track width.
+
+Anything that writes `Theme::scrollbar_mode` or the `scrollbar*` colors directly
+must call `Theme::sync_scrollbar_theme(cx)` afterwards. `Scrollbar` reads the
+`gpui_base::Theme` projection, which those assignments do not touch.
 
 The terminal scrollback scrollbar is hand-rolled as a reserved flex column with
 its own drag and overview ruler, and is deliberately exempt from all of the

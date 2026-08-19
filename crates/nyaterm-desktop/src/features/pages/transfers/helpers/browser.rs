@@ -11,6 +11,12 @@ use crate::features::NyaTermApp;
 use crate::models::{TransferBrowserSortColumn, TransferBrowserSortDirection};
 use crate::theme::ThemePalette;
 
+/// Height of the sort-header row.
+///
+/// The browser's vertical scrollbar overlay starts below the header, so the two
+/// must agree or the bar's track is offset from the rows it scrolls.
+pub(in crate::features::pages::transfers) const FILE_BROWSER_HEADER_HEIGHT_PX: f32 = 28.;
+
 pub(in crate::features::pages::transfers) fn transfer_browser_search_status(
     query: &str,
     visible: usize,
@@ -43,7 +49,7 @@ pub(in crate::features::pages::transfers) fn sort_header_cell(
             "transfer-browser-sort-{}",
             column.label().to_lowercase()
         )))
-        .h(px(28.))
+        .h(px(FILE_BROWSER_HEADER_HEIGHT_PX))
         .w(width)
         .flex_none()
         .relative()

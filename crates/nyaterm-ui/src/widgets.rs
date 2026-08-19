@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, App, ClickEvent, FontWeight, Hsla, IntoElement, Pixels, RenderOnce, ScrollHandle,
     SharedString, UniformListScrollHandle, Window, div, prelude::*, px, rgb,
 };
-use gpui_component::scroll::{Scrollbar, ScrollbarMode};
+use gpui_component::scroll::Scrollbar;
 
 fn platform_code_font_family() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -60,7 +60,6 @@ impl RenderOnce for NyaScrollArea {
             .flex_col()
             .children(self.children)
             .overflow_y_scroll()
-            .scrollbar_width(px(6.))
             .track_scroll(&scroll_handle);
         if let Some(max_height) = self.max_height {
             viewport = viewport.max_h(max_height);
@@ -112,7 +111,6 @@ impl NyaUniformListScrollbar {
 pub struct NyaHorizontalScrollbar {
     id: SharedString,
     handle: ScrollHandle,
-    always_visible: bool,
 }
 
 impl NyaHorizontalScrollbar {
@@ -120,20 +118,7 @@ impl NyaHorizontalScrollbar {
         Self {
             id: id.into(),
             handle: handle.clone(),
-            always_visible: false,
         }
-    }
-
-    /// Keep the bar visible while the content overflows instead of fading it out
-    /// after idle.
-    ///
-    /// Auto-hide assumes the user already knows the axis scrolls, because only a
-    /// real scroll on that axis reveals the bar. A mouse can only scroll
-    /// horizontally with shift held, so on a wide table the hidden bar is the
-    /// only hint that more columns exist. Opt in there; leave vertical bars alone.
-    pub fn always_visible(mut self) -> Self {
-        self.always_visible = true;
-        self
     }
 }
 
@@ -142,7 +127,6 @@ impl RenderOnce for NyaHorizontalScrollbar {
         Scrollbar::horizontal(&self.handle)
             .id(self.id)
             .viewport_from_layout()
-            .when(self.always_visible, |bar| bar.mode(ScrollbarMode::Always))
     }
 }
 
@@ -322,17 +306,17 @@ mod tests {
                         .overflow_x_scroll()
                         .overflow_y_hidden()
                         .restrict_scroll_to_axis()
-                        .scrollbar_width(px(12.))
                         .track_scroll(&self.scroll)
                         .child(div().w(px(300.)).h_full()),
                 )
+                // Mirrors the file browser: the overlay spans the viewport so the
+                // bar's hitbox is the panel, inset on the right by one track width
+                // to leave room for a vertical bar.
                 .child(
                     div()
                         .absolute()
-                        .left_0()
-                        .right(px(12.))
-                        .bottom(px(-4.))
-                        .h(px(16.))
+                        .inset_0()
+                        .right(px(16.))
                         .debug_selector(|| "horizontal-scrollbar-layer".to_string())
                         .child(NyaHorizontalScrollbar::new(
                             "horizontal-scrollbar",
@@ -428,9 +412,14 @@ mod tests {
         let cx: &mut VisualTestContext = cx;
         draw(cx);
 
+        // The overlay spans the scroll viewport rather than a thin bottom strip:
+        // hover-to-reveal watches the bar's own hitbox, so a strip-sized overlay
+        // would only react within a track width of the edge.
         let layer = cx.debug_bounds("horizontal-scrollbar-layer").unwrap();
-        assert_eq!(layer.top(), px(28.));
-        assert_eq!(layer.bottom(), px(44.));
+        assert_eq!(layer.top(), px(0.));
+        assert_eq!(layer.bottom(), px(40.));
+        assert_eq!(layer.left(), px(0.));
+        assert_eq!(layer.right(), px(84.));
 
         scroll_xy(cx, 0., -30.);
         assert_eq!(scroll.offset().x, px(0.));

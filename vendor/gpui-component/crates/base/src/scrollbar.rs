@@ -152,6 +152,9 @@ struct ScrollbarState(Rc<Cell<ScrollbarStateInner>>);
 struct ScrollbarStateInner {
     hovered_axis: Option<Axis>,
     hovered_on_thumb: Option<Axis>,
+    /// Whether the pointer is over the scroll viewport, as opposed to the track
+    /// strip that `hovered_axis` covers. Only [`ScrollbarMode::Hover`] reads it.
+    hovered_viewport: bool,
     dragged_axis: Option<Axis>,
     drag_pos: Point<Pixels>,
     last_scroll_offset: Point<Pixels>,
@@ -170,6 +173,7 @@ impl Default for ScrollbarState {
         Self(Rc::new(Cell::new(ScrollbarStateInner {
             hovered_axis: None,
             hovered_on_thumb: None,
+            hovered_viewport: false,
             dragged_axis: None,
             drag_pos: point(px(0.), px(0.)),
             last_scroll_offset: point(px(0.), px(0.)),
@@ -496,6 +500,16 @@ fn tracks_thumb_hover(mode: ScrollbarMode, is_visible: bool) -> bool {
     mode.is_hover() || is_visible
 }
 
+/// Which pointer positions count as hover for the visibility predicates.
+///
+/// Track hover always counts — it is also what widens the thumb. [`ScrollbarMode::Hover`]
+/// additionally accepts the whole viewport: a hidden bar cannot be aimed at, so
+/// reacting only within the track strip would require the user to already know
+/// the bar is there.
+fn reveal_hover(mode: ScrollbarMode, hovered_bar: bool, hovered_viewport: bool) -> bool {
+    hovered_bar || (mode.is_hover() && hovered_viewport)
+}
+
 fn hover_keeps_visible(mode: ScrollbarMode, is_hovered: bool, is_currently_visible: bool) -> bool {
     is_hovered && (mode.is_hover() || (mode == ScrollbarMode::Scrolling && is_currently_visible))
 }
@@ -531,6 +545,18 @@ impl ScrollbarStateInner {
     fn with_hovered(&self, axis: Option<Axis>, now: Instant) -> Self {
         let mut state = *self;
         state.hovered_axis = axis;
+        state.last_scroll_time = Some(now);
+        state
+    }
+
+    /// Record whether the pointer is inside the scroll viewport.
+    ///
+    /// Stamping `last_scroll_time` mirrors [`Self::with_hovered`]: leaving the
+    /// viewport starts a fresh idle hold, so the bar fades on the usual curve
+    /// instead of vanishing the instant the pointer crosses the edge.
+    fn with_hovered_viewport(&self, hovered: bool, now: Instant) -> Self {
+        let mut state = *self;
+        state.hovered_viewport = hovered;
         state.last_scroll_time = Some(now);
         state
     }
@@ -1191,7 +1217,8 @@ impl Element for Scrollbar {
             inner = inner.with_last_scroll(current_offset, Some(now));
         }
 
-        let is_hovered = inner.hovered_axis.is_some() || inner.hovered_on_thumb.is_some();
+        let hovered_bar = inner.hovered_axis.is_some() || inner.hovered_on_thumb.is_some();
+        let is_hovered = reveal_hover(mode, hovered_bar, inner.hovered_viewport);
         let is_dragging = inner.dragged_axis.is_some();
         let is_currently_visible = inner.visibility.sample(now).opacity > 0.0;
         let visible = hover_keeps_visible(mode, is_hovered, is_currently_visible)
@@ -1429,6 +1456,7 @@ impl Element for Scrollbar {
         let mode = self.mode.unwrap_or(theme.scrollbar.mode());
         let view_id = window.current_view();
         let hitbox_bounds = prepaint.hitbox.bounds;
+        let hitbox_id = prepaint.hitbox.id;
         let is_hover_to_show = mode.is_hover();
 
         window.with_content_mask(
@@ -1566,8 +1594,21 @@ impl Element for Scrollbar {
                         let state = scrollbar_state.clone();
                         let max_fps_duration = Duration::from_millis((1000 / self.max_fps) as u64);
 
-                        move |event: &MouseMoveEvent, _, _, cx| {
+                        move |event: &MouseMoveEvent, _, window, cx| {
                             let mut notify = false;
+                            // Hover-to-show reveals from anywhere in the viewport, not just the
+                            // track strip below. `is_hovered` on the hitbox rather than a plain
+                            // bounds test so an overlay covering this panel does not reveal the
+                            // bar behind it.
+                            if is_hover_to_show {
+                                let inside = hitbox_id.is_hovered(window);
+                                if state.get().hovered_viewport != inside {
+                                    state.set(
+                                        state.get().with_hovered_viewport(inside, Instant::now()),
+                                    );
+                                    notify = true;
+                                }
+                            }
                             // When is hover to show mode or it was visible,
                             // we need to update the hovered state and increase the last_scroll_time.
                             let need_hover_to_update = is_hover_to_show || is_visible;
@@ -1809,6 +1850,58 @@ mod tests {
         assert!(!hover_keeps_visible(ScrollbarMode::Scrolling, true, false));
         assert!(hover_keeps_visible(ScrollbarMode::Scrolling, true, true));
         assert!(hover_keeps_visible(ScrollbarMode::Hover, true, false));
+    }
+
+    #[test]
+    fn hover_mode_reveals_from_anywhere_in_the_viewport() {
+        assert!(reveal_hover(ScrollbarMode::Hover, false, true));
+        assert!(reveal_hover(ScrollbarMode::Hover, true, false));
+    }
+
+    #[test]
+    fn other_modes_ignore_viewport_hover() {
+        assert!(!reveal_hover(ScrollbarMode::Scrolling, false, true));
+        assert!(!reveal_hover(ScrollbarMode::Always, false, true));
+    }
+
+    #[test]
+    fn track_hover_counts_in_every_mode() {
+        for mode in [
+            ScrollbarMode::Scrolling,
+            ScrollbarMode::Hover,
+            ScrollbarMode::Always,
+        ] {
+            assert!(
+                reveal_hover(mode, true, false),
+                "{mode:?} ignored the track"
+            );
+            assert!(
+                !reveal_hover(mode, false, false),
+                "{mode:?} hovered nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn leaving_the_viewport_starts_a_fresh_idle_hold() {
+        let entered_at = Instant::now();
+        let left_at = entered_at + Duration::from_secs(5);
+        let state = ScrollbarState::default().get();
+
+        let hovered = state.with_hovered_viewport(true, entered_at);
+        assert!(hovered.hovered_viewport);
+        assert_eq!(hovered.last_scroll_time, Some(entered_at));
+
+        let left = hovered.with_hovered_viewport(false, left_at);
+        assert!(!left.hovered_viewport);
+        assert!(wants_visible(
+            ScrollbarMode::Hover,
+            false,
+            false,
+            left.last_scroll_time,
+            DEFAULT_IDLE,
+            left_at + DEFAULT_IDLE - Duration::from_millis(1),
+        ));
     }
 
     #[test]

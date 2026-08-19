@@ -27,6 +27,7 @@ pub use gpui_component::input::{
     Undo as NyaUndo,
 };
 pub use gpui_component::scroll::ScrollableElement as NyaScrollable;
+pub use gpui_component::scroll::ScrollbarAxis as NyaScrollbarAxis;
 pub use input::{
     NyaInput, NyaInputEvent, NyaInputShell, NyaInputState, NyaSearchInput, NyaTextArea,
 };

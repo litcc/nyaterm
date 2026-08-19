@@ -43,6 +43,7 @@ dirs = "6"
 encoding_rs = "0.8"
 futures = "0.3"
 gpui = { path = "vendor/zed/crates/gpui" }
+gpui-base = { path = "vendor/gpui-component/crates/base" }
 gpui-component = { path = "vendor/gpui-component/crates/ui" }
 gpui-component-assets = { path = "vendor/gpui-component/crates/assets" }
 gpui_platform = { path = "vendor/zed/crates/gpui_platform" }
