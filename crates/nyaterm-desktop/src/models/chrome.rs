@@ -1,5 +1,5 @@
 use gpui::Pixels;
-use nyaterm_core::{AiAction, AiContext, QuickCommand};
+use nyaterm_core::{AiAction, AiContext, QuickCommand, QuickCommandCategory};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HeaderStatusMode {
@@ -174,6 +174,15 @@ pub(crate) struct QuickCommandCategoryRenameState {
     pub(crate) error: Option<String>,
 }
 
+/// Draft for the "add category" dialog. `parent_id` is `None` when the menu was
+/// opened from a pseudo-row, which creates a root category.
+#[derive(Debug, Clone)]
+pub(crate) struct QuickCommandCategoryCreateState {
+    pub(crate) parent_id: Option<String>,
+    pub(crate) draft: String,
+    pub(crate) error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct QuickCommandVariableDef {
     pub(crate) raw: String,
@@ -208,6 +217,21 @@ impl QuickCommandEditorState {
             execution_mode: "execute".to_string(),
             error: None,
             error_field: None,
+        }
+    }
+
+    /// `blank()` seeded with a category, for "add command" on a group row. An id
+    /// that no longer resolves is dropped so the editor opens uncategorized rather
+    /// than holding a dangling reference.
+    pub(crate) fn blank_in_category(
+        category_id: Option<String>,
+        categories: &[QuickCommandCategory],
+    ) -> Self {
+        let category_id =
+            category_id.filter(|id| categories.iter().any(|category| &category.id == id));
+        Self {
+            category_id,
+            ..Self::blank()
         }
     }
 

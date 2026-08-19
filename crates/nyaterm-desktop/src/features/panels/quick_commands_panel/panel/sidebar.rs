@@ -36,8 +36,13 @@ impl NyaTermApp {
             let selected = self.commands.quick_selected_category() == option.id;
             let manageable = option.manageable;
             let depth = option.depth;
-            let menu_items =
-                manageable.then(|| self.quick_command_category_menu_items(option.id.clone(), cx));
+            // Real categories get the full menu; `all` / `uncategorized` get the two
+            // add actions only, since there is nothing there to rename or delete.
+            let menu_items = if manageable {
+                self.quick_command_category_menu_items(option.id.clone(), cx)
+            } else {
+                self.quick_command_pseudo_category_menu_items(cx)
+            };
             let row = div()
                 .id(SharedString::from(format!(
                     "quick-command-category-{}",
@@ -192,29 +197,71 @@ impl NyaTermApp {
                         },
                     ))
                 });
-            category_sidebar = category_sidebar.child(if let Some(menu_items) = menu_items {
-                NyaContextMenu::new(row, menu_items).into_any_element()
-            } else {
-                row.into_any_element()
-            });
+            category_sidebar =
+                category_sidebar.child(NyaContextMenu::new(row, menu_items).into_any_element());
         }
         category_sidebar.into_any_element()
     }
 
+    /// Group menu for a real category, mirroring Tauri's `QuickCommands.tsx`
+    /// category `ContextMenuContent`: add, then reorder, then edit/delete.
     fn quick_command_category_menu_items(
         &self,
         category_id: String,
         cx: &mut Context<Self>,
     ) -> Vec<NyaMenuItem> {
+        let add_category_parent = category_id.clone();
+        let add_command_id = category_id.clone();
+        let move_up_id = category_id.clone();
+        let move_down_id = category_id.clone();
         let rename_id = category_id.clone();
-        let delete_id = category_id;
+        let delete_id = category_id.clone();
+        let can_move_up = self
+            .commands
+            .quick_category_move_neighbor(&category_id, true)
+            .is_some();
+        let can_move_down = self
+            .commands
+            .quick_category_move_neighbor(&category_id, false)
+            .is_some();
         vec![
+            NyaMenuItem::action(self.tr("quickCommands.addCategory"))
+                .icon("icons/fe/new-folder.svg")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_new_quick_command_category(
+                        Some(add_category_parent.clone()),
+                        window,
+                        cx,
+                    );
+                })),
+            NyaMenuItem::action(self.tr("quickCommands.addCommand"))
+                .icon("icons/conn/terminal.svg")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_new_quick_command_editor_in_category(
+                        Some(add_command_id.clone()),
+                        window,
+                        cx,
+                    );
+                })),
+            NyaMenuItem::separator(),
+            NyaMenuItem::action(self.tr("dialog.moveUp"))
+                .icon("icons/chevron-up.svg")
+                .disabled(!can_move_up)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.move_quick_command_category(move_up_id.clone(), true, cx);
+                })),
+            NyaMenuItem::action(self.tr("dialog.moveDown"))
+                .icon("icons/chevron-down.svg")
+                .disabled(!can_move_down)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.move_quick_command_category(move_down_id.clone(), false, cx);
+                })),
+            NyaMenuItem::separator(),
             NyaMenuItem::action(self.tr("quickCommands.edit"))
                 .icon("icons/net/edit.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_rename_quick_command_category(rename_id.clone(), window, cx);
                 })),
-            NyaMenuItem::separator(),
             NyaMenuItem::action(self.tr("common.delete"))
                 .icon("icons/net/delete.svg")
                 .danger()
@@ -222,5 +269,171 @@ impl NyaTermApp {
                     this.open_delete_quick_command_category_confirm(delete_id.clone(), window, cx);
                 })),
         ]
+    }
+
+    /// Group menu for the synthetic `all` / `uncategorized` rows. Neither can be
+    /// renamed or deleted, but Tauri still offers both add actions from them: a root
+    /// category, and a command with no category.
+    fn quick_command_pseudo_category_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
+        vec![
+            NyaMenuItem::action(self.tr("quickCommands.addCategory"))
+                .icon("icons/fe/new-folder.svg")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_new_quick_command_category(None, window, cx);
+                })),
+            NyaMenuItem::action(self.tr("quickCommands.addCommand"))
+                .icon("icons/conn/terminal.svg")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_new_quick_command_editor_in_category(None, window, cx);
+                })),
+        ]
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quick_command_category_menu_items_for_test(
+        &self,
+        category_id: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<NyaMenuItem> {
+        self.quick_command_category_menu_items(category_id, cx)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn quick_command_pseudo_category_menu_items_for_test(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Vec<NyaMenuItem> {
+        self.quick_command_pseudo_category_menu_items(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use gpui::{AppContext as _, TestAppContext};
+    use nyaterm_core::{AppRuntime, QuickCommandCategory, RuntimeMode};
+    use nyaterm_ui::NyaMenuItem;
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+
+    fn menu_app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-quick-group-menu-{}-{nanos}",
+            std::process::id()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    fn category(id: &str, order: i32) -> QuickCommandCategory {
+        QuickCommandCategory {
+            id: id.to_string(),
+            name: id.to_string(),
+            parent_id: None,
+            sort_order: order,
+        }
+    }
+
+    fn labels(items: &[NyaMenuItem]) -> Vec<&str> {
+        items.iter().map(NyaMenuItem::test_label).collect()
+    }
+
+    /// Mirrors Tauri's category `ContextMenuContent`: two add actions, the reorder
+    /// pair, then edit/delete, each group separated.
+    #[test]
+    fn group_menu_matches_tauri_structure_and_marks_delete_dangerous() {
+        let mut cx = TestAppContext::single();
+        let app = menu_app(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            app.commands.replace_quick_command_catalog(
+                Vec::new(),
+                vec![
+                    category("first", 0),
+                    category("middle", 1),
+                    category("last", 2),
+                ],
+            );
+        });
+        let items = cx.update_entity(&app, |app, cx| {
+            app.quick_command_category_menu_items_for_test("middle".to_string(), cx)
+        });
+
+        assert_eq!(
+            labels(&items),
+            vec![
+                "Add Category",
+                "Add Command",
+                "",
+                "Move up",
+                "Move down",
+                "",
+                "Edit",
+                "Delete",
+            ]
+        );
+        // (label, shortcut, icon, disabled, checked, danger)
+        assert!(items[7].test_presentation().5, "delete should be dangerous");
+        assert!(items.iter().all(|item| item.children().is_none()));
+    }
+
+    #[test]
+    fn group_menu_disables_the_move_that_would_leave_the_sibling_run() {
+        let mut cx = TestAppContext::single();
+        let app = menu_app(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            app.commands.replace_quick_command_catalog(
+                Vec::new(),
+                vec![
+                    category("first", 0),
+                    category("middle", 1),
+                    category("last", 2),
+                ],
+            );
+        });
+
+        let disabled = |app: &gpui::Entity<NyaTermApp>, cx: &mut TestAppContext, id: &str| {
+            let items = cx.update_entity(app, |app, cx| {
+                app.quick_command_category_menu_items_for_test(id.to_string(), cx)
+            });
+            (
+                items[3].test_presentation().3,
+                items[4].test_presentation().3,
+            )
+        };
+
+        assert_eq!(disabled(&app, &mut cx, "first"), (true, false));
+        assert_eq!(disabled(&app, &mut cx, "middle"), (false, false));
+        assert_eq!(disabled(&app, &mut cx, "last"), (false, true));
+    }
+
+    /// `all` / `uncategorized` cannot be renamed or deleted, so they offer the add
+    /// actions only.
+    #[test]
+    fn pseudo_group_menu_offers_only_the_add_actions() {
+        let mut cx = TestAppContext::single();
+        let app = menu_app(&mut cx);
+        let items = cx.update_entity(&app, |app, cx| {
+            app.quick_command_pseudo_category_menu_items_for_test(cx)
+        });
+
+        assert_eq!(labels(&items), vec!["Add Category", "Add Command"]);
+        assert!(items.iter().all(|item| !item.test_presentation().5));
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use gpui::{FocusHandle, UniformListScrollHandle};
 use nyaterm_core::{
     CommandHistoryEntry, QuickCommand, QuickCommandCategory, QuickCommandCategoryPosition,
-    QuickCommandRelativePosition, QuickCommandsConfig,
+    QuickCommandRelativePosition, QuickCommandsConfig, quick_command_category_move_neighbor,
 };
 use nyaterm_store::StoreBlockingClient;
 use nyaterm_ui::NyaWindowHandle;
@@ -14,9 +14,10 @@ use crate::features::{
     runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
 };
 use crate::models::{
-    QuickCommandCategoryDeleteState, QuickCommandCategoryRenameState, QuickCommandDetailsState,
-    QuickCommandEditorField, QuickCommandEditorState, QuickCommandImportPathPromptKind,
-    QuickCommandSortMode, QuickCommandVariablePromptState, QuickCommandViewMode,
+    QuickCommandCategoryCreateState, QuickCommandCategoryDeleteState,
+    QuickCommandCategoryRenameState, QuickCommandDetailsState, QuickCommandEditorField,
+    QuickCommandEditorState, QuickCommandImportPathPromptKind, QuickCommandSortMode,
+    QuickCommandVariablePromptState, QuickCommandViewMode,
 };
 
 use super::runtime_state::{CommandPersistencePoll, CommandRuntimeState};
@@ -156,6 +157,39 @@ impl CommandFeatureState {
             QuickCommandDropPosition::Inside => QuickCommandCategoryPosition::Inside,
         };
         if !config.move_category(source_id, target_id, position) {
+            return None;
+        }
+        self.catalog
+            .replace(config.commands.clone(), config.categories.clone());
+        Some(config)
+    }
+
+    /// The sibling this category would swap with, or `None` at either end of its
+    /// run. The group menu uses it both to enable the item and to perform the move.
+    pub(in crate::features) fn quick_category_move_neighbor(
+        &self,
+        category_id: &str,
+        up: bool,
+    ) -> Option<String> {
+        quick_command_category_move_neighbor(&self.catalog.categories, category_id, up)
+    }
+
+    /// Moves a category one slot within its own siblings. Reuses `move_category`,
+    /// so reparenting rules, cycle rejection and `sort_order` densification stay in
+    /// one place.
+    pub(in crate::features) fn move_quick_category_by_one(
+        &mut self,
+        category_id: &str,
+        up: bool,
+    ) -> Option<QuickCommandsConfig> {
+        let target = self.quick_category_move_neighbor(category_id, up)?;
+        let position = if up {
+            QuickCommandCategoryPosition::Before
+        } else {
+            QuickCommandCategoryPosition::After
+        };
+        let mut config = self.quick_command_config();
+        if !config.move_category(category_id, &target, position) {
             return None;
         }
         self.catalog
@@ -615,6 +649,38 @@ impl CommandFeatureState {
         }
     }
 
+    pub(in crate::features) fn quick_category_create(
+        &self,
+    ) -> Option<&QuickCommandCategoryCreateState> {
+        self.quick.dialogs.category_create.as_ref()
+    }
+
+    pub(in crate::features) fn request_quick_category_create(
+        &mut self,
+        state: QuickCommandCategoryCreateState,
+    ) {
+        self.quick.dialogs.category_create = Some(state);
+    }
+
+    pub(in crate::features) fn clear_quick_category_create(&mut self) {
+        self.quick.dialogs.category_create = None;
+    }
+
+    pub(in crate::features) fn apply_quick_category_create(&mut self, text: String) -> bool {
+        let Some(create) = self.quick.dialogs.category_create.as_mut() else {
+            return false;
+        };
+        create.draft = text;
+        create.error = None;
+        true
+    }
+
+    pub(in crate::features) fn set_quick_category_create_error(&mut self, error: String) {
+        if let Some(create) = self.quick.dialogs.category_create.as_mut() {
+            create.error = Some(error);
+        }
+    }
+
     pub(in crate::features) fn quick_category_rename(
         &self,
     ) -> Option<&QuickCommandCategoryRenameState> {
@@ -828,11 +894,12 @@ struct QuickCommandEditorFeatureState {
     new_category_draft: String,
 }
 
-/// Delete/details/rename confirmations and the variable prompt.
+/// Delete/details/create/rename confirmations and the variable prompt.
 struct QuickCommandDialogState {
     details: Option<QuickCommandDetailsState>,
     details_focus: FocusHandle,
     category_delete: Option<QuickCommandCategoryDeleteState>,
+    category_create: Option<QuickCommandCategoryCreateState>,
     category_rename: Option<QuickCommandCategoryRenameState>,
     variable_prompt: Option<QuickCommandVariablePromptState>,
     variable_focus: FocusHandle,
@@ -878,6 +945,7 @@ impl QuickCommandFeatureState {
                 details: None,
                 details_focus: focus.details,
                 category_delete: None,
+                category_create: None,
                 category_rename: None,
                 variable_prompt: None,
                 variable_focus: focus.variable,
@@ -962,6 +1030,75 @@ mod tests {
             },
             store,
         })
+    }
+
+    fn category(id: &str, parent: Option<&str>, order: i32) -> QuickCommandCategory {
+        QuickCommandCategory {
+            id: id.to_string(),
+            name: id.to_string(),
+            parent_id: parent.map(ToString::to_string),
+            sort_order: order,
+        }
+    }
+
+    #[test]
+    fn quick_category_move_neighbor_is_none_at_each_end() {
+        let mut state = command_state();
+        state.replace_quick_command_catalog(
+            Vec::new(),
+            vec![
+                category("first", None, 0),
+                category("middle", None, 1),
+                category("last", None, 2),
+            ],
+        );
+
+        // These drive `.disabled(...)` on the group menu's move items.
+        assert!(state.quick_category_move_neighbor("first", true).is_none());
+        assert!(state.quick_category_move_neighbor("last", false).is_none());
+        assert_eq!(
+            state
+                .quick_category_move_neighbor("middle", true)
+                .as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            state
+                .quick_category_move_neighbor("middle", false)
+                .as_deref(),
+            Some("last")
+        );
+    }
+
+    #[test]
+    fn move_quick_category_by_one_reorders_and_stops_at_the_ends() {
+        let mut state = command_state();
+        state.replace_quick_command_catalog(
+            Vec::new(),
+            vec![
+                category("first", None, 0),
+                category("middle", None, 1),
+                category("last", None, 2),
+            ],
+        );
+
+        assert!(state.move_quick_category_by_one("last", true).is_some());
+        let order = |state: &CommandFeatureState| {
+            nyaterm_core::quick_command_category_sibling_order(
+                state.quick_command_categories(),
+                None,
+            )
+            .into_iter()
+            .map(|item| item.id.clone())
+            .collect::<Vec<_>>()
+        };
+        assert_eq!(order(&state), vec!["first", "last", "middle"]);
+
+        // The catalog is the authority, so the refusal has to be observable there too.
+        assert!(state.move_quick_category_by_one("first", true).is_none());
+        assert_eq!(order(&state), vec!["first", "last", "middle"]);
+        assert!(state.move_quick_category_by_one("middle", false).is_none());
+        assert_eq!(order(&state), vec!["first", "last", "middle"]);
     }
 
     #[test]

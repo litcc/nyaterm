@@ -1,5 +1,5 @@
 use gpui::{Context, IntoElement, div, prelude::*, px, rgb, svg};
-use nyaterm_core::{QuickCommand, QuickCommandCategory};
+use nyaterm_core::{QuickCommand, QuickCommandCategory, quick_command_category_sibling_order};
 
 use crate::features::{
     NyaTermApp, commands::quick_command_category_label, icons::quick_command_icon,
@@ -64,6 +64,9 @@ pub(in crate::features::panels) fn quick_command_category_options(
     options
 }
 
+/// Depth-first sidebar order. Sibling order comes from
+/// `quick_command_category_sibling_order`, which the group menu's move up/down
+/// also uses, so "the row above" and "move up" cannot disagree.
 fn ordered_quick_command_categories(
     categories: &[QuickCommandCategory],
 ) -> Vec<(&QuickCommandCategory, usize)> {
@@ -74,17 +77,7 @@ fn ordered_quick_command_categories(
         visited: &mut std::collections::BTreeSet<String>,
         output: &mut Vec<(&'a QuickCommandCategory, usize)>,
     ) {
-        let mut children = categories
-            .iter()
-            .filter(|category| category.parent_id.as_deref() == parent_id)
-            .collect::<Vec<_>>();
-        children.sort_by(|left, right| {
-            left.sort_order
-                .cmp(&right.sort_order)
-                .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        for category in children {
+        for category in quick_command_category_sibling_order(categories, parent_id) {
             if visited.insert(category.id.clone()) {
                 output.push((category, depth));
                 visit(
@@ -98,31 +91,13 @@ fn ordered_quick_command_categories(
         }
     }
 
-    let ids = categories
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut roots = categories
-        .iter()
-        .filter(|item| {
-            item.parent_id
-                .as_deref()
-                .is_none_or(|parent| !ids.contains(parent))
-        })
-        .collect::<Vec<_>>();
-    roots.sort_by(|left, right| {
-        left.sort_order
-            .cmp(&right.sort_order)
-            .then_with(|| left.id.cmp(&right.id))
-    });
     let mut visited = std::collections::BTreeSet::new();
     let mut output = Vec::with_capacity(categories.len());
-    for root in roots {
-        if visited.insert(root.id.clone()) {
-            output.push((root, 0));
-            visit(Some(&root.id), 1, categories, &mut visited, &mut output);
-        }
-    }
+    // Roots are `parent_id: None` plus rows whose parent no longer exists, which
+    // the sibling-order helper already folds together.
+    visit(None, 0, categories, &mut visited, &mut output);
+    // A parent cycle leaves rows unreachable from any root; surface them flat
+    // rather than dropping them from the sidebar.
     let mut remaining = categories
         .iter()
         .filter(|item| !visited.contains(&item.id))
@@ -130,6 +105,7 @@ fn ordered_quick_command_categories(
     remaining.sort_by(|left, right| {
         left.sort_order
             .cmp(&right.sort_order)
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
             .then_with(|| left.id.cmp(&right.id))
     });
     for category in remaining {

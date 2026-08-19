@@ -57,6 +57,28 @@ impl NyaTermApp {
         );
     }
 
+    /// Moves a category one slot among its siblings from the group context menu.
+    ///
+    /// Persists through `finish_quick_command_reorder`, the same path category
+    /// drag-and-drop uses, so both routes agree on ordering and on switching the
+    /// list to the custom sort.
+    pub(in crate::features) fn move_quick_command_category(
+        &mut self,
+        category_id: String,
+        up: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let config = self.commands.move_quick_category_by_one(&category_id, up);
+        if config.is_none() {
+            self.shell.set_status(
+                "quick command category is already at the end of its group".to_string(),
+            );
+            cx.notify();
+            return;
+        }
+        self.finish_quick_command_reorder(config, cx);
+    }
+
     pub(in crate::features) fn close_quick_command_toolbar_popovers(&mut self) {
         self.commands.close_quick_toolbar_popovers();
     }

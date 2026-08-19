@@ -393,6 +393,8 @@ impl NyaTermApp {
             self.apply_quick_command_variable(index, text, cx);
         } else if id.as_ref() == "quick-command.category-rename" {
             self.apply_quick_command_category_rename(text, cx);
+        } else if id.as_ref() == "quick-command.category-create" {
+            self.apply_quick_command_category_create(text, cx);
         } else if id.as_ref() == "send-command.draft" {
             self.apply_send_command_draft(text, cx);
         } else if let Some(control) = id.strip_prefix("send-command.") {

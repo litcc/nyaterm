@@ -1,11 +1,12 @@
 use gpui::{ClipboardItem, Context, ParentElement as _, Window, div};
+use nyaterm_core::{QuickCommandCategory, uuid};
 use nyaterm_store::{StoreDomain, store_request};
 use nyaterm_ui::{NyaConfirmDialog, NyaDialogFooter, NyaDialogWindowExt};
 
 use crate::features::NyaTermApp;
 use crate::models::{
-    QuickCommandCategoryDeleteState, QuickCommandCategoryRenameState, QuickCommandDetailsState,
-    QuickCommandEditorState,
+    QuickCommandCategoryCreateState, QuickCommandCategoryDeleteState,
+    QuickCommandCategoryRenameState, QuickCommandDetailsState, QuickCommandEditorState,
 };
 
 use super::helpers::quick_command_category_label;
@@ -18,6 +19,30 @@ impl NyaTermApp {
     ) {
         self.commands
             .open_quick_editor(QuickCommandEditorState::blank());
+        // The boxes own their text, so they have to be dropped for the next
+        // command to seed from its own values.
+        self.forget_text_inputs("quick-command.editor.");
+        self.shell
+            .set_status("quick command editor opened".to_string());
+        if !self.open_quick_command_window(cx) {
+            window.focus(self.commands.quick_editor_focus(), cx);
+        }
+        cx.notify();
+    }
+
+    /// "Add command" from a group row. The child window reads the editor state when
+    /// it opens, so seeding the draft first is what carries the category across.
+    pub(in crate::features) fn open_new_quick_command_editor_in_category(
+        &mut self,
+        category_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = QuickCommandEditorState::blank_in_category(
+            category_id,
+            self.commands.quick_command_categories(),
+        );
+        self.commands.open_quick_editor(editor);
         // The boxes own their text, so they have to be dropped for the next
         // command to seed from its own values.
         self.forget_text_inputs("quick-command.editor.");
@@ -474,7 +499,7 @@ impl NyaTermApp {
                             let message = if duplicated {
                                 this.tr("quickCommands.categoryNameDuplicated").to_string()
                             } else {
-                                "Category is no longer available".to_string()
+                                this.tr("quickCommands.categoryUnavailable").to_string()
                             };
                             this.commands
                                 .set_quick_category_rename_error(message.clone());
@@ -499,6 +524,161 @@ impl NyaTermApp {
         true
     }
 
+    /// Opens the "add category" dialog. `parent_id` is `None` from a pseudo-row,
+    /// which creates a root category.
+    pub(in crate::features) fn open_new_quick_command_category(
+        &mut self,
+        parent_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A stale parent would silently create a root category, so drop the parent
+        // rather than attach the new row to something that no longer exists.
+        let parent_id = parent_id.filter(|parent| {
+            self.commands
+                .quick_command_categories()
+                .iter()
+                .any(|category| &category.id == parent)
+        });
+        self.commands
+            .request_quick_category_create(QuickCommandCategoryCreateState {
+                parent_id,
+                draft: String::new(),
+                error: None,
+            });
+        self.reset_text_input("quick-command.category-create", "", cx);
+        self.shell
+            .set_status("quick command category editor opened".to_string());
+        self.open_form_dialog(
+            (
+                self.tr("quickCommands.addCategory").to_string(),
+                384.,
+                self.tr("common.confirm").to_string(),
+                |app, _, cx| app.quick_command_category_create_dialog_content(cx),
+                |app, _, cx| app.confirm_create_quick_command_category(cx),
+                |app, cx| app.cancel_create_quick_command_category(cx),
+            ),
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub(in crate::features) fn cancel_create_quick_command_category(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.commands.clear_quick_category_create();
+        self.shell
+            .set_status("quick command category creation cancelled".to_string());
+        cx.notify();
+    }
+
+    pub(in crate::features) fn confirm_create_quick_command_category(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(create) = self.commands.quick_category_create().cloned() else {
+            return true;
+        };
+        let name = create.draft.trim().to_string();
+        if name.is_empty() {
+            let message = self.tr("quickCommands.categoryNameRequired").to_string();
+            self.commands.set_quick_category_create_error(message);
+            cx.notify();
+            return false;
+        }
+        if self
+            .commands
+            .quick_command_categories()
+            .iter()
+            .any(|category| category.name.trim().eq_ignore_ascii_case(name.as_str()))
+        {
+            let message = self.tr("quickCommands.categoryNameDuplicated").to_string();
+            self.commands.set_quick_category_create_error(message);
+            cx.notify();
+            return false;
+        }
+
+        let parent_id = create.parent_id.clone();
+        let request_name = name.clone();
+        let status_name = name.clone();
+        self.submit_store_request(
+            0,
+            store_request(StoreDomain::Commands, move |store| {
+                let mut config = store.load_quick_commands()?;
+                let duplicated = config
+                    .categories
+                    .iter()
+                    .any(|category| category.name.trim().eq_ignore_ascii_case(&request_name));
+                if duplicated {
+                    return Ok((config, false, true));
+                }
+                // A parent removed between opening the dialog and confirming would
+                // orphan the row, so fall back to a root category.
+                let parent_id = parent_id.filter(|parent| {
+                    config
+                        .categories
+                        .iter()
+                        .any(|category| &category.id == parent)
+                });
+                let sort_order = config
+                    .categories
+                    .iter()
+                    .filter(|category| category.parent_id == parent_id)
+                    .map(|category| category.sort_order)
+                    .max()
+                    .unwrap_or(-1)
+                    .saturating_add(1);
+                config.categories.push(QuickCommandCategory {
+                    id: format!("quick-category-{}", uuid()),
+                    name: request_name,
+                    parent_id,
+                    sort_order,
+                });
+                store.save_quick_commands(config.clone())?;
+                Ok((config, true, false))
+            }),
+            move |this, event, cx| {
+                match event.outcome {
+                    Ok((config, created, duplicated)) => {
+                        this.commands
+                            .replace_quick_command_catalog(config.commands, config.categories);
+                        if created {
+                            this.commands.clear_quick_category_create();
+                            this.settings.update_store_status(
+                                format!("quick command category '{status_name}' created"),
+                                true,
+                            );
+                        } else {
+                            let message = if duplicated {
+                                this.tr("quickCommands.categoryNameDuplicated").to_string()
+                            } else {
+                                this.tr("quickCommands.categoryCreateFailed").to_string()
+                            };
+                            this.commands
+                                .set_quick_category_create_error(message.clone());
+                            this.settings.update_store_status(message, false);
+                        }
+                    }
+                    Err(error) => {
+                        this.commands
+                            .set_quick_category_create_error(error.to_string());
+                        this.settings.update_store_status(
+                            format!("quick command category creation failed: {error}"),
+                            false,
+                        );
+                    }
+                }
+                this.shell
+                    .set_status(this.settings.store_status().message.to_string());
+                cx.notify();
+            },
+            cx,
+        );
+        true
+    }
+
     /// Apply an edit from the category rename box.
     pub(in crate::features) fn apply_quick_command_category_rename(
         &mut self,
@@ -506,6 +686,17 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         if self.commands.apply_quick_category_rename(text) {
+            cx.notify();
+        }
+    }
+
+    /// Apply an edit from the new-category box.
+    pub(in crate::features) fn apply_quick_command_category_create(
+        &mut self,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.commands.apply_quick_category_create(text) {
             cx.notify();
         }
     }
