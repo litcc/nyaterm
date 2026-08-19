@@ -1,10 +1,13 @@
 use gpui::{
-    AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent, MouseButton,
-    Point, Render, SharedString, Window, div, prelude::*, px, rgb, rgba, svg, uniform_list,
+    Anchor, AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent,
+    MouseButton, Point, Render, SharedString, Window, anchored, deferred, div, point, prelude::*,
+    px, rgb, rgba, svg, uniform_list,
 };
 
 use super::super::{filtered_quick_commands, quick_command_category_options};
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::{
+    NyaTermApp, text_inputs::TextInputSetup, view_widgets::APP_OVERLAY_PRIORITY,
+};
 use crate::models::{QuickCommandSortMode, QuickCommandViewMode};
 use crate::widgets::small_button;
 use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem, NyaScrollable, NyaSearchInput, NyaTooltip};
@@ -583,88 +586,105 @@ fn quick_command_ai_popover_button(
             }),
         ))
         .when(open, |this| {
+            // Deferred so the rows, which are the panel body and therefore paint
+            // after this header, cannot cover the form; deferring also drops the
+            // panel's `overflow_hidden` mask, so a short panel no longer clips it.
+            // `anchored()` with no position anchors to this element's own layout
+            // origin, and the offset restates the old `top: 28px; right: 0`
+            // against the 24px-square trigger.
             this.child(
-                div()
-                    .id(SharedString::from("quick-command-ai-popover"))
-                    .absolute()
-                    .top(px(28.))
-                    .right_0()
-                    .w(px(320.))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(palette.border))
-                    .bg(popover_bg)
-                    .shadow_lg()
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .font_weight(FontWeight(600.))
-                            .text_color(rgb(palette.text))
-                            .child(button_label),
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from("quick-command-ai-input"))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                cx.stop_propagation();
-                                this.handle_quick_command_ai_prompt_key_down(event, window, cx);
-                            }))
-                            .child(prompt_input),
-                    )
-                    .child(
-                        div().flex().justify_end().child(
+                deferred(
+                    anchored()
+                        .anchor(Anchor::TopRight)
+                        .offset(point(px(24.), px(28.)))
+                        .snap_to_window_with_margin(px(8.))
+                        .child(
                             div()
-                                .id(SharedString::from("quick-command-ai-submit"))
-                                .h(px(24.))
-                                .px_2()
+                                .id(SharedString::from("quick-command-ai-popover"))
+                                .occlude()
+                                .w(px(320.))
                                 .rounded_md()
+                                .border_1()
+                                .border_color(rgb(palette.border))
+                                .bg(popover_bg)
+                                .shadow_lg()
+                                .p_3()
                                 .flex()
-                                .items_center()
-                                .gap_1()
-                                .text_size(px(11.))
-                                .font_weight(FontWeight(600.))
-                                .text_color(if prompt.trim().is_empty() {
-                                    rgb(palette.text_dimmed)
-                                } else {
-                                    rgb(palette.text)
-                                })
-                                .bg(if prompt.trim().is_empty() {
-                                    rgb(palette.input)
-                                } else {
-                                    rgb(palette.hover)
-                                })
-                                .when(can_generate, |this| {
-                                    this.cursor_pointer().hover(|this| {
-                                        this.bg(rgb(palette.surface_elevated))
-                                            .text_color(rgb(palette.text))
-                                    })
+                                .flex_col()
+                                .gap_2()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation();
                                 })
                                 .child(
-                                    svg()
-                                        .size(px(13.))
-                                        .flex_none()
-                                        .path("icons/ai.svg")
-                                        .text_color(if prompt.trim().is_empty() {
-                                            rgb(palette.text_dimmed)
-                                        } else {
-                                            rgb(palette.text)
-                                        }),
+                                    div()
+                                        .text_size(px(12.))
+                                        .font_weight(FontWeight(600.))
+                                        .text_color(rgb(palette.text))
+                                        .child(button_label),
                                 )
-                                .child(generate_label)
-                                .when(can_generate, |this| {
-                                    this.on_click(cx.listener(|this, _, window, cx| {
-                                        this.submit_quick_command_ai_prompt(window, cx);
-                                    }))
-                                }),
+                                .child(
+                                    div()
+                                        .id(SharedString::from("quick-command-ai-input"))
+                                        .on_key_down(cx.listener(
+                                            |this, event: &KeyDownEvent, window, cx| {
+                                                cx.stop_propagation();
+                                                this.handle_quick_command_ai_prompt_key_down(
+                                                    event, window, cx,
+                                                );
+                                            },
+                                        ))
+                                        .child(prompt_input),
+                                )
+                                .child(
+                                    div().flex().justify_end().child(
+                                        div()
+                                            .id(SharedString::from("quick-command-ai-submit"))
+                                            .h(px(24.))
+                                            .px_2()
+                                            .rounded_md()
+                                            .flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .text_size(px(11.))
+                                            .font_weight(FontWeight(600.))
+                                            .text_color(if prompt.trim().is_empty() {
+                                                rgb(palette.text_dimmed)
+                                            } else {
+                                                rgb(palette.text)
+                                            })
+                                            .bg(if prompt.trim().is_empty() {
+                                                rgb(palette.input)
+                                            } else {
+                                                rgb(palette.hover)
+                                            })
+                                            .when(can_generate, |this| {
+                                                this.cursor_pointer().hover(|this| {
+                                                    this.bg(rgb(palette.surface_elevated))
+                                                        .text_color(rgb(palette.text))
+                                                })
+                                            })
+                                            .child(
+                                                svg()
+                                                    .size(px(13.))
+                                                    .flex_none()
+                                                    .path("icons/ai.svg")
+                                                    .text_color(if prompt.trim().is_empty() {
+                                                        rgb(palette.text_dimmed)
+                                                    } else {
+                                                        rgb(palette.text)
+                                                    }),
+                                            )
+                                            .child(generate_label)
+                                            .when(can_generate, |this| {
+                                                this.on_click(cx.listener(|this, _, window, cx| {
+                                                    this.submit_quick_command_ai_prompt(window, cx);
+                                                }))
+                                            }),
+                                    ),
+                                ),
                         ),
-                    ),
+                )
+                .with_priority(APP_OVERLAY_PRIORITY),
             )
         })
 }
