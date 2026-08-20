@@ -43,8 +43,8 @@ use crate::models::{
 use gpui::{AppContext as _, TestAppContext};
 use nyaterm_core::{
     AiExecutionProfile, AppRuntime, ConnectionRecordingSettings, ConnectionType, Group,
-    RecordingMode, RecordingRotationPolicy, RuntimeMode, SavedConnection, SshProfile,
-    SshTerminalType,
+    RecordingMode, RecordingRotationPolicy, RuntimeMode, SavedConnection, SshAgentEndpoint,
+    SshAgentForwardingPolicy, SshProfile, SshTerminalType,
 };
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -629,11 +629,15 @@ fn connection_editor_owner(cx: &TestAppContext) -> ConnectionEditorFeatureState 
         number_fields: HashMap::new(),
         field_subscriptions: Vec::new(),
         number_field_subscriptions: Vec::new(),
+        forwarding_endpoint_fields: HashMap::new(),
+        forwarding_endpoint_field_subscriptions: Vec::new(),
         window: None,
         window_open_pending: false,
         focus,
         icon_picker_open: false,
         group_select_open: false,
+        agent_identity_picker_open: false,
+        agent_preview_generation: 0,
         group_select_trigger_bounds: None,
     };
     owner.begin_edit(connection_editor_state_with_secret_draft());
@@ -751,6 +755,46 @@ fn set_connection_editor_auth_none_clears_password_and_key_state() {
     assert_eq!(editor.existing_password, None);
     assert_eq!(editor.key_id, None);
     assert_eq!(editor.error, None);
+}
+
+#[test]
+fn set_connection_editor_agent_endpoint_updates_the_authentication_endpoint() {
+    let mut draft = Some(connection_editor_state_with_secret_draft());
+
+    assert!(set_connection_editor_select_value(
+        &mut draft,
+        ConnectionEditorSelect::SshAgentEndpoint,
+        Some("environment".to_string()),
+    ));
+
+    assert_eq!(
+        draft.expect("editor remains open").agent_endpoint,
+        SshAgentEndpoint::Environment {
+            variable: "SSH_AUTH_SOCK".to_string(),
+        }
+    );
+}
+
+#[test]
+fn enabling_allow_all_agent_forwarding_requires_fresh_confirmation() {
+    let mut draft = Some(ConnectionEditorState {
+        agent_allow_all_confirmed: true,
+        agent_forwarding_config: nyaterm_core::SshAgentForwardingConfig {
+            enabled: false,
+            policy: SshAgentForwardingPolicy::All,
+            ..Default::default()
+        },
+        ..connection_editor_state_with_secret_draft()
+    });
+
+    assert!(toggle_connection_editor_flag(
+        &mut draft,
+        ConnectionEditorToggle::AgentForwarding,
+    ));
+
+    let editor = draft.expect("editor remains open");
+    assert!(editor.agent_forwarding_config.enabled);
+    assert!(!editor.agent_allow_all_confirmed);
 }
 
 #[test]
@@ -999,6 +1043,16 @@ fn set_connection_editor_advanced_tab_resets_hidden_post_login_focus() {
         ConnectionEditorAdvancedTab::X11
     );
     assert_eq!(editor.focused_field, ConnectionEditorField::Name);
+
+    let mut draft = Some(connection_editor_state_with_secret_draft());
+    assert!(set_connection_editor_advanced_tab(
+        &mut draft,
+        ConnectionEditorAdvancedTab::AgentForwarding
+    ));
+    assert_eq!(
+        draft.expect("editor remains open").advanced_network_tab,
+        ConnectionEditorAdvancedTab::AgentForwarding
+    );
 }
 
 #[test]
@@ -1650,7 +1704,11 @@ fn connection_editor_state_with_secret_draft() -> ConnectionEditorState {
         proxy_jump_id: None,
         x11_forwarding: false,
         agent_endpoint: Default::default(),
-        agent_forwarding: false,
+        agent_forwarding_config: Default::default(),
+        agent_allow_all_confirmed: false,
+        agent_forwarding_endpoint_index: 0,
+        agent_preview: None,
+        agent_preview_loading: false,
         backspace_mode: "del".to_string(),
         encoding: "global".to_string(),
         ssh_profile: Default::default(),

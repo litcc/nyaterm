@@ -33,6 +33,8 @@ fn test_config() -> SshSessionConfig {
         agent_auth: false,
         agent_endpoint: Default::default(),
         agent_forwarding: false,
+        agent_forwarding_config: None,
+        agent_stored_key_provider: None,
         otp_id: None,
         auto_fill_otp: false,
         proxy_jump: None,

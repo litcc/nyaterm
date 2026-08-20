@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use nyaterm_core::{Group, PreparedSessionImport, SavedConnection, SavedPassword, SshKey};
 
+use super::vault::bump_ssh_key_revision;
 use super::{
     CREDENTIALS_TABLE, ConnectionStore, LEGACY_TEXT_MASTER_KEY, META_MASTER_KEY, META_TABLE,
     PASSWORD_PREFIX, SSH_KEY_PREFIX, StorageError, TEXT_DOCS_TABLE, entity_key,
@@ -116,6 +117,9 @@ impl ConnectionStore {
             save_connection_in_txn(&txn, connection)?;
         }
         txn.commit()?;
+        if !ssh_keys.is_empty() {
+            bump_ssh_key_revision();
+        }
         Ok(count)
     }
 }

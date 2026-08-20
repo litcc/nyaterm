@@ -32,19 +32,23 @@ mod list_logic;
 mod network_logic;
 
 use self::editor_logic::{
-    ConnectionEditorPlaceholder, advance_connection_editor_focus,
-    apply_connection_editor_shell_path, apply_connection_editor_working_dir,
-    clear_connection_editor_runtime_state, commit_connection_editor_new_group,
-    connection_editor_inline_panel_draft, connection_editor_window_open_or_pending,
-    editor_field_seeds, insert_connection_editor_description_newline,
-    move_connection_editor_ssh_algorithm, select_saved_connection_after_editor_save,
-    set_connection_editor_advanced_tab, set_connection_editor_error,
-    set_connection_editor_field_text, set_connection_editor_icon,
+    ConnectionEditorPlaceholder, add_connection_editor_agent_endpoint,
+    advance_connection_editor_focus, apply_connection_editor_shell_path,
+    apply_connection_editor_working_dir, clear_connection_editor_runtime_state,
+    commit_connection_editor_new_group, connection_editor_inline_panel_draft,
+    connection_editor_window_open_or_pending, editor_field_seeds, forwarding_endpoint_field_seeds,
+    insert_connection_editor_description_newline, move_connection_editor_agent_endpoint,
+    move_connection_editor_ssh_algorithm, remove_connection_editor_agent_endpoint,
+    select_connection_editor_agent_endpoint, select_saved_connection_after_editor_save,
+    set_connection_editor_advanced_tab, set_connection_editor_agent_endpoint_type,
+    set_connection_editor_error, set_connection_editor_field_text,
+    set_connection_editor_forwarding_endpoint_field, set_connection_editor_icon,
     set_connection_editor_icon_auto_detect, set_connection_editor_kind,
     set_connection_editor_password_source, set_connection_editor_rdp_tab,
     set_connection_editor_select_value, set_connection_editor_ssh_algorithm_enabled,
     set_connection_editor_ssh_algorithm_tab, set_connection_editor_telnet_tab,
-    set_connection_group_editor_error, toggle_connection_editor_flag,
+    set_connection_group_editor_error, toggle_connection_editor_agent_allowlist_fingerprint,
+    toggle_connection_editor_flag,
 };
 use self::list_logic::{
     clear_connection_list_runtime_state, clear_selected_connection_ids,
@@ -167,11 +171,15 @@ struct ConnectionEditorFeatureState {
     number_fields: HashMap<ConnectionEditorField, Entity<NyaNumberInputState>>,
     field_subscriptions: Vec<Subscription>,
     number_field_subscriptions: Vec<Subscription>,
+    forwarding_endpoint_fields: HashMap<(usize, ConnectionEditorField), Entity<NyaInputState>>,
+    forwarding_endpoint_field_subscriptions: Vec<Subscription>,
     window: Option<NyaWindowHandle>,
     window_open_pending: bool,
     focus: FocusHandle,
     icon_picker_open: bool,
     group_select_open: bool,
+    agent_identity_picker_open: bool,
+    agent_preview_generation: u64,
     group_select_trigger_bounds: Option<Bounds<Pixels>>,
 }
 
@@ -250,11 +258,15 @@ impl ConnectionFeatureState {
                 number_fields: HashMap::new(),
                 field_subscriptions: Vec::new(),
                 number_field_subscriptions: Vec::new(),
+                forwarding_endpoint_fields: HashMap::new(),
+                forwarding_endpoint_field_subscriptions: Vec::new(),
                 window: None,
                 window_open_pending: false,
                 focus: focus.editor,
                 icon_picker_open: false,
                 group_select_open: false,
+                agent_identity_picker_open: false,
+                agent_preview_generation: 0,
                 group_select_trigger_bounds: None,
             },
             group_editor: ConnectionGroupEditorFeatureState {
@@ -578,6 +590,12 @@ impl ConnectionFeatureState {
         &self.editor.number_fields
     }
 
+    pub fn editor_forwarding_endpoint_fields(
+        &self,
+    ) -> &HashMap<(usize, ConnectionEditorField), Entity<NyaInputState>> {
+        &self.editor.forwarding_endpoint_fields
+    }
+
     /// Build a field per input and wire each back into the draft.
     ///
     /// Called when the editor opens, so the entities live exactly as long as the
@@ -587,6 +605,8 @@ impl ConnectionFeatureState {
         self.editor.number_fields.clear();
         self.editor.field_subscriptions.clear();
         self.editor.number_field_subscriptions.clear();
+        self.editor.forwarding_endpoint_fields.clear();
+        self.editor.forwarding_endpoint_field_subscriptions.clear();
         let Some(draft) = self.editor.draft.as_ref() else {
             return;
         };
@@ -637,6 +657,56 @@ impl ConnectionFeatureState {
             self.editor.fields.insert(field, entity);
             self.editor.field_subscriptions.push(subscription);
         }
+        self.ensure_editor_forwarding_endpoint_fields(cx);
+    }
+
+    /// Keep one independent input entity for every endpoint value.
+    ///
+    /// The endpoint list is editable at runtime, so these entities are created
+    /// lazily and refreshed from the draft whenever the editor renders.
+    pub fn ensure_editor_forwarding_endpoint_fields(&mut self, cx: &mut Context<NyaTermApp>) {
+        let seeds = self
+            .editor
+            .draft
+            .as_ref()
+            .map(forwarding_endpoint_field_seeds)
+            .unwrap_or_default();
+        for (index, field, value, placeholder) in seeds {
+            let key = (index, field);
+            if let Some(entity) = self.editor.forwarding_endpoint_fields.get(&key) {
+                if entity.read(cx).value(cx) != value {
+                    entity.update(cx, |entity, cx| entity.set_content(&value, cx));
+                }
+                continue;
+            }
+            let seed = value.clone();
+            let entity = cx.new(|cx| NyaInputState::new(cx, seed).placeholder(placeholder));
+            let subscription =
+                cx.subscribe(
+                    &entity,
+                    move |app: &mut NyaTermApp, _, event, cx| match event {
+                        NyaInputEvent::Changed(text) | NyaInputEvent::Submitted(text) => {
+                            app.set_connection_editor_agent_endpoint_field(
+                                index,
+                                field,
+                                text.clone(),
+                                cx,
+                            );
+                        }
+                        NyaInputEvent::Blurred(_) => {}
+                    },
+                );
+            self.editor.forwarding_endpoint_fields.insert(key, entity);
+            self.editor
+                .forwarding_endpoint_field_subscriptions
+                .push(subscription);
+        }
+    }
+
+    pub fn rebuild_editor_forwarding_endpoint_fields(&mut self, cx: &mut Context<NyaTermApp>) {
+        self.editor.forwarding_endpoint_fields.clear();
+        self.editor.forwarding_endpoint_field_subscriptions.clear();
+        self.ensure_editor_forwarding_endpoint_fields(cx);
     }
 
     /// Push a value the runtime changed back down into its field.
@@ -679,6 +749,15 @@ impl ConnectionFeatureState {
         }
     }
 
+    pub fn set_editor_agent_endpoint_field(
+        &mut self,
+        index: usize,
+        field: ConnectionEditorField,
+        text: String,
+    ) -> bool {
+        set_connection_editor_forwarding_endpoint_field(&mut self.editor.draft, index, field, text)
+    }
+
     pub fn begin_editor(&mut self, draft: ConnectionEditorState) {
         self.editor.begin_edit(draft);
     }
@@ -687,12 +766,45 @@ impl ConnectionFeatureState {
         self.editor.active_draft()
     }
 
+    pub fn begin_editor_agent_preview(&mut self) -> Option<(u64, ConnectionEditorState)> {
+        let editor = self.editor.draft.as_mut()?;
+        self.editor.agent_preview_generation = self.editor.agent_preview_generation.wrapping_add(1);
+        editor.agent_preview_loading = true;
+        Some((self.editor.agent_preview_generation, editor.clone()))
+    }
+
+    pub fn confirm_editor_agent_allow_all(&mut self) {
+        if let Some(editor) = self.editor.draft.as_mut() {
+            editor.agent_allow_all_confirmed = true;
+        }
+    }
+
+    pub fn set_editor_agent_preview(
+        &mut self,
+        generation: u64,
+        preview: nyaterm_transport::SshAgentIdentityPreviewResponse,
+    ) -> bool {
+        if generation != self.editor.agent_preview_generation {
+            return false;
+        }
+        if let Some(editor) = self.editor.draft.as_mut() {
+            editor.agent_preview = Some(preview);
+            editor.agent_preview_loading = false;
+            return true;
+        }
+        false
+    }
+
     pub fn editor_icon_picker_is_open(&self) -> bool {
         self.editor.icon_picker_is_open()
     }
 
     pub fn editor_group_select_is_open(&self) -> bool {
         self.editor.group_select_is_open()
+    }
+
+    pub fn editor_agent_identity_picker_is_open(&self) -> bool {
+        self.editor.agent_identity_picker_is_open()
     }
 
     pub fn editor_group_select_trigger_bounds(&self) -> Option<Bounds<Pixels>> {
@@ -745,6 +857,18 @@ impl ConnectionFeatureState {
 
     pub fn set_editor_icon_picker_open(&mut self, open: bool) -> bool {
         self.editor.set_icon_picker_open(open)
+    }
+
+    pub fn set_editor_agent_identity_picker_open(&mut self, open: bool) -> bool {
+        let changed = self.editor.set_agent_identity_picker_open(open);
+        if changed && !open {
+            self.editor.agent_preview_generation =
+                self.editor.agent_preview_generation.wrapping_add(1);
+            if let Some(editor) = self.editor.draft.as_mut() {
+                editor.agent_preview_loading = false;
+            }
+        }
+        changed
     }
 
     pub fn close_editor_group_select(&mut self) {
@@ -803,6 +927,31 @@ impl ConnectionFeatureState {
         direction: i8,
     ) -> bool {
         self.editor.move_ssh_algorithm(tab, id, direction)
+    }
+
+    pub fn add_editor_agent_endpoint(&mut self) -> bool {
+        self.editor.add_editor_agent_endpoint()
+    }
+
+    pub fn remove_editor_agent_endpoint(&mut self, index: usize) -> bool {
+        self.editor.remove_editor_agent_endpoint(index)
+    }
+
+    pub fn select_editor_agent_endpoint(&mut self, index: usize) -> bool {
+        self.editor.select_editor_agent_endpoint(index)
+    }
+
+    pub fn set_editor_agent_endpoint_type(&mut self, index: usize, value: &str) -> bool {
+        self.editor.set_editor_agent_endpoint_type(index, value)
+    }
+
+    pub fn move_editor_agent_endpoint(&mut self, index: usize, direction: i8) -> bool {
+        self.editor.move_editor_agent_endpoint(index, direction)
+    }
+
+    pub fn toggle_editor_agent_allowlist_fingerprint(&mut self, fingerprint: &str) -> bool {
+        self.editor
+            .toggle_editor_agent_allowlist_fingerprint(fingerprint)
     }
 
     pub fn set_editor_telnet_tab(&mut self, tab: ConnectionEditorTelnetTab) -> bool {
@@ -1125,9 +1274,12 @@ impl ConnectionFeatureState {
     pub fn clear_editor_fields(&mut self) {
         self.editor.fields.clear();
         self.editor.field_subscriptions.clear();
+        self.editor.forwarding_endpoint_fields.clear();
+        self.editor.forwarding_endpoint_field_subscriptions.clear();
     }
 
     pub fn finish_editor_save(&mut self, connection_id: String, group_id: Option<String>) {
+        self.editor.agent_identity_picker_open = false;
         clear_connection_editor_runtime_state(
             &mut self.editor.draft,
             &mut self.editor.icon_picker_open,
@@ -1431,6 +1583,8 @@ impl ConnectionEditorFeatureState {
     pub fn begin_edit(&mut self, draft: ConnectionEditorState) {
         self.icon_picker_open = false;
         self.group_select_open = false;
+        self.agent_identity_picker_open = false;
+        self.agent_preview_generation = self.agent_preview_generation.wrapping_add(1);
         self.group_select_trigger_bounds = None;
         self.draft = Some(draft);
     }
@@ -1449,6 +1603,10 @@ impl ConnectionEditorFeatureState {
 
     pub fn group_select_is_open(&self) -> bool {
         self.group_select_open
+    }
+
+    pub fn agent_identity_picker_is_open(&self) -> bool {
+        self.agent_identity_picker_open
     }
 
     pub fn group_select_trigger_bounds(&self) -> Option<Bounds<Pixels>> {
@@ -1514,6 +1672,14 @@ impl ConnectionEditorFeatureState {
             self.close_group_select();
         }
         self.icon_picker_open = open;
+        true
+    }
+
+    pub fn set_agent_identity_picker_open(&mut self, open: bool) -> bool {
+        if self.agent_identity_picker_open == open {
+            return false;
+        }
+        self.agent_identity_picker_open = open;
         true
     }
 
@@ -1598,6 +1764,30 @@ impl ConnectionEditorFeatureState {
         move_connection_editor_ssh_algorithm(&mut self.draft, tab, id, direction)
     }
 
+    pub fn add_editor_agent_endpoint(&mut self) -> bool {
+        add_connection_editor_agent_endpoint(&mut self.draft)
+    }
+
+    pub fn remove_editor_agent_endpoint(&mut self, index: usize) -> bool {
+        remove_connection_editor_agent_endpoint(&mut self.draft, index)
+    }
+
+    pub fn select_editor_agent_endpoint(&mut self, index: usize) -> bool {
+        select_connection_editor_agent_endpoint(&mut self.draft, index)
+    }
+
+    pub fn set_editor_agent_endpoint_type(&mut self, index: usize, value: &str) -> bool {
+        set_connection_editor_agent_endpoint_type(&mut self.draft, index, value)
+    }
+
+    pub fn move_editor_agent_endpoint(&mut self, index: usize, direction: i8) -> bool {
+        move_connection_editor_agent_endpoint(&mut self.draft, index, direction)
+    }
+
+    pub fn toggle_editor_agent_allowlist_fingerprint(&mut self, fingerprint: &str) -> bool {
+        toggle_connection_editor_agent_allowlist_fingerprint(&mut self.draft, fingerprint)
+    }
+
     pub fn set_telnet_tab(&mut self, tab: ConnectionEditorTelnetTab) -> bool {
         let changed = set_connection_editor_telnet_tab(&mut self.draft, tab);
         if changed {
@@ -1658,6 +1848,8 @@ impl ConnectionEditorFeatureState {
     }
 
     pub fn close(&mut self) {
+        self.agent_identity_picker_open = false;
+        self.agent_preview_generation = self.agent_preview_generation.wrapping_add(1);
         clear_connection_editor_runtime_state(
             &mut self.draft,
             &mut self.icon_picker_open,

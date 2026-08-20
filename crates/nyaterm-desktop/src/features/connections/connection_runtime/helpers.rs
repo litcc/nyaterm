@@ -2,9 +2,10 @@ use gpui::Context;
 use nyaterm_core::{
     AiExecutionProfile, ConnectionAuth, ConnectionNetwork, ConnectionPostLogin, ConnectionType,
     RdpClipboardSettings, RdpDisplaySettings, RdpReconnectSettings, RdpSecuritySettings,
-    SavedConnection, SftpCwdFollowMode, SftpSettings, SshAlgorithmMode, SshAlgorithmPreferences,
-    TelnetAutoLoginConfig, VncClipboardSettings, VncDisplaySettings, VncReconnectSettings,
-    VncSecuritySettings, uuid,
+    SavedConnection, SftpCwdFollowMode, SftpSettings, SshAgentEndpointValidationError,
+    SshAgentForwardingConfig, SshAlgorithmMode, SshAlgorithmPreferences, TelnetAutoLoginConfig,
+    VncClipboardSettings, VncDisplaySettings, VncReconnectSettings, VncSecuritySettings, uuid,
+    validate_ssh_agent_endpoint, validate_ssh_agent_forwarding_config,
 };
 use nyaterm_store::{StoreDomain, store_request};
 
@@ -30,6 +31,7 @@ pub(super) enum ConnectionEditorValidationError {
     PostLoginCommandRequired,
     PostLoginDelayInvalid,
     SftpShellDetectionTimeoutInvalid,
+    SshAgentEndpoint(SshAgentEndpointValidationError),
     SshAlgorithms(nyaterm_transport::SshAlgorithmValidationError),
 }
 
@@ -102,7 +104,11 @@ pub(super) fn connection_editor_from_saved(
         proxy_jump_id: network.proxy_jump_id,
         x11_forwarding: false,
         agent_endpoint: Default::default(),
-        agent_forwarding: false,
+        agent_forwarding_config: SshAgentForwardingConfig::default(),
+        agent_allow_all_confirmed: false,
+        agent_forwarding_endpoint_index: 0,
+        agent_preview: None,
+        agent_preview_loading: false,
         backspace_mode: "del".to_string(),
         encoding: "global".to_string(),
         ssh_profile: connection.ssh_profile,
@@ -172,8 +178,8 @@ pub(super) fn connection_editor_from_saved(
             username,
             backspace_mode,
             x11_forwarding,
-            agent_endpoint,
-            agent_forwarding,
+            auth_agent_endpoint,
+            agent_forwarding_config,
             encoding,
             ..
         } => {
@@ -182,8 +188,16 @@ pub(super) fn connection_editor_from_saved(
             editor.username = username;
             editor.backspace_mode = backspace_mode;
             editor.x11_forwarding = x11_forwarding;
-            editor.agent_endpoint = agent_endpoint;
-            editor.agent_forwarding = agent_forwarding;
+            // Preserve foreign-platform endpoints so editing unrelated fields
+            // on another device does not erase the original Agent settings.
+            editor.agent_endpoint = auth_agent_endpoint.unwrap_or_default();
+            editor.agent_forwarding_config = agent_forwarding_config.unwrap_or_default();
+            editor.agent_allow_all_confirmed = editor.agent_forwarding_config.enabled
+                && matches!(
+                    editor.agent_forwarding_config.policy,
+                    nyaterm_core::SshAgentForwardingPolicy::All
+                );
+            editor.agent_forwarding_endpoint_index = 0;
             editor.encoding = encoding_to_editor_value(&encoding);
         }
         ConnectionType::LocalTerminal {
@@ -356,8 +370,12 @@ pub(super) fn build_saved_connection_from_editor(
                 backspace_mode: non_empty_or(editor.backspace_mode.clone(), "del"),
                 ai_execution_profile: AiExecutionProfile::Auto,
                 x11_forwarding: editor.x11_forwarding,
-                agent_endpoint: editor.agent_endpoint.clone(),
-                agent_forwarding: editor.agent_forwarding,
+                auth_agent_endpoint: (editor.auth_mode == "agent")
+                    .then(|| editor.agent_endpoint.clone()),
+                agent_forwarding_config: (editor.agent_forwarding_config
+                    != nyaterm_core::SshAgentForwardingConfig::default())
+                .then(|| editor.agent_forwarding_config.clone()),
+                legacy_agent_forwarding: None,
                 encoding: editor_encoding_to_saved(&editor.encoding),
             }
         }
@@ -505,6 +523,14 @@ pub(super) fn build_saved_connection_from_editor(
     };
 
     if editor.kind == ConnectionKindTab::Ssh {
+        // Endpoint drafts are used only by Agent authentication or forwarding.
+        // Hidden values left after changing auth mode must not block saving.
+        if editor.auth_mode == "agent" || editor.agent_forwarding_config.enabled {
+            validate_ssh_agent_endpoint(&editor.agent_endpoint)
+                .map_err(ConnectionEditorValidationError::SshAgentEndpoint)?;
+        }
+        validate_ssh_agent_forwarding_config(&editor.agent_forwarding_config)
+            .map_err(ConnectionEditorValidationError::SshAgentEndpoint)?;
         if editor.post_login_enabled && editor.post_login_command.trim().is_empty() {
             return Err(ConnectionEditorValidationError::PostLoginCommandRequired);
         }
@@ -550,6 +576,7 @@ pub(super) fn build_saved_connection_from_editor(
             let existing = editor.existing_password.clone();
             let mode = match editor.auth_mode.as_str() {
                 "password" => "password".to_string(),
+                "agent" if editor.kind == ConnectionKindTab::Ssh => "agent".to_string(),
                 "key"
                     if editor.kind == ConnectionKindTab::Ssh
                         && editor
@@ -755,7 +782,7 @@ mod tests {
         AiExecutionProfile, ConnectionAuth, ConnectionRecordingSettings, ConnectionType,
         RdpClipboardSettings, RdpDisplaySettings, RdpReconnectSettings, RdpSecuritySettings,
         RecordingMode, RecordingRotationPolicy, SavedConnection, SftpCwdFollowMode, SftpSettings,
-        SshAlgorithmMode, SshAlgorithmPreferences, SshProfile, SshTerminalType,
+        SshAgentEndpoint, SshAlgorithmMode, SshAlgorithmPreferences, SshProfile, SshTerminalType,
         VncClipboardSettings, VncDisplaySettings, VncReconnectSettings, VncSecuritySettings,
     };
 
@@ -814,8 +841,9 @@ mod tests {
                 backspace_mode: "del".to_string(),
                 ai_execution_profile: AiExecutionProfile::Auto,
                 x11_forwarding: false,
-                agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                auth_agent_endpoint: None,
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
                 encoding: String::new(),
             },
             group_id: None,
@@ -855,6 +883,123 @@ mod tests {
     }
 
     #[test]
+    fn connection_editor_round_trip_preserves_ssh_agent_authentication() {
+        let expected_endpoint = if cfg!(unix) {
+            SshAgentEndpoint::WindowsOpenSsh
+        } else {
+            SshAgentEndpoint::Auto
+        };
+        let connection = SavedConnection {
+            id: "connection-agent".to_string(),
+            name: "Agent SSH".to_string(),
+            config: ConnectionType::Ssh {
+                host: "example.com".to_string(),
+                port: 22,
+                username: "root".to_string(),
+                backspace_mode: "del".to_string(),
+                ai_execution_profile: AiExecutionProfile::Auto,
+                x11_forwarding: false,
+                auth_agent_endpoint: Some(expected_endpoint.clone()),
+                agent_forwarding_config: Some(nyaterm_core::SshAgentForwardingConfig {
+                    enabled: true,
+                    sources: nyaterm_core::SshAgentForwardingSources {
+                        external_agent: true,
+                        external_agent_endpoints: vec![expected_endpoint.clone()],
+                        stored_keys: false,
+                    },
+                    policy: nyaterm_core::SshAgentForwardingPolicy::All,
+                }),
+                legacy_agent_forwarding: None,
+                encoding: String::new(),
+            },
+            group_id: None,
+            description: None,
+            sort_order: 0,
+            icon: None,
+            icon_auto_detect: None,
+            auth: Some(ConnectionAuth {
+                mode: "agent".to_string(),
+                ..ConnectionAuth::default()
+            }),
+            recording: None,
+            ssh_algorithms: None,
+            ssh_profile: Default::default(),
+            terminal_type: None,
+            sftp: Default::default(),
+            network: None,
+            post_login: None,
+            created_at_ms: None,
+            updated_at_ms: None,
+            last_used_at_ms: None,
+        };
+
+        let editor = connection_editor_from_saved(connection, false);
+        assert_eq!(editor.auth_mode, "agent");
+        assert!(editor.agent_forwarding_config.enabled);
+        assert_eq!(editor.agent_endpoint, expected_endpoint);
+        let saved = build_saved_connection_from_editor(&editor).expect("valid Agent connection");
+        assert_eq!(saved.auth.as_ref().expect("auth settings").mode, "agent");
+        assert!(matches!(
+            saved.config,
+            ConnectionType::Ssh {
+                auth_agent_endpoint: Some(agent_endpoint),
+                ..
+            } if agent_endpoint == expected_endpoint
+        ));
+    }
+
+    #[test]
+    fn connection_editor_rejects_invalid_ssh_agent_endpoint_before_save() {
+        let connection = SavedConnection {
+            id: "connection-agent-invalid".to_string(),
+            name: "Agent SSH".to_string(),
+            config: ConnectionType::Ssh {
+                host: "example.com".to_string(),
+                port: 22,
+                username: "root".to_string(),
+                backspace_mode: "del".to_string(),
+                ai_execution_profile: AiExecutionProfile::Auto,
+                x11_forwarding: false,
+                auth_agent_endpoint: Some(SshAgentEndpoint::Auto),
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
+                encoding: String::new(),
+            },
+            group_id: None,
+            description: None,
+            sort_order: 0,
+            icon: None,
+            icon_auto_detect: None,
+            auth: Some(ConnectionAuth {
+                mode: "agent".to_string(),
+                ..ConnectionAuth::default()
+            }),
+            recording: None,
+            ssh_algorithms: None,
+            ssh_profile: Default::default(),
+            terminal_type: None,
+            sftp: Default::default(),
+            network: None,
+            post_login: None,
+            created_at_ms: None,
+            updated_at_ms: None,
+            last_used_at_ms: None,
+        };
+        let mut editor = connection_editor_from_saved(connection, false);
+        editor.agent_endpoint = SshAgentEndpoint::Environment {
+            variable: "SSH=AUTH_SOCK".to_string(),
+        };
+        assert!(matches!(
+            build_saved_connection_from_editor(&editor),
+            Err(ConnectionEditorValidationError::SshAgentEndpoint(_))
+        ));
+
+        // A hidden endpoint draft must not block password authentication.
+        editor.auth_mode = "password".to_string();
+        assert!(build_saved_connection_from_editor(&editor).is_ok());
+    }
+
+    #[test]
     fn connection_editor_round_trip_preserves_ssh_encoding_sftp_and_algorithms() {
         let connection = SavedConnection {
             id: "connection-ssh".to_string(),
@@ -866,8 +1011,9 @@ mod tests {
                 backspace_mode: "del".to_string(),
                 ai_execution_profile: AiExecutionProfile::Auto,
                 x11_forwarding: false,
-                agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                auth_agent_endpoint: None,
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
                 encoding: "GBK".to_string(),
             },
             group_id: None,
@@ -1339,6 +1485,8 @@ pub(in crate::features) enum ConnectionEditorToggle {
     AutoFillOtp,
     X11,
     AgentForwarding,
+    AgentExternal,
+    AgentStoredKeys,
     SftpEnabled,
     RawTcp,
     LocalEcho,

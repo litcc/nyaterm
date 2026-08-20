@@ -10,7 +10,7 @@ use gpui::{
 
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{SshAlgorithmOption, SshAlgorithmRisk};
-use nyaterm_ui::{NyaCheckbox, NyaScrollable, NyaTabItem, NyaTabs, NyaTooltip};
+use nyaterm_ui::{NyaCheckbox, NyaScrollable, NyaSelect, NyaTabItem, NyaTabs, NyaTooltip};
 
 use crate::features::{NyaTermApp, connections::ConnectionEditorToggle};
 use crate::models::{
@@ -19,8 +19,9 @@ use crate::models::{
 };
 
 use super::super::super::list::{
-    ConnectionEditorChoice, ConnectionEditorRenderContext, connection_editor_select, editor_field,
-    editor_stepper_field, required, toggle_chip,
+    ConnectionEditorChoice, ConnectionEditorRenderContext, EDITOR_CONTROL_HEIGHT_PX,
+    connection_editor_select, editor_field, editor_stepper_field, forwarding_endpoint_editor_field,
+    required, toggle_chip,
 };
 
 use super::ConnectionEditorSectionContext;
@@ -313,18 +314,21 @@ pub(super) fn connection_editor_ssh_section(
             NyaTabItem::new(tr("dialog.proxySelect")),
             NyaTabItem::new(tr("dialog.proxyJump")),
             NyaTabItem::new(tr("dialog.twoFactorAuth")),
+            NyaTabItem::new(tr("dialog.sshAgentForwardingTab")),
         ])
         .selected_index(match editor.advanced_network_tab {
             ConnectionEditorAdvancedTab::Proxy => 0,
             ConnectionEditorAdvancedTab::JumpHost => 1,
             ConnectionEditorAdvancedTab::TwoFactor => 2,
+            ConnectionEditorAdvancedTab::AgentForwarding => 3,
             _ => 0,
         })
         .on_select(cx.listener(|this, index, _, cx| {
             let tab = match *index {
                 0 => ConnectionEditorAdvancedTab::Proxy,
                 1 => ConnectionEditorAdvancedTab::JumpHost,
-                _ => ConnectionEditorAdvancedTab::TwoFactor,
+                2 => ConnectionEditorAdvancedTab::TwoFactor,
+                _ => ConnectionEditorAdvancedTab::AgentForwarding,
             };
             this.set_connection_editor_advanced_tab(tab, cx);
         }));
@@ -484,55 +488,53 @@ pub(super) fn connection_editor_ssh_section(
             )
         })
         .when(editor.auth_mode == "agent", |this| {
-            let endpoint_values = [
-                "auto",
-                "environment",
-                "unix_socket",
-                "windows_openssh",
-                "pageant",
-            ];
-            let selected_endpoint = match &editor.agent_endpoint {
-                nyaterm_core::SshAgentEndpoint::Environment { .. } => 1,
-                nyaterm_core::SshAgentEndpoint::UnixSocket { .. } => 2,
-                nyaterm_core::SshAgentEndpoint::WindowsOpenSsh => 3,
-                nyaterm_core::SshAgentEndpoint::Pageant => 4,
-                nyaterm_core::SshAgentEndpoint::Auto => 0,
-            };
-            let endpoint_tabs = NyaTabs::new("connection-ssh-agent-endpoint-tabs")
-                .items([
-                    NyaTabItem::new(tr("dialog.sshAgentAuto")),
-                    NyaTabItem::new("SSH_AUTH_SOCK"),
-                    NyaTabItem::new(tr("dialog.sshAgentUnixSocket")),
-                    NyaTabItem::new("Windows OpenSSH"),
-                    NyaTabItem::new("Pageant"),
-                ])
-                .selected_index(selected_endpoint)
-                .on_select(cx.listener(move |this, index: &usize, _, cx| {
-                    if let Some(value) = endpoint_values.get(*index) {
-                        this.set_connection_editor_select_value(
-                            ConnectionEditorSelect::SshAgentEndpoint,
-                            Some(value),
-                            cx,
-                        );
-                    }
-                }));
             this.child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_2()
                     .px_3()
-                    .py_2()
+                    .py_3()
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
                     .child(
                         div()
-                            .text_size(px(10.))
-                            .text_color(rgb(palette.text_muted))
-                            .child(tr("dialog.sshAgentDescription")),
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight(600.))
+                                            .text_color(rgb(palette.text))
+                                            .child(tr("dialog.sshAgentEndpoint")),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(rgb(palette.text_muted))
+                                            .child(tr("dialog.sshAgentAuthDesc")),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w(px(176.))
+                                    .flex_none()
+                                    .h(px(EDITOR_CONTROL_HEIGHT_PX))
+                                    .child(NyaSelect::new(
+                                        &fields.select(ConnectionEditorSelect::SshAgentEndpoint),
+                                    )),
+                            ),
                     )
-                    .child(endpoint_tabs)
                     .when(
                         matches!(
                             editor.agent_endpoint,
@@ -562,18 +564,7 @@ pub(super) fn connection_editor_ssh_section(
                                 cx,
                             ))
                         },
-                    )
-                    .child(toggle_chip(
-                        palette,
-                        tr("dialog.sshAgentForwarding"),
-                        editor.agent_forwarding,
-                        cx.listener(|this, _, _, cx| {
-                            this.toggle_connection_editor_flag(
-                                ConnectionEditorToggle::AgentForwarding,
-                                cx,
-                            );
-                        }),
-                    )),
+                    ),
             )
         })
         .when(
@@ -698,6 +689,425 @@ pub(super) fn connection_editor_ssh_section(
                                         }),
                                     )),
                             ))
+                        },
+                    )
+                    .when(
+                        editor.advanced_network_tab == ConnectionEditorAdvancedTab::AgentForwarding,
+                        |this| {
+                            let endpoints = &editor
+                                .agent_forwarding_config
+                                .sources
+                                .external_agent_endpoints;
+                            let endpoint_rows = div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .children(endpoints.iter().enumerate().map(|(index, endpoint)| {
+                                    let remove = cx.listener(move |this, _, _, cx| {
+                                        this.remove_connection_editor_agent_endpoint(index, cx);
+                                    });
+                                    let move_up = cx.listener(move |this, _, _, cx| {
+                                        this.move_connection_editor_agent_endpoint(index, -1, cx);
+                                    });
+                                    let move_down = cx.listener(move |this, _, _, cx| {
+                                        this.move_connection_editor_agent_endpoint(index, 1, cx);
+                                    });
+                                    let select_endpoint = cx.listener(move |this, _, _, cx| {
+                                        this.select_connection_editor_agent_endpoint(index, cx);
+                                    });
+                                    div()
+                                        .id(SharedString::from(format!(
+                                            "connection-agent-endpoint-{index}"
+                                        )))
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .border_1()
+                                        .border_color(rgb(palette.border))
+                                        .rounded_md()
+                                        .p_2()
+                                        .on_click(select_endpoint)
+                                        .child(
+                                            div()
+                                                .items_center()
+                                                .flex()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .flex_1()
+                                                        .h(px(EDITOR_CONTROL_HEIGHT_PX))
+                                                        .child(NyaSelect::new(
+                                                            &fields.forwarding_endpoint_select(index),
+                                                        )),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_none()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap_1()
+                                                        .child(
+                                                            div()
+                                                                .id(format!(
+                                                                    "connection-agent-up-{index}"
+                                                                ))
+                                                                .px_2()
+                                                                .py_1()
+                                                                .text_xs()
+                                                                .cursor_pointer()
+                                                                .child("↑")
+                                                                .on_click(move_up),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .id(format!(
+                                                                    "connection-agent-down-{index}"
+                                                                ))
+                                                                .px_2()
+                                                                .py_1()
+                                                                .text_xs()
+                                                                .cursor_pointer()
+                                                                .child("↓")
+                                                                .on_click(move_down),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .id(format!(
+                                                                    "connection-agent-remove-{index}"
+                                                                ))
+                                                                .px_2()
+                                                                .py_1()
+                                                                .text_xs()
+                                                                .cursor_pointer()
+                                                                .child("×")
+                                                                .on_click(remove),
+                                                        ),
+                                                ),
+                                        )
+                                        .when(
+                                            matches!(
+                                                endpoint,
+                                                nyaterm_core::SshAgentEndpoint::Environment { .. }
+                                            ),
+                                            |this| {
+                                                this.child(forwarding_endpoint_editor_field(
+                                                    palette,
+                                                    tr("dialog.sshAgentEnvironmentVariable"),
+                                                    index,
+                                                    ConnectionEditorField::AgentForwardingEnvironmentVariable,
+                                                    fields,
+                                                    cx,
+                                                ))
+                                            },
+                                        )
+                                        .when(
+                                            matches!(
+                                                endpoint,
+                                                nyaterm_core::SshAgentEndpoint::UnixSocket { .. }
+                                            ),
+                                            |this| {
+                                                this.child(forwarding_endpoint_editor_field(
+                                                    palette,
+                                                    tr("dialog.sshAgentSocketPath"),
+                                                    index,
+                                                    ConnectionEditorField::AgentForwardingSocketPath,
+                                                    fields,
+                                                    cx,
+                                                ))
+                                            },
+                                        )
+                                }));
+                            let add_endpoint = cx.listener(|this, _, _, cx| {
+                                this.add_connection_editor_agent_endpoint(cx);
+                            });
+                            let allowlist_fingerprints = match &editor.agent_forwarding_config.policy {
+                                nyaterm_core::SshAgentForwardingPolicy::Allowlist { fingerprints } => {
+                                    fingerprints.clone()
+                                }
+                                nyaterm_core::SshAgentForwardingPolicy::All => Vec::new(),
+                            };
+                            let allowlist_mode = matches!(
+                                editor.agent_forwarding_config.policy,
+                                nyaterm_core::SshAgentForwardingPolicy::Allowlist { .. }
+                            );
+                            let external_agent = editor.agent_forwarding_config.sources.external_agent;
+                            let stored_keys = editor.agent_forwarding_config.sources.stored_keys;
+                            let allowlist_count = allowlist_fingerprints.len();
+                            let can_choose_identity = external_agent || stored_keys;
+                            let mut choose_identity = div()
+                                .id("connection-agent-choose-identity")
+                                .h(px(32.))
+                                .px_3()
+                                .rounded_sm()
+                                .border_1()
+                                .border_color(rgb(palette.border))
+                                .bg(rgb(palette.input))
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .text_xs()
+                                .font_weight(FontWeight(600.))
+                                .text_color(rgb(palette.text))
+                                .child(
+                                    svg()
+                                        .size(px(14.))
+                                        .path("icons/settings.svg")
+                                        .text_color(rgb(palette.text_muted)),
+                                )
+                                .child(tr("dialog.sshAgentManageAllowlist"));
+                            if can_choose_identity {
+                                choose_identity = choose_identity
+                                    .cursor_pointer()
+                                    .hover(|this| this.bg(rgb(palette.hover)))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.set_connection_editor_agent_identity_picker_open(true, cx);
+                                        this.refresh_connection_editor_agent_preview(cx);
+                                    }));
+                            } else {
+                                choose_identity = choose_identity.opacity(0.5);
+                            }
+                            this.child(
+                                div()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(rgb(palette.border))
+                                    .bg(rgb(palette.bg))
+                                    .p_3()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_3()
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_start()
+                                            .justify_between()
+                                            .gap_3()
+                                            .child(
+                                                div()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_1()
+                                                    .child(
+                                                        div()
+                                                            .text_sm()
+                                                            .font_weight(FontWeight(600.))
+                                                            .text_color(rgb(palette.text))
+                                                            .child(tr("dialog.sshAgentForwarding")),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(rgb(palette.text_muted))
+                                                            .child(tr("dialog.sshAgentForwardingDescription")),
+                                                    ),
+                                            )
+                                            .child(crate::features::pages::settings::settings_switch(
+                                                palette,
+                                                "connection-agent-forwarding-switch",
+                                                editor.agent_forwarding_config.enabled,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.toggle_connection_editor_flag(
+                                                        ConnectionEditorToggle::AgentForwarding,
+                                                        cx,
+                                                    );
+                                                }),
+                                            )),
+                                    )
+                                    .when(editor.agent_forwarding_config.enabled, |this| {
+                                        this.child(
+                                            div()
+                                                .border_t_1()
+                                            .border_color(rgb(palette.border))
+                                            .pt_3()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight(600.))
+                                                    .text_color(rgb(palette.text))
+                                                    .child(tr("dialog.sshAgentForwardingSources")),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .gap_3()
+                                                    .child(
+                                                        div()
+                                                            .min_w_0()
+                                                            .text_xs()
+                                                            .text_color(rgb(palette.text))
+                                                            .child(format!(
+                                                                "{} ({})",
+                                                                tr("dialog.sshAgentExternalSource"),
+                                                                tr("dialog.sshAgentEndpointList"),
+                                                            )),
+                                                    )
+                                                    .child(crate::features::pages::settings::settings_switch(
+                                                        palette,
+                                                        "connection-agent-external-switch",
+                                                        external_agent,
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.toggle_connection_editor_flag(
+                                                                ConnectionEditorToggle::AgentExternal,
+                                                                cx,
+                                                            );
+                                                        }),
+                                                    )),
+                                            )
+                                            .when(external_agent, |this| {
+                                                this.child(
+                                                    div()
+                                                        .rounded_sm()
+                                                        .border_1()
+                                                        .border_color(rgb(palette.border))
+                                                        .bg(rgb(palette.surface))
+                                                        .p_2()
+                                                        .flex()
+                                                        .flex_col()
+                                                        .gap_2()
+                                                        .child(
+                                                            div()
+                                                                .flex()
+                                                                .items_start()
+                                                                .justify_between()
+                                                                .gap_2()
+                                                                .child(
+                                                                    div()
+                                                                        .min_w_0()
+                                                                        .flex_1()
+                                                                        .text_xs()
+                                                                        .text_color(rgb(palette.text_muted))
+                                                                        .child(tr("dialog.sshAgentEndpointListDescription")),
+                                                                )
+                                                                .child(
+                                                                    div()
+                                                                        .id("connection-agent-add-endpoint")
+                                                                        .px_2()
+                                                                        .py_1()
+                                                                        .rounded_sm()
+                                                                        .border_1()
+                                                                        .border_color(rgb(palette.border))
+                                                                        .text_xs()
+                                                                        .text_color(rgb(palette.text))
+                                                                        .cursor_pointer()
+                                                                        .hover(|this| this.bg(rgb(palette.hover)))
+                                                                        .child(tr("dialog.sshAgentAddEndpoint"))
+                                                                        .on_click(add_endpoint),
+                                                                ),
+                                                        )
+                                                        .when(endpoints.is_empty(), |this| {
+                                                            this.child(
+                                                                div()
+                                                                    .rounded_sm()
+                                                                    .border_1()
+                                                                    .border_color(rgb(palette.border))
+                                                                    .px_2()
+                                                                    .py_2()
+                                                                    .text_xs()
+                                                                    .text_color(rgb(palette.text_muted))
+                                                                    .child(tr("dialog.sshAgentEndpointListEmpty")),
+                                                            )
+                                                        })
+                                                        .child(endpoint_rows),
+                                                )
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .gap_3()
+                                                    .child(
+                                                        div()
+                                                            .min_w_0()
+                                                            .text_xs()
+                                                            .text_color(rgb(palette.text))
+                                                            .child(tr("dialog.sshAgentStoredKeysSource")),
+                                                    )
+                                                    .child(crate::features::pages::settings::settings_switch(
+                                                        palette,
+                                                        "connection-agent-stored-keys-switch",
+                                                        stored_keys,
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.toggle_connection_editor_flag(
+                                                                ConnectionEditorToggle::AgentStoredKeys,
+                                                                cx,
+                                                            );
+                                                        }),
+                                                    )),
+                                            ),
+                                        )
+                                    .child(
+                                        div()
+                                            .border_t_1()
+                                            .border_color(rgb(palette.border))
+                                            .pt_3()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight(600.))
+                                                    .text_color(rgb(palette.text))
+                                                    .child(tr("dialog.sshAgentForwardingPolicy")),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(190.))
+                                                    .child(connection_editor_select(
+                                                        ConnectionEditorRenderContext { palette, fields, cx },
+                                                        "connection-editor-ssh-agent-policy",
+                                                        "",
+                                                        ConnectionEditorSelect::SshAgentForwardingPolicy,
+                                                    )),
+                                            )
+                                            .when(allowlist_mode, |this| {
+                                                this.child(
+                                                    div()
+                                                        .flex()
+                                                        .flex_col()
+                                                        .gap_2()
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(if allowlist_count == 0 {
+                                                                    rgb(palette.warning)
+                                                                } else {
+                                                                    rgb(palette.text_muted)
+                                                                })
+                                                                .child(if allowlist_count == 0 {
+                                                                    tr("dialog.sshAgentAllowlistEmpty")
+                                                                        .to_string()
+                                                                } else {
+                                                                    format!(
+                                                                        "{} {}",
+                                                                        allowlist_count,
+                                                                        tr("dialog.sshAgentAllowlistCount"),
+                                                                    )
+                                                                }),
+                                                        )
+                                                        .child(choose_identity),
+                                                )
+                                            })
+                                    )
+                                })
+                                    .child(
+                                        div()
+                                            .border_t_1()
+                                            .border_color(rgb(palette.border))
+                                            .pt_3()
+                                            .text_xs()
+                                            .text_color(rgb(palette.warning))
+                                            .child(tr("dialog.sshAgentForwardingWarning")),
+                                    ),
+                            )
                         },
                     )
                     .child(behavior_tabs)

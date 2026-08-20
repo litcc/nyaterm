@@ -18,8 +18,8 @@ use gpui::{
 };
 use nyaterm_core::{ConnectionType, Group, SavedConnection, natural_compare, truncate_preview};
 use nyaterm_ui::{
-    NyaInput, NyaPopover, NyaScrollArea, NyaScrollable, NyaSelectOption, NyaSelectState,
-    NyaTabItem, NyaTabs,
+    NyaCheckbox, NyaInput, NyaPopover, NyaScrollArea, NyaScrollable, NyaSelectOption,
+    NyaSelectState, NyaTabItem, NyaTabs,
 };
 
 use self::local::connection_editor_local_section;
@@ -77,25 +77,7 @@ impl NyaTermApp {
         placeholder: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) -> Entity<NyaSelectState> {
-        let options = choices
-            .iter()
-            .map(|choice| {
-                let mut option = NyaSelectOption::new(
-                    choice
-                        .value
-                        .clone()
-                        .unwrap_or_else(|| NO_SELECTION_VALUE.to_string()),
-                    choice.label.clone(),
-                );
-                if let Some(search_text) = choice.search_text.as_ref() {
-                    option = option.search_text(search_text.clone());
-                }
-                if let Some(subtitle) = choice.subtitle.as_ref() {
-                    option = option.subtitle(subtitle.clone());
-                }
-                option
-            })
-            .collect::<Vec<_>>();
+        let options = Self::connection_editor_select_options(choices);
         let selected_value = choices.iter().find(|choice| choice.selected).map(|choice| {
             choice
                 .value
@@ -119,12 +101,112 @@ impl NyaTermApp {
         select
     }
 
+    fn connection_editor_select_options(
+        choices: &[ConnectionEditorChoice],
+    ) -> Vec<NyaSelectOption> {
+        choices
+            .iter()
+            .map(|choice| {
+                let mut option = NyaSelectOption::new(
+                    choice
+                        .value
+                        .clone()
+                        .unwrap_or_else(|| NO_SELECTION_VALUE.to_string()),
+                    choice.label.clone(),
+                );
+                if let Some(search_text) = choice.search_text.as_ref() {
+                    option = option.search_text(search_text.clone());
+                }
+                if let Some(subtitle) = choice.subtitle.as_ref() {
+                    option = option.subtitle(subtitle.clone());
+                }
+                option
+            })
+            .collect()
+    }
+
+    pub(super) fn ssh_agent_endpoint_value(
+        endpoint: &nyaterm_core::SshAgentEndpoint,
+    ) -> &'static str {
+        match endpoint {
+            nyaterm_core::SshAgentEndpoint::Auto => "auto",
+            nyaterm_core::SshAgentEndpoint::Environment { .. } => "environment",
+            nyaterm_core::SshAgentEndpoint::UnixSocket { .. } => "unix_socket",
+            nyaterm_core::SshAgentEndpoint::WindowsOpenSsh => "windows_openssh",
+            nyaterm_core::SshAgentEndpoint::Pageant => "pageant",
+        }
+    }
+
+    pub(super) fn ssh_agent_endpoint_choices(
+        language: &str,
+        endpoint: &nyaterm_core::SshAgentEndpoint,
+    ) -> Vec<ConnectionEditorChoice> {
+        let tr = |key: &'static str| crate::i18n::text(language, key);
+        let selected = Self::ssh_agent_endpoint_value(endpoint);
+        let mut choices = vec![ConnectionEditorChoice::new(
+            Some("auto".to_string()),
+            tr("dialog.sshAgentAuto"),
+            selected == "auto",
+        )];
+        if cfg!(unix) {
+            choices.extend([
+                ConnectionEditorChoice::new(
+                    Some("environment".to_string()),
+                    tr("dialog.sshAgentEnvironment"),
+                    selected == "environment",
+                ),
+                ConnectionEditorChoice::new(
+                    Some("unix_socket".to_string()),
+                    tr("dialog.sshAgentUnixSocket"),
+                    selected == "unix_socket",
+                ),
+            ]);
+        }
+        if cfg!(windows) {
+            choices.extend([
+                ConnectionEditorChoice::new(
+                    Some("windows_openssh".to_string()),
+                    tr("dialog.sshAgentWindowsOpenSsh"),
+                    selected == "windows_openssh",
+                ),
+                ConnectionEditorChoice::new(
+                    Some("pageant".to_string()),
+                    tr("dialog.sshAgentPageant"),
+                    selected == "pageant",
+                ),
+            ]);
+        }
+        if !nyaterm_core::ssh_agent_endpoint_supported_on_current_platform(endpoint) {
+            let label = match endpoint {
+                nyaterm_core::SshAgentEndpoint::Environment { .. } => {
+                    tr("dialog.sshAgentEnvironment")
+                }
+                nyaterm_core::SshAgentEndpoint::UnixSocket { .. } => {
+                    tr("dialog.sshAgentUnixSocket")
+                }
+                nyaterm_core::SshAgentEndpoint::Pageant => tr("dialog.sshAgentPageant"),
+                nyaterm_core::SshAgentEndpoint::WindowsOpenSsh => {
+                    tr("dialog.sshAgentWindowsOpenSsh")
+                }
+                nyaterm_core::SshAgentEndpoint::Auto => tr("dialog.sshAgentAuto"),
+            };
+            choices.push(ConnectionEditorChoice::new(
+                Some(selected.to_string()),
+                format!("{} ({})", label, tr("dialog.sshAgentUnavailableOnPlatform")),
+                true,
+            ));
+        }
+        choices
+    }
+
     fn connection_editor_surface(
         &mut self,
         editor: ConnectionEditorState,
         native_window: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.connection_state
+            .ensure_editor_forwarding_endpoint_fields(cx);
         let palette = self.theme_palette();
         let language = self.settings.summary().language.clone();
         let title = if editor.id.is_some() {
@@ -728,6 +810,26 @@ impl NyaTermApp {
                 )
             })
             .collect::<Vec<_>>();
+        let policy_options = [
+            ConnectionEditorChoice::new(
+                Some("allowlist".to_string()),
+                self.tr("dialog.sshAgentPolicyAllowlist"),
+                matches!(
+                    editor.agent_forwarding_config.policy,
+                    nyaterm_core::SshAgentForwardingPolicy::Allowlist { .. }
+                ),
+            ),
+            ConnectionEditorChoice::new(
+                Some("all".to_string()),
+                self.tr("dialog.sshAgentPolicyAll"),
+                matches!(
+                    editor.agent_forwarding_config.policy,
+                    nyaterm_core::SshAgentForwardingPolicy::All
+                ),
+            ),
+        ];
+        let ssh_agent_endpoint_options =
+            Self::ssh_agent_endpoint_choices(language.as_str(), &editor.agent_endpoint);
         let shell_label = match editor.shell_path.as_str() {
             "powershell.exe" => self.tr("dialog.shellPowerShell"),
             "cmd.exe" => self.tr("dialog.shellCmd"),
@@ -800,6 +902,16 @@ impl NyaTermApp {
                 ConnectionEditorSelect::SshAlgorithmMode,
                 ssh_algorithm_mode_options.as_slice(),
                 String::new(),
+            ),
+            (
+                ConnectionEditorSelect::SshAgentEndpoint,
+                ssh_agent_endpoint_options.as_slice(),
+                self.tr("dialog.sshAgentAuto").to_string(),
+            ),
+            (
+                ConnectionEditorSelect::SshAgentForwardingPolicy,
+                policy_options.as_slice(),
+                self.tr("dialog.sshAgentPolicyAllowlist").to_string(),
             ),
             (
                 ConnectionEditorSelect::SshProfile,
@@ -882,15 +994,43 @@ impl NyaTermApp {
                 self.connection_editor_select_entity(select_key, choices, placeholder, cx),
             );
         }
+        let forwarding_endpoint_selects = editor
+            .agent_forwarding_config
+            .sources
+            .external_agent_endpoints
+            .iter()
+            .enumerate()
+            .map(|(index, endpoint)| {
+                let choices = Self::ssh_agent_endpoint_choices(language.as_str(), endpoint);
+                let options = Self::connection_editor_select_options(&choices);
+                let selected_value = Some(Self::ssh_agent_endpoint_value(endpoint).to_string());
+                let select = self.select_entity(
+                    format!("connection-editor-ssh-agent-forwarding-endpoint-{index}"),
+                    options,
+                    selected_value,
+                    false,
+                    cx,
+                );
+                (index, select)
+            })
+            .collect();
+        let forwarding_endpoint_fields = self
+            .connection_state
+            .editor_forwarding_endpoint_fields()
+            .clone();
         let fields = ConnectionEditorFields::new(
             self.connection_state.editor_fields().clone(),
             self.connection_state.editor_number_fields().clone(),
             selects,
+            forwarding_endpoint_selects,
+            forwarding_endpoint_fields,
         );
         let icon_key = editor.icon.as_deref();
         let icon_def = resolve_connection_icon(icon_key, editor.kind.label());
         let icon_picker_open = self.connection_state.editor_icon_picker_is_open();
         let group_select_open = self.connection_state.editor_group_select_is_open();
+        let agent_identity_picker_open =
+            self.connection_state.editor_agent_identity_picker_is_open();
         let icon_picker_bg = if native_window {
             rgb(palette.surface)
         } else {
@@ -1257,20 +1397,27 @@ impl NyaTermApp {
                             )),
                     ),
             );
+        let surface = div()
+            .relative()
+            .w_full()
+            .when(native_window, |this| this.size_full())
+            .overflow_hidden()
+            .bg(rgb(palette.bg))
+            .child(card)
+            .when(agent_identity_picker_open, |this| {
+                this.child(connection_editor_agent_identity_picker(
+                    palette, &language, &editor, cx,
+                ))
+            });
         if native_window {
-            div()
-                .size_full()
-                .overflow_hidden()
-                .bg(rgb(palette.bg))
-                .child(card)
-                .into_any_element()
+            surface.into_any_element()
         } else {
             modal_dialog_shell(
                 palette,
                 self.shell_surface_color(palette.bg),
                 "connection-editor-modal",
                 560.,
-                card,
+                surface,
             )
             .into_any_element()
         }
@@ -1282,6 +1429,11 @@ impl NyaTermApp {
         connection_editor_select_keys()
             .into_iter()
             .any(|select| self.select_is_focused(connection_editor_select_id(select), window, cx))
+            || self.select_with_prefix_is_focused(
+                "connection-editor-ssh-agent-forwarding-endpoint-",
+                window,
+                cx,
+            )
     }
 
     fn connection_editor_select_menu_is_focused(
@@ -1291,11 +1443,289 @@ impl NyaTermApp {
     ) -> bool {
         connection_editor_select_keys().into_iter().any(|select| {
             self.select_menu_is_focused(connection_editor_select_id(select), window, cx)
-        })
+        }) || self.select_menu_with_prefix_is_focused(
+            "connection-editor-ssh-agent-forwarding-endpoint-",
+            window,
+            cx,
+        )
     }
 }
 
-fn connection_editor_select_keys() -> [ConnectionEditorSelect; 26] {
+fn connection_editor_agent_identity_picker(
+    palette: crate::theme::ThemePalette,
+    language: &str,
+    editor: &ConnectionEditorState,
+    cx: &mut Context<NyaTermApp>,
+) -> AnyElement {
+    let tr = |key: &'static str| crate::i18n::text(language, key);
+    let allowlist_fingerprints: &[String] = match &editor.agent_forwarding_config.policy {
+        nyaterm_core::SshAgentForwardingPolicy::Allowlist { fingerprints } => fingerprints,
+        nyaterm_core::SshAgentForwardingPolicy::All => &[],
+    };
+    let mut identity_list = div().flex().flex_col().gap_2();
+    if let Some(preview) = editor.agent_preview.as_ref() {
+        identity_list =
+            identity_list.child(div().text_xs().text_color(rgb(palette.text_muted)).child(
+                format!(
+                    "{} {}{}",
+                    preview.identities.len(),
+                    tr("dialog.sshAgentPreviewIdentityCount"),
+                    if preview.truncated {
+                        format!(" · {}", tr("dialog.sshAgentPreviewTruncated"))
+                    } else {
+                        String::new()
+                    }
+                ),
+            ));
+        for (index, identity) in preview.identities.iter().enumerate() {
+            let fingerprint = identity.fingerprint.clone();
+            let selected = allowlist_fingerprints
+                .iter()
+                .any(|value| value == &fingerprint);
+            let source = match identity.source.as_str() {
+                "external_agent" => tr("dialog.sshAgentExternalSource").to_string(),
+                "stored_key" => tr("dialog.sshAgentStoredKeysSource").to_string(),
+                _ => identity.source.clone(),
+            };
+            identity_list = identity_list.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "connection-agent-identity-picker-row-{index}"
+                    )))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(rgb(palette.border))
+                    .bg(rgb(palette.surface))
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .items_start()
+                    .gap_2()
+                    .child(
+                        NyaCheckbox::new(SharedString::from(format!(
+                            "connection-agent-identity-picker-checkbox-{index}"
+                        )))
+                        .checked(selected)
+                        .on_click(cx.listener(
+                            move |this, _: &bool, _, cx| {
+                                this.toggle_connection_editor_agent_allowlist_fingerprint(
+                                    &fingerprint,
+                                    cx,
+                                );
+                            },
+                        )),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight(600.))
+                                    .text_color(rgb(palette.text))
+                                    .child(if identity.comment.is_empty() {
+                                        "(anonymous)".to_string()
+                                    } else {
+                                        identity.comment.clone()
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .font_family(crate::features::shell::gpui_code_font_family())
+                                    .text_size(px(10.))
+                                    .text_color(rgb(palette.text_muted))
+                                    .child(identity.fingerprint.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.))
+                                    .text_color(rgb(palette.text_dimmed))
+                                    .child(source),
+                            ),
+                    ),
+            );
+        }
+        for (index, error) in preview.endpoint_errors.iter().enumerate() {
+            identity_list = identity_list.child(
+                div()
+                    .id(SharedString::from(format!(
+                        "connection-agent-identity-picker-error-{index}"
+                    )))
+                    .text_xs()
+                    .text_color(rgb(palette.warning))
+                    .child(format!(
+                        "{} #{}: {} ({})",
+                        tr("dialog.sshAgentPreviewError"),
+                        error.custom_endpoint_index + 1,
+                        error.endpoint_type,
+                        match error.code {
+                            nyaterm_transport::SshAgentEndpointPreviewErrorCode::ConnectFailed => {
+                                tr("dialog.sshAgentEndpointConnectFailed")
+                            }
+                            nyaterm_transport::SshAgentEndpointPreviewErrorCode::IdentityEnumerationFailed => {
+                                tr("dialog.sshAgentEndpointIdentityEnumerationFailed")
+                            }
+                        }
+                    )),
+            );
+        }
+        if preview.identities.is_empty() && preview.endpoint_errors.is_empty() {
+            identity_list = identity_list.child(
+                div()
+                    .py_4()
+                    .text_xs()
+                    .text_color(rgb(palette.text_muted))
+                    .text_center()
+                    .child(tr("dialog.sshAgentEndpointListEmpty")),
+            );
+        }
+    } else {
+        identity_list = identity_list.child(
+            div()
+                .py_6()
+                .text_xs()
+                .text_color(rgb(palette.text_muted))
+                .text_center()
+                .child(if editor.agent_preview_loading {
+                    tr("dialog.sshAgentPreviewLoading")
+                } else {
+                    tr("dialog.sshAgentPreviewRefresh")
+                }),
+        );
+    }
+
+    let refresh_label = if editor.agent_preview_loading {
+        tr("dialog.sshAgentPreviewLoading")
+    } else {
+        tr("dialog.sshAgentPreviewRefresh")
+    };
+    let picker_card = div()
+        .id("connection-agent-identity-picker-card")
+        .w(px(560.))
+        .max_w_full()
+        .max_h_full()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.bg))
+        .shadow_lg()
+        .p_4()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .flex_1()
+                        .text_lg()
+                        .font_weight(FontWeight(700.))
+                        .text_color(rgb(palette.text))
+                        .text_center()
+                        .child(tr("dialog.sshAgentIdentityPickerTitle")),
+                )
+                .child(
+                    div()
+                        .id("connection-agent-identity-picker-close")
+                        .size(px(28.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .text_lg()
+                        .text_color(rgb(palette.text_muted))
+                        .cursor_pointer()
+                        .hover(|this| this.bg(rgb(palette.hover)))
+                        .child("×")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_connection_editor_agent_identity_picker_open(false, cx);
+                        })),
+                ),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(rgb(palette.text_muted))
+                .text_center()
+                .child(tr("dialog.sshAgentIdentityPickerDescription")),
+        )
+        .child(
+            NyaScrollArea::new("connection-agent-identity-picker-list")
+                .max_h(px(320.))
+                .child(identity_list),
+        )
+        .child(
+            div()
+                .flex()
+                .gap_2()
+                .child(
+                    div()
+                        .id("connection-agent-identity-picker-refresh")
+                        .h(px(36.))
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(palette.border))
+                        .bg(rgb(palette.input))
+                        .text_sm()
+                        .text_color(if editor.agent_preview_loading {
+                            rgb(palette.text_muted)
+                        } else {
+                            rgb(palette.text)
+                        })
+                        .child(refresh_label)
+                        .when(!editor.agent_preview_loading, |this| {
+                            this.cursor_pointer()
+                                .hover(|this| this.bg(rgb(palette.hover)))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.refresh_connection_editor_agent_preview(cx);
+                                }))
+                        }),
+                )
+                .child(
+                    div()
+                        .id("connection-agent-identity-picker-done")
+                        .h(px(36.))
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .bg(rgb(palette.primary))
+                        .text_sm()
+                        .text_color(rgb(palette.on_primary))
+                        .cursor_pointer()
+                        .hover(|this| this.bg(rgb(palette.primary_hover)))
+                        .child(tr("dialog.sshAgentIdentityPickerDone"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.set_connection_editor_agent_identity_picker_open(false, cx);
+                        })),
+                ),
+        )
+        .into_any_element();
+
+    modal_dialog_shell(
+        palette,
+        rgb(palette.bg),
+        "connection-agent-identity-picker",
+        560.,
+        picker_card,
+    )
+    .into_any_element()
+}
+
+fn connection_editor_select_keys() -> [ConnectionEditorSelect; 28] {
     [
         ConnectionEditorSelect::Group,
         ConnectionEditorSelect::SavedPassword,
@@ -1308,6 +1738,8 @@ fn connection_editor_select_keys() -> [ConnectionEditorSelect; 26] {
         ConnectionEditorSelect::SftpCwdFollowMode,
         ConnectionEditorSelect::SftpFilenameEncoding,
         ConnectionEditorSelect::SshAlgorithmMode,
+        ConnectionEditorSelect::SshAgentEndpoint,
+        ConnectionEditorSelect::SshAgentForwardingPolicy,
         ConnectionEditorSelect::SshProfile,
         ConnectionEditorSelect::SshTerminalType,
         ConnectionEditorSelect::RdpCertificatePolicy,
@@ -1331,9 +1763,8 @@ fn connection_editor_select_id(select: ConnectionEditorSelect) -> &'static str {
         ConnectionEditorSelect::Authentication => {
             unreachable!("authentication uses connection-specific segmented tabs")
         }
-        ConnectionEditorSelect::SshAgentEndpoint => {
-            unreachable!("SSH Agent endpoint uses connection-specific segmented tabs")
-        }
+        ConnectionEditorSelect::SshAgentEndpoint => "connection-editor-ssh-agent-endpoint",
+        ConnectionEditorSelect::SshAgentForwardingPolicy => "connection-editor-ssh-agent-policy",
         ConnectionEditorSelect::Group => "connection-editor-group-select",
         ConnectionEditorSelect::SavedPassword => "connection-editor-saved-password",
         ConnectionEditorSelect::SshKey => "connection-editor-ssh-key",
@@ -1384,6 +1815,7 @@ fn connection_editor_select_search_placeholder(
         ConnectionEditorSelect::Otp => Some(app.tr("dialog.searchOtpEntries").to_string()),
         ConnectionEditorSelect::Proxy => Some(app.tr("network.searchProxies").to_string()),
         ConnectionEditorSelect::ProxyJump => Some(app.tr("network.searchConnections").to_string()),
+        ConnectionEditorSelect::SshAgentForwardingPolicy => None,
         _ => None,
     }
 }
@@ -2028,7 +2460,11 @@ mod tests {
             proxy_jump_id: None,
             x11_forwarding: false,
             agent_endpoint: Default::default(),
-            agent_forwarding: false,
+            agent_forwarding_config: Default::default(),
+            agent_allow_all_confirmed: false,
+            agent_forwarding_endpoint_index: 0,
+            agent_preview: None,
+            agent_preview_loading: false,
             backspace_mode: "del".to_string(),
             encoding: "global".to_string(),
             ssh_profile: Default::default(),

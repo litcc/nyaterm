@@ -7,13 +7,14 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use nyaterm_core::{
-    AiSettings, CredentialCrypto, CredentialCryptoError, Group, KeywordHighlightConfig,
-    KeywordHighlightImportResult, KeywordHighlightRule, PortableSnapshotError, ProxyConfig,
-    ProxyGroup, ProxyGroupsConfig, QuickCommand, QuickCommandCategory, QuickCommandsConfig,
-    SavedConnection, SessionsConfig, TranslationSettings, TunnelConfig, TunnelGroup,
-    TunnelGroupsConfig, ai_settings_has_secret, merge_masked_ai_settings,
-    merge_masked_translation_settings, normalize_ai_settings, translation_settings_has_secret,
-    uuid,
+    AiSettings, ConnectionType, CredentialCrypto, CredentialCryptoError, Group,
+    KeywordHighlightConfig, KeywordHighlightImportResult, KeywordHighlightRule,
+    PortableSnapshotError, ProxyConfig, ProxyGroup, ProxyGroupsConfig, QuickCommand,
+    QuickCommandCategory, QuickCommandsConfig, SavedConnection, SessionsConfig,
+    TranslationSettings, TunnelConfig, TunnelGroup, TunnelGroupsConfig, ai_settings_has_secret,
+    merge_masked_ai_settings, merge_masked_translation_settings, migrate_legacy_ssh_agent_settings,
+    normalize_ai_settings, translation_settings_has_secret, uuid,
+    validate_ssh_agent_forwarding_config,
 };
 
 mod ai_history;
@@ -364,6 +365,9 @@ impl ConnectionStore {
 
     pub fn list_connections(&self) -> Result<Vec<SavedConnection>, StorageError> {
         let mut connections = self.list_json_by_prefix(CONNECTIONS_TABLE, CONNECTION_PREFIX)?;
+        for connection in &mut connections {
+            migrate_legacy_ssh_agent_settings(connection);
+        }
         sort_connections(&mut connections);
         Ok(connections)
     }
@@ -383,6 +387,7 @@ impl ConnectionStore {
             return Ok(None);
         };
         let mut connection: SavedConnection = deserialize_json(raw.value())?;
+        migrate_legacy_ssh_agent_settings(&mut connection);
         drop(table);
         drop(txn);
         self.hydrate_connection_passwords(std::slice::from_mut(&mut connection))?;
@@ -425,6 +430,7 @@ impl ConnectionStore {
             };
             deserialize_json::<SavedConnection>(raw.value())?
         };
+        migrate_legacy_ssh_agent_settings(&mut connection);
         connection.last_used_at_ms = Some(current_time_ms());
         connection.updated_at_ms = Some(current_time_ms());
         write_json_in_txn(&txn, CONNECTIONS_TABLE, &key, &connection)?;
@@ -1034,6 +1040,20 @@ fn save_connection_in_txn(
     connection: &SavedConnection,
 ) -> Result<(), StorageError> {
     let mut connection = connection.clone();
+    // Canonicalize legacy fields before every write so input-only aliases are
+    // never silently discarded by unrelated updates.
+    migrate_legacy_ssh_agent_settings(&mut connection);
+    if let ConnectionType::Ssh {
+        agent_forwarding_config: Some(config),
+        ..
+    } = &connection.config
+    {
+        validate_ssh_agent_forwarding_config(config).map_err(|error| {
+            StorageError::InvalidData(format!(
+                "invalid SSH Agent forwarding configuration: {error:?}"
+            ))
+        })?;
+    }
     let now = current_time_ms();
     let connection_key = entity_key(CONNECTION_PREFIX, &connection.id);
     if connection.created_at_ms.is_none() {
@@ -1076,7 +1096,8 @@ fn existing_connection_created_at(
     let Some(raw) = table.get(key)? else {
         return Ok(None);
     };
-    let connection: SavedConnection = deserialize_json(raw.value())?;
+    let mut connection: SavedConnection = deserialize_json(raw.value())?;
+    migrate_legacy_ssh_agent_settings(&mut connection);
     Ok(connection.created_at_ms)
 }
 

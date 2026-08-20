@@ -34,6 +34,7 @@ mod session_event_queue;
 mod session_types;
 mod sftp;
 mod ssh_agent;
+mod ssh_agent_broker;
 mod ssh_algorithms;
 mod ssh_auth;
 mod telnet_prompts;
@@ -65,8 +66,10 @@ mod zmodem;
 
 pub use session_config::{
     LocalSessionConfig, SerialSessionConfig, SftpCwdFollowMode, SftpSettings, SshAgentEndpoint,
-    SshAgentPrompt, SshAgentPromptAction, SshAgentPromptPhase, SshAgentPromptProvider,
-    SshAlgorithmMode, SshAlgorithmPreferences, SshCredentialPrompt, SshCredentialPromptKind,
+    SshAgentForwardingConfig, SshAgentForwardingPolicy, SshAgentForwardingSources, SshAgentPrompt,
+    SshAgentPromptAction, SshAgentPromptPhase, SshAgentPromptProvider, SshAgentStoredKey,
+    SshAgentStoredKeyProvider, SshAgentStoredKeySnapshot, SshAlgorithmMode,
+    SshAlgorithmPreferences, SshCredentialPrompt, SshCredentialPromptKind,
     SshCredentialPromptReason, SshCredentialProvider, SshHostKey, SshHostKeyDecision,
     SshHostKeyVerifier, SshKeyAuthConfig, SshKeyboardInteractivePrompt,
     SshKeyboardInteractiveRequest, SshOtpProvider, SshProxyConfig, SshSessionConfig,
@@ -93,6 +96,10 @@ pub use sftp_transfer_types::{
     SFTP_TRANSFER_MIN_DIRECTORY_UPLOAD_THREADS, SftpDuplicateDecision, SftpDuplicatePolicy,
     SftpDuplicateRequest, SftpDuplicateResolver, SftpPathTransferOptions, SftpTransferDirection,
     SftpTransferOptions, SftpTransferProgress, SftpTransferSummary,
+};
+pub use ssh_agent_broker::{
+    SshAgentEndpointPreviewError, SshAgentEndpointPreviewErrorCode, SshAgentIdentityPreview,
+    SshAgentIdentityPreviewResponse, preview_identities, preview_identities_blocking,
 };
 pub use ssh_algorithms::{
     SshAlgorithmDefaults, SshAlgorithmListKind, SshAlgorithmOption, SshAlgorithmRisk,
@@ -203,6 +210,10 @@ struct SshMultiplexInner {
     target: SharedSshHandle,
     jumps: Vec<SharedSshHandle>,
     info: SshMultiplexInfo,
+    /// The Agent handler is fixed when the transport is created, so multiplex
+    /// handles with different forwarding policies must never be shared.
+    agent_forwarding_config: Option<SshAgentForwardingConfig>,
+    agent_stored_key_revision: Option<u64>,
     forwarded_tcpip: ForwardedTcpIpRegistry,
     closed: AtomicBool,
 }
@@ -240,6 +251,8 @@ impl SshMultiplexHandle {
             && self.inner.info.port == config.port
             && self.inner.info.username == config.username
             && self.inner.info.proxy == config.proxy
+            && self.inner.agent_forwarding_config == effective_agent_forwarding_config(config)
+            && self.inner.agent_stored_key_revision == current_agent_stored_key_revision(config)
     }
 
     pub fn ensure_matches_config(&self, config: &SshSessionConfig) -> anyhow::Result<()> {
@@ -314,6 +327,8 @@ fn forwarded_tcpip_sender_for(
 }
 
 pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<SshMultiplexHandle> {
+    let agent_forwarding_config = effective_agent_forwarding_config(&config);
+    let agent_stored_key_revision = current_agent_stored_key_revision(&config);
     let runtime = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -344,6 +359,8 @@ pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<Ssh
                 .map(|jump| Arc::new(tokio::sync::Mutex::new(jump)))
                 .collect(),
             info,
+            agent_forwarding_config,
+            agent_stored_key_revision,
             forwarded_tcpip,
             closed: AtomicBool::new(false),
         }),
@@ -1920,7 +1937,7 @@ async fn open_ssh_shell_from_pending(
         SshShellHandle::Dedicated(handle) => handle.channel_open_session().await?,
         SshShellHandle::Multiplexed(handle) => handle.lock().await.channel_open_session().await?,
     };
-    if config.agent_forwarding {
+    if effective_agent_forwarding_config(config).is_some_and(|forwarding| forwarding.enabled) {
         channel.agent_forward(false).await?;
     }
     tracing::debug!(
@@ -2159,9 +2176,8 @@ fn open_authenticated_ssh_handle_with_sender_registry(
                         verifier: config.host_key_verifier.clone(),
                         forwarded_tcpip: forwarded_tcpip.clone(),
                         x11_tx: x11_tx.clone(),
-                        agent_forwarding_endpoint: config
-                            .agent_forwarding
-                            .then(|| config.agent_endpoint.clone()),
+                        agent_forwarding_config: effective_agent_forwarding_config(config),
+                        agent_stored_key_provider: config.agent_stored_key_provider.clone(),
                     },
                 ),
             )
@@ -2211,9 +2227,8 @@ async fn connect_ssh_transport(
         verifier: config.host_key_verifier.clone(),
         forwarded_tcpip,
         x11_tx,
-        agent_forwarding_endpoint: config
-            .agent_forwarding
-            .then(|| config.agent_endpoint.clone()),
+        agent_forwarding_config: effective_agent_forwarding_config(config),
+        agent_stored_key_provider: config.agent_stored_key_provider.clone(),
     };
     let Some(proxy) = config.proxy.as_ref() else {
         return client::connect(
@@ -2463,7 +2478,8 @@ struct SshClientHandler {
     verifier: Option<Arc<dyn SshHostKeyVerifier>>,
     forwarded_tcpip: Option<ForwardedTcpIpRegistry>,
     x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
-    agent_forwarding_endpoint: Option<SshAgentEndpoint>,
+    agent_forwarding_config: Option<SshAgentForwardingConfig>,
+    agent_stored_key_provider: Option<Arc<dyn SshAgentStoredKeyProvider>>,
 }
 
 impl client::Handler for SshClientHandler {
@@ -2574,28 +2590,80 @@ impl client::Handler for SshClientHandler {
         reply: russh::client::ChannelOpenHandle,
         _session: &mut russh::client::Session,
     ) -> Result<(), Self::Error> {
-        let Some(endpoint) = self.agent_forwarding_endpoint.clone() else {
+        let Some(config) = self.agent_forwarding_config.clone() else {
             reply
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
                 .await;
             return Ok(());
         };
+        if !config.enabled {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        }
+        let Some(permit) = ssh_agent_broker::try_acquire_agent_channel_permit() else {
+            reply
+                .reject(russh::ChannelOpenFailure::ResourceShortage)
+                .await;
+            let _ = channel.close().await;
+            return Ok(());
+        };
+        if is_raw_relay_compatible(&config) {
+            let endpoint = config.sources.external_agent_endpoints[0].clone();
+            tokio::spawn(async move {
+                let Ok(agent_stream) = ssh_agent::connect_agent_stream(&endpoint).await else {
+                    reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+                    let _ = channel.close().await;
+                    return;
+                };
+                reply.accept().await;
+                ssh_agent_broker::serve_raw_channel(channel.into_stream(), agent_stream, permit)
+                    .await;
+            });
+            return Ok(());
+        }
+        let provider = self.agent_stored_key_provider.clone();
         tokio::spawn(async move {
-            let Ok(mut agent_stream) = ssh_agent::connect_agent_stream(&endpoint).await else {
-                reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
-                let _ = channel.close().await;
-                return;
-            };
             reply.accept().await;
-            let mut channel_stream = channel.into_stream();
-            if let Err(error) =
-                tokio::io::copy_bidirectional(&mut agent_stream, &mut channel_stream).await
-            {
-                tracing::debug!(%error, "SSH Agent forwarding channel closed");
-            }
+            ssh_agent_broker::serve_channel(channel.into_stream(), config, provider, permit).await;
         });
         Ok(())
     }
+}
+
+fn effective_agent_forwarding_config(
+    config: &SshSessionConfig,
+) -> Option<SshAgentForwardingConfig> {
+    config.agent_forwarding_config.clone().or_else(|| {
+        config.agent_forwarding.then(|| SshAgentForwardingConfig {
+            enabled: true,
+            sources: SshAgentForwardingSources {
+                external_agent: true,
+                external_agent_endpoints: vec![config.agent_endpoint.clone()],
+                stored_keys: false,
+            },
+            policy: SshAgentForwardingPolicy::All,
+        })
+    })
+}
+
+fn current_agent_stored_key_revision(config: &SshSessionConfig) -> Option<u64> {
+    let forwarding = effective_agent_forwarding_config(config)?;
+    if !forwarding.enabled || !forwarding.sources.stored_keys {
+        return None;
+    }
+    config
+        .agent_stored_key_provider
+        .as_ref()
+        .and_then(|provider| provider.revision().ok())
+}
+
+fn is_raw_relay_compatible(config: &SshAgentForwardingConfig) -> bool {
+    config.sources.external_agent
+        && config.sources.external_agent_endpoints.len() == 1
+        && !config.sources.stored_keys
+        && matches!(config.policy, SshAgentForwardingPolicy::All)
 }
 
 fn ssh_host_identifier(host: &str, port: u16) -> String {

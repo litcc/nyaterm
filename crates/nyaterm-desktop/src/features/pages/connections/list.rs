@@ -788,6 +788,8 @@ pub(super) struct ConnectionEditorFields {
     fields: HashMap<ConnectionEditorField, Entity<NyaInputState>>,
     number_fields: HashMap<ConnectionEditorField, Entity<NyaNumberInputState>>,
     selects: HashMap<ConnectionEditorSelect, Entity<NyaSelectState>>,
+    forwarding_endpoint_selects: HashMap<usize, Entity<NyaSelectState>>,
+    forwarding_endpoint_fields: HashMap<(usize, ConnectionEditorField), Entity<NyaInputState>>,
 }
 
 impl ConnectionEditorFields {
@@ -795,11 +797,15 @@ impl ConnectionEditorFields {
         fields: HashMap<ConnectionEditorField, Entity<NyaInputState>>,
         number_fields: HashMap<ConnectionEditorField, Entity<NyaNumberInputState>>,
         selects: HashMap<ConnectionEditorSelect, Entity<NyaSelectState>>,
+        forwarding_endpoint_selects: HashMap<usize, Entity<NyaSelectState>>,
+        forwarding_endpoint_fields: HashMap<(usize, ConnectionEditorField), Entity<NyaInputState>>,
     ) -> Self {
         Self {
             fields,
             number_fields,
             selects,
+            forwarding_endpoint_selects,
+            forwarding_endpoint_fields,
         }
     }
 
@@ -819,6 +825,24 @@ impl ConnectionEditorFields {
             .get(&select)
             .cloned()
             .expect("connection editor select registered before rendering")
+    }
+
+    pub(super) fn forwarding_endpoint_select(&self, index: usize) -> Entity<NyaSelectState> {
+        self.forwarding_endpoint_selects
+            .get(&index)
+            .cloned()
+            .expect("forwarding endpoint select registered before rendering")
+    }
+
+    pub(super) fn forwarding_endpoint_field(
+        &self,
+        index: usize,
+        field: ConnectionEditorField,
+    ) -> Entity<NyaInputState> {
+        self.forwarding_endpoint_fields
+            .get(&(index, field))
+            .cloned()
+            .expect("forwarding endpoint field registered before rendering")
     }
 }
 
@@ -910,6 +934,57 @@ pub(super) fn editor_field(
             this.child(field_caption(palette, &label))
         })
         .child(editor_field_box(palette, field, fields, cx))
+}
+
+pub(super) fn forwarding_endpoint_editor_field(
+    palette: crate::theme::ThemePalette,
+    label: impl Into<FieldLabel>,
+    index: usize,
+    field: ConnectionEditorField,
+    fields: &ConnectionEditorFields,
+    cx: &App,
+) -> impl IntoElement {
+    let label = label.into();
+    let entity = fields.forwarding_endpoint_field(index, field);
+    let handle = entity.read(cx).focus_handle();
+    let focused = entity.read(cx).has_focus();
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .when(!label.is_empty(), |this| {
+            this.child(field_caption(palette, &label))
+        })
+        .child(
+            div()
+                .h(px(EDITOR_CONTROL_HEIGHT_PX))
+                .id(SharedString::from(format!(
+                    "connection-agent-endpoint-{index}-field"
+                )))
+                .min_w_0()
+                .px(px(ORDINARY_INPUT_SHELL_PADDING_X_PX))
+                .flex()
+                .items_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(ordinary_input_shell_border_color(palette, focused))
+                .when(focused, |this| {
+                    this.shadow(ordinary_input_focus_ring(palette))
+                })
+                .bg(rgb(palette.input))
+                .cursor_text()
+                .on_click(move |_, window, cx| {
+                    window.focus(&handle, cx);
+                })
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .text_xs()
+                        .text_color(rgb(palette.text))
+                        .child(NyaInput::new(&entity)),
+                ),
+        )
 }
 
 /// The bordered box holding one field, without a caption.

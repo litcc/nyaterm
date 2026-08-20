@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use zeroize::Zeroize;
 
 use crate::ssh_auth::format_keyboard_interactive_prompt;
 
@@ -15,6 +16,94 @@ pub enum SshAgentEndpoint {
     },
     Pageant,
     WindowsOpenSsh,
+}
+
+/// Runtime-only SSH Agent forwarding sources.
+///
+/// Persistent fields remain owned by `nyaterm-core`, keeping the transport
+/// crate independent from GPUI and storage implementations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshAgentForwardingSources {
+    pub external_agent: bool,
+    pub external_agent_endpoints: Vec<SshAgentEndpoint>,
+    pub stored_keys: bool,
+}
+
+impl Default for SshAgentForwardingSources {
+    fn default() -> Self {
+        Self {
+            external_agent: false,
+            external_agent_endpoints: Vec::new(),
+            stored_keys: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshAgentForwardingPolicy {
+    Allowlist { fingerprints: Vec<String> },
+    All,
+}
+
+impl Default for SshAgentForwardingPolicy {
+    fn default() -> Self {
+        Self::Allowlist {
+            fingerprints: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SshAgentForwardingConfig {
+    pub enabled: bool,
+    pub sources: SshAgentForwardingSources,
+    pub policy: SshAgentForwardingPolicy,
+}
+
+/// A decrypted stored key supplied by the desktop layer.
+///
+/// Debug output always redacts secret material and Drop clears the plaintext
+/// buffers after the broker finishes parsing them.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SshAgentStoredKey {
+    pub key_data: String,
+    pub cert_data: Option<String>,
+    pub passphrase: Option<String>,
+    pub comment: String,
+}
+
+impl std::fmt::Debug for SshAgentStoredKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SshAgentStoredKey")
+            .field("key_data", &"<redacted>")
+            .field("cert_data", &self.cert_data.as_ref().map(|_| "<redacted>"))
+            .field(
+                "passphrase",
+                &self.passphrase.as_ref().map(|_| "<redacted>"),
+            )
+            .field("comment", &self.comment)
+            .finish()
+    }
+}
+
+impl Drop for SshAgentStoredKey {
+    fn drop(&mut self) {
+        self.key_data.zeroize();
+        self.cert_data.zeroize();
+        self.passphrase.zeroize();
+    }
+}
+
+#[derive(Debug)]
+pub struct SshAgentStoredKeySnapshot {
+    pub revision: u64,
+    pub keys: Vec<SshAgentStoredKey>,
+}
+
+pub trait SshAgentStoredKeyProvider: Send + Sync {
+    fn revision(&self) -> Result<u64, String>;
+    fn load_snapshot(&self) -> Result<SshAgentStoredKeySnapshot, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +278,9 @@ pub struct SshSessionConfig {
     /// Only interactive terminal sessions request forwarding. Shared configs
     /// used by SFTP, tunnels and jump hosts never request it themselves.
     pub agent_forwarding: bool,
+    /// Multi-endpoint broker configuration. Legacy callers without this value
+    /// are normalized to a compatible runtime configuration at the boundary.
+    pub agent_forwarding_config: Option<SshAgentForwardingConfig>,
     pub otp_id: Option<String>,
     pub auto_fill_otp: bool,
     pub proxy_jump: Option<Box<SshSessionConfig>>,
@@ -216,6 +308,7 @@ pub struct SshSessionConfig {
     pub host_key_verifier: Option<Arc<dyn SshHostKeyVerifier>>,
     pub credential_provider: Option<Arc<dyn SshCredentialProvider>>,
     pub agent_prompt_provider: Option<Arc<dyn SshAgentPromptProvider>>,
+    pub agent_stored_key_provider: Option<Arc<dyn SshAgentStoredKeyProvider>>,
     pub otp_provider: Option<Arc<dyn SshOtpProvider>>,
 }
 
@@ -312,6 +405,13 @@ impl std::fmt::Debug for SshSessionConfig {
             .field("agent_auth", &self.agent_auth)
             .field("agent_endpoint", &self.agent_endpoint)
             .field("agent_forwarding", &self.agent_forwarding)
+            .field(
+                "agent_forwarding_config",
+                &self
+                    .agent_forwarding_config
+                    .as_ref()
+                    .map(|_| "<configured>"),
+            )
             .field("otp_id", &self.otp_id)
             .field("auto_fill_otp", &self.auto_fill_otp)
             .field("proxy_jump", &self.proxy_jump.is_some())
@@ -336,6 +436,10 @@ impl std::fmt::Debug for SshSessionConfig {
             .field(
                 "agent_prompt_provider",
                 &self.agent_prompt_provider.is_some(),
+            )
+            .field(
+                "agent_stored_key_provider",
+                &self.agent_stored_key_provider.is_some(),
             )
             .field("otp_provider", &self.otp_provider.is_some())
             .finish()
@@ -504,6 +608,7 @@ impl Default for SshSessionConfig {
             agent_auth: false,
             agent_endpoint: SshAgentEndpoint::Auto,
             agent_forwarding: false,
+            agent_forwarding_config: None,
             otp_id: None,
             auto_fill_otp: false,
             proxy_jump: None,
@@ -527,6 +632,7 @@ impl Default for SshSessionConfig {
             host_key_verifier: None,
             credential_provider: None,
             agent_prompt_provider: None,
+            agent_stored_key_provider: None,
             otp_provider: None,
         }
     }
