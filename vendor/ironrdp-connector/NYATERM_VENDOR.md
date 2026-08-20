@@ -29,3 +29,14 @@
   resolves a single `picky 7.0.0-rc.26` alongside a single stable
   `aes-gcm 0.11.0`. Exercise NLA against the manual Windows matrix before
   release.
+
+## Upstream fork branch
+
+These changes are maintained as a patch series on <https://github.com/nyakang/IronRDP>,
+branch `nyaterm`, based on upstream `11a0810cfbbabd8b8023875a05e3041216d4b01b`. Branch head at the
+time of writing: `512a19d41cbf080eaff6ee1a5a5445a50a456249`.
+
+The branch carries the functional patches only. Vendoring artifacts (this note,
+crates.io packaging files, retained lock files, and sibling-path dependency
+repoints for this directory layout) are deliberately not on it, so a `diff`
+between the branch and this directory should show only those.

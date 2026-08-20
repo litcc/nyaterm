@@ -45,3 +45,14 @@ Validation performed on 2026-08-18:
 - `scripts/check-architecture-boundaries.sh` is referenced by repository
   documentation but is not present in this checkout, so that command could
   not be run.
+
+## Upstream fork branch
+
+These changes are maintained as a patch series on <https://github.com/nyakang/zed>,
+branch `nyaterm`, based on upstream `78712609912211332becb84cb7a667d1b7b23f78`. Branch head at the
+time of writing: `e83a00dc5daccb4ee2f077f4050e9315ea21f165`.
+
+The branch carries the functional patches only. Vendoring artifacts (this note,
+crates.io packaging files, retained lock files, and sibling-path dependency
+repoints for this directory layout) are deliberately not on it, so a `diff`
+between the branch and this directory should show only those.

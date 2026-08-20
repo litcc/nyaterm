@@ -73,3 +73,14 @@ Validation performed on 2026-08-19 for the scrollbar reveal changes:
 - Hover reveal, overlay hit regions, and thumb drag verified by hand on
   Windows 11; GPUI hit testing is platform-specific, so macOS and Linux remain
   part of the platform release matrix.
+
+## Upstream fork branch
+
+These changes are maintained as a patch series on <https://github.com/nyakang/gpui-component>,
+branch `nyaterm`, based on upstream `b1e78a515716b232a7d731cc092bdc25f3bfd787`. Branch head at the
+time of writing: `a6f390f7aefd96c465b67ec4434c41e4aed4ef34`.
+
+The branch carries the functional patches only. Vendoring artifacts (this note,
+crates.io packaging files, retained lock files, and sibling-path dependency
+repoints for this directory layout) are deliberately not on it, so a `diff`
+between the branch and this directory should show only those.

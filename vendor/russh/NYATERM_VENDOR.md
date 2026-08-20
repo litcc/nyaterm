@@ -22,3 +22,14 @@ Validation on 2026-08-05:
 ```text
 cargo test --manifest-path vendor/russh/Cargo.toml -p russh --lib  # 159 passed
 ```
+
+## Upstream fork branch
+
+These changes are maintained as a patch series on <https://github.com/nyakang/russh>,
+branch `nyaterm`, based on upstream `4882af71cf27ea5293636bf4985ef296dcf20896`. Branch head at the
+time of writing: `074d4eb594bf0ce1271725cf96e50ed4af8e3285`.
+
+The branch carries the functional patches only. Vendoring artifacts (this note,
+crates.io packaging files, retained lock files, and sibling-path dependency
+repoints for this directory layout) are deliberately not on it, so a `diff`
+between the branch and this directory should show only those.

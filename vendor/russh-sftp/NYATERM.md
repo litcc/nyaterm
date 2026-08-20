@@ -63,3 +63,14 @@ Additional validation on 2026-08-09 after the raw path bytes API expansion:
 cargo test -p nyaterm-transport  # 160 passed, 1 ignored
 cargo test -p nyaterm-desktop    # 819 passed, 3 ignored
 ```
+
+## Upstream fork branch
+
+These changes are maintained as a patch series on <https://github.com/nyakang/russh-sftp>,
+branch `nyaterm`, based on upstream `e145c1f7ece99f41f558949ef59731f2cd1a9dfe`. Branch head at the
+time of writing: `687c578b0199a16b0a326e4a5983f0f7471e2ac1`.
+
+The branch carries the functional patches only. Vendoring artifacts (this note,
+crates.io packaging files, retained lock files, and sibling-path dependency
+repoints for this directory layout) are deliberately not on it, so a `diff`
+between the branch and this directory should show only those.
