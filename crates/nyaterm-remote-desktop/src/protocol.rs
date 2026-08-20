@@ -448,6 +448,12 @@ pub enum VncErrorKind {
     Encoding,
     Clipboard,
     Internal,
+    /// The helper binary was not found beside the application.
+    HelperMissing,
+    /// The helper exited or panicked while a session was live.
+    HelperCrashed,
+    /// The helper IPC channel itself failed.
+    Ipc,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -545,6 +551,56 @@ pub enum RdpControlMessage {
     Error {
         session_id: String,
         error: RdpError,
+        fatal: bool,
+    },
+    RequestFullFrame {
+        session_id: String,
+    },
+    Disconnect {
+        session_id: String,
+    },
+}
+
+/// Control vocabulary spoken between the application and `nyaterm-vnc-helper`.
+///
+/// Deliberately narrower than [`RdpControlMessage`]: this VNC path has no dynamic
+/// resize, no TLS certificate prompt, and no capability negotiation. Framebuffer
+/// and cursor payloads reuse the protocol-neutral binary packets in `crate::ipc`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum VncControlMessage {
+    ClientHello {
+        version: u32,
+    },
+    ServerHello {
+        version: u32,
+    },
+    Connect {
+        session_id: String,
+        config: VncSessionConfig,
+    },
+    /// The helper owns the epoch counter and stamps every frame with it.
+    DesktopReset {
+        session_id: String,
+        epoch: u64,
+        width: u32,
+        height: u32,
+    },
+    State {
+        session_id: String,
+        state: VncSessionState,
+        message: Option<String>,
+    },
+    Input {
+        session_id: String,
+        events: Vec<VncInputEvent>,
+    },
+    Clipboard {
+        session_id: String,
+        text: String,
+    },
+    Error {
+        session_id: String,
+        error: VncError,
         fatal: bool,
     },
     RequestFullFrame {

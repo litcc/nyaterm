@@ -25,6 +25,10 @@ ICON_DIR = RESOURCE_DIR / "icons"
 LICENSE_PATH = ROOT_DIR / "LICENSE"
 APP_NAME = "NyaTerm"
 APP_BIN = "nyaterm"
+# Helper processes the application spawns at runtime. `resolve_helper_path()`
+# in nyaterm-remote-desktop only looks beside the running executable, so each
+# of these must be packaged next to the application binary in every format.
+HELPER_BINS = ("nyaterm-rdp-helper", "nyaterm-vnc-helper")
 MACOS_IDENTIFIER = "com.kang.nyaterm"
 LINUX_PACKAGE = "nyaterm"
 PORTABLE_MARKER = "nyaterm-portable"
@@ -124,34 +128,57 @@ def cargo_target_dir() -> Path:
     return path if path.is_absolute() else ROOT_DIR / path
 
 
-def release_binary_path(target: str) -> Path:
+def release_binary_path(target: str, name: str = APP_BIN) -> Path:
     suffix = ".exe" if "windows" in target else ""
-    return cargo_target_dir() / target / "release" / f"{APP_BIN}{suffix}"
+    return cargo_target_dir() / target / "release" / f"{name}{suffix}"
 
 
-def build_application(target: str) -> Path:
+def helper_binary_paths(target: str) -> list[Path]:
+    return [release_binary_path(target, name) for name in HELPER_BINS]
+
+
+def build_binary(package: str, name: str, target: str) -> Path:
     run(
         [
             "cargo",
             "build",
             "-p",
-            "nyaterm-app",
+            package,
             "--bin",
-            APP_BIN,
+            name,
             "--release",
             "--target",
             target,
             "--locked",
         ]
     )
-    binary = release_binary_path(target)
+    binary = release_binary_path(target, name)
     if not binary.is_file():
         raise FileNotFoundError(f"release executable not found: {binary}")
     return binary
 
 
+def build_application(target: str) -> Path:
+    binary = build_binary("nyaterm-app", APP_BIN, target)
+    for name in HELPER_BINS:
+        build_binary(name, name, target)
+    return binary
+
+
 def make_executable(path: Path) -> None:
     path.chmod(path.stat().st_mode | 0o111)
+
+
+def copy_helpers(destination: Path, target: str) -> list[Path]:
+    """Copy helper binaries beside the application and return the copies."""
+    copied = []
+    for source in helper_binary_paths(target):
+        binary = destination / source.name
+        shutil.copy2(source, binary)
+        if "windows" not in target:
+            make_executable(binary)
+        copied.append(binary)
+    return copied
 
 
 def copy_release_documents(destination: Path, version: str) -> None:
@@ -204,6 +231,7 @@ def create_windows_packages(
     portable_root = WORK_DIR / "NyaTerm-portable"
     portable_root.mkdir()
     shutil.copy2(binary, portable_root / "NyaTerm.exe")
+    copy_helpers(portable_root, info.target)
     (portable_root / PORTABLE_MARKER).touch()
     (portable_root / "data").mkdir()
     (portable_root / "data" / ".keep").touch()
@@ -216,8 +244,17 @@ def create_windows_packages(
     installer_root = WORK_DIR / "windows-installer"
     installer_root.mkdir()
     shutil.copy2(binary, installer_root / "NyaTerm.exe")
+    installer_helpers = copy_helpers(installer_root, info.target)
     copy_release_documents(installer_root, version)
     shutil.copy2(ICON_DIR / "icon.ico", installer_root / "icon.ico")
+
+    nsis_indent = "\n" + " " * 14
+    helper_install = nsis_indent.join(
+        f'File "{nsis_path(path)}"' for path in installer_helpers
+    )
+    helper_uninstall = nsis_indent.join(
+        f'Delete "$INSTDIR\\{path.name}"' for path in installer_helpers
+    )
 
     output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}-setup.exe"
     script = WORK_DIR / "nyaterm-installer.nsi"
@@ -253,6 +290,7 @@ def create_windows_packages(
             Section "NyaTerm" SecMain
               SetOutPath "$INSTDIR"
               File "{nsis_path(installer_root / 'NyaTerm.exe')}"
+              {helper_install}
               File "{nsis_path(installer_root / 'LICENSE')}"
               File "{nsis_path(installer_root / 'VERSION')}"
               File "{nsis_path(installer_root / 'icon.ico')}"
@@ -272,6 +310,7 @@ def create_windows_packages(
               Delete "$SMPROGRAMS\NyaTerm\NyaTerm.lnk"
               RMDir "$SMPROGRAMS\NyaTerm"
               Delete "$INSTDIR\NyaTerm.exe"
+              {helper_uninstall}
               Delete "$INSTDIR\LICENSE"
               Delete "$INSTDIR\VERSION"
               Delete "$INSTDIR\icon.ico"
@@ -296,6 +335,7 @@ def create_macos_packages(binary: Path, info: TargetInfo, version: str) -> None:
     app_binary = macos_dir / "NyaTerm"
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
+    helper_binaries = copy_helpers(macos_dir, info.target)
     shutil.copy2(ICON_DIR / "icon.icns", resources_dir / "icon.icns")
     copy_release_documents(resources_dir, version)
 
@@ -318,6 +358,11 @@ def create_macos_packages(binary: Path, info: TargetInfo, version: str) -> None:
         plistlib.dump(plist, handle, sort_keys=True)
 
     codesign = require_tool("codesign")
+    # Sign inside out. A bundle-only signature seals extra Mach-O files in
+    # Contents/MacOS as resources instead of signing them as code, which makes
+    # the helper fail to launch under Gatekeeper.
+    for helper in helper_binaries:
+        run([codesign, "--force", "--sign", "-", "--timestamp=none", str(helper)])
     run([codesign, "--force", "--deep", "--sign", "-", "--timestamp=none", str(bundle)])
 
     tar_output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}.app.tar.gz"
@@ -415,7 +460,7 @@ def parse_dpkg_dependencies(output: str) -> str:
     raise RuntimeError("dpkg-shlibdeps did not report shlibs:Depends")
 
 
-def linux_deb_dependencies(binary: Path) -> str:
+def linux_deb_dependencies(binaries: list[Path]) -> str:
     scratch = WORK_DIR / "shlibdeps"
     debian = scratch / "debian"
     debian.mkdir(parents=True)
@@ -423,11 +468,11 @@ def linux_deb_dependencies(binary: Path) -> str:
         "Source: nyaterm\nPackage: nyaterm\nArchitecture: any\nDescription: NyaTerm\n",
         encoding="utf-8",
     )
-    output = subprocess.check_output(
-        [require_tool("dpkg-shlibdeps"), "-O", "-e", str(binary)],
-        cwd=scratch,
-        text=True,
-    )
+    # Helpers can pull shared libraries the application itself does not need.
+    command = [require_tool("dpkg-shlibdeps"), "-O"]
+    for binary in binaries:
+        command += ["-e", str(binary)]
+    output = subprocess.check_output(command, cwd=scratch, text=True)
     return parse_dpkg_dependencies(output)
 
 
@@ -438,6 +483,7 @@ def create_linux_appimage(binary: Path, info: TargetInfo, version: str) -> None:
     app_binary = usr_bin / APP_BIN
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
+    copy_helpers(usr_bin, info.target)
     copy_release_documents(appdir / "usr" / "share" / "doc" / LINUX_PACKAGE, version)
 
     applications = appdir / "usr" / "share" / "applications"
@@ -469,6 +515,7 @@ def create_linux_deb(binary: Path, info: TargetInfo, version: str) -> None:
     app_binary = app_root / APP_BIN
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
+    helper_binaries = copy_helpers(app_root, info.target)
     copy_release_documents(app_root, version)
     copy_release_documents(root / "usr" / "share" / "doc" / LINUX_PACKAGE, version)
 
@@ -479,7 +526,7 @@ def create_linux_deb(binary: Path, info: TargetInfo, version: str) -> None:
 
     control_dir = root / "DEBIAN"
     control_dir.mkdir()
-    dependencies = linux_deb_dependencies(app_binary)
+    dependencies = linux_deb_dependencies([app_binary, *helper_binaries])
     (control_dir / "control").write_text(
         textwrap.dedent(
             f"""
@@ -513,6 +560,7 @@ def create_linux_rpm(binary: Path, info: TargetInfo, version: str) -> None:
     app_binary = app_root / APP_BIN
     shutil.copy2(binary, app_binary)
     make_executable(app_binary)
+    copy_helpers(app_root, info.target)
     copy_release_documents(app_root, version)
     copy_release_documents(payload / "usr" / "share" / "doc" / LINUX_PACKAGE, version)
     applications = payload / "usr" / "share" / "applications"

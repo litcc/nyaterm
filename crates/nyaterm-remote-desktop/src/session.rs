@@ -1,12 +1,12 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
 
 use uuid::Uuid;
 
+use crate::helper_process;
 use crate::{
     PROTOCOL_VERSION, PacketType, RdpCertificateResponse, RdpControlMessage, RdpError,
     RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpSessionConfig, RdpSessionDrain,
@@ -19,46 +19,12 @@ const MIN_HEIGHT: u32 = 200;
 const MAX_WIDTH: u32 = 8192;
 const MAX_HEIGHT: u32 = 8192;
 const FRAME_QUEUE_LIMIT: usize = 64;
-const GRACEFUL_CLOSE_TIMEOUT: Duration = Duration::from_millis(750);
+const HELPER_PACKAGE: &str = "nyaterm-rdp-helper";
+const HELPER_ENV_VAR: &str = "NYATERM_RDP_HELPER";
 
 pub fn resolve_helper_path() -> Result<PathBuf, RdpError> {
-    if let Some(path) = std::env::var_os("NYATERM_RDP_HELPER").filter(|value| !value.is_empty()) {
-        let path = PathBuf::from(path);
-        return path.is_file().then_some(path).ok_or_else(|| {
-            RdpError::new(
-                RdpErrorKind::HelperMissing,
-                "NYATERM_RDP_HELPER does not name an existing file",
-            )
-        });
-    }
-    let executable = std::env::current_exe().map_err(|error| {
-        RdpError::new(
-            RdpErrorKind::HelperMissing,
-            format!("cannot resolve NyaTerm executable: {error}"),
-        )
-    })?;
-    let filename = if cfg!(windows) {
-        "nyaterm-rdp-helper.exe"
-    } else {
-        "nyaterm-rdp-helper"
-    };
-    let path = executable
-        .parent()
-        .map(|parent| parent.join(filename))
-        .ok_or_else(|| {
-            RdpError::new(
-                RdpErrorKind::HelperMissing,
-                "NyaTerm executable has no parent directory",
-            )
-        })?;
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err(RdpError::new(
-            RdpErrorKind::HelperMissing,
-            format!("RDP helper is missing beside NyaTerm: {}", path.display()),
-        ))
-    }
+    helper_process::resolve_helper(HELPER_PACKAGE, HELPER_ENV_VAR)
+        .map_err(|message| RdpError::new(RdpErrorKind::HelperMissing, message))
 }
 
 #[derive(Default)]
@@ -187,26 +153,16 @@ impl RdpSessionManager {
             sessions.remove(&session_id);
         }
         let helper = resolve_helper_path()?;
-        let mut command = Command::new(helper);
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        configure_child(&mut command);
-        let mut child = command.spawn().map_err(|error| {
+        let helper_process::HelperProcess {
+            child,
+            stdin,
+            stdout,
+        } = helper_process::spawn_helper(&helper).map_err(|error| {
             RdpError::new(
                 RdpErrorKind::HelperMissing,
-                format!("failed to spawn RDP helper: {error}"),
+                format!("failed to spawn the RDP helper: {error}"),
             )
         })?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| RdpError::new(RdpErrorKind::Ipc, "RDP helper stdin is unavailable"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| RdpError::new(RdpErrorKind::Ipc, "RDP helper stdout is unavailable"))?;
         let writer = Arc::new(Mutex::new(stdin));
         let queue = Arc::new(Mutex::new(EventQueue::default()));
         let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
@@ -700,24 +656,7 @@ fn set_state(state: &Arc<Mutex<RdpSessionState>>, new_state: RdpSessionState) {
 }
 
 fn cleanup_child(record: &mut SessionRecord) {
-    if let Some(child) = record.child.as_mut() {
-        let deadline = Instant::now() + GRACEFUL_CLOSE_TIMEOUT;
-        while Instant::now() < deadline {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => thread::sleep(Duration::from_millis(10)),
-                Err(_) => break,
-            }
-        }
-        if child.try_wait().ok().flatten().is_none() {
-            let _ = child.kill();
-        }
-        let _ = child.wait();
-    }
-    record.child = None;
-    if let Some(reader) = record.reader.take() {
-        let _ = reader.join();
-    }
+    helper_process::cleanup_child(&mut record.child, &mut record.reader);
 }
 
 fn validate_config(config: &RdpSessionConfig) -> Result<(), RdpError> {
@@ -746,15 +685,6 @@ fn validate_size(width: u32, height: u32) -> Result<(), RdpError> {
     }
     Ok(())
 }
-
-#[cfg(windows)]
-fn configure_child(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    command.creation_flags(0x0800_0000);
-}
-
-#[cfg(not(windows))]
-fn configure_child(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {

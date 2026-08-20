@@ -75,14 +75,7 @@ impl NyaTermApp {
         let session_id = nyaterm_core::uuid();
         self.remote_desktop.insert_connecting(session_id.clone());
         if let Some(session) = self.remote_desktop.sessions.get_mut(&session_id) {
-            let kind = match error.kind {
-                VncErrorKind::Authentication => RdpErrorKind::Authentication,
-                VncErrorKind::Clipboard => RdpErrorKind::Clipboard,
-                VncErrorKind::Transport => RdpErrorKind::Transport,
-                VncErrorKind::Encoding | VncErrorKind::Protocol => RdpErrorKind::Protocol,
-                VncErrorKind::Internal => RdpErrorKind::Session,
-            };
-            set_rdp_view_error(session, kind, error.message);
+            set_rdp_view_error(session, vnc_error_as_rdp_kind(error.kind), error.message);
         }
         session_id
     }
@@ -1480,6 +1473,10 @@ fn rdp_error_is_retryable(kind: RdpErrorKind) -> bool {
     )
 }
 
+/// Project a VNC error onto the shared remote-desktop error vocabulary.
+///
+/// The view layer renders both protocols through `RdpErrorKind`; the helper
+/// lifecycle kinds map straight across because RDP already has them.
 fn vnc_error_as_rdp_kind(kind: VncErrorKind) -> RdpErrorKind {
     match kind {
         VncErrorKind::Authentication => RdpErrorKind::Authentication,
@@ -1487,6 +1484,9 @@ fn vnc_error_as_rdp_kind(kind: VncErrorKind) -> RdpErrorKind {
         VncErrorKind::Transport => RdpErrorKind::Transport,
         VncErrorKind::Encoding | VncErrorKind::Protocol => RdpErrorKind::Protocol,
         VncErrorKind::Internal => RdpErrorKind::Session,
+        VncErrorKind::HelperMissing => RdpErrorKind::HelperMissing,
+        VncErrorKind::HelperCrashed => RdpErrorKind::HelperCrashed,
+        VncErrorKind::Ipc => RdpErrorKind::Ipc,
     }
 }
 

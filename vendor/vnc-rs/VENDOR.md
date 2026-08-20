@@ -14,10 +14,13 @@ and undefined-behavior paths with typed errors, add bounded protocol limits,
 reduce queue sizes, add explicit security-selection policy, and add
 deterministic handshake/parser regression tests.
 
-This fork is used by NyaTerm's direct-TCP VNC manager and native GPUI remote
-desktop surface. Raw must remain the required fallback. ZRLE/Tight support
-should only be advertised after the corresponding decoder hardening tests and
-interoperability checks pass.
+This fork is linked only by `crates/nyaterm-vnc-helper`, the isolated helper
+process that decodes VNC on behalf of the native GPUI remote desktop surface. It
+must not be added as a dependency of any crate the application itself links: the
+process boundary is what keeps this parser, and the `flate2`/`image` decoders it
+pulls in, away from server-controlled bytes in the main process. Raw must remain
+the required fallback. ZRLE/Tight support should only be advertised after the
+corresponding decoder hardening tests and interoperability checks pass.
 
 ## Refresh procedure
 

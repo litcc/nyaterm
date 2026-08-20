@@ -1,6 +1,6 @@
 use std::io::{self, Read, Write};
 
-use crate::{PixelFormat, RdpControlMessage, RdpCursorEvent, RdpFrameEvent};
+use crate::{PixelFormat, RdpControlMessage, RdpCursorEvent, RdpFrameEvent, VncControlMessage};
 
 pub const HEADER_LEN: usize = 5;
 pub const CONTROL_PAYLOAD_LIMIT: usize = 1024 * 1024;
@@ -23,7 +23,7 @@ impl TryFrom<u8> for PacketType {
             3 => Ok(Self::Cursor),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "unknown RDP IPC packet type",
+                "unknown helper IPC packet type",
             )),
         }
     }
@@ -51,7 +51,7 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Packet>> {
             0 => {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "truncated RDP IPC header",
+                    "truncated helper IPC header",
                 ));
             }
             count => read += count,
@@ -62,7 +62,7 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Packet>> {
     if length > payload_limit(packet_type) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "RDP IPC payload exceeds limit",
+            "helper IPC payload exceeds limit",
         ));
     }
     let mut payload = vec![0; length];
@@ -73,18 +73,32 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Packet>> {
     }))
 }
 
-pub fn write_packet(writer: &mut impl Write, packet: &Packet) -> io::Result<()> {
+/// Frame a packet without flushing.
+///
+/// A single VNC framebuffer update can carry up to `max_rectangles_per_update`
+/// rectangles, so flushing per packet would turn one update into a thousand
+/// write syscalls. Helpers batch into a `BufWriter` and flush once the outbound
+/// queue drains; use [`write_packet`] when the packet must leave immediately.
+pub fn write_packet_into(writer: &mut impl Write, packet: &Packet) -> io::Result<()> {
     if packet.payload.len() > payload_limit(packet.packet_type) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "RDP IPC payload exceeds limit",
+            "helper IPC payload exceeds limit",
         ));
     }
-    let length = u32::try_from(packet.payload.len())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "RDP IPC payload is too large"))?;
+    let length = u32::try_from(packet.payload.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "helper IPC payload is too large",
+        )
+    })?;
     writer.write_all(&[packet.packet_type as u8])?;
     writer.write_all(&length.to_le_bytes())?;
-    writer.write_all(&packet.payload)?;
+    writer.write_all(&packet.payload)
+}
+
+pub fn write_packet(writer: &mut impl Write, packet: &Packet) -> io::Result<()> {
+    write_packet_into(writer, packet)?;
     writer.flush()
 }
 
@@ -105,11 +119,11 @@ impl PacketReader {
             if length > payload_limit(packet_type) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "RDP IPC payload exceeds limit",
+                    "helper IPC payload exceeds limit",
                 ));
             }
             let packet_len = HEADER_LEN.checked_add(length).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "RDP IPC length overflow")
+                io::Error::new(io::ErrorKind::InvalidData, "helper IPC length overflow")
             })?;
             if self.buffer.len() - offset < packet_len {
                 break;
@@ -152,9 +166,44 @@ pub fn decode_control(packet: &Packet) -> io::Result<RdpControlMessage> {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
+/// Encode a VNC control message.
+///
+/// VNC reuses [`PacketType::Control`] rather than claiming its own tag: a helper
+/// only ever speaks one protocol, so the payload is never ambiguous. Keeping the
+/// two codecs separate instead of making them generic leaves every existing
+/// `decode_control` call site untouched.
+pub fn encode_vnc_control(message: &VncControlMessage) -> io::Result<Packet> {
+    let payload = serde_json::to_vec(message).map_err(io::Error::other)?;
+    if payload.len() > CONTROL_PAYLOAD_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "VNC control payload exceeds limit",
+        ));
+    }
+    Ok(Packet {
+        packet_type: PacketType::Control,
+        payload,
+    })
+}
+
+pub fn decode_vnc_control(packet: &Packet) -> io::Result<VncControlMessage> {
+    if packet.packet_type != PacketType::Control {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "packet is not a control packet",
+        ));
+    }
+    serde_json::from_slice(&packet.payload)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
 fn put_session(payload: &mut Vec<u8>, session_id: &str) -> io::Result<()> {
-    let length = u16::try_from(session_id.len())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "RDP session id is too long"))?;
+    let length = u16::try_from(session_id.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "helper IPC session id is too long",
+        )
+    })?;
     payload.extend_from_slice(&length.to_le_bytes());
     payload.extend_from_slice(session_id.as_bytes());
     Ok(())
@@ -164,11 +213,11 @@ fn take<const N: usize>(payload: &[u8], offset: &mut usize) -> io::Result<[u8; N
     let end = offset.checked_add(N).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "RDP binary packet offset overflow",
+            "helper IPC packet offset overflow",
         )
     })?;
     let bytes = payload.get(*offset..end).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::UnexpectedEof, "truncated RDP binary packet")
+        io::Error::new(io::ErrorKind::UnexpectedEof, "truncated helper IPC packet")
     })?;
     *offset = end;
     Ok(bytes.try_into().unwrap())
@@ -177,14 +226,24 @@ fn take<const N: usize>(payload: &[u8], offset: &mut usize) -> io::Result<[u8; N
 fn take_session(payload: &[u8], offset: &mut usize) -> io::Result<String> {
     let length = u16::from_le_bytes(take::<2>(payload, offset)?) as usize;
     let end = offset.checked_add(length).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "RDP session id length overflow")
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "helper IPC session id length overflow",
+        )
     })?;
-    let bytes = payload
-        .get(*offset..end)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "truncated RDP session id"))?;
+    let bytes = payload.get(*offset..end).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "truncated helper IPC session id",
+        )
+    })?;
     *offset = end;
-    String::from_utf8(bytes.to_vec())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "RDP session id is not UTF-8"))
+    String::from_utf8(bytes.to_vec()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "helper IPC session id is not UTF-8",
+        )
+    })
 }
 
 fn put_u32(payload: &mut Vec<u8>, value: u32) {
@@ -209,7 +268,7 @@ pub fn encode_frame_packet(session_id: &str, event: &RdpFrameEvent) -> io::Resul
     else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "event is not an RDP bitmap",
+            "event is not a bitmap",
         ));
     };
     let mut payload = Vec::with_capacity(40 + session_id.len() + pixels.len());
@@ -226,13 +285,13 @@ pub fn encode_frame_packet(session_id: &str, event: &RdpFrameEvent) -> io::Resul
     put_u32(
         &mut payload,
         u32::try_from(pixels.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "RDP frame is too large"))?,
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "frame is too large"))?,
     );
     payload.extend_from_slice(pixels);
     if payload.len() > FRAME_PAYLOAD_LIMIT {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "RDP frame exceeds limit",
+            "frame exceeds limit",
         ));
     }
     Ok(Packet {
@@ -245,7 +304,7 @@ pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent
     if packet.packet_type != PacketType::Frame {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "packet is not an RDP frame",
+            "packet is not a frame",
         ));
     }
     let mut offset = 0;
@@ -258,7 +317,7 @@ pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "unknown RDP pixel format",
+                "unknown pixel format",
             ));
         }
     };
@@ -272,9 +331,7 @@ pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent
         .ok()
         .and_then(|rows| rows.checked_mul(stride as usize))
         .and_then(|base| base.checked_add(width as usize * 4))
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "RDP frame dimensions overflow")
-        })?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "frame dimensions overflow"))?;
     if width == 0
         || height == 0
         || stride < width.saturating_mul(4)
@@ -283,7 +340,7 @@ pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "invalid RDP frame dimensions or payload length",
+            "invalid frame dimensions or payload length",
         ));
     }
     let pixels = packet.payload[offset..].to_vec();
@@ -321,7 +378,7 @@ pub fn encode_cursor_packet(session_id: &str, cursor: &RdpCursorEvent) -> io::Re
     put_u32(
         &mut payload,
         u32::try_from(cursor.pixels.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "RDP cursor is too large"))?,
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cursor is too large"))?,
     );
     payload.extend_from_slice(&cursor.pixels);
     Ok(Packet {
@@ -334,7 +391,7 @@ pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEve
     if packet.packet_type != PacketType::Cursor {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "packet is not an RDP cursor",
+            "packet is not a cursor",
         ));
     }
     let mut offset = 0;
@@ -356,13 +413,11 @@ pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEve
                 .and_then(|height| width.checked_mul(height))
         })
         .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "RDP cursor dimensions overflow")
-        })?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "cursor dimensions overflow"))?;
     if data_len != expected || packet.payload.len() - offset != data_len {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "invalid RDP cursor payload length",
+            "invalid cursor payload length",
         ));
     }
     Ok((
@@ -384,11 +439,32 @@ pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEve
 #[cfg(test)]
 mod tests {
     use super::{
-        PacketReader, decode_control, decode_frame_packet, encode_control, encode_frame_packet,
-        read_packet, write_packet,
+        PacketReader, decode_control, decode_frame_packet, decode_vnc_control, encode_control,
+        encode_frame_packet, encode_vnc_control, read_packet, write_packet, write_packet_into,
     };
-    use crate::{PROTOCOL_VERSION, PixelFormat, RdpControlMessage, RdpFrameEvent};
-    use std::io::Cursor;
+    use crate::{
+        PROTOCOL_VERSION, PixelFormat, RdpControlMessage, RdpFrameEvent, VncControlMessage,
+        VncInputEvent, VncSessionState,
+    };
+    use std::io::{Cursor, Write};
+
+    /// Records how many times the writer was flushed.
+    #[derive(Default)]
+    struct CountingWriter {
+        bytes: Vec<u8>,
+        flushes: usize,
+    }
+
+    impl Write for CountingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
 
     #[test]
     fn round_trips_partial_control_and_binary_frame_packets() {
@@ -436,5 +512,114 @@ mod tests {
         let mut bytes = vec![1];
         bytes.extend_from_slice(&length);
         assert!(read_packet(&mut Cursor::new(bytes)).is_err());
+    }
+
+    #[test]
+    fn round_trips_vnc_control_across_a_split_read() {
+        let messages = [
+            VncControlMessage::ClientHello {
+                version: PROTOCOL_VERSION,
+            },
+            VncControlMessage::DesktopReset {
+                session_id: "vnc".to_string(),
+                epoch: 4,
+                width: 1024,
+                height: 768,
+            },
+            VncControlMessage::State {
+                session_id: "vnc".to_string(),
+                state: VncSessionState::Reconnecting,
+                message: Some("retrying".to_string()),
+            },
+            VncControlMessage::Input {
+                session_id: "vnc".to_string(),
+                events: vec![VncInputEvent::Key {
+                    keysym: 0xFF0D,
+                    pressed: true,
+                }],
+            },
+            VncControlMessage::RequestFullFrame {
+                session_id: "vnc".to_string(),
+            },
+        ];
+        let mut encoded = Vec::new();
+        for message in &messages {
+            write_packet(&mut encoded, &encode_vnc_control(message).unwrap()).unwrap();
+        }
+
+        // Feed one byte at a time: the reader must reassemble every message.
+        let mut reader = PacketReader::default();
+        let mut decoded = Vec::new();
+        for byte in &encoded {
+            for packet in reader.push(&[*byte]).unwrap() {
+                decoded.push(decode_vnc_control(&packet).unwrap());
+            }
+        }
+        assert_eq!(decoded.len(), messages.len());
+        assert!(matches!(
+            decoded[1],
+            VncControlMessage::DesktopReset {
+                epoch: 4,
+                width: 1024,
+                height: 768,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &decoded[2],
+            VncControlMessage::State {
+                state: VncSessionState::Reconnecting,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn protocol_specific_control_payloads_are_rejected_by_the_other_decoder() {
+        // Both vocabularies share PacketType::Control, and structurally identical
+        // variants (Disconnect, RequestFullFrame) do decode either way. That is
+        // harmless because a helper process only ever speaks one protocol. What
+        // must not pass silently is a payload only one side can represent.
+        let vnc_only_state = encode_vnc_control(&VncControlMessage::State {
+            session_id: "vnc".to_string(),
+            state: VncSessionState::Authenticating,
+            message: None,
+        })
+        .unwrap();
+        assert!(decode_control(&vnc_only_state).is_err());
+
+        // RdpControlMessage::Clipboard carries a generation counter; VNC's does not.
+        let vnc_clipboard = encode_vnc_control(&VncControlMessage::Clipboard {
+            session_id: "vnc".to_string(),
+            text: "hello".to_string(),
+        })
+        .unwrap();
+        assert!(decode_control(&vnc_clipboard).is_err());
+
+        let rdp_only = encode_control(&RdpControlMessage::Resize {
+            session_id: "rdp".to_string(),
+            width: 800,
+            height: 600,
+        })
+        .unwrap();
+        assert!(decode_vnc_control(&rdp_only).is_err());
+    }
+
+    #[test]
+    fn only_write_packet_flushes() {
+        let packet = encode_vnc_control(&VncControlMessage::ServerHello {
+            version: PROTOCOL_VERSION,
+        })
+        .unwrap();
+
+        let mut buffered = CountingWriter::default();
+        write_packet_into(&mut buffered, &packet).unwrap();
+        write_packet_into(&mut buffered, &packet).unwrap();
+        assert_eq!(buffered.flushes, 0);
+
+        let mut immediate = CountingWriter::default();
+        write_packet(&mut immediate, &packet).unwrap();
+        assert_eq!(immediate.flushes, 1);
+        assert_eq!(immediate.bytes.len() * 2, buffered.bytes.len());
     }
 }

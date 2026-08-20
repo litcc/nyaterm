@@ -1,5 +1,11 @@
 [workspace]
-default-members = ["crates/nyaterm-app"]
+# The application spawns both helpers at runtime and looks for them beside its own
+# executable, so a bare `cargo build` must produce all three binaries.
+default-members = [
+    "crates/nyaterm-app",
+    "crates/nyaterm-rdp-helper",
+    "crates/nyaterm-vnc-helper",
+]
 members = [
     "crates/nyaterm-app",
     "crates/nyaterm-core",
@@ -12,6 +18,7 @@ members = [
     "crates/nyaterm-terminal-gpui",
     "crates/nyaterm-transport",
     "crates/nyaterm-ui",
+    "crates/nyaterm-vnc-helper",
 ]
 resolver = "3"
 exclude = [

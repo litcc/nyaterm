@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -72,6 +73,99 @@ class PackageNativeTests(unittest.TestCase):
             windows.relative_to(package_native.ROOT_DIR).as_posix(),
             "target/aarch64-pc-windows-msvc/release/nyaterm.exe",
         )
+
+    def test_helper_binaries_resolve_beside_the_application(self) -> None:
+        self.assertIn("nyaterm-rdp-helper", package_native.HELPER_BINS)
+        with mock.patch.dict("os.environ", {}, clear=True):
+            linux = package_native.helper_binary_paths("x86_64-unknown-linux-gnu")
+            windows = package_native.helper_binary_paths("aarch64-pc-windows-msvc")
+        self.assertEqual(
+            [path.name for path in linux], list(package_native.HELPER_BINS)
+        )
+        self.assertEqual(
+            [path.name for path in windows],
+            [f"{name}.exe" for name in package_native.HELPER_BINS],
+        )
+        application = package_native.release_binary_path("x86_64-unknown-linux-gnu")
+        for path in linux:
+            self.assertEqual(path.parent, application.parent)
+
+    def test_copy_helpers_stages_every_helper_beside_the_application(self) -> None:
+        target = "x86_64-unknown-linux-gnu"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources = root / "build"
+            destination = root / "package"
+            destination.mkdir()
+            staged = []
+            for path in package_native.helper_binary_paths(target):
+                fake = sources / path.name
+                fake.parent.mkdir(parents=True, exist_ok=True)
+                fake.write_bytes(b"helper")
+                staged.append(fake)
+            with mock.patch.object(
+                package_native, "helper_binary_paths", return_value=staged
+            ):
+                copied = package_native.copy_helpers(destination, target)
+            self.assertEqual(
+                sorted(path.name for path in copied),
+                sorted(package_native.HELPER_BINS),
+            )
+            for path in copied:
+                self.assertTrue(path.is_file())
+                self.assertEqual(path.parent, destination)
+
+    def test_windows_installer_script_installs_and_removes_every_helper(self) -> None:
+        target = "x86_64-pc-windows-msvc"
+        info = package_native.target_info(target)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                mock.patch.object(package_native, "WORK_DIR", root / "work"),
+                mock.patch.object(package_native, "DIST_DIR", root / "dist"),
+                mock.patch.object(package_native, "run"),
+                mock.patch.object(
+                    package_native, "find_makensis", return_value="makensis"
+                ),
+            ):
+                package_native.WORK_DIR.mkdir(parents=True)
+                package_native.DIST_DIR.mkdir(parents=True)
+                application = root / "nyaterm.exe"
+                application.write_bytes(b"MZ")
+                for path in package_native.helper_binary_paths(target):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b"MZ")
+                package_native.create_windows_packages(application, info, "2.0.0")
+                script = (
+                    package_native.WORK_DIR / "nyaterm-installer.nsi"
+                ).read_text(encoding="utf-8")
+        for name in package_native.HELPER_BINS:
+            filename = f"{name}.exe"
+            with self.subTest(helper=filename):
+                self.assertRegex(script, rf'File ".*{filename}"')
+                self.assertIn(f'Delete "$INSTDIR\\{filename}"', script)
+
+    def test_deb_dependencies_cover_helper_binaries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = [root / "nyaterm", root / "nyaterm-rdp-helper"]
+            with (
+                mock.patch.object(package_native, "WORK_DIR", root / "work"),
+                mock.patch.object(
+                    package_native, "require_tool", return_value="dpkg-shlibdeps"
+                ),
+                mock.patch.object(
+                    package_native.subprocess,
+                    "check_output",
+                    return_value="shlibs:Depends=libc6, libx11-6\n",
+                ) as check_output,
+            ):
+                dependencies = package_native.linux_deb_dependencies(binaries)
+        self.assertEqual(dependencies, "libc6, libx11-6")
+        command = check_output.call_args.args[0]
+        for binary in binaries:
+            self.assertIn(str(binary), command)
+        self.assertEqual(command.count("-e"), len(binaries))
 
     def test_release_binary_respects_absolute_cargo_target_dir(self) -> None:
         with mock.patch.dict("os.environ", {"CARGO_TARGET_DIR": "/cache/cargo"}):

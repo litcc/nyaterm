@@ -1,46 +1,33 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-    mpsc,
-};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
-use tokio::net::TcpStream;
-use tokio::runtime::Runtime;
-use tokio::time::timeout;
 use uuid::Uuid;
-use vnc::{
-    ClientKeyEvent, ClientMouseEvent, PixelFormat as VncPixelFormat, Rect, Screen, VncClient,
-    VncConnector, VncEncoding, VncEvent, VncLimits, VncSecurityPolicy, X11Event,
-};
-use zeroize::Zeroizing;
 
+use crate::helper_process;
 use crate::{
-    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH,
-    MAX_VNC_INPUT_BATCH, PixelFormat, RdpFrameEvent, VncError, VncErrorKind, VncInputEvent,
-    VncRuntimeEvent, VncSecurityMode, VncSessionConfig, VncSessionDrain, VncSessionState,
+    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, PacketType, RdpFrameEvent,
+    VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent, VncSecurityMode,
+    VncSessionConfig, VncSessionDrain, VncSessionState, decode_frame_packet, decode_vnc_control,
+    encode_vnc_control, read_packet, write_packet,
 };
 
 const FRAME_QUEUE_LIMIT: usize = 64;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(8);
-const UPDATE_REQUEST_INTERVAL: Duration = Duration::from_millis(16);
+const HELPER_PACKAGE: &str = "nyaterm-vnc-helper";
+const HELPER_ENV_VAR: &str = "NYATERM_VNC_HELPER";
 
-enum WorkerCommand {
-    Input(VncInputEvent),
-    Clipboard(String),
-    FullRefresh,
-    Close,
+fn resolve_helper_path() -> Result<PathBuf, VncError> {
+    helper_process::resolve_helper(HELPER_PACKAGE, HELPER_ENV_VAR)
+        .map_err(|message| VncError::new(VncErrorKind::HelperMissing, message))
 }
 
 #[derive(Default)]
 struct EventQueue {
     control: VecDeque<VncRuntimeEvent>,
     frames: VecDeque<RdpFrameEvent>,
-    current_epoch: u64,
+    current_epoch: Option<u64>,
     waiting_for_full_frame: bool,
     dropped_frames: usize,
 }
@@ -50,31 +37,48 @@ impl EventQueue {
         self.control.push_back(event);
     }
 
-    fn push_reset(&mut self, session_id: &str, width: u32, height: u32) -> u64 {
-        self.current_epoch = self.current_epoch.saturating_add(1).max(1);
+    fn push_reset(&mut self, session_id: &str, epoch: u64, width: u32, height: u32) {
+        self.current_epoch = Some(epoch);
         self.frames.clear();
         self.waiting_for_full_frame = true;
         self.control.push_back(VncRuntimeEvent::Frame {
             session_id: session_id.to_string(),
             event: RdpFrameEvent::Reset {
-                epoch: self.current_epoch,
+                epoch,
                 width,
                 height,
             },
         });
-        self.current_epoch
     }
 
-    fn push_frame(&mut self, frame: RdpFrameEvent) {
+    /// Queue a framebuffer update, returning `true` when the queue overflowed and
+    /// the helper must be asked for a full refresh.
+    ///
+    /// Frames from a superseded epoch are dropped here rather than decoded and
+    /// rejected later by `Framebuffer::apply`. Unlike the RDP queue this one does
+    /// not withhold partial frames while `waiting_for_full_frame`: a VNC frame is
+    /// flagged `full` merely by starting at the origin, so withholding would stall
+    /// the display whenever a server only sends interior rectangles.
+    fn push_frame(&mut self, frame: RdpFrameEvent) -> bool {
+        let RdpFrameEvent::Bitmap { epoch, full, .. } = &frame else {
+            self.frames.push_back(frame);
+            return false;
+        };
+        if self.current_epoch != Some(*epoch) {
+            self.dropped_frames += 1;
+            return false;
+        }
+        if *full {
+            self.waiting_for_full_frame = false;
+        }
         if self.frames.len() >= FRAME_QUEUE_LIMIT {
             self.dropped_frames += self.frames.len() + 1;
             self.frames.clear();
             self.waiting_for_full_frame = true;
-        }
-        if matches!(&frame, RdpFrameEvent::Bitmap { full: true, .. }) {
-            self.waiting_for_full_frame = false;
+            return true;
         }
         self.frames.push_back(frame);
+        false
     }
 
     fn drain(&mut self) -> VncSessionDrain {
@@ -90,11 +94,15 @@ impl EventQueue {
 struct SessionRecord {
     state: Arc<Mutex<VncSessionState>>,
     queue: Arc<Mutex<EventQueue>>,
-    sender: mpsc::Sender<WorkerCommand>,
-    worker: Option<JoinHandle<()>>,
-    close_requested: Arc<AtomicBool>,
+    writer: Arc<Mutex<ChildStdin>>,
+    child: Option<Child>,
+    reader: Option<JoinHandle<()>>,
 }
 
+/// Owns the `nyaterm-vnc-helper` child processes and their event queues.
+///
+/// The public surface is unchanged from the previous in-process implementation;
+/// only the transport moved behind IPC.
 #[derive(Default)]
 pub struct VncSessionManager {
     sessions: Mutex<HashMap<String, SessionRecord>>,
@@ -114,42 +122,93 @@ impl VncSessionManager {
         session_id: String,
         config: VncSessionConfig,
     ) -> Result<String, VncError> {
+        // Validate before spawning so a bad configuration never costs a process.
         validate_vnc_config(&config)?;
-        let queue = Arc::new(Mutex::new(EventQueue::default()));
-        let state = Arc::new(Mutex::new(VncSessionState::Connecting));
-        let close_requested = Arc::new(AtomicBool::new(false));
-        let (sender, receiver) = mpsc::channel();
-        let worker = spawn_worker(
-            session_id.clone(),
-            config,
-            Arc::clone(&queue),
-            Arc::clone(&state),
-            Arc::clone(&close_requested),
-            receiver,
-        );
-        let mut sessions = self.sessions.lock().map_err(|_| {
+        {
+            let mut sessions = self.sessions.lock().map_err(|_| registry_poisoned())?;
+            if sessions
+                .get(&session_id)
+                .is_some_and(|record| record.child.is_some())
+            {
+                return Err(VncError::new(
+                    VncErrorKind::Protocol,
+                    format!("VNC session '{session_id}' is already running"),
+                ));
+            }
+            sessions.remove(&session_id);
+        }
+        let helper = resolve_helper_path()?;
+        let helper_process::HelperProcess {
+            child,
+            stdin,
+            stdout,
+        } = helper_process::spawn_helper(&helper).map_err(|error| {
             VncError::new(
-                VncErrorKind::Internal,
-                "VNC session registry lock is poisoned",
+                VncErrorKind::HelperMissing,
+                format!("failed to spawn the VNC helper: {error}"),
             )
         })?;
-        if let Some(mut existing) = sessions.remove(&session_id) {
-            existing.close_requested.store(true, Ordering::Release);
-            let _ = existing.sender.send(WorkerCommand::Close);
-            if let Some(worker) = existing.worker.take() {
-                let _ = worker.join();
-            }
-        }
-        sessions.insert(
+        let writer = Arc::new(Mutex::new(stdin));
+        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let state = Arc::new(Mutex::new(VncSessionState::Connecting));
+        let reader = spawn_reader(
             session_id.clone(),
-            SessionRecord {
-                state,
-                queue,
-                sender,
-                worker: Some(worker),
-                close_requested,
-            },
+            stdout,
+            writer.clone(),
+            queue.clone(),
+            state.clone(),
         );
+        let mut record = SessionRecord {
+            state,
+            queue,
+            writer,
+            child: Some(child),
+            reader: Some(reader),
+        };
+        let start_result = send_control(
+            &record.writer,
+            &VncControlMessage::ClientHello {
+                version: PROTOCOL_VERSION,
+            },
+        )
+        .and_then(|()| {
+            send_control(
+                &record.writer,
+                &VncControlMessage::Connect {
+                    session_id: session_id.clone(),
+                    config,
+                },
+            )
+        });
+        if let Err(error) = start_result {
+            cleanup_child(&mut record);
+            return Err(error);
+        }
+        record
+            .queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_control(VncRuntimeEvent::State {
+                session_id: session_id.clone(),
+                state: VncSessionState::Connecting,
+                message: None,
+            });
+        let mut sessions = match self.sessions.lock() {
+            Ok(sessions) => sessions,
+            Err(_) => {
+                cleanup_child(&mut record);
+                return Err(registry_poisoned());
+            }
+        };
+        if sessions.contains_key(&session_id) {
+            drop(sessions);
+            cleanup_child(&mut record);
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                format!("VNC session '{session_id}' was created concurrently"),
+            ));
+        }
+        sessions.insert(session_id.clone(), record);
         Ok(session_id)
     }
 
@@ -160,25 +219,13 @@ impl VncSessionManager {
                 format!("VNC input batch exceeds {MAX_VNC_INPUT_BATCH} events"),
             ));
         }
-        let sessions = self.sessions.lock().map_err(|_| {
-            VncError::new(
-                VncErrorKind::Internal,
-                "VNC session registry lock is poisoned",
-            )
-        })?;
-        let record = sessions.get(session_id).ok_or_else(|| {
-            VncError::new(
-                VncErrorKind::Protocol,
-                format!("VNC session '{session_id}' is not running"),
-            )
-        })?;
-        for event in events {
-            record
-                .sender
-                .send(WorkerCommand::Input(event))
-                .map_err(|_| VncError::new(VncErrorKind::Transport, "VNC worker channel closed"))?;
-        }
-        Ok(())
+        self.send(
+            session_id,
+            VncControlMessage::Input {
+                session_id: session_id.to_string(),
+                events,
+            },
+        )
     }
 
     pub fn set_clipboard_text(&self, session_id: &str, text: String) -> Result<(), VncError> {
@@ -188,77 +235,126 @@ impl VncSessionManager {
                 "VNC clipboard text must be Latin-1 and no larger than 1 MiB",
             ));
         }
-        let sessions = self.sessions.lock().map_err(|_| {
-            VncError::new(
-                VncErrorKind::Internal,
-                "VNC session registry lock is poisoned",
-            )
-        })?;
-        let record = sessions.get(session_id).ok_or_else(|| {
-            VncError::new(
-                VncErrorKind::Protocol,
-                format!("VNC session '{session_id}' is not running"),
-            )
-        })?;
-        record
-            .sender
-            .send(WorkerCommand::Clipboard(text))
-            .map_err(|_| VncError::new(VncErrorKind::Transport, "VNC worker channel closed"))
+        self.send(
+            session_id,
+            VncControlMessage::Clipboard {
+                session_id: session_id.to_string(),
+                text,
+            },
+        )
     }
 
     pub fn request_full_frame(&self, session_id: &str) -> Result<(), VncError> {
-        let sessions = self.sessions.lock().map_err(|_| {
-            VncError::new(
-                VncErrorKind::Internal,
-                "VNC session registry lock is poisoned",
-            )
-        })?;
-        let record = sessions.get(session_id).ok_or_else(|| {
-            VncError::new(
-                VncErrorKind::Protocol,
-                format!("VNC session '{session_id}' is not running"),
-            )
-        })?;
-        record
-            .sender
-            .send(WorkerCommand::FullRefresh)
-            .map_err(|_| VncError::new(VncErrorKind::Transport, "VNC worker channel closed"))
+        self.send(
+            session_id,
+            VncControlMessage::RequestFullFrame {
+                session_id: session_id.to_string(),
+            },
+        )
     }
 
     pub fn drain(&self, session_id: &str) -> VncSessionDrain {
         let Ok(sessions) = self.sessions.lock() else {
             return VncSessionDrain::default();
         };
-        sessions
-            .get(session_id)
-            .and_then(|record| record.queue.lock().ok().map(|mut queue| queue.drain()))
-            .unwrap_or_default()
+        let Some(record) = sessions.get(session_id) else {
+            return VncSessionDrain::default();
+        };
+        record
+            .queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain()
     }
 
+    /// Close a session, keeping its record so [`Self::state`] still answers.
+    ///
+    /// This matches `RdpSessionManager::close`: the record stays in the map with
+    /// `child: None` so a caller can observe `Disconnected` afterwards, and a
+    /// later `create_session_with_id` with the same id replaces the stale entry.
     pub fn close(&self, session_id: &str) -> Result<(), VncError> {
-        let mut sessions = self.sessions.lock().map_err(|_| {
-            VncError::new(
-                VncErrorKind::Internal,
-                "VNC session registry lock is poisoned",
-            )
-        })?;
-        let Some(mut record) = sessions.remove(session_id) else {
+        let Some(mut record) = self
+            .sessions
+            .lock()
+            .map_err(|_| registry_poisoned())?
+            .remove(session_id)
+        else {
             return Ok(());
         };
-        record.close_requested.store(true, Ordering::Release);
-        let _ = record.sender.send(WorkerCommand::Close);
-        if let Some(worker) = record.worker.take() {
-            let _ = worker.join();
-        }
+        set_state(&record.state, VncSessionState::Disconnecting);
+        let _ = send_control(
+            &record.writer,
+            &VncControlMessage::Input {
+                session_id: session_id.to_string(),
+                events: vec![VncInputEvent::ReleaseAllKeys],
+            },
+        );
+        let _ = send_control(
+            &record.writer,
+            &VncControlMessage::Disconnect {
+                session_id: session_id.to_string(),
+            },
+        );
+        cleanup_child(&mut record);
+        set_state(&record.state, VncSessionState::Disconnected);
+        record
+            .queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_control(VncRuntimeEvent::State {
+                session_id: session_id.to_string(),
+                state: VncSessionState::Disconnected,
+                message: None,
+            });
+        self.sessions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(session_id.to_string(), record);
         Ok(())
     }
 
     pub fn state(&self, session_id: &str) -> Option<VncSessionState> {
-        self.sessions.lock().ok().and_then(|sessions| {
-            sessions
-                .get(session_id)
-                .and_then(|record| record.state.lock().ok().map(|state| *state))
-        })
+        let sessions = self.sessions.lock().ok()?;
+        sessions
+            .get(session_id)?
+            .state
+            .lock()
+            .ok()
+            .map(|state| *state)
+    }
+
+    pub fn shutdown(&self) {
+        let ids = self
+            .sessions
+            .lock()
+            .map(|sessions| {
+                sessions
+                    .iter()
+                    .filter_map(|(id, record)| record.child.is_some().then_some(id.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for id in ids {
+            let _ = self.close(&id);
+        }
+    }
+
+    fn send(&self, session_id: &str, message: VncControlMessage) -> Result<(), VncError> {
+        let sessions = self.sessions.lock().map_err(|_| registry_poisoned())?;
+        let record = sessions.get(session_id).ok_or_else(|| {
+            VncError::new(
+                VncErrorKind::Protocol,
+                format!("VNC session '{session_id}' is not running"),
+            )
+        })?;
+        send_control(&record.writer, &message)
+    }
+}
+
+impl Drop for VncSessionManager {
+    fn drop(&mut self) {
+        // Without this, every helper process outlives the application.
+        self.shutdown();
     }
 }
 
@@ -275,8 +371,9 @@ pub fn validate_vnc_config(config: &VncSessionConfig) -> Result<(), VncError> {
             "VNC Authentication requires a password",
         ));
     }
+    // Classic VNC auth keys off the first 8 bytes; str::len() is that byte count.
     if let Some(password) = config.password.as_ref()
-        && password.as_bytes().len() > 8
+        && password.len() > 8
     {
         return Err(VncError::new(
             VncErrorKind::Authentication,
@@ -286,481 +383,211 @@ pub fn validate_vnc_config(config: &VncSessionConfig) -> Result<(), VncError> {
     Ok(())
 }
 
-pub fn classify_vnc_error(error: vnc::VncError) -> VncError {
-    let (kind, message) = match error {
-        vnc::VncError::NoPassword | vnc::VncError::WrongPassword => (
-            VncErrorKind::Authentication,
-            "VNC authentication failed".to_string(),
-        ),
-        vnc::VncError::UnsupportedSecurityType
-        | vnc::VncError::RequiredSecurityTypeUnavailable(_)
-        | vnc::VncError::InvalidSecurityType(_) => (
-            VncErrorKind::Authentication,
-            format!(
-                "The VNC server requires an unsupported security type. Currently supported: None and VNC Authentication. Details: {error}"
-            ),
-        ),
-        vnc::VncError::InvalidEncoding(_) | vnc::VncError::InvalidImageData => {
-            (VncErrorKind::Encoding, error.to_string())
-        }
-        vnc::VncError::IoError(_) => (VncErrorKind::Transport, error.to_string()),
-        vnc::VncError::LimitExceeded { .. }
-        | vnc::VncError::InvalidDimensions
-        | vnc::VncError::IntegerOverflow(_)
-        | vnc::VncError::WrongPixelFormat
-        | vnc::VncError::WrongServerMessage
-        | vnc::VncError::InvalidSecurityResult(_)
-        | vnc::VncError::SecurityFailure(_) => (VncErrorKind::Protocol, error.to_string()),
-        _ => (VncErrorKind::Internal, error.to_string()),
-    };
-    VncError::new(kind, message)
+fn registry_poisoned() -> VncError {
+    VncError::new(
+        VncErrorKind::Internal,
+        "VNC session registry lock is poisoned",
+    )
 }
 
-fn spawn_worker(
+fn send_control(
+    writer: &Arc<Mutex<ChildStdin>>,
+    message: &VncControlMessage,
+) -> Result<(), VncError> {
+    let packet = encode_vnc_control(message)
+        .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
+    write_packet(
+        &mut *writer
+            .lock()
+            .map_err(|_| VncError::new(VncErrorKind::Ipc, "VNC helper writer lock is poisoned"))?,
+        &packet,
+    )
+    .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))
+}
+
+fn spawn_reader(
     session_id: String,
-    config: VncSessionConfig,
+    mut stdout: std::process::ChildStdout,
+    writer: Arc<Mutex<ChildStdin>>,
     queue: Arc<Mutex<EventQueue>>,
     state: Arc<Mutex<VncSessionState>>,
-    close_requested: Arc<AtomicBool>,
-    receiver: mpsc::Receiver<WorkerCommand>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
-        .name(format!("nyaterm-vnc-{session_id}"))
+        .name(format!("nyaterm-vnc-reader-{session_id}"))
         .spawn(move || {
-            let runtime = Runtime::new();
-            match runtime {
-                Ok(runtime) => runtime.block_on(run_worker(
-                    session_id,
-                    config,
-                    queue,
-                    state,
-                    close_requested,
-                    receiver,
-                )),
-                Err(error) => push_error(
+            loop {
+                let packet = match read_packet(&mut stdout) {
+                    Ok(Some(packet)) => packet,
+                    Ok(None) => break,
+                    Err(error) => {
+                        push_reader_error(
+                            &session_id,
+                            &queue,
+                            &state,
+                            VncErrorKind::Ipc,
+                            error.to_string(),
+                        );
+                        return;
+                    }
+                };
+                let result: Result<(), VncError> = match packet.packet_type {
+                    PacketType::Control => decode_vnc_control(&packet)
+                        .map_err(|error| VncError::new(VncErrorKind::Protocol, error.to_string()))
+                        .and_then(|message| handle_control(&session_id, message, &queue, &state)),
+                    PacketType::Frame => decode_frame_packet(&packet)
+                        .map_err(|error| VncError::new(VncErrorKind::Protocol, error.to_string()))
+                        .map(|(frame_session, frame)| {
+                            if frame_session != session_id {
+                                return;
+                            }
+                            let request_full = queue
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .push_frame(frame);
+                            if request_full {
+                                // Overflow discarded queued rectangles, so ask the
+                                // server to repaint instead of leaving them lost.
+                                let _ = send_control(
+                                    &writer,
+                                    &VncControlMessage::RequestFullFrame {
+                                        session_id: session_id.clone(),
+                                    },
+                                );
+                            }
+                        }),
+                    // The VNC path never advertises cursor encodings.
+                    PacketType::Cursor => Ok(()),
+                };
+                if let Err(error) = result {
+                    push_reader_error(&session_id, &queue, &state, error.kind, error.message);
+                    return;
+                }
+            }
+            let current = *state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !matches!(
+                current,
+                VncSessionState::Disconnecting
+                    | VncSessionState::Disconnected
+                    | VncSessionState::Failed
+            ) {
+                // stdout EOF with a live session means the helper died. Reporting it
+                // is what turns a silent hang into a retryable failure.
+                push_reader_error(
+                    &session_id,
                     &queue,
                     &state,
-                    &session_id,
-                    VncError::new(
-                        VncErrorKind::Internal,
-                        format!("failed to start VNC runtime: {error}"),
-                    ),
-                    true,
-                ),
+                    VncErrorKind::HelperCrashed,
+                    "the VNC helper exited unexpectedly".to_string(),
+                );
             }
         })
-        .expect("failed to spawn VNC worker")
+        .expect("failed to spawn the VNC helper reader")
 }
 
-async fn run_worker(
-    session_id: String,
-    config: VncSessionConfig,
-    queue: Arc<Mutex<EventQueue>>,
-    state: Arc<Mutex<VncSessionState>>,
-    close_requested: Arc<AtomicBool>,
-    receiver: mpsc::Receiver<WorkerCommand>,
-) {
-    let receiver = Arc::new(Mutex::new(receiver));
-    let mut attempt = 0;
-    loop {
-        if close_requested.load(Ordering::Acquire) {
-            set_state(
-                &queue,
-                &state,
-                &session_id,
-                VncSessionState::Disconnected,
-                None,
-            );
-            return;
-        }
-        let connecting_state = if attempt == 0 {
-            VncSessionState::Connecting
-        } else {
-            VncSessionState::Reconnecting
-        };
-        set_state(&queue, &state, &session_id, connecting_state, None);
-        let result = run_generation(
-            &session_id,
-            &config,
-            &queue,
-            &state,
-            Arc::clone(&receiver),
-            Arc::clone(&close_requested),
-        )
-        .await;
-        match result {
-            Ok(()) => return,
-            Err(error) => {
-                if close_requested.load(Ordering::Acquire) {
-                    set_state(
-                        &queue,
-                        &state,
-                        &session_id,
-                        VncSessionState::Disconnected,
-                        None,
-                    );
-                    return;
-                }
-                let retryable =
-                    matches!(error.kind, VncErrorKind::Transport | VncErrorKind::Internal);
-                if !retryable
-                    || !config.reconnect.enabled
-                    || attempt >= config.reconnect.max_attempts
-                {
-                    push_error(&queue, &state, &session_id, error, true);
-                    return;
-                }
-                attempt += 1;
-                tokio::time::sleep(reconnect_delay(attempt)).await;
-            }
-        }
-    }
-}
-
-async fn run_generation(
+fn handle_control(
     session_id: &str,
-    config: &VncSessionConfig,
+    message: VncControlMessage,
     queue: &Arc<Mutex<EventQueue>>,
     state: &Arc<Mutex<VncSessionState>>,
-    receiver: Arc<Mutex<mpsc::Receiver<WorkerCommand>>>,
-    close_requested: Arc<AtomicBool>,
 ) -> Result<(), VncError> {
-    let stream = timeout(
-        CONNECT_TIMEOUT,
-        TcpStream::connect((config.host.as_str(), config.port)),
-    )
-    .await
-    .map_err(|_| VncError::new(VncErrorKind::Transport, "VNC connection timed out"))?
-    .map_err(|error| {
-        VncError::new(
-            VncErrorKind::Transport,
-            format!("Unable to connect to the VNC server: {error}"),
-        )
-    })?;
-    set_state(
-        queue,
-        state,
-        session_id,
-        VncSessionState::Authenticating,
-        None,
-    );
-    let password = Zeroizing::new(config.password.clone().unwrap_or_default());
-    let auth_password = password.to_string();
-    let connector = VncConnector::new(stream)
-        .set_auth_method(async move { Ok(auth_password) })
-        .set_security_policy(security_policy(
-            config.security.mode,
-            config.password.is_some(),
-        ))
-        .set_pixel_format(VncPixelFormat::rgba())
-        .set_limits(vnc_limits())
-        .add_encoding(VncEncoding::DesktopSizePseudo)
-        .add_encoding(VncEncoding::Zrle)
-        .add_encoding(VncEncoding::Tight)
-        .add_encoding(VncEncoding::Raw)
-        .allow_shared(config.shared)
-        .build()
-        .map_err(classify_vnc_error)?;
-    let client = timeout(HANDSHAKE_TIMEOUT, connector.try_start())
-        .await
-        .map_err(|_| {
-            VncError::new(
-                VncErrorKind::Transport,
-                "VNC protocol negotiation timed out",
-            )
-        })?
-        .and_then(|state| state.finish())
-        .map_err(classify_vnc_error)?;
-    set_state(queue, state, session_id, VncSessionState::Negotiating, None);
-    let mut pressed_keys = Vec::new();
-    let mut poll = tokio::time::interval(EVENT_POLL_INTERVAL);
-    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut refresh_due = false;
-    let refresh_delay = tokio::time::sleep(Duration::from_secs(86_400));
-    tokio::pin!(refresh_delay);
-    loop {
-        if close_requested.load(Ordering::Acquire) {
-            release_pressed_keys(&client, &mut pressed_keys).await;
-            let _ = client.close().await;
-            return Ok(());
+    match message {
+        VncControlMessage::ServerHello { version } if version != PROTOCOL_VERSION => {
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                format!("VNC helper protocol version {version} does not match {PROTOCOL_VERSION}"),
+            ));
         }
-        tokio::select! {
-            _ = poll.tick() => {
-                loop {
-                    match client.poll_event().await {
-                        Ok(Some(event)) => {
-                            handle_vnc_event(session_id, queue, state, event)?;
-                            refresh_due = true;
-                            refresh_delay.as_mut().reset(tokio::time::Instant::now() + UPDATE_REQUEST_INTERVAL);
-                        }
-                        Ok(None) => break,
-                        Err(error) => return Err(classify_vnc_error(error)),
-                    }
-                }
-            }
-            _ = &mut refresh_delay, if refresh_due => {
-                client.input(X11Event::Refresh).await.map_err(classify_vnc_error)?;
-                refresh_due = false;
-            }
-            command = recv_worker_command(Arc::clone(&receiver)) => {
-                match command {
-                    Some(WorkerCommand::Input(event)) if !config.view_only => {
-                        send_vnc_input(&client, event, &mut pressed_keys).await?;
-                    }
-                    Some(WorkerCommand::Input(_)) => {}
-                    Some(WorkerCommand::Clipboard(text)) if !config.view_only && config.clipboard.enabled => {
-                        client.input(X11Event::CopyText(text)).await.map_err(classify_vnc_error)?;
-                    }
-                    Some(WorkerCommand::Clipboard(_)) => {}
-                    Some(WorkerCommand::FullRefresh) => {
-                        client.input(X11Event::FullRefresh).await.map_err(classify_vnc_error)?;
-                    }
-                    Some(WorkerCommand::Close) | None => {
-                        release_pressed_keys(&client, &mut pressed_keys).await;
-                        let _ = client.close().await;
-                        return Ok(());
-                    }
-                }
-            }
-        }
-    }
-}
-
-async fn recv_worker_command(
-    receiver: Arc<Mutex<mpsc::Receiver<WorkerCommand>>>,
-) -> Option<WorkerCommand> {
-    tokio::task::spawn_blocking(move || receiver.lock().ok().and_then(|rx| rx.recv().ok()))
-        .await
-        .ok()
-        .flatten()
-}
-
-fn handle_vnc_event(
-    session_id: &str,
-    queue: &Arc<Mutex<EventQueue>>,
-    state: &Arc<Mutex<VncSessionState>>,
-    event: VncEvent,
-) -> Result<(), VncError> {
-    match event {
-        VncEvent::SetResolution(Screen { width, height }) => {
-            validate_framebuffer_dimensions(u32::from(width), u32::from(height))?;
-            let mut queue = queue.lock().map_err(|_| {
-                VncError::new(VncErrorKind::Internal, "VNC event queue lock is poisoned")
-            })?;
-            queue.push_reset(session_id, u32::from(width), u32::from(height));
-        }
-        VncEvent::RawImage(rect, pixels) => {
-            let epoch = {
-                let mut event_queue = queue.lock().map_err(|_| {
-                    VncError::new(VncErrorKind::Internal, "VNC event queue lock is poisoned")
-                })?;
-                if event_queue.current_epoch == 0 {
-                    let width = u32::from(rect.x) + u32::from(rect.width);
-                    let height = u32::from(rect.y) + u32::from(rect.height);
-                    event_queue.push_reset(session_id, width, height)
-                } else {
-                    event_queue.current_epoch
-                }
-            };
-            validate_rect(rect)?;
-            let frame = RdpFrameEvent::Bitmap {
-                epoch,
-                full: rect.x == 0 && rect.y == 0,
-                x: u32::from(rect.x),
-                y: u32::from(rect.y),
-                width: u32::from(rect.width),
-                height: u32::from(rect.height),
-                stride: u32::from(rect.width) * 4,
-                format: PixelFormat::Rgba8,
-                pixels,
-            };
-            let mut event_queue = queue.lock().map_err(|_| {
-                VncError::new(VncErrorKind::Internal, "VNC event queue lock is poisoned")
-            })?;
-            event_queue.push_frame(frame);
-            drop(event_queue);
-            set_state(queue, state, session_id, VncSessionState::Connected, None);
-        }
-        VncEvent::Text(text) if is_latin1_within_limit(&text) => {
+        VncControlMessage::ServerHello { .. } => {}
+        VncControlMessage::DesktopReset {
+            session_id: event_session,
+            epoch,
+            width,
+            height,
+        } if event_session == session_id => queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_reset(session_id, epoch, width, height),
+        VncControlMessage::State {
+            session_id: event_session,
+            state: new_state,
+            message,
+        } if event_session == session_id => {
+            set_state(state, new_state);
             queue
                 .lock()
-                .map_err(|_| {
-                    VncError::new(VncErrorKind::Internal, "VNC event queue lock is poisoned")
-                })?
-                .push_control(VncRuntimeEvent::Clipboard {
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push_control(VncRuntimeEvent::State {
                     session_id: session_id.to_string(),
-                    text,
+                    state: new_state,
+                    message,
                 });
         }
-        VncEvent::Error(message) => {
-            return Err(VncError::new(VncErrorKind::Protocol, message));
+        VncControlMessage::Clipboard {
+            session_id: event_session,
+            text,
+        } if event_session == session_id => queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push_control(VncRuntimeEvent::Clipboard {
+                session_id: session_id.to_string(),
+                text,
+            }),
+        VncControlMessage::Error {
+            session_id: event_session,
+            error,
+            fatal,
+        } if event_session == session_id => {
+            if fatal {
+                set_state(state, VncSessionState::Failed);
+            }
+            queue
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push_control(VncRuntimeEvent::Error {
+                    session_id: session_id.to_string(),
+                    error,
+                    fatal,
+                });
         }
-        VncEvent::JpegImage(_, _) => {
-            return Err(VncError::new(
-                VncErrorKind::Encoding,
-                "The server sent a Tight JPEG event instead of decoded RGBA pixels",
-            ));
-        }
-        VncEvent::Copy(_, _) | VncEvent::SetCursor(_, _) => {
-            return Err(VncError::new(
-                VncErrorKind::Encoding,
-                "The server sent an unrequested VNC encoding",
-            ));
-        }
-        VncEvent::SetPixelFormat(_) | VncEvent::Bell => {}
         _ => {}
     }
     Ok(())
 }
 
-async fn send_vnc_input(
-    client: &VncClient,
-    event: VncInputEvent,
-    pressed_keys: &mut Vec<u32>,
-) -> Result<(), VncError> {
-    match event {
-        VncInputEvent::Key { keysym, pressed } => {
-            if pressed {
-                if !pressed_keys.contains(&keysym) {
-                    pressed_keys.push(keysym);
-                }
-            } else {
-                pressed_keys.retain(|key| *key != keysym);
-            }
-            client
-                .input(X11Event::KeyEvent(ClientKeyEvent {
-                    keycode: keysym,
-                    down: pressed,
-                }))
-                .await
-                .map_err(classify_vnc_error)?;
-        }
-        VncInputEvent::Pointer { x, y, button_mask } => {
-            client
-                .input(X11Event::PointerEvent(ClientMouseEvent {
-                    position_x: u16::try_from(x.min(u32::from(u16::MAX))).unwrap_or(u16::MAX),
-                    position_y: u16::try_from(y.min(u32::from(u16::MAX))).unwrap_or(u16::MAX),
-                    bottons: button_mask,
-                }))
-                .await
-                .map_err(classify_vnc_error)?;
-        }
-        VncInputEvent::ReleaseAllKeys => release_pressed_keys(client, pressed_keys).await,
-    }
-    Ok(())
-}
-
-async fn release_pressed_keys(client: &VncClient, pressed_keys: &mut Vec<u32>) {
-    for keysym in pressed_keys.drain(..) {
-        let _ = client
-            .input(X11Event::KeyEvent(ClientKeyEvent {
-                keycode: keysym,
-                down: false,
-            }))
-            .await;
-    }
-}
-
-fn set_state(
+fn push_reader_error(
+    session_id: &str,
     queue: &Arc<Mutex<EventQueue>>,
     state: &Arc<Mutex<VncSessionState>>,
-    session_id: &str,
-    next: VncSessionState,
-    message: Option<String>,
+    kind: VncErrorKind,
+    message: String,
 ) {
-    if let Ok(mut state) = state.lock() {
-        *state = next;
-    }
-    if let Ok(mut queue) = queue.lock() {
-        queue.push_control(VncRuntimeEvent::State {
-            session_id: session_id.to_string(),
-            state: next,
-            message,
-        });
-    }
+    let error = VncError::new(kind, message);
+    set_state(state, VncSessionState::Failed);
+    let mut queue = queue
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    queue.push_control(VncRuntimeEvent::Error {
+        session_id: session_id.to_string(),
+        error,
+        fatal: true,
+    });
+    queue.push_control(VncRuntimeEvent::State {
+        session_id: session_id.to_string(),
+        state: VncSessionState::Failed,
+        message: None,
+    });
 }
 
-fn push_error(
-    queue: &Arc<Mutex<EventQueue>>,
-    state: &Arc<Mutex<VncSessionState>>,
-    session_id: &str,
-    error: VncError,
-    fatal: bool,
-) {
-    if let Ok(mut state) = state.lock() {
-        *state = VncSessionState::Failed;
-    }
-    if let Ok(mut queue) = queue.lock() {
-        queue.push_control(VncRuntimeEvent::Error {
-            session_id: session_id.to_string(),
-            error,
-            fatal,
-        });
-    }
+fn set_state(state: &Arc<Mutex<VncSessionState>>, new_state: VncSessionState) {
+    *state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = new_state;
 }
 
-fn security_policy(mode: VncSecurityMode, has_password: bool) -> VncSecurityPolicy {
-    match mode {
-        VncSecurityMode::None => VncSecurityPolicy::NoneOnly,
-        VncSecurityMode::VncAuth => VncSecurityPolicy::VncAuthOnly,
-        VncSecurityMode::Auto if has_password => VncSecurityPolicy::VncAuthOnly,
-        VncSecurityMode::Auto => VncSecurityPolicy::NoneOnly,
-    }
-}
-
-fn vnc_limits() -> VncLimits {
-    VncLimits {
-        max_framebuffer_width: u16::try_from(MAX_VNC_FRAMEBUFFER_WIDTH).unwrap_or(u16::MAX),
-        max_framebuffer_height: u16::try_from(MAX_VNC_FRAMEBUFFER_HEIGHT).unwrap_or(u16::MAX),
-        max_framebuffer_pixels: usize::try_from(
-            MAX_VNC_FRAMEBUFFER_WIDTH * MAX_VNC_FRAMEBUFFER_HEIGHT,
-        )
-        .unwrap_or(usize::MAX),
-        max_clipboard_bytes: MAX_VNC_CLIPBOARD_TEXT_BYTES,
-        max_rectangles_per_update: 1024,
-        max_encoded_payload_bytes: 64 * 1024 * 1024,
-        max_decoded_payload_bytes: usize::try_from(
-            MAX_VNC_FRAMEBUFFER_WIDTH * MAX_VNC_FRAMEBUFFER_HEIGHT * 4,
-        )
-        .unwrap_or(usize::MAX),
-        channel_capacity: 32,
-        ..VncLimits::default()
-    }
-}
-
-fn reconnect_delay(attempt: u32) -> Duration {
-    Duration::from_secs(match attempt {
-        0 | 1 => 1,
-        2 => 2,
-        3 => 4,
-        4 => 8,
-        5 => 15,
-        _ => 30,
-    })
-}
-
-fn validate_framebuffer_dimensions(width: u32, height: u32) -> Result<(), VncError> {
-    if width == 0
-        || height == 0
-        || width > MAX_VNC_FRAMEBUFFER_WIDTH
-        || height > MAX_VNC_FRAMEBUFFER_HEIGHT
-    {
-        return Err(VncError::new(
-            VncErrorKind::Protocol,
-            format!("VNC framebuffer {width}x{height} is outside the supported range"),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_rect(rect: Rect) -> Result<(), VncError> {
-    if rect.width == 0 || rect.height == 0 {
-        return Err(VncError::new(
-            VncErrorKind::Protocol,
-            "VNC rectangle must be non-empty",
-        ));
-    }
-    Ok(())
+fn cleanup_child(record: &mut SessionRecord) {
+    helper_process::cleanup_child(&mut record.child, &mut record.reader);
 }
 
 fn is_latin1_within_limit(text: &str) -> bool {
@@ -769,10 +596,11 @@ fn is_latin1_within_limit(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_VNC_CLIPBOARD_TEXT_BYTES, is_latin1_within_limit, validate_vnc_config};
+    use super::{EventQueue, FRAME_QUEUE_LIMIT, is_latin1_within_limit, validate_vnc_config};
     use crate::{
-        Framebuffer, PixelFormat, RdpFrameEvent, VncClipboardConfig, VncDisplayConfig,
-        VncErrorKind, VncReconnectConfig, VncSecurityConfig, VncSecurityMode, VncSessionConfig,
+        Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PixelFormat, RdpFrameEvent, VncClipboardConfig,
+        VncDisplayConfig, VncErrorKind, VncReconnectConfig, VncSecurityConfig, VncSecurityMode,
+        VncSessionConfig,
     };
 
     fn config() -> VncSessionConfig {
@@ -787,6 +615,20 @@ mod tests {
             reconnect: VncReconnectConfig::default(),
             shared: true,
             view_only: false,
+        }
+    }
+
+    fn frame(epoch: u64, x: u32, full: bool) -> RdpFrameEvent {
+        RdpFrameEvent::Bitmap {
+            epoch,
+            full,
+            x,
+            y: 0,
+            width: 1,
+            height: 1,
+            stride: 4,
+            format: PixelFormat::Rgba8,
+            pixels: vec![x as u8; 4],
         }
     }
 
@@ -824,5 +666,57 @@ mod tests {
         };
         framebuffer.apply(&frame).expect("apply");
         assert_eq!(framebuffer.pixels(), &[30, 20, 10, 255]);
+    }
+
+    #[test]
+    fn frames_from_a_superseded_epoch_are_dropped() {
+        let mut queue = EventQueue::default();
+        queue.push_reset("s", 2, 4, 4);
+        assert!(!queue.push_frame(frame(1, 0, true)));
+        assert!(queue.frames.is_empty());
+        assert_eq!(queue.dropped_frames, 1);
+        assert!(!queue.push_frame(frame(2, 0, true)));
+        assert_eq!(queue.frames.len(), 1);
+    }
+
+    #[test]
+    fn partial_frames_are_kept_while_waiting_for_a_full_frame() {
+        // A VNC frame is flagged `full` only by starting at the origin, so interior
+        // rectangles must still paint instead of being withheld.
+        let mut queue = EventQueue::default();
+        queue.push_reset("s", 1, 100, 100);
+        assert!(queue.waiting_for_full_frame);
+        assert!(!queue.push_frame(frame(1, 40, false)));
+        assert_eq!(queue.frames.len(), 1);
+        assert!(queue.waiting_for_full_frame);
+        assert!(!queue.push_frame(frame(1, 0, true)));
+        assert!(!queue.waiting_for_full_frame);
+    }
+
+    #[test]
+    fn overflow_requests_a_full_frame_and_reports_the_drop() {
+        let mut queue = EventQueue::default();
+        queue.push_reset("s", 1, 100, 100);
+        for x in 0..FRAME_QUEUE_LIMIT as u32 {
+            assert!(!queue.push_frame(frame(1, x, false)));
+        }
+        assert!(queue.push_frame(frame(1, FRAME_QUEUE_LIMIT as u32, false)));
+        assert!(queue.frames.is_empty());
+        assert!(queue.waiting_for_full_frame);
+        assert_eq!(queue.dropped_frames, FRAME_QUEUE_LIMIT + 1);
+    }
+
+    #[test]
+    fn drain_reports_and_clears_drop_accounting() {
+        let mut queue = EventQueue::default();
+        queue.push_reset("s", 1, 4, 4);
+        queue.push_frame(frame(1, 0, true));
+        let drain = queue.drain();
+        assert_eq!(drain.frames.len(), 1);
+        assert_eq!(drain.control.len(), 1);
+        assert_eq!(drain.dropped_frames, 0);
+        let drain = queue.drain();
+        assert!(drain.frames.is_empty());
+        assert!(drain.control.is_empty());
     }
 }

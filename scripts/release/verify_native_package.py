@@ -21,6 +21,11 @@ import package_native
 MIN_ARTIFACT_SIZE = 1024
 
 
+def helper_filenames(target: str) -> list[str]:
+    suffix = ".exe" if "windows" in target else ""
+    return [f"{name}{suffix}" for name in package_native.HELPER_BINS]
+
+
 def require_safe_archive_path(name: str) -> None:
     path = PurePosixPath(name.replace("\\", "/"))
     if path.is_absolute() or ".." in path.parts:
@@ -76,8 +81,10 @@ def macho_cpu_type(data: bytes) -> int:
 
 def verify_windows_portable(path: Path, target: str, version: str) -> None:
     root = "NyaTerm-portable"
+    executables = ["NyaTerm.exe", *helper_filenames(target)]
     required = {
-        f"{root}/NyaTerm.exe",
+        f"{root}/{name}" for name in executables
+    } | {
         f"{root}/nyaterm-portable",
         f"{root}/LICENSE",
         f"{root}/VERSION",
@@ -91,15 +98,19 @@ def verify_windows_portable(path: Path, target: str, version: str) -> None:
         packaged_version = archive.read(f"{root}/VERSION").decode("utf-8").strip()
         if packaged_version != version:
             raise RuntimeError(f"{path.name} contains version {packaged_version}, expected {version}")
-        machine = pe_machine(archive.read(f"{root}/NyaTerm.exe"))
+        machines = {
+            name: pe_machine(archive.read(f"{root}/{name}")) for name in executables
+        }
     expected_machine = {
         "x86_64-pc-windows-msvc": 0x8664,
         "aarch64-pc-windows-msvc": 0xAA64,
     }[target]
-    if machine != expected_machine:
-        raise RuntimeError(
-            f"{path.name} contains PE machine 0x{machine:04x}, expected 0x{expected_machine:04x}"
-        )
+    for name, machine in machines.items():
+        if machine != expected_machine:
+            raise RuntimeError(
+                f"{path.name} contains PE machine 0x{machine:04x} for {name}, "
+                f"expected 0x{expected_machine:04x}"
+            )
 
 
 def find_7zip() -> str:
@@ -110,7 +121,7 @@ def find_7zip() -> str:
     raise RuntimeError("7-Zip is required to verify the NSIS installer")
 
 
-def verify_windows_installer(path: Path) -> None:
+def verify_windows_installer(path: Path, target: str) -> None:
     with path.open("rb") as handle:
         header = handle.read(2)
     if header != b"MZ":
@@ -124,6 +135,7 @@ def verify_windows_installer(path: Path) -> None:
         )
         names = {candidate.name for candidate in output.rglob("*") if candidate.is_file()}
     required = {"NyaTerm.exe", "LICENSE", "VERSION", "Uninstall.exe"}
+    required.update(helper_filenames(target))
     missing = required - names
     if missing:
         raise RuntimeError(f"{path.name} is missing installed files: {', '.join(sorted(missing))}")
@@ -131,10 +143,12 @@ def verify_windows_installer(path: Path) -> None:
 
 def verify_macos_archive(path: Path, target: str, version: str) -> None:
     executable = "NyaTerm.app/Contents/MacOS/NyaTerm"
+    helpers = [f"NyaTerm.app/Contents/MacOS/{name}" for name in helper_filenames(target)]
     info_plist = "NyaTerm.app/Contents/Info.plist"
     version_file = "NyaTerm.app/Contents/Resources/VERSION"
     required = {
         executable,
+        *helpers,
         info_plist,
         version_file,
         "NyaTerm.app/Contents/Resources/LICENSE",
@@ -148,6 +162,10 @@ def verify_macos_archive(path: Path, target: str, version: str) -> None:
         packaged_version = archive.extractfile(version_file).read().decode().strip()  # type: ignore[union-attr]
         plist = plistlib.loads(archive.extractfile(info_plist).read())  # type: ignore[union-attr]
         binary = archive.extractfile(executable).read()  # type: ignore[union-attr]
+        helper_binaries = {
+            name: archive.extractfile(name).read()  # type: ignore[union-attr]
+            for name in helpers
+        }
     if packaged_version != version or plist.get("CFBundleShortVersionString") != version:
         raise RuntimeError(f"{path.name} contains inconsistent version metadata")
     if plist.get("CFBundleIdentifier") != package_native.MACOS_IDENTIFIER:
@@ -156,11 +174,13 @@ def verify_macos_archive(path: Path, target: str, version: str) -> None:
         "x86_64-apple-darwin": 0x01000007,
         "aarch64-apple-darwin": 0x0100000C,
     }[target]
-    actual_cpu = macho_cpu_type(binary)
-    if actual_cpu != expected_cpu:
-        raise RuntimeError(
-            f"{path.name} contains Mach-O CPU 0x{actual_cpu:08x}, expected 0x{expected_cpu:08x}"
-        )
+    for name, data in {executable: binary, **helper_binaries}.items():
+        actual_cpu = macho_cpu_type(data)
+        if actual_cpu != expected_cpu:
+            raise RuntimeError(
+                f"{path.name} contains Mach-O CPU 0x{actual_cpu:08x} for {name}, "
+                f"expected 0x{expected_cpu:08x}"
+            )
 
 
 def verify_dmg(path: Path) -> None:
@@ -211,21 +231,34 @@ def verify_appimage(path: Path, target: str, version: str) -> None:
             env={**os.environ, "APPIMAGE_EXTRACT_AND_RUN": "1"},
         )
         root = Path(directory) / "squashfs-root"
+        executables = [
+            root / "usr" / "bin" / name
+            for name in ("nyaterm", *helper_filenames(target))
+        ]
+        version_file = root / "usr" / "share" / "doc" / "nyaterm" / "VERSION"
         required = [
             root / "AppRun",
-            root / "usr" / "bin" / "nyaterm",
+            *executables,
             root / "usr" / "share" / "applications" / "nyaterm.desktop",
             root / "usr" / "share" / "doc" / "nyaterm" / "LICENSE",
-            root / "usr" / "share" / "doc" / "nyaterm" / "VERSION",
+            version_file,
         ]
         missing = [item for item in required if not item.exists()]
         if missing:
             raise RuntimeError(f"{path.name} is missing AppImage entries: {missing}")
-        packaged_version = required[-1].read_text(encoding="utf-8").strip()
-        with required[1].open("rb") as handle:
-            binary_machine = elf_machine(handle.read(64))
-    if packaged_version != version or binary_machine != expected_machine:
-        raise RuntimeError(f"{path.name} contains inconsistent version or architecture")
+        packaged_version = version_file.read_text(encoding="utf-8").strip()
+        machines = {}
+        for executable in executables:
+            with executable.open("rb") as handle:
+                machines[executable.name] = elf_machine(handle.read(64))
+    if packaged_version != version:
+        raise RuntimeError(f"{path.name} contains inconsistent version")
+    for name, binary_machine in machines.items():
+        if binary_machine != expected_machine:
+            raise RuntimeError(
+                f"{path.name} contains ELF machine {binary_machine} for {name}, "
+                f"expected {expected_machine}"
+            )
 
 
 def verify_deb(path: Path, target: str, version: str) -> None:
@@ -245,6 +278,7 @@ def verify_deb(path: Path, target: str, version: str) -> None:
         "./opt/nyaterm/nyaterm",
         "./opt/nyaterm/VERSION",
         "./usr/share/applications/nyaterm.desktop",
+        *(f"./opt/nyaterm/{name}" for name in helper_filenames(target)),
     ):
         if required not in contents:
             raise RuntimeError(f"{path.name} is missing {required}")
@@ -264,6 +298,7 @@ def verify_rpm(path: Path, target: str, version: str) -> None:
         "/opt/nyaterm/nyaterm",
         "/opt/nyaterm/VERSION",
         "/usr/share/applications/nyaterm.desktop",
+        *(f"/opt/nyaterm/{name}" for name in helper_filenames(target)),
     ):
         if required not in contents.splitlines():
             raise RuntimeError(f"{path.name} is missing {required}")
@@ -287,7 +322,7 @@ def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
     prefix = f"{package_native.APP_NAME}_{version}_{info.label}"
     if info.os_name == "windows":
         verify_windows_portable(dist / f"{prefix}_portable.zip", target, version)
-        verify_windows_installer(dist / f"{prefix}-setup.exe")
+        verify_windows_installer(dist / f"{prefix}-setup.exe", target)
     elif info.os_name == "macos":
         verify_macos_archive(dist / f"{prefix}.app.tar.gz", target, version)
         verify_dmg(dist / f"{prefix}.dmg")

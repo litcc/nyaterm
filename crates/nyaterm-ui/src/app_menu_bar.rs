@@ -16,6 +16,22 @@ use crate::NyaMenuItem;
 
 const KEY_CONTEXT: &str = "NyaAppMenuBar";
 
+/// Deferred priority for an open menu's popup layer.
+///
+/// Deferred draws paint after the whole normal element tree, so a menu left at
+/// the default priority `0` shares that layer with the main-interface resize
+/// handles. Those are deferred too and prepainted after the title bar, so the
+/// handle drew its highlight line across an open menu and won hit-testing
+/// inside its band: hovering the menu over a panel divider highlighted the
+/// divider and started a drag.
+///
+/// `PopupMenu` also expects its container to defer it at the popup layer, since
+/// each submenu defers itself at `priority + 1` relative to the menu's own
+/// `gpui_base::POPUP_PRIORITY` default. This matches what `gpui-component`'s
+/// own menu-bar fallback, `Popover`, and `ContextMenu` use, and keeps the menu
+/// below tooltips.
+const MENU_POPUP_PRIORITY: usize = 100;
+
 type MenuLabelBuilder = Rc<dyn Fn(&App) -> SharedString>;
 type MenuItemsBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<NyaMenuItem>>;
 type MenuOpenHandler = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -343,12 +359,15 @@ impl Render for NyaAppMenuEntry {
             )
             .on_hover(cx.listener(Self::handle_hover))
             .when_some(popup, |this, popup| {
-                this.child(deferred(
-                    anchored()
-                        .anchor(Anchor::TopLeft)
-                        .snap_to_window_with_margin(px(8.))
-                        .child(div().size_full().occlude().top_1().child(popup)),
-                ))
+                this.child(
+                    deferred(
+                        anchored()
+                            .anchor(Anchor::TopLeft)
+                            .snap_to_window_with_margin(px(8.))
+                            .child(div().size_full().occlude().top_1().child(popup)),
+                    )
+                    .with_priority(MENU_POPUP_PRIORITY),
+                )
             })
     }
 }
@@ -360,7 +379,8 @@ mod tests {
 
     use gpui::{
         Context, DismissEvent, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-        ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, Window, div,
+        Modifiers, ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement as _,
+        Styled as _, TestAppContext, VisualTestContext, Window, deferred, div, point, px,
     };
 
     use super::{NyaAppMenu, NyaAppMenuBar};
@@ -380,11 +400,45 @@ mod tests {
         }
     }
 
+    /// A stand-in for the main interface's resize handles: `deferred()` at the
+    /// default priority, spanning the window the way a panel divider spans the
+    /// workspace height.
+    struct DividerFixture {
+        bar: Entity<NyaAppMenuBar>,
+        divider_hovered: Rc<Cell<bool>>,
+        original_focus: FocusHandle,
+    }
+
+    impl Render for DividerFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let divider_hovered = self.divider_hovered.clone();
+            div()
+                .size_full()
+                .relative()
+                .items_start()
+                .child(div().id("original-focus").track_focus(&self.original_focus))
+                .child(
+                    div()
+                        .debug_selector(|| "MENU_BAR".to_string())
+                        .child(self.bar.clone()),
+                )
+                .child(deferred(div().id("divider").absolute().inset_0().on_hover(
+                    move |is_hovered, _, _| divider_hovered.set(*is_hovered),
+                )))
+        }
+    }
+
     fn draw(cx: &mut VisualTestContext) {
         cx.run_until_parked();
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
+    }
+
+    fn hover(cx: &mut VisualTestContext, position: Point<Pixels>) {
+        cx.simulate_mouse_move(position, None, Modifiers::none());
+        draw(cx);
+        cx.run_until_parked();
     }
 
     fn menu(id: &'static str, items_built: Rc<Cell<usize>>, with_submenu: bool) -> NyaAppMenu {
@@ -664,5 +718,74 @@ mod tests {
         cx.update(|window, cx| {
             assert_eq!(window.focused(cx).as_ref(), Some(&original_focus));
         });
+    }
+
+    #[gpui::test]
+    fn an_open_menu_owns_the_pointer_over_the_deferred_resize_handles(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let divider_hovered = Rc::new(Cell::new(false));
+        let (root, cx) = cx.add_window_view({
+            let divider_hovered = divider_hovered.clone();
+            move |window, cx| {
+                let original_focus = cx.focus_handle();
+                original_focus.focus(window, cx);
+                DividerFixture {
+                    bar: NyaAppMenuBar::new(
+                        [NyaAppMenu::new(
+                            "file",
+                            |_| "File".into(),
+                            |_, _| {
+                                (0..8)
+                                    .map(|index| NyaMenuItem::action(format!("Item {index}")))
+                                    .collect()
+                            },
+                        )
+                        .min_width(px(220.))],
+                        cx,
+                    ),
+                    divider_hovered,
+                    original_focus,
+                }
+            }
+        });
+        let bar = root.read_with(cx, |root, _| root.bar.clone());
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+
+        let bar_bounds = cx.debug_bounds("MENU_BAR").expect("menu bar bounds");
+        let over_menu = point(bar_bounds.left() + px(40.), bar_bounds.bottom() + px(60.));
+        let below_menu = point(bar_bounds.left() + px(40.), bar_bounds.bottom() + px(400.));
+
+        hover(cx, over_menu);
+        assert!(
+            divider_hovered.get(),
+            "the divider stand-in should own the pointer while no menu is open"
+        );
+
+        bar.update_in(cx, |bar, window, cx| bar.activate_menu(0, window, cx));
+        draw(cx);
+        hover(cx, below_menu);
+        assert!(divider_hovered.get());
+        hover(cx, over_menu);
+        assert!(
+            !divider_hovered.get(),
+            "an open menu must paint above the deferred resize handles and take the pointer"
+        );
+
+        bar.update_in(cx, |bar, window, cx| {
+            bar.set_selected_index(None, window, cx)
+        });
+        draw(cx);
+        hover(cx, below_menu);
+        hover(cx, over_menu);
+        assert!(
+            divider_hovered.get(),
+            "closing the menu should hand the pointer back to the divider"
+        );
+    }
+
+    #[test]
+    fn menu_popup_priority_matches_the_component_popup_layer() {
+        assert_eq!(super::MENU_POPUP_PRIORITY, gpui_base::POPUP_PRIORITY);
     }
 }

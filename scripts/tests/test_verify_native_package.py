@@ -30,6 +30,22 @@ def fake_macho(cpu_type: int) -> bytes:
     return b"\xcf\xfa\xed\xfe" + cpu_type.to_bytes(4, "little") + bytes(504)
 
 
+def write_portable(path: Path, machine: int, *, helper_machine: int | None = None) -> None:
+    """Build a portable zip whose layout matches package_native's output."""
+    root = "NyaTerm-portable"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(f"{root}/NyaTerm.exe", fake_pe(machine))
+        if helper_machine is not None:
+            for name in verify_native_package.helper_filenames(
+                "x86_64-pc-windows-msvc"
+            ):
+                archive.writestr(f"{root}/{name}", fake_pe(helper_machine))
+        archive.writestr(f"{root}/nyaterm-portable", b"")
+        archive.writestr(f"{root}/LICENSE", b"license")
+        archive.writestr(f"{root}/VERSION", b"2.0.0\n")
+        archive.writestr(f"{root}/data/.keep", b"")
+
+
 class VerifyNativePackageTests(unittest.TestCase):
     def test_archive_paths_reject_parent_traversal_and_absolute_paths(self) -> None:
         for path in ("../secret", "dir/../../secret", "/absolute/file"):
@@ -40,13 +56,7 @@ class VerifyNativePackageTests(unittest.TestCase):
     def test_windows_portable_has_required_entries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "portable.zip"
-            root = "NyaTerm-portable"
-            with zipfile.ZipFile(path, "w") as archive:
-                archive.writestr(f"{root}/NyaTerm.exe", fake_pe(0x8664))
-                archive.writestr(f"{root}/nyaterm-portable", b"")
-                archive.writestr(f"{root}/LICENSE", b"license")
-                archive.writestr(f"{root}/VERSION", b"2.0.0\n")
-                archive.writestr(f"{root}/data/.keep", b"")
+            write_portable(path, 0x8664, helper_machine=0x8664)
             verify_native_package.verify_windows_portable(
                 path, "x86_64-pc-windows-msvc", "2.0.0"
             )
@@ -54,14 +64,28 @@ class VerifyNativePackageTests(unittest.TestCase):
     def test_windows_portable_rejects_wrong_architecture(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "portable.zip"
-            root = "NyaTerm-portable"
-            with zipfile.ZipFile(path, "w") as archive:
-                archive.writestr(f"{root}/NyaTerm.exe", fake_pe(0xAA64))
-                archive.writestr(f"{root}/nyaterm-portable", b"")
-                archive.writestr(f"{root}/LICENSE", b"license")
-                archive.writestr(f"{root}/VERSION", b"2.0.0\n")
-                archive.writestr(f"{root}/data/.keep", b"")
+            write_portable(path, 0xAA64, helper_machine=0x8664)
             with self.assertRaisesRegex(RuntimeError, "PE machine"):
+                verify_native_package.verify_windows_portable(
+                    path, "x86_64-pc-windows-msvc", "2.0.0"
+                )
+
+    def test_windows_portable_requires_every_helper_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.zip"
+            write_portable(path, 0x8664)
+            with self.assertRaisesRegex(RuntimeError, "nyaterm-rdp-helper.exe"):
+                verify_native_package.verify_windows_portable(
+                    path, "x86_64-pc-windows-msvc", "2.0.0"
+                )
+
+    def test_windows_portable_rejects_helper_architecture_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "portable.zip"
+            write_portable(path, 0x8664, helper_machine=0xAA64)
+            with self.assertRaisesRegex(
+                RuntimeError, "PE machine 0xaa64 for nyaterm-rdp-helper.exe"
+            ):
                 verify_native_package.verify_windows_portable(
                     path, "x86_64-pc-windows-msvc", "2.0.0"
                 )
@@ -71,6 +95,12 @@ class VerifyNativePackageTests(unittest.TestCase):
             path = Path(directory) / "NyaTerm.app.tar.gz"
             entries = {
                 "NyaTerm.app/Contents/MacOS/NyaTerm": fake_macho(0x0100000C),
+                **{
+                    f"NyaTerm.app/Contents/MacOS/{name}": fake_macho(0x0100000C)
+                    for name in verify_native_package.helper_filenames(
+                        "aarch64-apple-darwin"
+                    )
+                },
                 "NyaTerm.app/Contents/Info.plist": plistlib.dumps(
                     {
                         "CFBundleIdentifier": "com.kang.nyaterm",

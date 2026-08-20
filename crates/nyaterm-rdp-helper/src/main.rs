@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io;
+use std::io::{BufWriter, Write as _};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{
     Arc, Condvar, Mutex,
@@ -20,7 +21,7 @@ use nyaterm_remote_desktop::{
     RdpCertificateResponse, RdpControlMessage, RdpCursorEvent, RdpError, RdpErrorKind,
     RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpSessionConfig, RdpSessionState,
     decode_control, encode_control, encode_cursor_packet, encode_frame_packet, read_packet,
-    write_packet,
+    write_packet_into,
 };
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
@@ -33,6 +34,7 @@ mod clipboard;
 use clipboard::ClipboardBridge;
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+const STDOUT_BUFFER_BYTES: usize = 256 * 1024;
 
 enum Outbound {
     Control(RdpControlMessage),
@@ -317,22 +319,40 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Pump outbound packets to stdout.
+///
+/// Everything already queued is coalesced into one buffered write and flushed
+/// only once the queue drains, so a burst of frame packets costs a handful of
+/// write syscalls instead of one per packet. Latency is unchanged: whenever the
+/// producer is not ahead, each packet is flushed immediately.
 fn spawn_stdout_writer(
     output_rx: mpsc::Receiver<Outbound>,
 ) -> io::Result<thread::JoinHandle<io::Result<()>>> {
     thread::Builder::new()
         .name("nyaterm-rdp-stdout".to_string())
         .spawn(move || {
-            let mut stdout = io::stdout().lock();
+            let mut stdout = BufWriter::with_capacity(STDOUT_BUFFER_BYTES, io::stdout().lock());
             while let Ok(outbound) = output_rx.recv() {
-                let packet = match outbound {
-                    Outbound::Control(message) => encode_control(&message)?,
-                    Outbound::Packet(packet) => packet,
-                };
-                write_packet(&mut stdout, &packet)?;
+                write_outbound(&mut stdout, outbound)?;
+                loop {
+                    match output_rx.try_recv() {
+                        Ok(outbound) => write_outbound(&mut stdout, outbound)?,
+                        Err(mpsc::TryRecvError::Empty) => break,
+                        Err(mpsc::TryRecvError::Disconnected) => return stdout.flush(),
+                    }
+                }
+                stdout.flush()?;
             }
-            Ok(())
+            stdout.flush()
         })
+}
+
+fn write_outbound(writer: &mut impl io::Write, outbound: Outbound) -> io::Result<()> {
+    let packet = match outbound {
+        Outbound::Control(message) => encode_control(&message)?,
+        Outbound::Packet(packet) => packet,
+    };
+    write_packet_into(writer, &packet)
 }
 
 fn spawn_stdin_reader(
