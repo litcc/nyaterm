@@ -36,11 +36,16 @@ must include explicit conversion logic and tests.
   schema, encryption adapters, and database compatibility readers. Keep pure
   data models and serialization policies in `nyaterm-core`.
 * `crates/nyaterm-remote-desktop`: UI-independent RDP/VNC session management,
-  framebuffer and input models, certificate policy, clipboard state, and RDP
-  helper IPC contracts.
+  framebuffer and input models, certificate policy, clipboard state, and the
+  RDP/VNC helper IPC contracts. It owns no protocol decoder; both live in the
+  helper crates below.
 * `crates/nyaterm-rdp-helper`: isolated IronRDP helper process that communicates
   with the application through the typed IPC protocol in
   `nyaterm-remote-desktop`.
+* `crates/nyaterm-vnc-helper`: isolated VNC helper process using the same IPC
+  protocol. It owns the vendored `vnc-rs` decoders, the VNC reconnect ladder, and
+  the server-facing policy gates (`view_only`, `shared`, clipboard enablement).
+  Those gates must stay enforced here, not only in the application.
 * `crates/nyaterm-otp`: bundled HOTP/TOTP implementation.
 * `crates/nyaterm-app/assets`: bundled icons and images. Assets under
   `icons/**` are normally tintable and rendered through `svg()` or
@@ -89,6 +94,9 @@ For new or substantially changed features:
 * Keep transport code independent of GPUI and desktop presentation types.
 * Keep remote-desktop protocol and session logic in
   `nyaterm-remote-desktop`; keep GPUI presentation in `nyaterm-desktop`.
+* Keep protocol decoders that parse server-controlled bytes in the helper
+  crates, never in a crate the application links. Both helpers must translate a
+  decoder panic into a fatal IPC error rather than dying silently.
 * Keep persistence logic out of GPUI views.
 
 Use normal Rust module trees with `mod.rs` files or sibling module
@@ -207,6 +215,19 @@ Use package-specific checks while iterating:
 * `cargo test -p <crate-name>`
 * `cargo run -p nyaterm-app --bin nyaterm`
 
+RDP and VNC each run in a helper process that the application resolves beside its
+own executable. `cargo run -p nyaterm-app --bin nyaterm` builds only the
+application, so build the helpers into the same target directory first or both
+protocols fail with `HelperMissing`:
+
+* `cargo build -p nyaterm-rdp-helper -p nyaterm-vnc-helper`
+
+A bare `cargo build` or `cargo check` covers all three: they are the workspace
+`default-members`. `NYATERM_RDP_HELPER` and `NYATERM_VNC_HELPER` override the
+lookup with an explicit path. `scripts/release/package_native.py` is what puts the
+helpers next to the application in release packages; its `HELPER_BINS` list must
+name every helper.
+
 Before review, run the relevant broader checks:
 
 * `cargo check --workspace`
@@ -247,8 +268,10 @@ Add tests beside the behavior being changed.
 * SSH, SFTP, Telnet, Serial, tunnel, transfer, and terminal-session lifecycle
   tests belong in `nyaterm-transport`.
 * RDP/VNC protocol, framebuffer, input mapping, IPC, certificate, clipboard,
-  and reconnect tests belong in `nyaterm-remote-desktop` or
-  `nyaterm-rdp-helper`.
+  and reconnect tests belong in `nyaterm-remote-desktop`, `nyaterm-rdp-helper`,
+  or `nyaterm-vnc-helper`. Helper crates carry a `tests/lifecycle.rs` covering
+  the handshake, an ordinary disconnect, and crash/hang reaping; keep both in
+  step when the IPC contract changes.
 * Storage changes require round-trip and supported-format compatibility tests.
 * Credential and encryption changes require success, invalid-password,
   corrupted-data, and compatibility-format tests.
