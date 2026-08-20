@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use redb::TableDefinition;
 use serde::de::DeserializeOwned;
 
+use super::vault::bump_ssh_key_revision;
 use super::{
     CREDENTIAL_PREFIX, CREDENTIALS_TABLE, ConfigBackupInfo, ConnectionStore, DATABASE_FILE,
     LEGACY_TEXT_MASTER_KEY, META_MASTER_KEY, META_TABLE, OTP_ACCOUNTS_TABLE, OTP_PREFIX,
@@ -26,7 +27,9 @@ use crate::{
 };
 use nyaterm_core::{
     CommandHistoryEntry, ConnectionType, PortableSnapshotKind, RawPortableSnapshot, SessionsConfig,
-    SshAgentEndpoint, TunnelGroup,
+    SshAgentEndpoint, TunnelGroup, migrate_legacy_ssh_agent_settings,
+    ssh_agent_endpoint_supported_on_current_platform, validate_ssh_agent_endpoint,
+    validate_ssh_agent_forwarding_config,
 };
 
 impl ConnectionStore {
@@ -425,7 +428,13 @@ impl ConnectionStore {
         let master_key_token: Option<String> = read_snapshot_entity(snapshot, "master_key_token")?;
         let tunnel_groups: Vec<TunnelGroup> = read_snapshot_entity(snapshot, "tunnel_groups")?;
         let current_settings = self.load_settings_value()?;
-        preserve_device_local_ssh_agent_settings(&mut sessions, &self.load_sessions()?);
+        validate_and_migrate_agent_settings(&mut sessions)?;
+        match snapshot.meta.snapshot_kind {
+            PortableSnapshotKind::Sync => {
+                preserve_device_local_ssh_agent_settings(&mut sessions, &self.load_sessions()?);
+            }
+            PortableSnapshotKind::Backup => normalize_backup_agent_settings(&mut sessions),
+        }
 
         let txn = self.db.begin_write()?;
         replace_sessions_in_txn(&txn, &sessions)?;
@@ -499,6 +508,7 @@ impl ConnectionStore {
         }
         replace_known_hosts_text_in_txn(&txn, &known_hosts)?;
         txn.commit()?;
+        bump_ssh_key_revision();
         Ok(())
     }
 }
@@ -506,13 +516,80 @@ impl ConnectionStore {
 fn strip_device_local_ssh_agent_settings(sessions: &mut SessionsConfig) {
     for connection in &mut sessions.connections {
         if let ConnectionType::Ssh {
-            agent_endpoint,
-            agent_forwarding,
+            auth_agent_endpoint,
+            agent_forwarding_config,
             ..
         } = &mut connection.config
         {
-            *agent_endpoint = SshAgentEndpoint::Auto;
-            *agent_forwarding = false;
+            // Agent endpoints, forwarding sources and allowlists are local to
+            // the device and must not overwrite another device during sync.
+            *auth_agent_endpoint = Some(SshAgentEndpoint::Auto);
+            *agent_forwarding_config = None;
+        }
+    }
+}
+
+fn validate_and_migrate_agent_settings(sessions: &mut SessionsConfig) -> Result<(), StorageError> {
+    for connection in &mut sessions.connections {
+        migrate_legacy_ssh_agent_settings(connection);
+        if let ConnectionType::Ssh {
+            auth_agent_endpoint,
+            agent_forwarding_config,
+            ..
+        } = &connection.config
+        {
+            if let Some(endpoint) = auth_agent_endpoint {
+                validate_ssh_agent_endpoint(endpoint).map_err(|error| {
+                    StorageError::PortableSnapshotEntity {
+                        entity: "sessions".to_string(),
+                        message: format!("invalid SSH Agent authentication endpoint: {error:?}"),
+                    }
+                })?;
+            }
+            if let Some(config) = agent_forwarding_config {
+                validate_ssh_agent_forwarding_config(config).map_err(|error| {
+                    StorageError::PortableSnapshotEntity {
+                        entity: "sessions".to_string(),
+                        message: format!("invalid SSH Agent forwarding configuration: {error:?}"),
+                    }
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn normalize_backup_agent_settings(sessions: &mut SessionsConfig) {
+    for connection in &mut sessions.connections {
+        let auth_uses_agent = connection
+            .auth
+            .as_ref()
+            .is_some_and(|auth| auth.mode == "agent");
+        let ConnectionType::Ssh {
+            auth_agent_endpoint,
+            agent_forwarding_config,
+            ..
+        } = &mut connection.config
+        else {
+            continue;
+        };
+        if auth_agent_endpoint
+            .as_ref()
+            .is_some_and(|endpoint| !ssh_agent_endpoint_supported_on_current_platform(endpoint))
+        {
+            *auth_agent_endpoint = auth_uses_agent.then_some(SshAgentEndpoint::Auto);
+        }
+        if let Some(config) = agent_forwarding_config {
+            config
+                .sources
+                .external_agent_endpoints
+                .retain(ssh_agent_endpoint_supported_on_current_platform);
+            if config.sources.external_agent_endpoints.is_empty() {
+                config.sources.external_agent = false;
+            }
+            if !config.sources.external_agent && !config.sources.stored_keys {
+                config.enabled = false;
+            }
         }
     }
 }
@@ -528,19 +605,19 @@ fn preserve_device_local_ssh_agent_settings(incoming: &mut SessionsConfig, local
         };
         if let (
             ConnectionType::Ssh {
-                agent_endpoint,
-                agent_forwarding,
+                auth_agent_endpoint,
+                agent_forwarding_config,
                 ..
             },
             ConnectionType::Ssh {
-                agent_endpoint: local_endpoint,
-                agent_forwarding: local_forwarding,
+                auth_agent_endpoint: local_endpoint,
+                agent_forwarding_config: local_forwarding_config,
                 ..
             },
         ) = (&mut connection.config, &local_connection.config)
         {
-            *agent_endpoint = local_endpoint.clone();
-            *agent_forwarding = *local_forwarding;
+            *auth_agent_endpoint = local_endpoint.clone();
+            *agent_forwarding_config = local_forwarding_config.clone();
         }
     }
 }

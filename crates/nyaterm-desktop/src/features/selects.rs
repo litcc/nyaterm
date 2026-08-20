@@ -101,6 +101,28 @@ impl NyaTermApp {
             .is_some_and(|select| select.read(cx).is_menu_focused(window, cx))
     }
 
+    pub(in crate::features) fn select_with_prefix_is_focused(
+        &self,
+        prefix: &str,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        self.selects.fields.iter().any(|(id, select)| {
+            id.as_ref().starts_with(prefix) && select.read(cx).is_focused(window, cx)
+        })
+    }
+
+    pub(in crate::features) fn select_menu_with_prefix_is_focused(
+        &self,
+        prefix: &str,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        self.selects.fields.iter().any(|(id, select)| {
+            id.as_ref().starts_with(prefix) && select.read(cx).is_menu_focused(window, cx)
+        })
+    }
+
     pub(in crate::features) fn select_control<I>(
         &mut self,
         id: I,
@@ -177,6 +199,14 @@ impl NyaTermApp {
         let Some(value) = value else {
             return;
         };
+
+        if let Some(index) = id
+            .strip_prefix("connection-editor-ssh-agent-forwarding-endpoint-")
+            .and_then(|index| index.parse::<usize>().ok())
+        {
+            self.set_connection_editor_agent_endpoint_type(index, value, cx);
+            return;
+        }
 
         match id {
             "appearance-ui-theme" => self.update_appearance_theme(value, cx),
@@ -382,6 +412,12 @@ impl NyaTermApp {
                     }
                     "connection-editor-ssh-algorithm-mode" => {
                         ConnectionEditorSelect::SshAlgorithmMode
+                    }
+                    "connection-editor-ssh-agent-policy" => {
+                        ConnectionEditorSelect::SshAgentForwardingPolicy
+                    }
+                    "connection-editor-ssh-agent-endpoint" => {
+                        ConnectionEditorSelect::SshAgentEndpoint
                     }
                     "connection-editor-ssh-profile" => ConnectionEditorSelect::SshProfile,
                     "connection-editor-ssh-terminal-type" => {

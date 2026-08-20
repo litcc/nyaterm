@@ -5709,6 +5709,7 @@ dependencies = [
  "dirs",
  "encoding_rs",
  "flate2",
+ "futures",
  "md5",
  "nyaterm-remote-desktop",
  "portable-pty",
@@ -5718,12 +5719,14 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "sha2 0.11.0",
  "thiserror 2.0.19",
  "time",
  "tokio",
  "tokio-socks",
  "tracing",
  "uuid",
+ "zeroize",
  "zmodem2",
 ]
 

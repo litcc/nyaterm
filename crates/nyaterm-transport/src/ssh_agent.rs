@@ -13,13 +13,13 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 #[cfg(windows)]
 const WINDOWS_OPENSSH_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
 
-pub(super) async fn connect_agent_client(
+pub(crate) async fn connect_agent_client(
     endpoint: &SshAgentEndpoint,
 ) -> anyhow::Result<DynamicAgentClient> {
     Ok(AgentClient::connect(connect_agent_stream(endpoint).await?))
 }
 
-pub(super) async fn connect_agent_stream(
+pub(crate) async fn connect_agent_stream(
     endpoint: &SshAgentEndpoint,
 ) -> anyhow::Result<DynamicAgentStream> {
     match endpoint {

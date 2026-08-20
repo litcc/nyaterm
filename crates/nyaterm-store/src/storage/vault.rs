@@ -5,6 +5,7 @@
 //! Table name, key prefixes and record layout are unchanged.
 
 use redb::ReadableTable;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::{
     CREDENTIAL_PREFIX, CREDENTIALS_TABLE, ConnectionStore, OTP_ACCOUNTS_TABLE, OTP_PREFIX,
@@ -16,7 +17,17 @@ use nyaterm_core::{
     SavedCredential, SavedPassword, SshKey,
 };
 
+static SSH_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn bump_ssh_key_revision() {
+    SSH_KEY_REVISION.fetch_add(1, Ordering::AcqRel);
+}
+
 impl ConnectionStore {
+    pub fn ssh_key_revision(&self) -> u64 {
+        SSH_KEY_REVISION.load(Ordering::Acquire)
+    }
+
     pub fn list_ssh_keys(&self) -> Result<Vec<SshKey>, StorageError> {
         let mut keys = self.list_json_by_prefix(CREDENTIALS_TABLE, SSH_KEY_PREFIX)?;
         for key in &mut keys {
@@ -198,6 +209,7 @@ impl ConnectionStore {
             &key,
         )?;
         txn.commit()?;
+        bump_ssh_key_revision();
         Ok(target_id)
     }
 
@@ -206,6 +218,7 @@ impl ConnectionStore {
         txn.open_table(CREDENTIALS_TABLE)?
             .remove(entity_key(SSH_KEY_PREFIX, key_id).as_str())?;
         txn.commit()?;
+        bump_ssh_key_revision();
         Ok(())
     }
 

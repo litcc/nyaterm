@@ -12,8 +12,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AiSettings, COMMAND_HISTORY_PREFIX, COMMAND_HISTORY_TABLE, CONNECTION_PASSWORD_PREFIX,
-    CREDENTIALS_TABLE, ConnectionPasswordRecord, ConnectionStore, DATABASE_FILE, Group,
-    KnownHostCheck, LEGACY_TEXT_CLOUD_SYNC_STATE, LEGACY_TEXT_KNOWN_HOSTS,
+    CONNECTIONS_TABLE, CREDENTIALS_TABLE, ConnectionPasswordRecord, ConnectionStore, DATABASE_FILE,
+    Group, KnownHostCheck, LEGACY_TEXT_CLOUD_SYNC_STATE, LEGACY_TEXT_KNOWN_HOSTS,
     LEGACY_TEXT_REMOTE_FILE_BACKEND_CACHE, META_MASTER_KEY, META_TABLE, OTP_ACCOUNTS_TABLE,
     OTP_PREFIX, QuickCommand, QuickCommandCategory, QuickCommandsConfig, SETTINGS_CLOUD_SYNC,
     SETTINGS_DEFAULT, SETTINGS_QUICK_COMMANDS, SETTINGS_TABLE, SSH_KEY_FILE_IMPORT_MAX_BYTES,
@@ -21,6 +21,53 @@ use super::{
     TunnelConfig, TunnelGroup, current_time_ms, default_settings_value, deserialize_json,
     entity_key, json_path, set_nested_json_value, write_json_in_txn,
 };
+
+#[test]
+fn mark_connection_used_persists_legacy_agent_forwarding_migration() {
+    let dir = unique_temp_dir("mark-used-agent-migration");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let legacy = serde_json::json!({
+        "id": "legacy-agent",
+        "name": "Legacy Agent",
+        "type": "ssh",
+        "host": "example.com",
+        "port": 22,
+        "username": "root",
+        "auth": { "mode": "agent" },
+        "agent_endpoint": { "type": "unix_socket", "path": "/tmp/legacy-agent.sock" },
+        "agent_forwarding": true
+    });
+    let txn = store.db.begin_write().expect("write transaction");
+    write_json_in_txn(
+        &txn,
+        CONNECTIONS_TABLE,
+        &entity_key("connections/", "legacy-agent"),
+        &legacy,
+    )
+    .expect("write legacy connection");
+    txn.commit().expect("commit legacy connection");
+
+    store
+        .mark_connection_used("legacy-agent")
+        .expect("mark connection used");
+    let raw: serde_json::Value = {
+        let txn = store.db.begin_read().expect("read transaction");
+        let table = txn.open_table(CONNECTIONS_TABLE).expect("connections");
+        let value = table
+            .get(entity_key("connections/", "legacy-agent").as_str())
+            .expect("read legacy connection")
+            .expect("legacy connection exists");
+        deserialize_json(value.value()).expect("decode migrated connection")
+    };
+    assert!(raw.get("agent_forwarding").is_none());
+    assert_eq!(raw["agent_forwarding_config"]["enabled"], true);
+    assert_eq!(
+        raw["agent_forwarding_config"]["sources"]["stored_keys"],
+        false
+    );
+    assert_eq!(raw["agent_forwarding_config"]["policy"]["mode"], "all");
+    std::fs::remove_dir_all(dir).ok();
+}
 
 #[test]
 fn round_trips_sessions_in_redb_compatible_tables() {
@@ -45,8 +92,9 @@ fn round_trips_sessions_in_redb_compatible_tables() {
                 backspace_mode: "del".to_string(),
                 ai_execution_profile: AiExecutionProfile::Auto,
                 x11_forwarding: false,
-                agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                auth_agent_endpoint: None,
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
                 encoding: String::new(),
             },
             group_id: Some("group-1".to_string()),
@@ -200,8 +248,9 @@ fn exports_and_imports_portable_snapshot() {
                     backspace_mode: "del".to_string(),
                     ai_execution_profile: AiExecutionProfile::Auto,
                     x11_forwarding: true,
-                    agent_endpoint: Default::default(),
-                    agent_forwarding: false,
+                    auth_agent_endpoint: None,
+                    agent_forwarding_config: None,
+                    legacy_agent_forwarding: None,
                     encoding: String::new(),
                 },
                 group_id: Some("group-1".to_string()),
@@ -768,8 +817,9 @@ fn load_sessions_decrypts_legacy_connection_password_record() {
             backspace_mode: "del".to_string(),
             ai_execution_profile: AiExecutionProfile::Auto,
             x11_forwarding: false,
-            agent_endpoint: Default::default(),
-            agent_forwarding: false,
+            auth_agent_endpoint: None,
+            agent_forwarding_config: None,
+            legacy_agent_forwarding: None,
             encoding: String::new(),
         },
         group_id: None,
@@ -3024,8 +3074,9 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
                 backspace_mode: "del".to_string(),
                 ai_execution_profile: AiExecutionProfile::Auto,
                 x11_forwarding: false,
-                agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                auth_agent_endpoint: None,
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
                 encoding: String::new(),
             },
             group_id: None,
@@ -3050,17 +3101,27 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
         }],
     };
     let ConnectionType::Ssh {
-        agent_endpoint,
-        agent_forwarding,
+        auth_agent_endpoint,
+        agent_forwarding_config,
         ..
     } = &mut sessions.connections[0].config
     else {
         panic!("SSH expected");
     };
-    *agent_endpoint = nyaterm_core::SshAgentEndpoint::UnixSocket {
+    *auth_agent_endpoint = Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
         path: "/run/user/1000/agent.sock".to_string(),
-    };
-    *agent_forwarding = true;
+    });
+    *agent_forwarding_config = Some(nyaterm_core::SshAgentForwardingConfig {
+        enabled: true,
+        sources: nyaterm_core::SshAgentForwardingSources {
+            external_agent: true,
+            external_agent_endpoints: vec![nyaterm_core::SshAgentEndpoint::UnixSocket {
+                path: "/run/user/1000/agent.sock".to_string(),
+            }],
+            stored_keys: false,
+        },
+        policy: nyaterm_core::SshAgentForwardingPolicy::All,
+    });
     store.replace_sessions(&sessions).expect("save sessions");
 
     let snapshot = store
@@ -3070,15 +3131,80 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
         serde_json::from_str(snapshot.entities.get("sessions").expect("sessions entity"))
             .expect("decode sessions");
     let ConnectionType::Ssh {
-        agent_endpoint,
-        agent_forwarding,
+        auth_agent_endpoint,
+        agent_forwarding_config,
         ..
     } = &portable.connections[0].config
     else {
         panic!("SSH expected");
     };
-    assert_eq!(agent_endpoint, &nyaterm_core::SshAgentEndpoint::Auto);
-    assert!(!agent_forwarding);
+    assert_eq!(
+        auth_agent_endpoint,
+        &Some(nyaterm_core::SshAgentEndpoint::Auto)
+    );
+    assert!(agent_forwarding_config.is_none());
+
+    let backup = store
+        .build_raw_portable_snapshot(nyaterm_core::PortableSnapshotKind::Backup, "device", "test")
+        .expect("build backup snapshot");
+    let ConnectionType::Ssh {
+        auth_agent_endpoint,
+        agent_forwarding_config,
+        ..
+    } = &mut sessions.connections[0].config
+    else {
+        panic!("SSH expected");
+    };
+    *auth_agent_endpoint = Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
+        path: "/tmp/device-local-agent.sock".to_string(),
+    });
+    *agent_forwarding_config = Some(nyaterm_core::SshAgentForwardingConfig::default());
+    store
+        .replace_sessions(&sessions)
+        .expect("replace local Agent settings");
+
+    store
+        .apply_raw_portable_snapshot(&snapshot)
+        .expect("apply sync snapshot");
+    let synced = store.get_connection("agent-sync").unwrap().unwrap();
+    let ConnectionType::Ssh {
+        auth_agent_endpoint,
+        agent_forwarding_config,
+        ..
+    } = synced.config
+    else {
+        panic!("SSH expected");
+    };
+    assert_eq!(
+        auth_agent_endpoint,
+        Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
+            path: "/tmp/device-local-agent.sock".to_string(),
+        })
+    );
+    assert_eq!(
+        agent_forwarding_config,
+        Some(nyaterm_core::SshAgentForwardingConfig::default())
+    );
+
+    store
+        .apply_raw_portable_snapshot(&backup)
+        .expect("apply backup snapshot");
+    let restored = store.get_connection("agent-sync").unwrap().unwrap();
+    let ConnectionType::Ssh {
+        auth_agent_endpoint,
+        agent_forwarding_config,
+        ..
+    } = restored.config
+    else {
+        panic!("SSH expected");
+    };
+    assert_eq!(
+        auth_agent_endpoint,
+        Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
+            path: "/run/user/1000/agent.sock".to_string(),
+        })
+    );
+    assert!(agent_forwarding_config.is_some_and(|config| config.enabled));
     std::fs::remove_dir_all(dir).ok();
 }
 

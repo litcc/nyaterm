@@ -118,6 +118,22 @@ pub(super) fn set_connection_editor_select_value(
                 _ => nyaterm_core::SshAgentEndpoint::Auto,
             };
         }
+        ConnectionEditorSelect::SshAgentForwardingPolicy => {
+            editor.agent_forwarding_config.policy = match value.as_deref() {
+                Some("all") => {
+                    editor.agent_allow_all_confirmed = false;
+                    nyaterm_core::SshAgentForwardingPolicy::All
+                }
+                _ => nyaterm_core::SshAgentForwardingPolicy::Allowlist {
+                    fingerprints: match &editor.agent_forwarding_config.policy {
+                        nyaterm_core::SshAgentForwardingPolicy::Allowlist { fingerprints } => {
+                            fingerprints.clone()
+                        }
+                        nyaterm_core::SshAgentForwardingPolicy::All => Vec::new(),
+                    },
+                },
+            };
+        }
         ConnectionEditorSelect::Group => {
             editor.group_id = value;
             editor.new_group_name.clear();
@@ -267,7 +283,8 @@ pub(super) fn set_connection_editor_advanced_tab(
     match tab {
         ConnectionEditorAdvancedTab::Proxy
         | ConnectionEditorAdvancedTab::JumpHost
-        | ConnectionEditorAdvancedTab::TwoFactor => editor.advanced_network_tab = tab,
+        | ConnectionEditorAdvancedTab::TwoFactor
+        | ConnectionEditorAdvancedTab::AgentForwarding => editor.advanced_network_tab = tab,
         ConnectionEditorAdvancedTab::PostLogin
         | ConnectionEditorAdvancedTab::Terminal
         | ConnectionEditorAdvancedTab::Sftp
@@ -385,6 +402,161 @@ pub(super) fn move_connection_editor_ssh_algorithm(
     true
 }
 
+pub(super) fn add_connection_editor_agent_endpoint(
+    draft: &mut Option<ConnectionEditorState>,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    if editor
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints
+        .len()
+        >= nyaterm_core::MAX_SSH_AGENT_FORWARDING_ENDPOINTS
+    {
+        return false;
+    }
+    editor
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints
+        .push(nyaterm_core::SshAgentEndpoint::Auto);
+    editor.agent_forwarding_config.sources.external_agent = true;
+    editor.error = None;
+    true
+}
+
+pub(super) fn select_connection_editor_agent_endpoint(
+    draft: &mut Option<ConnectionEditorState>,
+    index: usize,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    if index
+        >= editor
+            .agent_forwarding_config
+            .sources
+            .external_agent_endpoints
+            .len()
+    {
+        return false;
+    }
+    editor.agent_forwarding_endpoint_index = index;
+    editor.error = None;
+    true
+}
+
+pub(super) fn set_connection_editor_agent_endpoint_type(
+    draft: &mut Option<ConnectionEditorState>,
+    index: usize,
+    value: &str,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    let Some(endpoint) = editor
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints
+        .get_mut(index)
+    else {
+        return false;
+    };
+    *endpoint = match value {
+        "environment" => nyaterm_core::SshAgentEndpoint::Environment {
+            variable: "SSH_AUTH_SOCK".to_string(),
+        },
+        "unix_socket" => nyaterm_core::SshAgentEndpoint::UnixSocket {
+            path: String::new(),
+        },
+        "pageant" => nyaterm_core::SshAgentEndpoint::Pageant,
+        "windows_openssh" => nyaterm_core::SshAgentEndpoint::WindowsOpenSsh,
+        _ => nyaterm_core::SshAgentEndpoint::Auto,
+    };
+    editor.agent_forwarding_endpoint_index = index;
+    editor.error = None;
+    true
+}
+
+pub(super) fn remove_connection_editor_agent_endpoint(
+    draft: &mut Option<ConnectionEditorState>,
+    index: usize,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    let endpoints = &mut editor
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints;
+    if index >= endpoints.len() {
+        return false;
+    }
+    endpoints.remove(index);
+    editor.agent_forwarding_endpoint_index = editor
+        .agent_forwarding_endpoint_index
+        .min(endpoints.len().saturating_sub(1));
+    editor.error = None;
+    true
+}
+
+pub(super) fn move_connection_editor_agent_endpoint(
+    draft: &mut Option<ConnectionEditorState>,
+    index: usize,
+    direction: i8,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    let endpoints = &mut editor
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints;
+    let target = if direction < 0 {
+        index.checked_sub(1)
+    } else if direction > 0 && index + 1 < endpoints.len() {
+        Some(index + 1)
+    } else {
+        None
+    };
+    let Some(target) = target else {
+        return false;
+    };
+    endpoints.swap(index, target);
+    editor.agent_forwarding_endpoint_index = target;
+    editor.error = None;
+    true
+}
+
+pub(super) fn toggle_connection_editor_agent_allowlist_fingerprint(
+    draft: &mut Option<ConnectionEditorState>,
+    fingerprint: &str,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    let nyaterm_core::SshAgentForwardingPolicy::Allowlist { fingerprints } =
+        &mut editor.agent_forwarding_config.policy
+    else {
+        return false;
+    };
+    let fingerprint = fingerprint.trim();
+    if fingerprint.is_empty() {
+        return false;
+    }
+    if let Some(index) = fingerprints.iter().position(|value| value == fingerprint) {
+        fingerprints.remove(index);
+    } else if fingerprints.len() < nyaterm_core::MAX_SSH_AGENT_FORWARDING_IDENTITIES {
+        fingerprints.push(fingerprint.to_string());
+    } else {
+        return false;
+    }
+    editor.error = None;
+    true
+}
+
 pub(super) fn set_connection_editor_telnet_tab(
     draft: &mut Option<ConnectionEditorState>,
     tab: ConnectionEditorTelnetTab,
@@ -495,7 +667,39 @@ pub(super) fn toggle_connection_editor_flag(
         }
         ConnectionEditorToggle::X11 => editor.x11_forwarding = !editor.x11_forwarding,
         ConnectionEditorToggle::AgentForwarding => {
-            editor.agent_forwarding = !editor.agent_forwarding;
+            editor.agent_forwarding_config.enabled = !editor.agent_forwarding_config.enabled;
+            if editor.agent_forwarding_config.enabled
+                && matches!(
+                    editor.agent_forwarding_config.policy,
+                    nyaterm_core::SshAgentForwardingPolicy::All
+                )
+            {
+                editor.agent_allow_all_confirmed = false;
+            }
+        }
+        ConnectionEditorToggle::AgentExternal => {
+            let enabled = !editor.agent_forwarding_config.sources.external_agent;
+            editor.agent_forwarding_config.sources.external_agent = enabled;
+            // Match the Tauri form by seeding the common platform endpoint the
+            // first time external Agent forwarding is enabled.
+            if enabled
+                && editor
+                    .agent_forwarding_config
+                    .sources
+                    .external_agent_endpoints
+                    .is_empty()
+            {
+                editor
+                    .agent_forwarding_config
+                    .sources
+                    .external_agent_endpoints
+                    .push(default_ssh_agent_forwarding_endpoint());
+                editor.agent_forwarding_endpoint_index = 0;
+            }
+        }
+        ConnectionEditorToggle::AgentStoredKeys => {
+            editor.agent_forwarding_config.sources.stored_keys =
+                !editor.agent_forwarding_config.sources.stored_keys;
         }
         ConnectionEditorToggle::SftpEnabled => editor.sftp_enabled = !editor.sftp_enabled,
         ConnectionEditorToggle::RawTcp => {
@@ -573,6 +777,19 @@ pub(super) fn toggle_connection_editor_flag(
     }
     editor.error = None;
     true
+}
+
+fn default_ssh_agent_forwarding_endpoint() -> nyaterm_core::SshAgentEndpoint {
+    #[cfg(windows)]
+    {
+        nyaterm_core::SshAgentEndpoint::WindowsOpenSsh
+    }
+    #[cfg(not(windows))]
+    {
+        nyaterm_core::SshAgentEndpoint::Environment {
+            variable: "SSH_AUTH_SOCK".to_string(),
+        }
+    }
 }
 
 pub(super) fn insert_connection_editor_description_newline(
@@ -738,6 +955,18 @@ pub(super) fn editor_field_seeds(
             Literal("/path/to/agent.sock"),
         ),
         (
+            ConnectionEditorField::AgentForwardingEnvironmentVariable,
+            forwarding_environment_variable(draft),
+            false,
+            Literal("SSH_AUTH_SOCK"),
+        ),
+        (
+            ConnectionEditorField::AgentForwardingSocketPath,
+            forwarding_socket_path(draft),
+            false,
+            Literal("/path/to/agent.sock"),
+        ),
+        (
             ConnectionEditorField::Domain,
             draft.domain.clone(),
             false,
@@ -860,6 +1089,87 @@ pub(super) fn editor_field_seeds(
     ]
 }
 
+pub(super) fn forwarding_endpoint_field_seeds(
+    draft: &ConnectionEditorState,
+) -> Vec<(usize, ConnectionEditorField, String, &'static str)> {
+    draft
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints
+        .iter()
+        .enumerate()
+        .filter_map(|(index, endpoint)| match endpoint {
+            nyaterm_core::SshAgentEndpoint::Environment { variable } => Some((
+                index,
+                ConnectionEditorField::AgentForwardingEnvironmentVariable,
+                variable.clone(),
+                "SSH_AUTH_SOCK",
+            )),
+            nyaterm_core::SshAgentEndpoint::UnixSocket { path } => Some((
+                index,
+                ConnectionEditorField::AgentForwardingSocketPath,
+                path.clone(),
+                "/path/to/agent.sock",
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(super) fn set_connection_editor_forwarding_endpoint_field(
+    draft: &mut Option<ConnectionEditorState>,
+    index: usize,
+    field: ConnectionEditorField,
+    text: String,
+) -> bool {
+    let Some(editor) = draft.as_mut() else {
+        return false;
+    };
+    let Some(endpoint) = editor
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints
+        .get_mut(index)
+    else {
+        return false;
+    };
+    *endpoint = match field {
+        ConnectionEditorField::AgentForwardingEnvironmentVariable => {
+            nyaterm_core::SshAgentEndpoint::Environment { variable: text }
+        }
+        ConnectionEditorField::AgentForwardingSocketPath => {
+            nyaterm_core::SshAgentEndpoint::UnixSocket { path: text }
+        }
+        _ => return false,
+    };
+    editor.error = None;
+    true
+}
+
+fn selected_forwarding_endpoint(
+    draft: &ConnectionEditorState,
+) -> Option<&nyaterm_core::SshAgentEndpoint> {
+    draft
+        .agent_forwarding_config
+        .sources
+        .external_agent_endpoints
+        .get(draft.agent_forwarding_endpoint_index)
+}
+
+fn forwarding_environment_variable(draft: &ConnectionEditorState) -> String {
+    match selected_forwarding_endpoint(draft) {
+        Some(nyaterm_core::SshAgentEndpoint::Environment { variable }) => variable.clone(),
+        _ => "SSH_AUTH_SOCK".to_string(),
+    }
+}
+
+fn forwarding_socket_path(draft: &ConnectionEditorState) -> String {
+    match selected_forwarding_endpoint(draft) {
+        Some(nyaterm_core::SshAgentEndpoint::UnixSocket { path }) => path.clone(),
+        _ => String::new(),
+    }
+}
+
 /// Write an edited field back into the draft, clearing any stale validation.
 ///
 /// Previously the error was cleared when a field took focus; a field now takes
@@ -882,6 +1192,26 @@ pub(super) fn set_connection_editor_field_text(
         }
         ConnectionEditorField::AgentUnixSocket => {
             draft.agent_endpoint = nyaterm_core::SshAgentEndpoint::UnixSocket { path: text };
+        }
+        ConnectionEditorField::AgentForwardingEnvironmentVariable => {
+            if let Some(endpoint) = draft
+                .agent_forwarding_config
+                .sources
+                .external_agent_endpoints
+                .get_mut(draft.agent_forwarding_endpoint_index)
+            {
+                *endpoint = nyaterm_core::SshAgentEndpoint::Environment { variable: text };
+            }
+        }
+        ConnectionEditorField::AgentForwardingSocketPath => {
+            if let Some(endpoint) = draft
+                .agent_forwarding_config
+                .sources
+                .external_agent_endpoints
+                .get_mut(draft.agent_forwarding_endpoint_index)
+            {
+                *endpoint = nyaterm_core::SshAgentEndpoint::UnixSocket { path: text };
+            }
         }
         ConnectionEditorField::Domain => draft.domain = text,
         ConnectionEditorField::Password => draft.password = text,

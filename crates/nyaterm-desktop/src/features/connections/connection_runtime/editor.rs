@@ -77,6 +77,26 @@ impl NyaTermApp {
                 .tr("dialog.sftpShellDetectionTimeoutInvalid")
                 .replace("{{min}}", "100")
                 .replace("{{max}}", "60000"),
+            ConnectionEditorValidationError::SshAgentEndpoint(error) => match error {
+                nyaterm_core::SshAgentEndpointValidationError::Empty => {
+                    self.tr("dialog.sshAgentEndpointEmpty").into()
+                }
+                nyaterm_core::SshAgentEndpointValidationError::Invalid => {
+                    self.tr("dialog.sshAgentEndpointInvalid").into()
+                }
+                nyaterm_core::SshAgentEndpointValidationError::TooLong => {
+                    self.tr("dialog.sshAgentEndpointTooLong").into()
+                }
+                nyaterm_core::SshAgentEndpointValidationError::DuplicateEndpoint => {
+                    self.tr("dialog.sshAgentEndpointDuplicate").into()
+                }
+                nyaterm_core::SshAgentEndpointValidationError::TooManyEndpoints
+                | nyaterm_core::SshAgentEndpointValidationError::TooManyIdentities
+                | nyaterm_core::SshAgentEndpointValidationError::InvalidFingerprint
+                | nyaterm_core::SshAgentEndpointValidationError::DuplicateFingerprint => {
+                    self.tr("dialog.sshAgentEndpointInvalid").into()
+                }
+            },
             ConnectionEditorValidationError::SshAlgorithms(
                 SshAlgorithmValidationError::EmptyList { kind },
             ) => self
@@ -155,7 +175,11 @@ impl NyaTermApp {
                 proxy_jump_id: None,
                 x11_forwarding: false,
                 agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                agent_forwarding_config: nyaterm_core::SshAgentForwardingConfig::default(),
+                agent_allow_all_confirmed: false,
+                agent_forwarding_endpoint_index: 0,
+                agent_preview: None,
+                agent_preview_loading: false,
                 backspace_mode: "del".to_string(),
                 encoding: "global".to_string(),
                 ssh_profile: Default::default(),
@@ -253,6 +277,19 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         if self.connection_state.set_editor_icon_picker_open(open) {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn set_connection_editor_agent_identity_picker_open(
+        &mut self,
+        open: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_state
+            .set_editor_agent_identity_picker_open(open)
+        {
             cx.notify();
         }
     }
@@ -363,6 +400,98 @@ impl NyaTermApp {
         if self
             .connection_state
             .move_editor_ssh_algorithm(tab, id, direction)
+        {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn add_connection_editor_agent_endpoint(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_state.add_editor_agent_endpoint() {
+            self.connection_state
+                .rebuild_editor_forwarding_endpoint_fields(cx);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn remove_connection_editor_agent_endpoint(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_state.remove_editor_agent_endpoint(index) {
+            self.connection_state
+                .rebuild_editor_forwarding_endpoint_fields(cx);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn select_connection_editor_agent_endpoint(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if self.connection_state.select_editor_agent_endpoint(index) {
+            self.connection_state.sync_editor_fields_from_draft(cx);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn set_connection_editor_agent_endpoint_type(
+        &mut self,
+        index: usize,
+        value: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_state
+            .set_editor_agent_endpoint_type(index, value)
+        {
+            self.connection_state
+                .rebuild_editor_forwarding_endpoint_fields(cx);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn set_connection_editor_agent_endpoint_field(
+        &mut self,
+        index: usize,
+        field: ConnectionEditorField,
+        text: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_state
+            .set_editor_agent_endpoint_field(index, field, text)
+        {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn move_connection_editor_agent_endpoint(
+        &mut self,
+        index: usize,
+        direction: i8,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_state
+            .move_editor_agent_endpoint(index, direction)
+        {
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn toggle_connection_editor_agent_allowlist_fingerprint(
+        &mut self,
+        fingerprint: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .connection_state
+            .toggle_editor_agent_allowlist_fingerprint(fingerprint)
         {
             cx.notify();
         }
@@ -582,12 +711,36 @@ impl NyaTermApp {
 
     pub(in crate::features) fn save_connection_editor(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(mut editor) = self.connection_state.active_editor_draft() else {
             return;
         };
+        if editor.agent_forwarding_config.enabled
+            && matches!(
+                editor.agent_forwarding_config.policy,
+                nyaterm_core::SshAgentForwardingPolicy::All
+            )
+            && !editor.agent_allow_all_confirmed
+        {
+            self.open_confirm_dialog(
+                (
+                    self.tr("dialog.sshAgentAllowAllConfirmTitle").to_string(),
+                    self.tr("dialog.sshAgentAllowAllConfirmMessage").to_string(),
+                    self.tr("dialog.sshAgentAllowAllConfirmAction").to_string(),
+                    true,
+                    |this: &mut NyaTermApp, window, cx| {
+                        this.connection_state.confirm_editor_agent_allow_all();
+                        this.save_connection_editor(window, cx);
+                        true
+                    },
+                ),
+                window,
+                cx,
+            );
+            return;
+        }
 
         let pending_group = editor.pending_group_name.as_ref().map(|name| Group {
             id: uuid(),

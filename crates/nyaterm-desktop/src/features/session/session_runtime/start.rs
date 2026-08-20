@@ -1,15 +1,18 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use gpui::{Context, Window};
+use futures::channel::oneshot;
+use gpui::{AppContext as _, Context, Window};
 use nyaterm_core::{
     AiExecutionProfile, ConnectionAuth, ConnectionType, SavedConnection, SftpCwdFollowMode,
-    SftpSettings, SshAlgorithmMode, SshAlgorithmPreferences, SshProfile, resolve_ssh_terminal_type,
+    SftpSettings, SshAgentForwardingConfig as CoreSshAgentForwardingConfig, SshAlgorithmMode,
+    SshAlgorithmPreferences, SshProfile, normalize_ssh_agent_endpoint, resolve_ssh_terminal_type,
 };
 use nyaterm_store::{StoreBlockingClient, StoreDomain, store_request};
 use nyaterm_transport::{
     LocalSessionConfig, RdpClipboardConfig, RdpDisplayConfig, RdpReconnectConfig, RdpSessionConfig,
-    SerialSessionConfig, SessionKind, SshKeyAuthConfig, SshProxyConfig, SshSessionConfig,
+    SerialSessionConfig, SessionKind, SshAgentStoredKey, SshAgentStoredKeyProvider,
+    SshAgentStoredKeySnapshot, SshKeyAuthConfig, SshProxyConfig, SshSessionConfig,
     SshSessionProfile, TelnetAutoLoginConfig, TelnetSessionConfig, VncClipboardConfig,
     VncDisplayConfig, VncReconnectConfig, VncSecurityConfig, VncSessionConfig,
     parse_rdp_certificate_policy, parse_rdp_clipboard_mode, parse_rdp_display_mode,
@@ -38,6 +41,59 @@ pub(in crate::features) struct SshSessionConfigBuildContext {
     pub(in crate::features) credential_prompts: Arc<CredentialPromptBroker>,
     pub(in crate::features) agent_prompts: Arc<AgentPromptBroker>,
     pub(in crate::features) otp_provider: Arc<NativeOtpProvider>,
+}
+
+/// Loads stored SSH keys only when the transport broker needs identities.
+#[derive(Clone)]
+struct StoreSshAgentKeyProvider {
+    store: StoreBlockingClient,
+}
+
+impl SshAgentStoredKeyProvider for StoreSshAgentKeyProvider {
+    fn revision(&self) -> Result<u64, String> {
+        self.store
+            .request_fn(StoreDomain::Security, |store| Ok(store.ssh_key_revision()))
+            .map_err(|error| error.to_string())
+    }
+
+    fn load_snapshot(&self) -> Result<SshAgentStoredKeySnapshot, String> {
+        let revision = self.revision()?;
+        let keys = self
+            .store
+            .request_fn(StoreDomain::Security, |store| store.list_ssh_keys())
+            .map_err(|error| error.to_string())?;
+        let mut result = Vec::new();
+        for key in keys {
+            let key_id = key.id.clone();
+            let Some(decrypted) = self
+                .store
+                .request_fn(StoreDomain::Security, move |store| {
+                    store.load_decrypted_ssh_key_by_id(&key_id)
+                })
+                .map_err(|error| error.to_string())?
+            else {
+                continue;
+            };
+            let Some(key_data) = decrypted.key_data.filter(|value| !value.trim().is_empty()) else {
+                continue;
+            };
+            result.push(SshAgentStoredKey {
+                key_data,
+                cert_data: decrypted.cert_data.filter(|value| !value.trim().is_empty()),
+                passphrase: decrypted
+                    .passphrase
+                    .filter(|value| !value.trim().is_empty()),
+                comment: decrypted.name,
+            });
+        }
+        if self.revision()? != revision {
+            return Err("stored SSH keys changed while loading".to_string());
+        }
+        Ok(SshAgentStoredKeySnapshot {
+            revision,
+            keys: result,
+        })
+    }
 }
 
 impl NyaTermApp {
@@ -673,6 +729,49 @@ impl NyaTermApp {
         )
     }
 
+    pub(in crate::features) fn refresh_connection_editor_agent_preview(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((generation, editor)) = self.connection_state.begin_editor_agent_preview() else {
+            return;
+        };
+        let runtime_config = map_agent_forwarding_config(editor.agent_forwarding_config);
+        let provider: Arc<dyn SshAgentStoredKeyProvider> = Arc::new(StoreSshAgentKeyProvider {
+            store: self.store_blocking_client(),
+        });
+        cx.notify();
+        let task = cx.background_spawn(async move {
+            let (sender, receiver) = oneshot::channel();
+            let worker = std::thread::Builder::new()
+                .name("nyaterm-ssh-agent-preview".to_string())
+                .spawn(move || {
+                    let preview = nyaterm_transport::preview_identities_blocking(
+                        &runtime_config,
+                        Some(provider),
+                    );
+                    let _ = sender.send(preview);
+                });
+            if let Err(error) = worker {
+                tracing::error!(%error, "failed to start SSH Agent preview worker");
+                return nyaterm_transport::SshAgentIdentityPreviewResponse::default();
+            }
+            receiver.await.unwrap_or_default()
+        });
+        cx.spawn(async move |this, cx| {
+            let preview = task.await;
+            let _ = this.update(cx, |this, cx| {
+                if this
+                    .connection_state
+                    .set_editor_agent_preview(generation, preview)
+                {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(in crate::features) fn apply_desired_geometry_to_local_config(
         &self,
         config: &mut LocalSessionConfig,
@@ -698,9 +797,10 @@ pub(in crate::features) fn build_ssh_session_config_with_context(
         backspace_mode,
         ai_execution_profile: _,
         x11_forwarding,
-        agent_endpoint,
-        agent_forwarding,
+        auth_agent_endpoint,
+        agent_forwarding_config,
         encoding,
+        ..
     } = connection.config.clone()
     else {
         return Err("only SSH connections can be used for SSH sessions".to_string());
@@ -725,7 +825,8 @@ pub(in crate::features) fn build_ssh_session_config_with_context(
         password,
         key_auth,
         agent_auth: auth.mode == "agent",
-        agent_endpoint: match agent_endpoint {
+        agent_endpoint: match normalize_ssh_agent_endpoint(auth_agent_endpoint.unwrap_or_default())
+        {
             nyaterm_core::SshAgentEndpoint::Auto => nyaterm_transport::SshAgentEndpoint::Auto,
             nyaterm_core::SshAgentEndpoint::Environment { variable } => {
                 nyaterm_transport::SshAgentEndpoint::Environment { variable }
@@ -738,7 +839,10 @@ pub(in crate::features) fn build_ssh_session_config_with_context(
                 nyaterm_transport::SshAgentEndpoint::WindowsOpenSsh
             }
         },
-        agent_forwarding,
+        agent_forwarding: agent_forwarding_config
+            .as_ref()
+            .is_some_and(|config| config.enabled),
+        agent_forwarding_config: agent_forwarding_config.map(map_agent_forwarding_config),
         otp_id: auth.otp_id.filter(|value| !value.trim().is_empty()),
         auto_fill_otp: auth.auto_fill_otp,
         proxy_jump,
@@ -774,6 +878,9 @@ pub(in crate::features) fn build_ssh_session_config_with_context(
         })),
         credential_provider: Some(context.credential_prompts.clone()),
         agent_prompt_provider: Some(context.agent_prompts.clone()),
+        agent_stored_key_provider: Some(Arc::new(StoreSshAgentKeyProvider {
+            store: context.store.clone(),
+        })),
         otp_provider: Some(context.otp_provider.clone()),
     })
 }
@@ -814,6 +921,50 @@ fn load_ssh_connection_password_with_context(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| "saved password is empty or locked".to_string())?;
     Ok(Some(password))
+}
+
+fn map_agent_forwarding_config(
+    config: CoreSshAgentForwardingConfig,
+) -> nyaterm_transport::SshAgentForwardingConfig {
+    nyaterm_transport::SshAgentForwardingConfig {
+        enabled: config.enabled,
+        sources: nyaterm_transport::SshAgentForwardingSources {
+            external_agent: config.sources.external_agent,
+            external_agent_endpoints: config
+                .sources
+                .external_agent_endpoints
+                .into_iter()
+                .map(map_runtime_agent_endpoint)
+                .collect(),
+            stored_keys: config.sources.stored_keys,
+        },
+        policy: match config.policy {
+            nyaterm_core::SshAgentForwardingPolicy::All => {
+                nyaterm_transport::SshAgentForwardingPolicy::All
+            }
+            nyaterm_core::SshAgentForwardingPolicy::Allowlist { fingerprints } => {
+                nyaterm_transport::SshAgentForwardingPolicy::Allowlist { fingerprints }
+            }
+        },
+    }
+}
+
+fn map_runtime_agent_endpoint(
+    endpoint: nyaterm_core::SshAgentEndpoint,
+) -> nyaterm_transport::SshAgentEndpoint {
+    match endpoint {
+        nyaterm_core::SshAgentEndpoint::Auto => nyaterm_transport::SshAgentEndpoint::Auto,
+        nyaterm_core::SshAgentEndpoint::Environment { variable } => {
+            nyaterm_transport::SshAgentEndpoint::Environment { variable }
+        }
+        nyaterm_core::SshAgentEndpoint::UnixSocket { path } => {
+            nyaterm_transport::SshAgentEndpoint::UnixSocket { path }
+        }
+        nyaterm_core::SshAgentEndpoint::Pageant => nyaterm_transport::SshAgentEndpoint::Pageant,
+        nyaterm_core::SshAgentEndpoint::WindowsOpenSsh => {
+            nyaterm_transport::SshAgentEndpoint::WindowsOpenSsh
+        }
+    }
 }
 
 fn inline_connection_password(auth: Option<&ConnectionAuth>) -> Option<String> {
@@ -1173,8 +1324,9 @@ mod tests {
                 backspace_mode: "del".to_string(),
                 ai_execution_profile: AiExecutionProfile::Posix,
                 x11_forwarding: false,
-                agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                auth_agent_endpoint: None,
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
                 encoding: String::new(),
             },
             group_id: None,
@@ -1220,8 +1372,9 @@ mod tests {
                 backspace_mode: "del".to_string(),
                 ai_execution_profile: AiExecutionProfile::Posix,
                 x11_forwarding: false,
-                agent_endpoint: Default::default(),
-                agent_forwarding: false,
+                auth_agent_endpoint: None,
+                agent_forwarding_config: None,
+                legacy_agent_forwarding: None,
                 encoding: String::new(),
             },
             group_id: None,

@@ -5,8 +5,10 @@ use super::{
     QuickCommandCategoryPosition, QuickCommandRelativePosition, QuickCommandsConfig, RecordingMode,
     RecordingRotationPolicy, RestorableOpenTab, SavedConnection, SessionsConfig, SftpCwdFollowMode,
     SftpSettings, SshAgentEndpoint, SshAlgorithmMode, SshAlgorithmPreferences, SshKey, SshProfile,
-    SshTerminalType, default_sftp_shell_detection_timeout_ms, quick_command_category_move_neighbor,
+    SshTerminalType, default_sftp_shell_detection_timeout_ms, migrate_legacy_ssh_agent_settings,
+    normalize_ssh_agent_endpoint, quick_command_category_move_neighbor,
     quick_command_category_sibling_order, resolve_ssh_terminal_type, validate_sftp_settings,
+    validate_ssh_agent_endpoint, validate_ssh_agent_forwarding_shape,
 };
 
 #[test]
@@ -537,7 +539,7 @@ fn legacy_ssh_profile_defaults_without_rewriting_sparse_json() {
 }
 
 #[test]
-fn ssh_agent_endpoint_and_forwarding_round_trip_without_secrets() {
+fn ssh_agent_legacy_fields_migrate_to_canonical_without_secrets() {
     let json = r#"{
             "id":"agent-ssh","name":"Agent SSH","type":"ssh","host":"example.com",
             "auth":{"mode":"agent"},
@@ -549,24 +551,142 @@ fn ssh_agent_endpoint_and_forwarding_round_trip_without_secrets() {
         connection.auth.as_ref().map(|auth| auth.mode.as_str()),
         Some("agent")
     );
+    let mut connection = connection;
+    assert!(migrate_legacy_ssh_agent_settings(&mut connection));
     let ConnectionType::Ssh {
-        agent_endpoint,
-        agent_forwarding,
+        auth_agent_endpoint,
+        legacy_agent_forwarding,
+        agent_forwarding_config,
         ..
     } = &connection.config
     else {
         panic!("SSH expected");
     };
     assert_eq!(
-        agent_endpoint,
+        auth_agent_endpoint.as_ref().expect("agent endpoint"),
         &SshAgentEndpoint::UnixSocket {
             path: "/run/user/1000/agent.sock".to_string()
         }
     );
-    assert!(*agent_forwarding);
+    assert_eq!(*legacy_agent_forwarding, None);
+    assert_eq!(
+        agent_forwarding_config.as_ref().map(|config| (
+            config.enabled,
+            config.sources.external_agent,
+            config.sources.stored_keys,
+            &config.policy,
+        )),
+        Some((true, true, false, &super::SshAgentForwardingPolicy::All))
+    );
     let serialized = serde_json::to_string(&connection).expect("agent SSH serializes");
     assert!(serialized.contains("unix_socket"), "{serialized}");
-    assert!(serialized.contains("agent_forwarding"), "{serialized}");
+    assert!(
+        serialized.contains("agent_forwarding_config"),
+        "{serialized}"
+    );
+    assert!(!serialized.contains("\"agent_endpoint\":"), "{serialized}");
+    assert!(
+        !serialized.contains("\"agent_forwarding\":"),
+        "{serialized}"
+    );
+}
+
+#[test]
+fn canonical_agent_forwarding_takes_precedence_over_legacy_boolean() {
+    let json = r#"{
+        "id":"agent-canonical","name":"Agent Canonical","type":"ssh",
+        "host":"example.com","auth":{"mode":"password"},
+        "agent_forwarding":true,
+        "agent_forwarding_config":{
+            "enabled":false,
+            "sources":{"external_agent":false,"stored_keys":true},
+            "policy":{"mode":"allowlist","fingerprints":[]}
+        }
+    }"#;
+    let mut connection: SavedConnection = serde_json::from_str(json).expect("connection parses");
+    assert!(migrate_legacy_ssh_agent_settings(&mut connection));
+    let ConnectionType::Ssh {
+        legacy_agent_forwarding,
+        agent_forwarding_config,
+        ..
+    } = &connection.config
+    else {
+        panic!("SSH expected");
+    };
+    assert_eq!(*legacy_agent_forwarding, None);
+    assert_eq!(
+        agent_forwarding_config
+            .as_ref()
+            .map(|config| config.enabled),
+        Some(false)
+    );
+    let serialized = serde_json::to_string(&connection).expect("connection serializes");
+    assert!(!serialized.contains("\"agent_forwarding\":"));
+}
+
+#[test]
+fn ssh_agent_endpoint_validation_rejects_empty_environment_variable() {
+    let result = validate_ssh_agent_endpoint(&SshAgentEndpoint::Environment {
+        variable: "  $  ".to_string(),
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn ssh_agent_forwarding_shape_rejects_duplicate_endpoints_and_fingerprints() {
+    let endpoint = SshAgentEndpoint::UnixSocket {
+        path: "/run/user/1000/agent.sock".to_string(),
+    };
+    let duplicate_endpoints = super::SshAgentForwardingConfig {
+        sources: super::SshAgentForwardingSources {
+            external_agent: true,
+            external_agent_endpoints: vec![endpoint.clone(), endpoint],
+            stored_keys: false,
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        validate_ssh_agent_forwarding_shape(&duplicate_endpoints),
+        Err(super::SshAgentEndpointValidationError::DuplicateEndpoint)
+    );
+
+    let duplicate_fingerprints = super::SshAgentForwardingConfig {
+        policy: super::SshAgentForwardingPolicy::Allowlist {
+            fingerprints: vec!["SHA256:abc".to_string(), "SHA256:abc".to_string()],
+        },
+        ..Default::default()
+    };
+    assert_eq!(
+        validate_ssh_agent_forwarding_shape(&duplicate_fingerprints),
+        Err(super::SshAgentEndpointValidationError::DuplicateFingerprint)
+    );
+}
+
+#[test]
+fn ssh_agent_endpoint_validation_rejects_invalid_unix_socket_path() {
+    let result = validate_ssh_agent_endpoint(&SshAgentEndpoint::UnixSocket {
+        path: "agent\0.sock".to_string(),
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn ssh_agent_endpoint_validation_rejects_unix_socket_path_over_legacy_limit() {
+    let result = validate_ssh_agent_endpoint(&SshAgentEndpoint::UnixSocket {
+        path: "a".repeat(4097),
+    });
+    assert!(result.is_err());
+}
+
+#[test]
+fn ssh_agent_endpoint_normalization_falls_back_for_foreign_platform_endpoint() {
+    let endpoint = SshAgentEndpoint::WindowsOpenSsh;
+    let normalized = normalize_ssh_agent_endpoint(endpoint);
+    if cfg!(unix) {
+        assert_eq!(normalized, SshAgentEndpoint::Auto);
+    } else if cfg!(windows) {
+        assert_eq!(normalized, SshAgentEndpoint::WindowsOpenSsh);
+    }
 }
 
 #[test]
