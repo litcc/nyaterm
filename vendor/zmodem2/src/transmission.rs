@@ -361,41 +361,12 @@ impl RxCrc {
     }
 }
 
-use bitflags::bitflags;
-
-bitflags! {
-    /// ZFILE subpacket management options (ZF1 byte).
-    /// These tell the remote receiver how to handle the file.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct ZfileManagementOption: u8 {
-        /// Clobber (overwrite) existing file.
-        const ZMCLOB = 0x01;
-        /// Append to existing file.
-        const ZMAPND = 0x02;
-        /// Resume interrupted transfer.
-        const ZMRESUM = 0x04;
-        /// Skip if file exists on destination.
-        const ZMSKNOLOC = 0x08;
-        /// Newer / longer / CRC match — skip if destination exists.
-        const ZMNEWL = 0x10;
-        /// Newer / longer / CRC match — overwrite.
-        const ZMNEWER = 0x20;
-        /// Compare CRC; skip if same.
-        const ZMCRC = 0x40;
-        /// Protect existing files (prompt on conflict).
-        const ZMPROT = 0x80;
-    }
-}
-
 /// ZMODEM sender state machine.
 pub struct Sender {
     state: SendState,
     file_name: String,
     file_size: u32,
     has_file: bool,
-    /// ZF0-ZF3 management / conversion options for ZFILE subpackets.
-    /// Bytes: [conversion, management, transport, extended_len].
-    file_options: [u8; 4],
     pending_request: Option<FileRequest>,
     frame_remaining: usize,
     frame_needs_header: bool,
@@ -421,7 +392,6 @@ impl Sender {
             file_name: String::new(),
             file_size: 0,
             has_file: false,
-            file_options: [1, 0, 0, 0], // ZF0=ZCBIN (binary mode)
             pending_request: None,
             frame_remaining: 0,
             frame_needs_header: false,
@@ -471,20 +441,6 @@ impl Sender {
             self.state = SendState::WaitFilePos;
         }
         Ok(())
-    }
-
-    /// Set ZFILE subpacket management options (ZF1 byte).
-    ///
-    /// Call before `start_file()` to control how the remote receiver
-    /// handles the file. Common values:
-    /// - `ZfileManagementOption::ZMCLOB` — overwrite without prompting (default)
-    /// - `ZfileManagementOption::ZMSKNOLOC` — skip if file exists
-    /// - `ZfileManagementOption::ZMAPND` — append to existing file
-    pub fn set_file_options(&mut self, options: impl Into<Option<ZfileManagementOption>>) {
-        self.file_options[1] = options
-            .into()
-            .map(|o| o.bits())
-            .unwrap_or(ZfileManagementOption::ZMCLOB.bits());
     }
 
     /// Requests to finish the session after the current file completes.
