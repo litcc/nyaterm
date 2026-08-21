@@ -16,11 +16,7 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         // Tauri GeneralTab: language, nested startup layout, tray, confirm, diagnostics.
-        let language = self.settings.summary().language.clone();
-        let language_value = match language.as_str() {
-            "zh-CN" | "zh" => "zh-CN",
-            _ => "en",
-        };
+        let language_value = crate::i18n::normalize_locale(&self.settings.summary().language);
         let diagnostics_level = self.settings.summary().diagnostics_level.clone();
         let retention = self.settings.summary().diagnostics_retention_days;
         let days_unit = t!("common.days");
@@ -51,10 +47,7 @@ impl NyaTermApp {
                         Some(SharedString::from(t!("settings.languageDesc"))),
                         self.settings_select_control(
                             "settings.general.language",
-                            vec![
-                                NyaSelectOption::new("en", "English"),
-                                NyaSelectOption::new("zh-CN", "中文 (简体)"),
-                            ],
+                            crate::i18n::language_options(),
                             language_value,
                             false,
                             cx,

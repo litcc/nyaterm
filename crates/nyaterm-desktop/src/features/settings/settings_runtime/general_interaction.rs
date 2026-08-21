@@ -63,7 +63,7 @@ impl SettingsSaveKind {
 impl NyaTermApp {
     pub(in crate::features) fn update_ui_language(
         &mut self,
-        language: &'static str,
+        language: &str,
         cx: &mut Context<Self>,
     ) {
         self.settings.set_language(language);

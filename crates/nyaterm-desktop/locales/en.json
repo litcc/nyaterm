@@ -1181,6 +1181,9 @@
     "select": "Choose header status",
     "session": "Session"
   },
+  "language": {
+    "name": "English"
+  },
   "passwordManager": {
     "add": "Add Password",
     "deleteConfirm": "Delete password '%{name}'?",

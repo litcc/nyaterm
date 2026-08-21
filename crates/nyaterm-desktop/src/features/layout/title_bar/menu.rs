@@ -367,19 +367,19 @@ impl NyaTermApp {
     }
 
     fn title_language_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
-        let language = self.settings.summary().language.as_str();
-        vec![
-            NyaMenuItem::action("English")
-                .checked(matches!(language, "en" | "en-US"))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.update_ui_language("en", cx);
-                })),
-            NyaMenuItem::action("中文")
-                .checked(matches!(language, "zh" | "zh-CN"))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.update_ui_language("zh-CN", cx);
-                })),
-        ]
+        let active = crate::i18n::normalize_locale(&self.settings.summary().language);
+        crate::i18n::available_locales()
+            .into_iter()
+            .map(|locale| {
+                let checked = locale == active;
+                let label = crate::i18n::locale_display_name(&locale);
+                NyaMenuItem::action(label)
+                    .checked(checked)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.update_ui_language(&locale, cx);
+                    }))
+            })
+            .collect()
     }
 
     fn title_header_status_menu_items(

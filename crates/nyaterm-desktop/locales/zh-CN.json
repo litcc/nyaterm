@@ -1181,6 +1181,9 @@
     "select": "选择顶部显示信息",
     "session": "会话信息"
   },
+  "language": {
+    "name": "中文 (简体)"
+  },
   "passwordManager": {
     "add": "添加密码",
     "deleteConfirm": "确定要删除密码「%{name}」吗？",

@@ -226,10 +226,7 @@ impl NyaTermApp {
                 }
             }
             "appearance-cursor-style" => self.set_cursor_style(value, cx),
-            "settings.general.language" => match value {
-                "zh-CN" | "zh" => self.update_ui_language("zh-CN", cx),
-                _ => self.update_ui_language("en", cx),
-            },
+            "settings.general.language" => self.update_ui_language(value, cx),
             "settings.general.header-status" => {
                 if value == "hidden" {
                     self.set_header_status_visible(false, cx);

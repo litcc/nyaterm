@@ -35,6 +35,31 @@ pub(crate) fn apply_locale(language: &str) {
     rust_i18n::set_locale(&normalize_locale(language));
 }
 
+/// The locales NyaTerm ships a catalog for, in a stable order.
+///
+/// Adding a language is a data-only change: drop a `<locale>.json` into
+/// `locales/` and it appears here, in the settings selector, and in the
+/// title-bar menu.
+pub(crate) fn available_locales() -> Vec<Cow<'static, str>> {
+    rust_i18n::available_locales!()
+}
+
+/// A locale's name in its own language, for the language pickers.
+pub(crate) fn locale_display_name(locale: &str) -> Cow<'static, str> {
+    rust_i18n::t!("language.name", locale = locale)
+}
+
+/// Language picker options, one per shipped catalog.
+pub(crate) fn language_options() -> Vec<nyaterm_ui::NyaSelectOption> {
+    available_locales()
+        .into_iter()
+        .map(|locale| {
+            let label = locale_display_name(&locale);
+            nyaterm_ui::NyaSelectOption::new(locale.into_owned(), label)
+        })
+        .collect()
+}
+
 fn is_simplified_chinese(language: &str) -> bool {
     let normalized = language.to_ascii_lowercase();
     normalized == "zh" || normalized == "zh-cn" || normalized.starts_with("zh-hans")
@@ -49,7 +74,7 @@ mod tests {
     use regex::Regex;
     use serde_json::Value;
 
-    use super::{Cow, normalize_locale};
+    use super::{Cow, available_locales, locale_display_name, normalize_locale};
 
     /// Translate against an explicit language instead of the process-wide locale,
     /// so no test has to touch `rust_i18n::set_locale` and race the others.
@@ -135,6 +160,25 @@ mod tests {
     /// variable syntax, which is handlebars-shaped and parsed by
     /// `parse_quick_command_variables`. It is never interpolated by `t!`.
     const HANDLEBARS_IS_LITERAL: &[&str] = &["quickCommands.commandPlaceholder"];
+
+    #[test]
+    fn every_shipped_locale_names_itself_for_the_language_pickers() {
+        // The selector and the title-bar menu label each entry with
+        // `language.name` read in that entry's own locale, so a catalog without
+        // one would show a bare key.
+        let locales = available_locales();
+        assert_eq!(locales, ["en", "zh-CN"], "shipped catalogs changed");
+        for locale in &locales {
+            let name = locale_display_name(locale);
+            assert_ne!(name, "language.name", "{locale} has no language.name");
+            assert!(
+                !name.trim().is_empty(),
+                "{locale} has a blank language.name"
+            );
+        }
+        assert_eq!(locale_display_name("en"), "English");
+        assert_eq!(locale_display_name("zh-CN"), "中文 (简体)");
+    }
 
     #[test]
     fn placeholders_use_the_rust_i18n_syntax() {
