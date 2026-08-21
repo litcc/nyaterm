@@ -56,12 +56,16 @@ private keys, OTP secrets, API keys, or unredacted terminal context.
 Use a Conventional Commit-style subject, for example
 `fix(transport): handle closed SSH channels`. Describe behavior, architectural
 ownership, commands and platforms tested, and any persistence, credential,
-migration, or vendored-dependency impact. Keep unrelated formatting or
+migration, or forked-dependency impact. Keep unrelated formatting or
 generated metadata out of the change.
 
 Keep pull requests focused and explain compatibility-sensitive decisions in the
-description. Changes under `vendor/` must identify the upstream project/version
-or commit, the reason for the local modification, and the validation performed.
+description. Patched third-party dependencies are not vendored: each is a patch
+series on a fork under <https://github.com/nyakang> on branch `nyaterm`, pinned
+by revision in the root `Cargo.toml`. Change one by committing to its fork
+branch and bumping that revision, and identify the upstream project/version or
+commit, the reason for the modification, and the validation performed. `temp/vendor/`
+holds untracked read-only copies for reading only; nothing there is compiled.
 Update `docs/architecture/gpui-migration-status.md` when a migration boundary,
 ownership rule, or debt count changes.
 

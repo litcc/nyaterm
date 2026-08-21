@@ -43,7 +43,7 @@ must include explicit conversion logic and tests.
   with the application through the typed IPC protocol in
   `nyaterm-remote-desktop`.
 * `crates/nyaterm-vnc-helper`: isolated VNC helper process using the same IPC
-  protocol. It owns the vendored `vnc-rs` decoders, the VNC reconnect ladder, and
+  protocol. It owns the forked `vnc-rs` decoders, the VNC reconnect ladder, and
   the server-facing policy gates (`view_only`, `shared`, clipboard enablement).
   Those gates must stay enforced here, not only in the application.
 * `crates/nyaterm-otp`: bundled HOTP/TOTP implementation.
@@ -51,7 +51,18 @@ must include explicit conversion logic and tests.
   `icons/**` are normally tintable and rendered through `svg()` or
   `mono_icon()`; full-color assets use `img()` or `color_icon()`. Preserve the
   rendering distinction when adding assets.
-* `vendor/`: modified or pinned third-party dependencies.
+* Third-party dependencies that NyaTerm patches are not vendored. Each is a
+  patch series on a fork under <https://github.com/nyakang> on branch
+  `nyaterm`, consumed from a revision pinned in the root `Cargo.toml`:
+  `alacritty` (`alacritty_terminal`), `gpui-component`, `IronRDP`
+  (`ironrdp-client`, `ironrdp-connector`), `russh`, `russh-sftp`, `sspi-rs`,
+  `vnc-rs`, `zed` (`gpui`, `gpui_platform`), and `zmodem2`. Each branch carries
+  a `NYATERM.md` recording its base revision, its patches, and how they were
+  validated.
+* `temp/vendor/`: untracked, read-only copies of those sources, kept only so
+  they can be read locally. Nothing under `temp/` is compiled. **Editing
+  anything there has no effect on the build and produces no error** — change
+  the fork branch instead.
 
 ## Application Architecture
 
@@ -156,8 +167,9 @@ discoverable without pinning it open. Two further consequences:
   hitbox, so a strip-sized overlay only reacts within a track width of the edge.
   `overflow_*_scrollbar()` and `vertical_scrollbar(&handle)` already do this.
 * Where the two axes ride different scroll handles they are separate
-  `Scrollbar` elements with separate reveal state, and the vendor's
-  corner-avoidance does not apply, so inset one overlay by a track width.
+  `Scrollbar` elements with separate reveal state, and the upstream
+  component's corner-avoidance does not apply, so inset one overlay by a track
+  width.
 
 Anything that writes `Theme::scrollbar_mode` or the `scrollbar*` colors directly
 must call `Theme::sync_scrollbar_theme(cx)` afterwards. `Scrollbar` reads the
@@ -204,8 +216,12 @@ Use custom redacted `Debug` implementations for secret-bearing structs when
 debug output is required. Prefer typed secret wrappers and zeroize sensitive
 buffers where practical.
 
-Changes under `vendor/` must document the upstream project and version or
-commit, the reason for the local modification, and the validation performed.
+Patching a third-party dependency means committing to its fork branch, pushing,
+and bumping the pinned revision in the root `Cargo.toml`. Do not edit `temp/`.
+Record the reason for the change and the validation performed on the patch
+commit and in that branch's `NYATERM.md`, and keep the patch series split by
+concern rather than squashed. Prefer rebasing the series onto a newer upstream
+revision over accumulating snapshots.
 
 ## Build and Development Commands
 
@@ -294,5 +310,5 @@ Pull requests should include:
 * a concise description of behavior and architectural impact;
 * linked issues where applicable;
 * commands and platforms tested;
-* explicit notes for persistence, credentials, data compatibility, or vendored
-  dependency changes.
+* explicit notes for persistence, credentials, data compatibility, or forked
+  dependency changes, including the fork branch and revision a bump moves to.

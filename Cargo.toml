@@ -21,14 +21,13 @@ members = [
     "crates/nyaterm-vnc-helper",
 ]
 resolver = "3"
-exclude = [
-    "vendor/alacritty_terminal",
-    "vendor/gpui-component",
-    "vendor/russh",
-    "vendor/russh-sftp",
-    "vendor/zed",
-    "vendor/zmodem2",
-]
+# `temp/` is untracked and holds local reference checkouts, including the
+# sources that used to be vendored here, now under `temp/vendor/`. None of it is
+# part of the build: every one of those dependencies comes from a pinned fork
+# revision below. Editing anything under `temp/` has no effect on what is
+# compiled. The exclude entry only stops cargo from claiming those manifests
+# belong to this workspace, so they can still be built on their own.
+exclude = ["temp"]
 
 [workspace.package]
 version = "2.0.0"
