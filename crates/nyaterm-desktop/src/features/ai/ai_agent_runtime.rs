@@ -282,7 +282,7 @@ impl NyaTermApp {
                 }
             };
             if !ai_job_cancelled(&cancel) {
-                let _ = tx.send(AiChatWorkerEvent::AgentBackgroundFinished {
+                let _ = tx.unbounded_send(AiChatWorkerEvent::AgentBackgroundFinished {
                     job_id,
                     state,
                     result,
@@ -494,7 +494,7 @@ impl NyaTermApp {
         let cancel = launch.cancel;
         std::thread::spawn(move || {
             let result = run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id);
-            let _ = tx.send(AiChatWorkerEvent::Finished(AiChatJobResult {
+            let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
                 job_id,
                 session_id,
                 result,

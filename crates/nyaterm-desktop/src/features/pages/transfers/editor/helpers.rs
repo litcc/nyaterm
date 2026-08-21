@@ -317,13 +317,13 @@ pub(super) fn watch_external_editor_file(
     job_id: String,
     remote_path: RemoteFilePath,
     local_path: PathBuf,
-    transfer_tx: std::sync::mpsc::Sender<TransferJobResult>,
+    transfer_tx: futures::channel::mpsc::UnboundedSender<TransferJobResult>,
 ) {
     let watch_started = Instant::now();
     let mut baseline = match LocalFileFingerprint::from_path(&local_path) {
         Ok(fingerprint) => fingerprint,
         Err(error) => {
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id: job_id,
                 event: TransferJobEvent::Finished(Err(format!(
                     "external editor watch failed for {}: {error}",
@@ -353,7 +353,7 @@ pub(super) fn watch_external_editor_file(
         std::thread::sleep(EXTERNAL_EDITOR_UPLOAD_SETTLE);
         let settled = LocalFileFingerprint::from_path(&local_path).unwrap_or(current);
         baseline = settled;
-        let _ = transfer_tx.send(TransferJobResult {
+        let _ = transfer_tx.unbounded_send(TransferJobResult {
             id: job_id.clone(),
             event: TransferJobEvent::ExternalModified {
                 remote_path: remote_path.display_path.clone(),
@@ -378,9 +378,9 @@ pub(super) fn upload_external_editor_file(
     raw_path_token: Option<String>,
     local_path: &Path,
     transfer_options: SftpTransferOptions,
-    transfer_tx: &std::sync::mpsc::Sender<TransferJobResult>,
+    transfer_tx: &futures::channel::mpsc::UnboundedSender<TransferJobResult>,
 ) {
-    let _ = transfer_tx.send(TransferJobResult {
+    let _ = transfer_tx.unbounded_send(TransferJobResult {
         id: job_id.to_string(),
         event: TransferJobEvent::Started {
             detail: format!("Syncing external edit {remote_path}"),
@@ -400,7 +400,7 @@ pub(super) fn upload_external_editor_file(
             control,
             transfer_options,
             move |progress| {
-                let _ = progress_tx.send(TransferJobResult {
+                let _ = progress_tx.unbounded_send(TransferJobResult {
                     id: progress_id.clone(),
                     event: TransferJobEvent::Progress(progress),
                 });
@@ -408,7 +408,7 @@ pub(super) fn upload_external_editor_file(
         )
         .map(TransferJobOutput::Summary)
         .map_err(|error| error.to_string());
-    let _ = transfer_tx.send(TransferJobResult {
+    let _ = transfer_tx.unbounded_send(TransferJobResult {
         id: job_id.to_string(),
         event: TransferJobEvent::Finished(result),
     });

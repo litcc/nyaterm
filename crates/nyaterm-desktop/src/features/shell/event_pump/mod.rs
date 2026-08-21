@@ -466,7 +466,6 @@ impl NyaTermApp {
             && !self.session.prompt_has_pending_or_active_prompt()
             && !self.terminal.action_link_hover_is_pending()
             && !self.recording.has_pending_auto_start()
-            && self.transfer.transfer_jobs_are_empty()
             && !self.shell.runtime.open_tabs_persist_dirty
             && !self.shell.runtime.window_layout_persist_dirty
             && self.terminal.terminal_windows_restore_is_complete()

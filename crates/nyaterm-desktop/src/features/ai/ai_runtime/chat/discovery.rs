@@ -1,11 +1,10 @@
+use futures::StreamExt as _;
 use gpui::Context;
 
 use crate::http::ai::discover_openai_compatible_models;
 use nyaterm_core::AiModelDiscovery;
 
 use crate::features::{NyaTermApp, runtime_jobs::AiDiscoveryJobResult};
-
-const AI_DISCOVERY_EVENT_DRAIN_LIMIT: usize = 8;
 
 impl NyaTermApp {
     pub(in crate::features) fn discover_ai_models(&mut self, cx: &mut Context<Self>) {
@@ -43,7 +42,7 @@ impl NyaTermApp {
             } else {
                 Ok(discoveries)
             };
-            let _ = tx.send(AiDiscoveryJobResult {
+            let _ = tx.unbounded_send(AiDiscoveryJobResult {
                 profile_id: String::new(),
                 result,
             });
@@ -51,37 +50,51 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_ai_discovery_events(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let events = self
-            .ai
-            .drain_discovery_events(AI_DISCOVERY_EVENT_DRAIN_LIMIT);
-        let dirty = !events.is_empty();
-        for event in events {
-            match event.result {
-                Ok(discoveries) if discoveries.is_empty() => {
-                    self.ai
-                        .set_panel_status("AI discovery returned no models".to_string());
-                }
-                Ok(discoveries) => {
-                    let count = self.apply_ai_model_discoveries(&event.profile_id, discoveries);
-                    self.ai
-                        .set_panel_status(format!("Discovered {count} AI model(s)"));
-                    self.settings
-                        .update_store_status(self.ai.panel_status().to_string(), true);
-                    self.persist_ai_settings_now(cx);
-                }
-                Err(error) => {
-                    self.ai
-                        .set_panel_status(format!("AI model discovery failed: {error}"));
-                    self.settings
-                        .update_store_status(self.ai.panel_status().to_string(), false);
+    /// Deliver AI model-discovery replies as they arrive.
+    ///
+    /// Started once at window open; before this the runtime tick polled for them.
+    pub(in crate::features) fn start_ai_discovery_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.ai.take_discovery_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        this.ai.note_discovery_event_delivered();
+                        this.apply_ai_discovery_event(event, cx);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             }
+        })
+        .detach();
+    }
+
+    fn apply_ai_discovery_event(&mut self, event: AiDiscoveryJobResult, cx: &mut Context<Self>) {
+        match event.result {
+            Ok(discoveries) if discoveries.is_empty() => {
+                self.ai
+                    .set_panel_status("AI discovery returned no models".to_string());
+            }
+            Ok(discoveries) => {
+                let count = self.apply_ai_model_discoveries(&event.profile_id, discoveries);
+                self.ai
+                    .set_panel_status(format!("Discovered {count} AI model(s)"));
+                self.settings
+                    .update_store_status(self.ai.panel_status().to_string(), true);
+                self.persist_ai_settings_now(cx);
+            }
+            Err(error) => {
+                self.ai
+                    .set_panel_status(format!("AI model discovery failed: {error}"));
+                self.settings
+                    .update_store_status(self.ai.panel_status().to_string(), false);
+            }
         }
-        dirty
     }
 
     pub(in crate::features) fn apply_ai_model_discoveries(

@@ -82,7 +82,7 @@ impl NyaTermApp {
                     entries,
                 })
                 .map_err(|error| error.to_string());
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -155,7 +155,7 @@ impl NyaTermApp {
                 .list_dir_path(&remote_file_path)
                 .map(TransferJobOutput::Entries)
                 .map_err(|error| error.to_string());
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -291,7 +291,7 @@ impl NyaTermApp {
                     entries,
                 })
             })();
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -353,7 +353,7 @@ impl NyaTermApp {
                 let home_dir = service.home_dir().map_err(|error| error.to_string())?;
                 Ok(TransferJobOutput::HomeDir(home_dir))
             })();
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });

@@ -108,13 +108,9 @@ impl NyaTermApp {
             self.drain_pending_credential_autofill_detection(cx)
         );
         drain_stage!(recording, self.drain_recording_pipeline_events());
-        drain_stage!(transfer, self.drain_transfer_events(window, cx));
-        drain_stage!(
-            ai,
-            self.drain_ai_discovery_events(cx)
-                | self.drain_ai_chat_events(cx)
-                | self.drive_ai_agent_loop(cx)
-        );
+        // Not a queue: the agent loop waits for the terminal to fall quiet, so it
+        // still needs periodic driving. Phase 2 gives it its own timer.
+        drain_stage!(ai, self.drive_ai_agent_loop(cx));
 
         dirty
     }
@@ -176,7 +172,6 @@ impl NyaTermApp {
             || self.current_left_panel() == Some(NavItem::Transfers);
         if calm_tick
             && !remote_panels_need_poll
-            && self.transfer.transfer_jobs_are_empty()
             && !self.recording.has_pending_auto_start()
             && !self.shell.runtime.open_tabs_persist_dirty
             && !self.shell.runtime.window_layout_persist_dirty

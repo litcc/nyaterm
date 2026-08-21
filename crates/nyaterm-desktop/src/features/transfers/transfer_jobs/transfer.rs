@@ -103,7 +103,7 @@ impl NyaTermApp {
                 )
                 .map(TransferJobOutput::Summary)
                 .map_err(|error| error.to_string());
-            let _ = finished_tx.send(TransferJobResult {
+            let _ = finished_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -171,7 +171,7 @@ impl NyaTermApp {
                     }
                 })
                 .map_err(|error| error.to_string());
-            let _ = finished_tx.send(TransferJobResult {
+            let _ = finished_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -379,7 +379,7 @@ impl NyaTermApp {
                         )
                         .map(TransferJobOutput::Summary)
                         .map_err(|error| error.to_string());
-                    let _ = finished_tx.send(TransferJobResult {
+                    let _ = finished_tx.unbounded_send(TransferJobResult {
                         id: job_id,
                         event: TransferJobEvent::Finished(result),
                     });
@@ -444,7 +444,7 @@ impl NyaTermApp {
                             }
                         })
                         .map_err(|error| error.to_string());
-                    let _ = finished_tx.send(TransferJobResult {
+                    let _ = finished_tx.unbounded_send(TransferJobResult {
                         id: job_id,
                         event: TransferJobEvent::Finished(result),
                     });

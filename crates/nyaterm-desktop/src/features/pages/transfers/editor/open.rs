@@ -134,7 +134,7 @@ impl NyaTermApp {
                     file,
                 })
                 .map_err(|error| error.to_string());
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -446,7 +446,7 @@ impl NyaTermApp {
                     control,
                     transfer_options,
                     move |progress| {
-                        let _ = progress_tx.send(TransferJobResult {
+                        let _ = progress_tx.unbounded_send(TransferJobResult {
                             id: progress_id.clone(),
                             event: TransferJobEvent::Progress(progress),
                         });
@@ -462,7 +462,7 @@ impl NyaTermApp {
                     })
                 });
             let opened = result.is_ok();
-            let _ = finished_tx.send(TransferJobResult {
+            let _ = finished_tx.unbounded_send(TransferJobResult {
                 id: id.clone(),
                 event: TransferJobEvent::Finished(result),
             });

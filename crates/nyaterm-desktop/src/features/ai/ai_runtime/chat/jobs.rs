@@ -1,3 +1,4 @@
+use futures::StreamExt as _;
 use gpui::{Context, KeyDownEvent};
 use nyaterm_core::{AiAction, AiChatRequest, AiContext, AiMode};
 use nyaterm_transport::SessionInfo;
@@ -10,8 +11,6 @@ use crate::models::SessionLaunchConfig;
 
 use super::super::super::ai_jobs::{observation_summary, run_ai_ask_job};
 use super::super::super::state::AiAgentBackgroundEffect;
-
-const AI_CHAT_EVENT_DRAIN_LIMIT: usize = 256;
 
 impl NyaTermApp {
     pub(in crate::features) fn cancel_ai_chat(&mut self, cx: &mut Context<Self>) {
@@ -98,7 +97,7 @@ impl NyaTermApp {
         let tx = launch.tx;
         std::thread::spawn(move || {
             let result = run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id);
-            let _ = tx.send(AiChatWorkerEvent::Finished(AiChatJobResult {
+            let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
                 job_id,
                 session_id,
                 result,
@@ -527,93 +526,111 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_ai_chat_events(&mut self, cx: &mut Context<Self>) -> bool {
-        let events = self.ai.drain_chat_events(AI_CHAT_EVENT_DRAIN_LIMIT);
+    /// Deliver AI chat worker events as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `drain_chat_events`, so a streamed token batch waited for the next tick.
+    pub(in crate::features) fn start_ai_chat_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.ai.take_chat_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.ai.chat_event_is_wanted() && this.apply_ai_chat_event(event, cx) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Apply one worker event, reporting whether the UI needs a repaint.
+    fn apply_ai_chat_event(&mut self, event: AiChatWorkerEvent, cx: &mut Context<Self>) -> bool {
         let mut dirty = false;
-        for event in events {
-            match event {
-                AiChatWorkerEvent::Delta {
-                    job_id,
-                    session_id,
-                    text_delta,
-                    reasoning_delta,
-                } => {
-                    if self
-                        .ai
-                        .apply_chat_delta(job_id, &text_delta, reasoning_delta.as_deref())
-                    {
+        match event {
+            AiChatWorkerEvent::Delta {
+                job_id,
+                session_id,
+                text_delta,
+                reasoning_delta,
+            } => {
+                if self
+                    .ai
+                    .apply_chat_delta(job_id, &text_delta, reasoning_delta.as_deref())
+                {
+                    dirty = true;
+                    self.settings
+                        .update_store_status(format!("AI session {session_id} streaming"), true);
+                }
+            }
+            AiChatWorkerEvent::AgentToolCallDelta {
+                job_id,
+                session_id,
+                tool_name,
+                arguments_delta_len,
+            } => {
+                if self
+                    .ai
+                    .apply_agent_tool_delta(job_id, tool_name.as_deref(), arguments_delta_len)
+                {
+                    dirty = true;
+                    self.settings.update_store_status(
+                        format!("AI session {session_id} streaming Agent tool call"),
+                        true,
+                    );
+                }
+            }
+            AiChatWorkerEvent::AgentBackgroundFinished {
+                job_id,
+                state,
+                result,
+            } => {
+                match self
+                    .ai
+                    .finish_agent_background(job_id, state, result, observation_summary)
+                {
+                    AiAgentBackgroundEffect::Ignored => {}
+                    AiAgentBackgroundEffect::MatchedStale => dirty = true,
+                    AiAgentBackgroundEffect::Continue(state, observation) => {
                         dirty = true;
-                        self.settings.update_store_status(
-                            format!("AI session {session_id} streaming"),
-                            true,
-                        );
+                        self.start_ai_agent_continuation(*state, observation, cx);
+                    }
+                    AiAgentBackgroundEffect::Failed => {
+                        dirty = true;
+                        self.settings
+                            .update_store_status(self.ai.panel_status().to_string(), false);
                     }
                 }
-                AiChatWorkerEvent::AgentToolCallDelta {
-                    job_id,
-                    session_id,
-                    tool_name,
-                    arguments_delta_len,
-                } => {
-                    if self.ai.apply_agent_tool_delta(
-                        job_id,
-                        tool_name.as_deref(),
-                        arguments_delta_len,
-                    ) {
-                        dirty = true;
-                        self.settings.update_store_status(
-                            format!("AI session {session_id} streaming Agent tool call"),
-                            true,
-                        );
+            }
+            AiChatWorkerEvent::Finished(event) => {
+                if let Some(effect) =
+                    self.ai
+                        .finish_chat_job(event.job_id, event.session_id, event.result)
+                {
+                    dirty = true;
+                    self.settings.update_store_status(
+                        if effect.succeeded {
+                            format!("AI session {} updated", effect.session_id)
+                        } else {
+                            self.ai.panel_status().to_string()
+                        },
+                        effect.succeeded,
+                    );
+                    if effect.clear_prompt_input {
+                        self.reset_text_input("ai.chat.prompt", "", cx);
                     }
-                }
-                AiChatWorkerEvent::AgentBackgroundFinished {
-                    job_id,
-                    state,
-                    result,
-                } => {
-                    match self.ai.finish_agent_background(
-                        job_id,
-                        state,
-                        result,
-                        observation_summary,
-                    ) {
-                        AiAgentBackgroundEffect::Ignored => {}
-                        AiAgentBackgroundEffect::MatchedStale => dirty = true,
-                        AiAgentBackgroundEffect::Continue(state, observation) => {
-                            dirty = true;
-                            self.start_ai_agent_continuation(*state, observation, cx);
-                        }
-                        AiAgentBackgroundEffect::Failed => {
-                            dirty = true;
-                            self.settings
-                                .update_store_status(self.ai.panel_status().to_string(), false);
-                        }
+                    if effect.refresh_usage_counts {
+                        self.refresh_ai_usage_counts(cx);
                     }
-                }
-                AiChatWorkerEvent::Finished(event) => {
-                    if let Some(effect) =
-                        self.ai
-                            .finish_chat_job(event.job_id, event.session_id, event.result)
-                    {
-                        dirty = true;
-                        self.settings.update_store_status(
-                            if effect.succeeded {
-                                format!("AI session {} updated", effect.session_id)
-                            } else {
-                                self.ai.panel_status().to_string()
-                            },
-                            effect.succeeded,
-                        );
-                        if effect.clear_prompt_input {
-                            self.reset_text_input("ai.chat.prompt", "", cx);
-                        }
-                        if effect.refresh_usage_counts {
-                            self.refresh_ai_usage_counts(cx);
-                        }
-                        if effect.auto_execute_first {
-                            self.run_ai_command_card(0, cx);
-                        }
+                    if effect.auto_execute_first {
+                        self.run_ai_command_card(0, cx);
                     }
                 }
             }

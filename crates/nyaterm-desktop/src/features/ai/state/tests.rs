@@ -434,14 +434,18 @@ fn discovery_job_and_picker_lifecycles_stay_on_the_owner() {
     let cx = TestAppContext::single();
     let mut state = state(&cx);
 
+    let mut rx = state
+        .take_discovery_event_receiver()
+        .expect("the state holds its receiver until the drain starts");
     let tx = state.begin_discovery_job().unwrap();
     assert!(state.begin_discovery_job().is_none());
-    tx.send(AiDiscoveryJobResult {
+    tx.unbounded_send(AiDiscoveryJobResult {
         profile_id: "profile".to_string(),
         result: Ok(Vec::new()),
     })
     .unwrap();
-    assert_eq!(state.drain_discovery_events(8).len(), 1);
+    assert!(rx.try_recv().is_ok());
+    state.note_discovery_event_delivered();
     assert!(!state.discovery_is_pending());
 
     state.toggle_discovery_menu(2);
@@ -469,16 +473,20 @@ fn chat_start_stream_and_finish_are_reduced_by_the_owner() {
     assert!(state.chat_prompt_draft().is_empty());
     assert_eq!(state.agent_steps().len(), 1);
     assert_eq!(state.agent_steps()[0].status, AiAgentStepStatus::Planning);
+    let mut rx = state
+        .take_chat_event_receiver()
+        .expect("the state holds its receiver until the drain starts");
     launch
         .tx
-        .send(AiChatWorkerEvent::Delta {
+        .unbounded_send(AiChatWorkerEvent::Delta {
             job_id: launch.job_id,
             session_id: launch.session_id.clone(),
             text_delta: "working".to_string(),
             reasoning_delta: Some("reason".to_string()),
         })
         .unwrap();
-    let event = state.drain_chat_events(1).pop().unwrap();
+    assert!(state.chat_event_is_wanted());
+    let event = rx.try_recv().expect("the delta should be queued");
     let AiChatWorkerEvent::Delta {
         job_id,
         text_delta,

@@ -1,6 +1,6 @@
+use futures::channel::mpsc::unbounded;
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc;
 
 use gpui::{ScrollHandle, ScrollStrategy, TestAppContext, UniformListScrollHandle, point, px};
 use nyaterm_transport::{
@@ -517,7 +517,7 @@ fn browser_selection_replacement_preserves_the_explicit_active_path() {
 }
 
 fn transfer_queue(cx: &TestAppContext) -> TransferQueueState {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = unbounded();
     let focus = cx.update(|cx| cx.focus_handle());
     TransferQueueState::new(tx, rx, focus)
 }
@@ -1062,22 +1062,23 @@ fn transfer_queue_owns_admission_events_and_job_removal() {
     assert!(queue.can_delete_job("job-1", Some("session-a")));
 
     assert!(queue.remove_job("job-1"));
-    assert!(queue.is_empty());
+    assert!(queue.jobs().is_empty());
     assert_eq!(queue.selected_job_id(), None);
     assert_eq!(queue.next_job_id("download"), "download-3");
 
+    let mut rx = queue
+        .take_event_receiver()
+        .expect("the queue holds its receiver until the drain starts");
     let sender = queue.event_sender();
     sender
-        .send(TransferJobResult {
+        .unbounded_send(TransferJobResult {
             id: "missing-job".to_string(),
             event: TransferJobEvent::Started {
                 detail: "started".to_string(),
             },
         })
         .expect("queue receiver should remain connected");
-    let event = queue
-        .try_recv_event()
-        .expect("queue should receive its typed event");
+    let event = rx.try_recv().expect("queue should receive its typed event");
     assert_eq!(event.id, "missing-job");
     assert!(matches!(event.event, TransferJobEvent::Started { .. }));
 }

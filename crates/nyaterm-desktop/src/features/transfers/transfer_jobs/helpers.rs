@@ -1,5 +1,5 @@
+use futures::channel::mpsc::UnboundedSender;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use nyaterm_transport::SftpTransferProgress;
@@ -10,12 +10,12 @@ const TRANSFER_PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(super) struct TransferProgressEventSender {
     id: String,
-    tx: mpsc::Sender<TransferJobResult>,
+    tx: UnboundedSender<TransferJobResult>,
     last_sent_at: Option<Instant>,
 }
 
 impl TransferProgressEventSender {
-    pub(super) fn new(id: String, tx: mpsc::Sender<TransferJobResult>) -> Self {
+    pub(super) fn new(id: String, tx: UnboundedSender<TransferJobResult>) -> Self {
         Self {
             id,
             tx,
@@ -36,7 +36,7 @@ impl TransferProgressEventSender {
         }
 
         self.last_sent_at = Some(now);
-        let _ = self.tx.send(TransferJobResult {
+        let _ = self.tx.unbounded_send(TransferJobResult {
             id: self.id.clone(),
             event: TransferJobEvent::Progress(progress),
         });

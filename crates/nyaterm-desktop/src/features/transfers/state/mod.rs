@@ -8,8 +8,8 @@
 mod browser;
 mod editor;
 
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::mpsc;
 use std::time::Instant;
 
 use gpui::{FocusHandle, Pixels, ScrollHandle, UniformListScrollHandle};
@@ -49,8 +49,10 @@ pub(in crate::features) struct TransferFeatureFocus {
 
 /// Upload/download job queue.
 struct TransferQueueState {
-    tx: mpsc::Sender<TransferJobResult>,
-    rx: mpsc::Receiver<TransferJobResult>,
+    tx: UnboundedSender<TransferJobResult>,
+    /// Taken once by `NyaTermApp::start_transfer_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<TransferJobResult>>,
     jobs: Vec<TransferJobState>,
     next_job_sequence: u64,
     selected_job_id: Option<String>,
@@ -220,7 +222,7 @@ impl TransferFeatureState {
         panel_height: f32,
         focus: TransferFeatureFocus,
     ) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             file_ops: TransferFileOpsState::new(),
             queue: TransferQueueState::new(tx, rx, focus.queue),
@@ -287,10 +289,6 @@ impl TransferFeatureState {
         self.queue.jobs()
     }
 
-    pub(in crate::features) fn transfer_jobs_are_empty(&self) -> bool {
-        self.queue.is_empty()
-    }
-
     pub(in crate::features) fn transfer_job(&self, job_id: &str) -> Option<&TransferJobState> {
         self.queue.job(job_id)
     }
@@ -314,14 +312,14 @@ impl TransferFeatureState {
         self.queue.enqueue(job);
     }
 
-    pub(in crate::features) fn transfer_event_sender(&self) -> mpsc::Sender<TransferJobResult> {
+    pub(in crate::features) fn transfer_event_sender(&self) -> UnboundedSender<TransferJobResult> {
         self.queue.event_sender()
     }
 
-    pub(in crate::features) fn try_recv_transfer_event(
-        &self,
-    ) -> Result<TransferJobResult, mpsc::TryRecvError> {
-        self.queue.try_recv_event()
+    pub(in crate::features) fn take_transfer_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<TransferJobResult>> {
+        self.queue.take_event_receiver()
     }
 
     pub(in crate::features) fn take_transfer_job_for_event(
@@ -1168,13 +1166,13 @@ impl TransferPanelState {
 
 impl TransferQueueState {
     fn new(
-        tx: mpsc::Sender<TransferJobResult>,
-        rx: mpsc::Receiver<TransferJobResult>,
+        tx: UnboundedSender<TransferJobResult>,
+        rx: UnboundedReceiver<TransferJobResult>,
         focus: FocusHandle,
     ) -> Self {
         Self {
             tx,
-            rx,
+            rx: Some(rx),
             jobs: Vec::new(),
             next_job_sequence: 0,
             selected_job_id: None,
@@ -1189,10 +1187,6 @@ impl TransferQueueState {
 
     fn jobs(&self) -> &[TransferJobState] {
         &self.jobs
-    }
-
-    fn is_empty(&self) -> bool {
-        self.jobs.is_empty()
     }
 
     fn job(&self, job_id: &str) -> Option<&TransferJobState> {
@@ -1211,12 +1205,12 @@ impl TransferQueueState {
         self.jobs.push(job);
     }
 
-    fn event_sender(&self) -> mpsc::Sender<TransferJobResult> {
+    fn event_sender(&self) -> UnboundedSender<TransferJobResult> {
         self.tx.clone()
     }
 
-    fn try_recv_event(&self) -> Result<TransferJobResult, mpsc::TryRecvError> {
-        self.rx.try_recv()
+    fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<TransferJobResult>> {
+        self.rx.take()
     }
 
     fn remove_job(&mut self, job_id: &str) -> bool {

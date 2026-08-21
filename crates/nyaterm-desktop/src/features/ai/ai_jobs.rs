@@ -1,9 +1,10 @@
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
 };
 use std::time::Instant;
+
+use futures::channel::mpsc::UnboundedSender;
 
 use crate::http::ai::{complete_native_chat, stream_native_chat};
 use nyaterm_core::{
@@ -30,7 +31,7 @@ pub(in crate::features) fn run_ai_ask_job(
     store: StoreBlockingClient,
     settings: AiSettings,
     mut request: AiChatRequest,
-    stream_tx: Option<mpsc::Sender<AiChatWorkerEvent>>,
+    stream_tx: Option<UnboundedSender<AiChatWorkerEvent>>,
     cancel: Arc<AtomicBool>,
     job_id: u64,
 ) -> Result<AiChatJobOutput, String> {
@@ -84,7 +85,7 @@ pub(in crate::features) fn run_ai_ask_job(
                     done: _,
                 } = delta;
                 if !text_delta.is_empty() || reasoning_delta.is_some() {
-                    let _ = tx.send(AiChatWorkerEvent::Delta {
+                    let _ = tx.unbounded_send(AiChatWorkerEvent::Delta {
                         job_id,
                         session_id: delta_session_id.clone(),
                         text_delta,
@@ -93,7 +94,7 @@ pub(in crate::features) fn run_ai_ask_job(
                 }
                 if stream_mode == AiMode::Agent {
                     for tool_delta in tool_call_deltas {
-                        let _ = tx.send(AiChatWorkerEvent::AgentToolCallDelta {
+                        let _ = tx.unbounded_send(AiChatWorkerEvent::AgentToolCallDelta {
                             job_id,
                             session_id: delta_session_id.clone(),
                             tool_name: tool_delta.name_delta,

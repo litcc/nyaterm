@@ -199,7 +199,7 @@ impl NyaTermApp {
                     properties,
                 })
                 .map_err(|error| error.to_string());
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });
@@ -326,7 +326,7 @@ impl NyaTermApp {
                 })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = transfer_tx.send(TransferJobResult {
+            let _ = transfer_tx.unbounded_send(TransferJobResult {
                 id,
                 event: TransferJobEvent::Finished(result),
             });

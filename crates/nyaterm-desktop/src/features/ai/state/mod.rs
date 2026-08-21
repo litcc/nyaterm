@@ -9,7 +9,9 @@ mod settings;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
+
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::time::{Duration, Instant};
 
 use gpui::FocusHandle;
@@ -85,8 +87,10 @@ pub(in crate::features) struct AiSettingsPersistenceCompletion {
 
 /// Composer, in-flight request and the visible transcript.
 struct AiChatState {
-    tx: mpsc::Sender<AiChatWorkerEvent>,
-    rx: mpsc::Receiver<AiChatWorkerEvent>,
+    tx: UnboundedSender<AiChatWorkerEvent>,
+    /// Taken once by `NyaTermApp::start_ai_chat_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<AiChatWorkerEvent>>,
     pending: bool,
     job_id: u64,
     cancel: Option<Arc<AtomicBool>>,
@@ -123,8 +127,10 @@ struct AiHistoryState {
 
 /// Model discovery job and the model picker it feeds.
 struct AiDiscoveryState {
-    tx: mpsc::Sender<AiDiscoveryJobResult>,
-    rx: mpsc::Receiver<AiDiscoveryJobResult>,
+    tx: UnboundedSender<AiDiscoveryJobResult>,
+    /// Taken once by `NyaTermApp::start_ai_discovery_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<AiDiscoveryJobResult>>,
     pending: bool,
     menu_open: bool,
     query: String,
@@ -145,7 +151,7 @@ struct AiAgentState {
 pub(in crate::features) struct AiChatLaunch {
     pub(in crate::features) job_id: u64,
     pub(in crate::features) cancel: Arc<AtomicBool>,
-    pub(in crate::features) tx: mpsc::Sender<AiChatWorkerEvent>,
+    pub(in crate::features) tx: UnboundedSender<AiChatWorkerEvent>,
     pub(in crate::features) session_id: String,
 }
 
@@ -197,8 +203,8 @@ impl AiFeatureState {
             message_count,
             audit_count,
         } = init;
-        let (chat_tx, chat_rx) = mpsc::channel();
-        let (discovery_tx, discovery_rx) = mpsc::channel();
+        let (chat_tx, chat_rx) = unbounded();
+        let (discovery_tx, discovery_rx) = unbounded();
         Self {
             settings: AiSettingsState {
                 config: settings,
@@ -221,7 +227,7 @@ impl AiFeatureState {
             },
             chat: AiChatState {
                 tx: chat_tx,
-                rx: chat_rx,
+                rx: Some(chat_rx),
                 pending: false,
                 job_id: 0,
                 cancel: None,
@@ -255,7 +261,7 @@ impl AiFeatureState {
             },
             discovery: AiDiscoveryState {
                 tx: discovery_tx,
-                rx: discovery_rx,
+                rx: Some(discovery_rx),
                 pending: false,
                 menu_open: false,
                 query: String::new(),
@@ -577,21 +583,19 @@ impl AiFeatureState {
         }
     }
 
-    pub(in crate::features) fn drain_chat_events(
+    pub(in crate::features) fn take_chat_event_receiver(
         &mut self,
-        limit: usize,
-    ) -> Vec<AiChatWorkerEvent> {
-        if !self.chat.pending {
-            return Vec::new();
-        }
-        let mut events = Vec::new();
-        for _ in 0..limit {
-            let Ok(event) = self.chat.rx.try_recv() else {
-                break;
-            };
-            events.push(event);
-        }
-        events
+    ) -> Option<UnboundedReceiver<AiChatWorkerEvent>> {
+        self.chat.rx.take()
+    }
+
+    /// Whether a chat request is outstanding, so a worker event is still wanted.
+    ///
+    /// A cancelled or already-settled request leaves nothing to apply; the
+    /// per-event `job_id` checks would reject it anyway, but dropping it here
+    /// keeps that intent explicit.
+    pub(in crate::features) fn chat_event_is_wanted(&self) -> bool {
+        self.chat.pending
     }
 
     pub(in crate::features) fn apply_chat_delta(
@@ -1226,7 +1230,7 @@ impl AiFeatureState {
 
     pub(in crate::features) fn begin_discovery_job(
         &mut self,
-    ) -> Option<mpsc::Sender<AiDiscoveryJobResult>> {
+    ) -> Option<UnboundedSender<AiDiscoveryJobResult>> {
         if self.discovery.pending {
             self.panel.status = "AI model discovery already running".to_string();
             return None;
@@ -1236,22 +1240,15 @@ impl AiFeatureState {
         Some(self.discovery.tx.clone())
     }
 
-    pub(in crate::features) fn drain_discovery_events(
+    pub(in crate::features) fn take_discovery_event_receiver(
         &mut self,
-        limit: usize,
-    ) -> Vec<AiDiscoveryJobResult> {
-        if !self.discovery.pending {
-            return Vec::new();
-        }
-        let mut events = Vec::new();
-        for _ in 0..limit {
-            let Ok(event) = self.discovery.rx.try_recv() else {
-                break;
-            };
-            self.discovery.pending = false;
-            events.push(event);
-        }
-        events
+    ) -> Option<UnboundedReceiver<AiDiscoveryJobResult>> {
+        self.discovery.rx.take()
+    }
+
+    /// A discovery reply settles the job it belongs to.
+    pub(in crate::features) fn note_discovery_event_delivered(&mut self) {
+        self.discovery.pending = false;
     }
 
     pub(in crate::features) fn set_discovery_query(&mut self, query: String) {
