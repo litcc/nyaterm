@@ -49,11 +49,11 @@ digest = "0.11.0-rc.5"
 dirs = "6"
 encoding_rs = "0.8"
 futures = "0.3"
-gpui = { path = "vendor/zed/crates/gpui" }
-gpui-base = { path = "vendor/gpui-component/crates/base" }
-gpui-component = { path = "vendor/gpui-component/crates/ui" }
-gpui-component-assets = { path = "vendor/gpui-component/crates/assets" }
-gpui_platform = { path = "vendor/zed/crates/gpui_platform" }
+gpui = { version = "=0.2.2", git = "https://github.com/nyakang/zed", rev = "e83a00dc5daccb4ee2f077f4050e9315ea21f165" }
+gpui-base = { git = "https://github.com/nyakang/gpui-component", rev = "a6f390f7aefd96c465b67ec4434c41e4aed4ef34" }
+gpui-component = { git = "https://github.com/nyakang/gpui-component", rev = "a6f390f7aefd96c465b67ec4434c41e4aed4ef34" }
+gpui-component-assets = { git = "https://github.com/nyakang/gpui-component", rev = "a6f390f7aefd96c465b67ec4434c41e4aed4ef34" }
+gpui_platform = { git = "https://github.com/nyakang/zed", rev = "e83a00dc5daccb4ee2f077f4050e9315ea21f165" }
 hex = "0.4"
 hmac = "0.13"
 keyring = { version = "3.6", features = [
@@ -79,8 +79,8 @@ rand = { version = "0.10", features = ["thread_rng"] }
 redb = "4.1.0"
 regex = "1.11.1"
 rustls = { version = "0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
-russh = { path = "vendor/russh/russh", features = ["des", "dsa"] }
-russh-sftp = { path = "vendor/russh-sftp" }
+russh = { git = "https://github.com/nyakang/russh", rev = "074d4eb594bf0ce1271725cf96e50ed4af8e3285", features = ["des", "dsa"] }
+russh-sftp = { git = "https://github.com/nyakang/russh-sftp", rev = "687c578b0199a16b0a326e4a5983f0f7471e2ac1" }
 rusty-leveldb = "4.0"
 rust-embed = { version = "8.11", features = ["include-exclude", "debug-embed"] }
 serialport = { version = "4", default-features = false }
@@ -100,10 +100,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # = false) so asset tests cannot pass under capabilities the app does not build.
 usvg = { version = "0.45", default-features = false }
 uuid = { version = "1", features = ["v4", "serde"] }
-vnc = { package = "vnc-rs", path = "vendor/vnc-rs" }
+vnc = { package = "vnc-rs", git = "https://github.com/nyakang/vnc-rs", rev = "99a82f83b05e4fb62aeb94fda6aa356e0251a766" }
 vte = "0.14"
 zeroize = "1"
-zmodem2 = { path = "vendor/zmodem2" }
+zmodem2 = { git = "https://github.com/nyakang/zmodem2", rev = "3e9129643205fccb27170e8f32db0d76068be6b5" }
 zed_reqwest = { package = "zed-reqwest", version = "0.12.15-zed", default-features = false, features = [
     "blocking",
     "json",
@@ -136,7 +136,37 @@ inherits = "dev"
 debug = "full"
 
 [patch.crates-io]
-alacritty_terminal = { path = "vendor/alacritty_terminal" }
-ironrdp-client = { path = "vendor/ironrdp-client" }
-ironrdp-connector = { path = "vendor/ironrdp-connector" }
-sspi = { path = "vendor/sspi" }
+alacritty_terminal = { git = "https://github.com/nyakang/alacritty", rev = "e7561331aa6e84df5dff9e1feb9433406fa0a4f9" }
+ironrdp-client = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+ironrdp-connector = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+sspi = { git = "https://github.com/nyakang/sspi-rs", rev = "878f55fd05257c86e9326b06f05735321f3f2352" }
+# The published ironrdp-client and ironrdp-connector packages declare their
+# sibling crates as registry dependencies, but in the IronRDP repository those
+# are path dependencies, so patching the two above to git pulls the siblings
+# from git as well. Without these entries the graph holds both a registry and a
+# git copy of each and the SvcClientProcessor impls stop unifying. The versions
+# are identical on both sides.
+ironrdp-cliprdr = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+ironrdp-core = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+ironrdp-error = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+ironrdp-pdu = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+ironrdp-svc = { git = "https://github.com/nyakang/IronRDP", rev = "512a19d41cbf080eaff6ee1a5a5445a50a456249" }
+
+# gpui-component declares gpui, gpui_macros and gpui_platform against upstream
+# zed-industries/zed without pinning a revision, because the NyaTerm patch
+# branch deliberately carries no vendor-layout changes. Left alone that resolves
+# a second, unpatched gpui and nothing type-checks across the boundary, so its
+# dependencies are redirected onto the same fork revision used above. The URL
+# must match gpui-component's manifest string exactly, including the absent
+# `.git` suffix. `gpui` also needs an explicit version because the zed
+# repository contains a second package named `gpui` at 0.0.0,
+# tooling/lints/test_fixture/gpui, and a bare git reference is ambiguous.
+[patch."https://github.com/zed-industries/zed"]
+gpui = { version = "=0.2.2", git = "https://github.com/nyakang/zed", rev = "e83a00dc5daccb4ee2f077f4050e9315ea21f165" }
+gpui_macros = { git = "https://github.com/nyakang/zed", rev = "e83a00dc5daccb4ee2f077f4050e9315ea21f165" }
+gpui_platform = { git = "https://github.com/nyakang/zed", rev = "e83a00dc5daccb4ee2f077f4050e9315ea21f165" }
+
+# gpui-component takes zed-reqwest from git while this workspace uses the
+# published crate; without this both end up in the graph.
+[patch."https://github.com/zed-industries/reqwest.git"]
+zed-reqwest = { version = "0.12.15-zed" }
