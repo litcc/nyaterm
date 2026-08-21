@@ -161,7 +161,7 @@ impl NyaTermApp {
                                                     .cursor_pointer()
                                                     .hover(|this| this.bg(rgb(palette.hover)))
                                                     .tooltip(move |window, cx| {
-                                                        NyaTooltip::new(select_icon_label)
+                                                        NyaTooltip::new(select_icon_label.clone())
                                                             .build(window, cx)
                                                     })
                                                     .child(match icon_def {
@@ -250,7 +250,7 @@ impl NyaTermApp {
                                                                 "settings-search-engine-menu-tip-{index}"
                                                             )))
                                                             .tooltip(move |window, cx| {
-                                                                NyaTooltip::new(show_menu_label)
+                                                                NyaTooltip::new(show_menu_label.clone())
                                                                     .build(window, cx)
                                                             })
                                                             .child(settings_switch(
@@ -429,9 +429,10 @@ fn search_engine_icon_picker(
     palette: ThemePalette,
     index: usize,
     selected_icon: Option<&str>,
-    clear_label: &'static str,
+    clear_label: impl Into<SharedString>,
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
+    let clear_label: SharedString = clear_label.into();
     div()
         .border_t_1()
         .border_color(rgb(palette.border))
@@ -505,11 +506,13 @@ fn search_engine_icon_choice(
 
 fn search_engine_settings_section(
     palette: ThemePalette,
-    title: &'static str,
-    desc: &'static str,
+    title: impl Into<SharedString>,
+    desc: impl Into<SharedString>,
     action: impl IntoElement,
     content: impl IntoElement,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
+    let desc: SharedString = desc.into();
     div()
         .rounded_lg()
         .border_1()
@@ -554,10 +557,11 @@ fn search_engine_icon_button(
     palette: ThemePalette,
     id: String,
     icon_path: &'static str,
-    tooltip: &'static str,
+    tooltip: impl Into<SharedString>,
     active: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let tooltip: SharedString = tooltip.into();
     div()
         .id(SharedString::from(id))
         .size(px(28.))
@@ -573,7 +577,7 @@ fn search_engine_icon_button(
         .text_color(rgb(palette.text_muted))
         .cursor_pointer()
         .hover(|this| this.bg(rgb(palette.hover)).text_color(rgb(palette.text)))
-        .tooltip(move |window, cx| NyaTooltip::new(tooltip).build(window, cx))
+        .tooltip(move |window, cx| NyaTooltip::new(tooltip.clone()).build(window, cx))
         .child(
             svg()
                 .size(px(15.))
@@ -587,11 +591,12 @@ fn search_engine_text_button(
     palette: ThemePalette,
     id: impl Into<String>,
     icon_path: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     destructive: bool,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let hover = if destructive {
         rgba((palette.danger << 8) | 0x18)
     } else {

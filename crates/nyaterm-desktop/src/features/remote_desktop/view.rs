@@ -1,7 +1,9 @@
+use std::borrow::Cow;
+
 use gpui::{
     Bounds, Context, FontWeight, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    Size, canvas, div, prelude::*, px, rgb,
+    SharedString, Size, canvas, div, prelude::*, px, rgb,
 };
 use nyaterm_remote_desktop::{
     RdpCertificateResponse, RdpPointerButton, RdpSessionState, VncScaleMode,
@@ -131,8 +133,12 @@ impl NyaTermApp {
         else {
             let detail = match session.state {
                 RdpSessionState::Connecting => self.tr("remoteDesktop.connecting"),
-                RdpSessionState::Disconnecting => "Disconnecting Remote Desktop session...",
-                RdpSessionState::Disconnected => "Remote Desktop session is disconnected.",
+                RdpSessionState::Disconnecting => {
+                    Cow::Borrowed("Disconnecting Remote Desktop session...")
+                }
+                RdpSessionState::Disconnected => {
+                    Cow::Borrowed("Remote Desktop session is disconnected.")
+                }
                 _ => self.tr("remoteDesktop.waitingFrame"),
             };
             return self
@@ -411,7 +417,12 @@ impl NyaTermApp {
             )
     }
 
-    fn rdp_status_view(&self, title: &'static str, detail: &'static str) -> impl IntoElement {
+    fn rdp_status_view(
+        &self,
+        title: &'static str,
+        detail: impl Into<SharedString>,
+    ) -> impl IntoElement {
+        let detail: SharedString = detail.into();
         let palette = self.theme_palette();
         div()
             .size_full()

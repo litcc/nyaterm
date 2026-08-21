@@ -25,7 +25,7 @@ pub(in crate::features::pages::remote) fn docker_images_panel(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     if images.is_empty() {
-        return docker_resource_empty(palette, "Images", labels.no_matches);
+        return docker_resource_empty(palette, "Images", labels.no_matches.clone());
     }
 
     let total = images.len();
@@ -38,6 +38,7 @@ pub(in crate::features::pages::remote) fn docker_images_panel(
     for image in images.get(window_start..window_end).unwrap_or(&[]) {
         let image_id = image.id.clone();
         let label = docker_image_label(image);
+        let row_labels = labels.clone();
         rows = rows.child(
             docker_resource_row(
                 palette,
@@ -57,8 +58,9 @@ pub(in crate::features::pages::remote) fn docker_images_panel(
                 cx.listener(move |this, _, window, cx| {
                     this.request_docker_confirm(
                         DockerConfirmState {
-                            title: labels.confirm_action_title.to_string(),
-                            detail: labels.confirm_description(labels.remove_image, &label),
+                            title: row_labels.confirm_action_title.to_string(),
+                            detail: row_labels
+                                .confirm_description(&row_labels.remove_image, &label),
                             action: DockerConfirmAction::ImageRemove {
                                 image_id: image_id.clone(),
                                 force: false,
@@ -85,7 +87,7 @@ pub(in crate::features::pages::remote) fn docker_volumes_panel(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     if volumes.is_empty() {
-        return docker_resource_empty(palette, "Volumes", labels.no_matches);
+        return docker_resource_empty(palette, "Volumes", labels.no_matches.clone());
     }
 
     let total = volumes.len();
@@ -97,11 +99,12 @@ pub(in crate::features::pages::remote) fn docker_volumes_panel(
     }
     for volume in volumes.get(window_start..window_end).unwrap_or(&[]) {
         let volume_name = volume.name.clone();
+        let row_labels = labels.clone();
         rows = rows.child(
             docker_resource_row(
                 palette,
                 volume.name.clone(),
-                labels.volume_driver_label(&volume.driver),
+                row_labels.volume_driver_label(&volume.driver),
             )
             .child(svg_icon_button(
                 format!("docker-volume-remove-{volume_name}"),
@@ -111,8 +114,9 @@ pub(in crate::features::pages::remote) fn docker_volumes_panel(
                 cx.listener(move |this, _, window, cx| {
                     this.request_docker_confirm(
                         DockerConfirmState {
-                            title: labels.confirm_action_title.to_string(),
-                            detail: labels.confirm_description(labels.remove_volume, &volume_name),
+                            title: row_labels.confirm_action_title.to_string(),
+                            detail: row_labels
+                                .confirm_description(&row_labels.remove_volume, &volume_name),
                             action: DockerConfirmAction::VolumeRemove {
                                 volume_name: volume_name.clone(),
                                 force: false,
@@ -139,7 +143,7 @@ pub(in crate::features::pages::remote) fn docker_networks_panel(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     if networks.is_empty() {
-        return docker_resource_empty(palette, "Networks", labels.no_matches);
+        return docker_resource_empty(palette, "Networks", labels.no_matches.clone());
     }
 
     let total = networks.len();
@@ -152,6 +156,7 @@ pub(in crate::features::pages::remote) fn docker_networks_panel(
     for network in networks.get(window_start..window_end).unwrap_or(&[]) {
         let network_id = network.id.clone();
         let name = network.name.clone();
+        let row_labels = labels.clone();
         rows = rows.child(
             docker_resource_row(
                 palette,
@@ -171,8 +176,9 @@ pub(in crate::features::pages::remote) fn docker_networks_panel(
                 cx.listener(move |this, _, window, cx| {
                     this.request_docker_confirm(
                         DockerConfirmState {
-                            title: labels.confirm_action_title.to_string(),
-                            detail: labels.confirm_description(labels.remove_network, &name),
+                            title: row_labels.confirm_action_title.to_string(),
+                            detail: row_labels
+                                .confirm_description(&row_labels.remove_network, &name),
                             action: DockerConfirmAction::NetworkRemove {
                                 network_id: network_id.clone(),
                             },
@@ -204,7 +210,7 @@ fn docker_resource_window(total: usize, list_offset: usize) -> (usize, usize, f3
 fn docker_resource_empty(
     palette: ThemePalette,
     title: &'static str,
-    message: &'static str,
+    message: impl Into<SharedString>,
 ) -> gpui::AnyElement {
     div()
         .id(SharedString::from(format!(

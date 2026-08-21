@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Anchor, AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent,
     MouseButton, Point, Render, SharedString, Window, anchored, deferred, div, point, prelude::*,
@@ -76,28 +78,28 @@ struct QuickCommandToolbarContext {
 
 struct QuickCommandSortMenuConfig {
     current: QuickCommandSortMode,
-    sort_label: &'static str,
-    created_label: &'static str,
-    name_label: &'static str,
-    usage_label: &'static str,
-    custom_label: &'static str,
+    sort_label: Cow<'static, str>,
+    created_label: Cow<'static, str>,
+    name_label: Cow<'static, str>,
+    usage_label: Cow<'static, str>,
+    custom_label: Cow<'static, str>,
 }
 
 struct QuickCommandViewMenuConfig {
     current: QuickCommandViewMode,
     icon_path: &'static str,
-    view_label: &'static str,
-    list_label: &'static str,
-    compact_label: &'static str,
-    tile_label: &'static str,
+    view_label: Cow<'static, str>,
+    list_label: Cow<'static, str>,
+    compact_label: Cow<'static, str>,
+    tile_label: Cow<'static, str>,
 }
 
 struct QuickCommandAiPopoverConfig {
     open: bool,
     prompt: String,
     prompt_input: AnyElement,
-    button_label: &'static str,
-    generate_label: &'static str,
+    button_label: Cow<'static, str>,
+    generate_label: Cow<'static, str>,
 }
 
 impl NyaTermApp {
@@ -484,10 +486,10 @@ fn quick_command_sort_menu_button(
             sort_label,
             quick_command_sort_mode_label(
                 current,
-                created_label,
-                name_label,
-                usage_label,
-                custom_label,
+                created_label.clone(),
+                name_label.clone(),
+                usage_label.clone(),
+                custom_label.clone(),
             )
         ))
         .min_width(px(154.))
@@ -534,7 +536,12 @@ fn quick_command_view_menu_button(
         .tooltip(format!(
             "{} · {}",
             view_label,
-            quick_command_view_mode_label(current, list_label, compact_label, tile_label)
+            quick_command_view_mode_label(
+                current,
+                list_label.clone(),
+                compact_label.clone(),
+                tile_label.clone()
+            )
         ))
         .min_width(px(154.))
         .items([
@@ -580,7 +587,7 @@ fn quick_command_ai_popover_button(
             "quick-command-ai",
             "icons/ai.svg",
             open,
-            button_label,
+            button_label.clone(),
             cx.listener(|this, _, window, cx| {
                 this.toggle_quick_command_ai_popover(window, cx);
             }),
@@ -739,10 +746,10 @@ fn quick_command_toolbar_divider(palette: crate::theme::ThemePalette) -> impl In
 
 fn quick_command_view_mode_label(
     mode: QuickCommandViewMode,
-    list_label: &'static str,
-    compact_label: &'static str,
-    tile_label: &'static str,
-) -> &'static str {
+    list_label: Cow<'static, str>,
+    compact_label: Cow<'static, str>,
+    tile_label: Cow<'static, str>,
+) -> Cow<'static, str> {
     match mode {
         QuickCommandViewMode::List => list_label,
         QuickCommandViewMode::Compact => compact_label,
@@ -752,11 +759,11 @@ fn quick_command_view_mode_label(
 
 fn quick_command_sort_mode_label(
     mode: QuickCommandSortMode,
-    created_label: &'static str,
-    name_label: &'static str,
-    usage_label: &'static str,
-    custom_label: &'static str,
-) -> &'static str {
+    created_label: Cow<'static, str>,
+    name_label: Cow<'static, str>,
+    usage_label: Cow<'static, str>,
+    custom_label: Cow<'static, str>,
+) -> Cow<'static, str> {
     match mode {
         QuickCommandSortMode::Created => created_label,
         QuickCommandSortMode::Name => name_label,

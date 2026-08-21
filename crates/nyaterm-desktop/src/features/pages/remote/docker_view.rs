@@ -84,7 +84,7 @@ impl NyaTermApp {
             .search_input_box(
                 "remote.docker.filter",
                 &docker.search_draft.clone(),
-                TextInputSetup::placeholder(labels.search),
+                TextInputSetup::placeholder(labels.search.clone()),
                 cx,
             )
             .into_any_element();
@@ -92,13 +92,13 @@ impl NyaTermApp {
             return div()
                 .size_full()
                 .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(labels.no_session, palette));
+                .child(empty_panel(labels.no_session.clone(), palette));
         }
         let Some(overview) = docker.overview.take() else {
             let message = if docker.pending || !docker.status.contains("failed") {
-                labels.loading
+                labels.loading.clone()
             } else {
-                labels.error
+                labels.error.clone()
             };
             return div()
                 .size_full()
@@ -109,7 +109,7 @@ impl NyaTermApp {
             return div()
                 .size_full()
                 .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(labels.unavailable, palette));
+                .child(empty_panel(labels.unavailable.clone(), palette));
         }
         let active_tab = if docker.tab == DockerTab::Compose && !overview.compose_available {
             DockerTab::Containers
@@ -123,7 +123,7 @@ impl NyaTermApp {
         let render_context = DockerRenderContext {
             palette,
             menu_bg,
-            labels,
+            labels: labels.clone(),
         };
         let docker_content = match filtered {
             DockerDerivedItems::Containers(filtered) => {
@@ -133,7 +133,7 @@ impl NyaTermApp {
                     .saturating_sub(VIEWPORT_ROWS.min(filtered.len()));
                 docker.list_offset = self.remote_ops.clamp_docker_list_offset(max_offset);
                 docker_containers_panel(
-                    render_context,
+                    render_context.clone(),
                     DockerContainersPanelState {
                         has_snapshot: true,
                         has_session: self.session.active_ssh_config().is_some(),
@@ -155,7 +155,7 @@ impl NyaTermApp {
                     palette,
                     filtered.as_ref(),
                     docker.resource_list_offset,
-                    labels,
+                    labels.clone(),
                     cx,
                 )
                 .into_any_element()
@@ -168,7 +168,7 @@ impl NyaTermApp {
                     palette,
                     filtered.as_ref(),
                     docker.resource_list_offset,
-                    labels,
+                    labels.clone(),
                     cx,
                 )
                 .into_any_element()
@@ -181,13 +181,13 @@ impl NyaTermApp {
                     palette,
                     filtered.as_ref(),
                     docker.resource_list_offset,
-                    labels,
+                    labels.clone(),
                     cx,
                 )
                 .into_any_element()
             }
             DockerDerivedItems::Compose(filtered) => docker_compose_panel(
-                render_context,
+                render_context.clone(),
                 DockerComposePanelState {
                     projects: filtered.as_ref(),
                     expanded_projects: &docker.compose_expanded,

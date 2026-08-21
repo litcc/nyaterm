@@ -51,11 +51,12 @@ impl NyaTermApp {
     pub(in crate::features) fn cloud_sync_input(
         &mut self,
         _id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         value: String,
         field: CloudSyncInputField,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let label: SharedString = label.into();
         let enabled = self.cloud_sync_form_enabled();
         let setup = secret_input_setup(field.is_secret());
         let input = self.text_input_field(
@@ -692,9 +693,10 @@ impl NyaTermApp {
 
 fn cloud_sync_conflict_stat(
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .min_w_0()
         .rounded_md()
@@ -848,10 +850,11 @@ fn cloud_sync_drive_validation_key(
 fn cloud_sync_action_button(
     palette: ThemePalette,
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let hover = palette.hover;
     div()
         .id(id)
@@ -876,9 +879,10 @@ fn cloud_sync_action_button(
 
 fn cloud_sync_status_item(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .rounded_md()
         .border_1()

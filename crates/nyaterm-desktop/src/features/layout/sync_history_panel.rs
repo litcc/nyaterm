@@ -455,10 +455,11 @@ fn sync_history_action_button(
     palette: crate::theme::ThemePalette,
     id: impl Into<String>,
     icon_path: &'static str,
-    tooltip: &'static str,
+    tooltip: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let tooltip: SharedString = tooltip.into();
     div()
         .id(SharedString::from(id.into()))
         .size(px(24.))
@@ -468,7 +469,7 @@ fn sync_history_action_button(
         .rounded_md()
         .opacity(if enabled { 1.0 } else { 0.45 })
         .cursor_pointer()
-        .tooltip(move |window, cx| NyaTooltip::new(tooltip).build(window, cx))
+        .tooltip(move |window, cx| NyaTooltip::new(tooltip.clone()).build(window, cx))
         .hover(|this| {
             if enabled {
                 this.bg(rgb(palette.surface_elevated))

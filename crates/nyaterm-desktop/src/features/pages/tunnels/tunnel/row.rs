@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, FontWeight, Hsla, IntoElement, Window, div, px, rgb};
 
@@ -15,9 +17,9 @@ pub(in crate::features::pages::tunnels) struct TunnelNetworkRow<'a> {
     pub connection_label: String,
     pub open_info: Option<SshTunnelInfo>,
     pub pending: bool,
-    pub open_status_label: &'static str,
-    pub closed_status_label: &'static str,
-    pub mode_label: &'static str,
+    pub open_status_label: Cow<'static, str>,
+    pub closed_status_label: Cow<'static, str>,
+    pub mode_label: Cow<'static, str>,
     pub menu: NetworkItemMenuConfig,
 }
 
@@ -43,13 +45,13 @@ pub(in crate::features::pages::tunnels) fn tunnel_network_row(
     let supported = tunnel_mode(tunnel).is_some();
     let is_open = open_info.is_some();
     let status = if pending {
-        "pending"
+        Cow::Borrowed("pending")
     } else if is_open {
         open_status_label
     } else if supported {
         closed_status_label
     } else {
-        "porting"
+        Cow::Borrowed("porting")
     };
     let (status_color, status_bg) = tunnel_status_style(palette, pending, is_open, supported);
     let bind = if tunnel.bind_localhost {

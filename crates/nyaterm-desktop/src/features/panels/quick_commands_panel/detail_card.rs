@@ -6,6 +6,8 @@
 //! a *hoverable* tooltip, which gpui keeps alive while the pointer is over it and
 //! does not dismiss on mouse-down, so a click target is legal there.
 
+use std::borrow::Cow;
+
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, Render, SharedString, WeakEntity, Window, div,
     prelude::*, px, rgb, rgba, svg,
@@ -26,10 +28,10 @@ pub(in crate::features) struct QuickCommandCardContent<'a> {
     pub copy_button: Option<AnyElement>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::features) struct QuickCommandCardExecutionMode {
     pub append: bool,
-    pub label: &'static str,
+    pub label: Cow<'static, str>,
 }
 
 pub(in crate::features) fn quick_command_detail_card(
@@ -265,7 +267,7 @@ impl Render for QuickCommandTooltip {
                 QuickCommandCardContent {
                     command: &self.command,
                     category: &self.category,
-                    execution_mode: Some(self.execution_mode),
+                    execution_mode: Some(self.execution_mode.clone()),
                     copy_button: Some(copy_button),
                 },
             ))

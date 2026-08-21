@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use gpui::{
@@ -483,7 +484,7 @@ impl NyaTermApp {
                 let title = panel
                     .i18n_key()
                     .map(|key| self.tr(key))
-                    .unwrap_or_else(|| panel.panel_title());
+                    .unwrap_or_else(|| Cow::Borrowed(panel.panel_title()));
                 let actions = self.side_panel_header_actions(panel, cx);
                 let palette = self.theme_palette();
                 let (meta, body) = self.side_panel_content(side, panel, window, cx);
@@ -526,7 +527,7 @@ impl NyaTermApp {
         let title = panel
             .i18n_key()
             .map(|key| self.tr(key))
-            .unwrap_or_else(|| panel.panel_title());
+            .unwrap_or_else(|| Cow::Borrowed(panel.panel_title()));
         let actions = self.side_panel_header_actions(panel, cx);
         let palette = self.theme_palette();
         let (meta, body) = self.side_panel_content(side, panel, window, cx);

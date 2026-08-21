@@ -1,4 +1,7 @@
-use gpui::{App, ClickEvent, Context, FontWeight, IntoElement, Window, div, prelude::*, px, rgb};
+use gpui::{
+    App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
+    rgb,
+};
 use nyaterm_ui::{NyaScrollable, NyaTabItem, NyaTabs};
 
 use crate::features::NyaTermApp;
@@ -125,12 +128,14 @@ fn security_auth_body_base(id: &'static str) -> gpui::Stateful<gpui::Div> {
 
 fn security_tab_toolbar(
     palette: ThemePalette,
-    title: &'static str,
+    title: impl Into<SharedString>,
     add_id: impl Into<String>,
-    add_label: &'static str,
+    add_label: impl Into<SharedString>,
     enabled: bool,
     on_add: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> gpui::Div {
+    let title: SharedString = title.into();
+    let add_label: SharedString = add_label.into();
     div()
         .flex_none()
         .h(px(28.))

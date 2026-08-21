@@ -38,10 +38,11 @@ pub(super) struct SshConnectionSectionOptions {
 
 fn ssh_advanced_content(
     palette: crate::theme::ThemePalette,
-    title: &'static str,
+    title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     content: impl IntoElement,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
     let description = description.into();
     div()
         .rounded_md()

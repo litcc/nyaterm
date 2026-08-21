@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     App, ClickEvent, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px, rgb,
 };
@@ -221,8 +223,8 @@ pub(in crate::features) struct CloudSyncHistoryRowLabels {
     pub trigger: String,
     pub provider: String,
     pub duration: String,
-    pub revision: &'static str,
-    pub view_details: &'static str,
-    pub hide_details: &'static str,
-    pub copy_message: &'static str,
+    pub revision: Cow<'static, str>,
+    pub view_details: Cow<'static, str>,
+    pub hide_details: Cow<'static, str>,
+    pub copy_message: Cow<'static, str>,
 }

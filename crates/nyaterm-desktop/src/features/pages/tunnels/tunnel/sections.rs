@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gpui::prelude::*;
-use gpui::{Context, FontWeight, IntoElement, div, px, rgb, rgba, svg};
+use gpui::{Context, FontWeight, IntoElement, SharedString, div, px, rgb, rgba, svg};
 
 use super::super::common::{NetworkItemMenuConfig, network_item_overflow_menu};
 use super::row::{TunnelNetworkRow, tunnel_network_row};
@@ -22,8 +22,9 @@ pub(in crate::features::pages::tunnels) struct TunnelSection {
 pub(in crate::features::pages::tunnels) fn tunnel_sections(
     tunnels: &[TunnelConfig],
     groups: &[TunnelGroup],
-    ungrouped_label: &'static str,
+    ungrouped_label: impl Into<SharedString>,
 ) -> Vec<TunnelSection> {
+    let ungrouped_label: SharedString = ungrouped_label.into();
     let valid_group_ids = groups
         .iter()
         .map(|group| group.id.as_str())

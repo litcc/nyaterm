@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Context, FontWeight, IntoElement, ScrollDelta, ScrollWheelEvent, SharedString, div, prelude::*,
     px, rgb, rgba, svg,
@@ -499,13 +501,13 @@ fn rich_gpu_panel(
         .child(accelerator_summary_grid(
             palette,
             vec![
-                (app.tr("gpuMonitor.gpus"), summary.count.to_string()),
+                (&app.tr("gpuMonitor.gpus"), summary.count.to_string()),
                 (
-                    app.tr("gpuMonitor.maxUtilization"),
+                    &app.tr("gpuMonitor.maxUtilization"),
                     format_percent(summary.max_utilization),
                 ),
                 (
-                    app.tr("gpuMonitor.memory"),
+                    &app.tr("gpuMonitor.memory"),
                     format!(
                         "{} / {}",
                         format_memory_mb(summary.memory_used_mb),
@@ -513,7 +515,7 @@ fn rich_gpu_panel(
                     ),
                 ),
                 (
-                    app.tr("gpuMonitor.maxTemperature"),
+                    &app.tr("gpuMonitor.maxTemperature"),
                     format_temperature(summary.max_temperature),
                 ),
             ],
@@ -598,13 +600,13 @@ fn rich_npu_panel(
         .child(accelerator_summary_grid(
             palette,
             vec![
-                (app.tr("ascendNpuMonitor.npus"), summary.count.to_string()),
+                (&app.tr("ascendNpuMonitor.npus"), summary.count.to_string()),
                 (
-                    app.tr("ascendNpuMonitor.maxAicore"),
+                    &app.tr("ascendNpuMonitor.maxAicore"),
                     format_optional_percent(summary.max_aicore),
                 ),
                 (
-                    app.tr("ascendNpuMonitor.memory"),
+                    &app.tr("ascendNpuMonitor.memory"),
                     format!(
                         "{} / {}",
                         format_memory_mb(summary.memory_used_mb),
@@ -612,7 +614,7 @@ fn rich_npu_panel(
                     ),
                 ),
                 (
-                    app.tr("ascendNpuMonitor.maxTemperature"),
+                    &app.tr("ascendNpuMonitor.maxTemperature"),
                     format_temperature(summary.max_temperature),
                 ),
             ],
@@ -730,10 +732,11 @@ fn gpu_card(
                             .text_color(rgb(palette.text))
                             .child(truncate_preview(
                                 if gpu.name.trim().is_empty() {
-                                    &app.tr("gpuMonitor.unknownGpu")
+                                    app.tr("gpuMonitor.unknownGpu")
                                 } else {
-                                    &gpu.name
-                                },
+                                    Cow::Borrowed(gpu.name.as_str())
+                                }
+                                .as_ref(),
                                 28,
                             )),
                     ),
@@ -830,10 +833,11 @@ fn npu_card(
                             .text_color(rgb(palette.text))
                             .child(truncate_preview(
                                 if npu.name.trim().is_empty() {
-                                    &app.tr("ascendNpuMonitor.unknownNpu")
+                                    app.tr("ascendNpuMonitor.unknownNpu")
                                 } else {
-                                    &npu.name
-                                },
+                                    Cow::Borrowed(npu.name.as_str())
+                                }
+                                .as_ref(),
                                 28,
                             )),
                     ),
@@ -961,10 +965,11 @@ fn accelerator_chevron(palette: crate::theme::ThemePalette, expanded: bool) -> g
 
 fn accelerator_metric_bar(
     palette: crate::theme::ThemePalette,
-    label: &str,
+    label: impl Into<SharedString>,
     value_percent: f64,
     detail: String,
 ) -> gpui::Div {
+    let label: SharedString = label.into();
     let ratio = (value_percent / 100.).clamp(0., 1.);
     div()
         .flex()
@@ -1014,7 +1019,7 @@ fn gpu_details(
         palette,
         vec![
             (
-                app.tr("gpuMonitor.uuid"),
+                &app.tr("gpuMonitor.uuid"),
                 if gpu.uuid.trim().is_empty() {
                     "-".to_string()
                 } else {
@@ -1022,19 +1027,19 @@ fn gpu_details(
                 },
             ),
             (
-                app.tr("gpuMonitor.temperature"),
+                &app.tr("gpuMonitor.temperature"),
                 format_temperature(gpu.temperature_c),
             ),
             (
-                app.tr("gpuMonitor.power"),
+                &app.tr("gpuMonitor.power"),
                 format_power(gpu.power_draw_w, gpu.power_limit_w),
             ),
             (
-                app.tr("gpuMonitor.fan"),
+                &app.tr("gpuMonitor.fan"),
                 format_optional_percent(gpu.fan_speed_percent),
             ),
             (
-                app.tr("gpuMonitor.memoryFree"),
+                &app.tr("gpuMonitor.memoryFree"),
                 format_memory_mb(gpu.memory_free_mb),
             ),
         ],
@@ -1050,7 +1055,7 @@ fn npu_details(
         palette,
         vec![
             (
-                app.tr("ascendNpuMonitor.device"),
+                &app.tr("ascendNpuMonitor.device"),
                 if npu.device_key.trim().is_empty() {
                     "-".to_string()
                 } else {
@@ -1058,7 +1063,7 @@ fn npu_details(
                 },
             ),
             (
-                app.tr("ascendNpuMonitor.busId"),
+                &app.tr("ascendNpuMonitor.busId"),
                 if npu.bus_id.trim().is_empty() {
                     "-".to_string()
                 } else {
@@ -1066,21 +1071,21 @@ fn npu_details(
                 },
             ),
             (
-                app.tr("ascendNpuMonitor.physicalId"),
+                &app.tr("ascendNpuMonitor.physicalId"),
                 npu.physical_id
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".to_string()),
             ),
             (
-                app.tr("ascendNpuMonitor.temperature"),
+                &app.tr("ascendNpuMonitor.temperature"),
                 format_temperature(npu.temperature_c),
             ),
             (
-                app.tr("ascendNpuMonitor.power"),
+                &app.tr("ascendNpuMonitor.power"),
                 format_watts(npu.power_draw_w),
             ),
             (
-                app.tr("ascendNpuMonitor.memoryFree"),
+                &app.tr("ascendNpuMonitor.memoryFree"),
                 if npu.memory_total_mb > 0 {
                     format_memory_mb(npu.memory_free_mb)
                 } else {
@@ -1139,9 +1144,10 @@ fn accelerator_process_section(
     pad_top: f32,
     pad_bottom: f32,
     list_height: f32,
-    empty_message: &str,
+    empty_message: impl Into<SharedString>,
     on_scroll: impl Fn(&ScrollWheelEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> gpui::Div {
+    let empty_message: SharedString = empty_message.into();
     let mut list_rows = div().flex().flex_col();
     if total_processes == 0 {
         list_rows = list_rows.child(

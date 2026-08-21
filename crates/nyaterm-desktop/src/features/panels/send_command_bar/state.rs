@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::SessionKind;
 
@@ -9,11 +11,11 @@ pub(super) struct SendCommandBarViewState {
     pub(super) send: SendCommandPresentationState,
     pub(super) palette: crate::theme::ThemePalette,
     pub(super) group_targets: Vec<(String, String, usize)>,
-    pub(super) target_kind: &'static str,
+    pub(super) target_kind: Cow<'static, str>,
     pub(super) is_serial_text_line: bool,
     pub(super) validation_error: bool,
     pub(super) preview: String,
-    pub(super) input_hint: &'static str,
+    pub(super) input_hint: Cow<'static, str>,
     pub(super) is_sending: bool,
     pub(super) progress_ratio: f32,
     pub(super) progress_label: String,
@@ -27,8 +29,8 @@ impl NyaTermApp {
         let group_targets = self.send_command_group_target_options();
         let target_kind = match active_kind {
             Some(SessionKind::Serial) => self.tr("serialSend.serialData"),
-            Some(SessionKind::RawTcp) => "Raw TCP",
-            Some(SessionKind::Telnet) => "Telnet",
+            Some(SessionKind::RawTcp) => Cow::Borrowed("Raw TCP"),
+            Some(SessionKind::Telnet) => Cow::Borrowed("Telnet"),
             Some(SessionKind::Ssh | SessionKind::LocalPty) => self.tr("serialSend.shellCommand"),
             Some(SessionKind::Rdp | SessionKind::Vnc) => self.tr("serialSend.unavailable"),
             None => self.tr("serialSend.unavailable"),

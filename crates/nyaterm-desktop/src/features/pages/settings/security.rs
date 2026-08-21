@@ -74,7 +74,7 @@ impl NyaTermApp {
                             .id("settings-master-password-switch-wrap")
                             .when(!master_password_switch_enabled, |this| {
                                 this.tooltip(move |window, cx| {
-                                    NyaTooltip::new(master_locked_desc).build(window, cx)
+                                    NyaTooltip::new(master_locked_desc.clone()).build(window, cx)
                                 })
                             })
                             .child(settings_switch_with_enabled(

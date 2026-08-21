@@ -384,10 +384,11 @@ pub(in crate::features) fn bounded_dialog_width(
 pub(in crate::features) fn dialog_action_button(
     _palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     danger: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let variant = if danger {
         NyaButtonVariant::Danger
     } else {
@@ -407,10 +408,11 @@ pub(in crate::features) fn dialog_action_button(
 /// metrics and hover behavior the moment either changes.
 pub(in crate::features) fn dialog_primary_button(
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     NyaButton::new(id.into(), label)
         .variant(NyaButtonVariant::Primary)
         .small()

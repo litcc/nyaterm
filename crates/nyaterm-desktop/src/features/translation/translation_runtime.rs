@@ -294,7 +294,7 @@ impl NyaTermApp {
                                 palette,
                                 "translation-dialog-copy",
                                 copy_label,
-                                cx.listener(|this, _, _, cx| {
+                                cx.listener(move |this, _, _, cx| {
                                     if let Some(result) = this.translation.result_snapshot() {
                                         cx.write_to_clipboard(ClipboardItem::new_string(
                                             result.translated,

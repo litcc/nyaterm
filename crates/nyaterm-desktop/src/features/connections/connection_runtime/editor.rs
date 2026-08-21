@@ -101,13 +101,13 @@ impl NyaTermApp {
                 SshAlgorithmValidationError::EmptyList { kind },
             ) => self
                 .tr("dialog.algorithmListRequired")
-                .replace("{{category}}", algorithm_kind(*kind)),
+                .replace("{{category}}", &algorithm_kind(*kind)),
             ConnectionEditorValidationError::SshAlgorithms(
                 SshAlgorithmValidationError::Unsupported { kind, algorithm },
             ) => self
                 .tr("dialog.algorithmUnsupportedError")
                 .replace("{{algorithm}}", algorithm)
-                .replace("{{category}}", algorithm_kind(*kind)),
+                .replace("{{category}}", &algorithm_kind(*kind)),
         }
     }
 
@@ -554,9 +554,9 @@ impl NyaTermApp {
             self.connection_state.sync_editor_fields_from_draft(cx);
             let kind_label = match kind {
                 ConnectionKindTab::Ssh => "SSH",
-                ConnectionKindTab::Local => self.tr("dialog.localTerminal"),
+                ConnectionKindTab::Local => &self.tr("dialog.localTerminal"),
                 ConnectionKindTab::Telnet => "Telnet",
-                ConnectionKindTab::Serial => self.tr("dialog.serial"),
+                ConnectionKindTab::Serial => &self.tr("dialog.serial"),
                 ConnectionKindTab::Rdp => "RDP",
                 ConnectionKindTab::Vnc => "VNC",
             };

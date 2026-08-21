@@ -14,11 +14,12 @@ impl NyaTermApp {
     pub(in crate::features) fn ai_input(
         &mut self,
         _id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         value: String,
         field: AiInputField,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let label: SharedString = label.into();
         let setup = if field == AiInputField::ApiKey {
             TextInputSetup::masked()
         } else {
@@ -238,7 +239,8 @@ impl NyaTermApp {
     }
 }
 
-fn ai_help_text(palette: ThemePalette, text: &'static str) -> impl IntoElement {
+fn ai_help_text(palette: ThemePalette, text: impl Into<SharedString>) -> impl IntoElement {
+    let text: SharedString = text.into();
     div()
         .text_size(px(11.))
         .text_color(rgb(palette.text_muted))

@@ -184,7 +184,7 @@ impl NyaTermApp {
                                         .items_center()
                                         .text_size(px(11.))
                                         .text_color(rgb(palette.text_dimmed))
-                                        .child(empty_group_label),
+                                        .child(empty_group_label.clone()),
                                 ),
                                 ConnectionListRow::Connection {
                                     connection_id,

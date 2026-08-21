@@ -122,7 +122,7 @@ impl NyaTermApp {
                 let manual_input = self.text_input_box(
                     format!("ai.settings.manual-model.{group_key}"),
                     &draft,
-                    TextInputSetup::placeholder(manual_placeholder),
+                    TextInputSetup::placeholder(manual_placeholder.clone()),
                     cx,
                 );
 
@@ -206,7 +206,7 @@ impl NyaTermApp {
                                             .child(small_button(
                                                 palette,
                                                 format!("ai-manual-add-{group_for_add}"),
-                                                add_label,
+                                                add_label.clone(),
                                                 cx.listener({
                                                     let credential_id = credential_id.clone();
                                                     let group = group_for_add.clone();
@@ -270,7 +270,7 @@ impl NyaTermApp {
                                                         .px_1()
                                                         .text_size(px(10.))
                                                         .text_color(rgb(palette.text_muted))
-                                                        .child(manual_badge),
+                                                        .child(manual_badge.clone()),
                                                 )
                                             }),
                                     )
@@ -286,7 +286,7 @@ impl NyaTermApp {
                                         this.child(small_button(
                                             palette,
                                             format!("ai-model-delete-{}", model.id),
-                                            delete_label,
+                                            delete_label.clone(),
                                             cx.listener(move |this, _, _, cx| {
                                                 this.remove_ai_manual_model(
                                                     model_id_delete.clone(),

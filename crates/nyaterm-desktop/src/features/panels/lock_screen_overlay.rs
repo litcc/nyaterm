@@ -38,7 +38,7 @@ impl NyaTermApp {
             self.security.screen_lock_status().to_string()
         };
         let status_is_error = lock_status == self.tr("lockScreen.wrongPassword")
-            || lock_status.starts_with(self.tr("lockScreen.unlockFailed"));
+            || lock_status.starts_with(self.tr("lockScreen.unlockFailed").as_ref());
 
         div()
             .id(SharedString::from("lock-screen-overlay"))

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{Context, FontWeight, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
@@ -106,7 +108,8 @@ impl NyaTermApp {
             rows = rows.child(self.shortcut_registry_row(shortcut, cx));
         }
 
-        settings_form_section(palette, Some(category.label()), None, rows).into_any_element()
+        settings_form_section(palette, Some(Cow::Borrowed(category.label())), None, rows)
+            .into_any_element()
     }
 
     pub(in crate::features) fn shortcut_registry_row(

@@ -1,10 +1,11 @@
-use gpui::{IntoElement, div, prelude::*, px, rgb};
+use gpui::{IntoElement, SharedString, div, prelude::*, px, rgb};
 
 pub(super) fn send_command_control_group(
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     content: impl IntoElement,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     // Tauri labeled control: h-8 bordered group with muted label prefix.
     div()
         .relative()

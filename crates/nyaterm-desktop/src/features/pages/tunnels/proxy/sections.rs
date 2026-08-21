@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gpui::prelude::*;
-use gpui::{Context, FontWeight, IntoElement, div, px, rgb, rgba, svg};
+use gpui::{Context, FontWeight, IntoElement, SharedString, div, px, rgb, rgba, svg};
 
 use super::super::common::{NetworkItemMenuConfig, network_item_overflow_menu};
 use super::rows::{proxy_move_picker, proxy_network_row};
@@ -20,8 +20,9 @@ pub(in crate::features::pages::tunnels) struct ProxySection {
 pub(in crate::features::pages::tunnels) fn proxy_sections(
     proxies: &[ProxyConfig],
     groups: &[ProxyGroup],
-    ungrouped_label: &'static str,
+    ungrouped_label: impl Into<SharedString>,
 ) -> Vec<ProxySection> {
+    let ungrouped_label: SharedString = ungrouped_label.into();
     let valid_group_ids = groups
         .iter()
         .map(|group| group.id.as_str())

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -18,7 +20,7 @@ impl NyaTermApp {
         let password_placeholder = if editor.has_password {
             self.tr("passwordManager.passwordUnchanged")
         } else {
-            ""
+            Cow::Borrowed("")
         };
         let password_masked = !editor.show_password;
         div()

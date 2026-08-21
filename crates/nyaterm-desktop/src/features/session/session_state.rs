@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{ClipboardItem, Context, Window};
 
 use crate::features::NyaTermApp;
@@ -26,7 +28,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn active_session_info_details(
         &self,
-    ) -> Option<Vec<(&'static str, String)>> {
+    ) -> Option<Vec<(Cow<'static, str>, String)>> {
         let session_id = self.session.active_id()?;
         let name = self.session.display_name(session_id)?;
         let session = self.session.session_info(session_id)?;

@@ -1,4 +1,4 @@
-use gpui::{AnyElement, Context, FontWeight, IntoElement, div, prelude::*, px, rgb};
+use gpui::{AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSelectOption;
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup, text_inputs::secret_input_setup};
@@ -11,11 +11,12 @@ impl NyaTermApp {
     fn translation_input(
         &mut self,
         _id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         value: String,
         field: TranslateInputField,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let label: SharedString = label.into();
         // The text being translated is a paragraph, not a line.
         let setup = if field == TranslateInputField::Text {
             TextInputSetup::multi_line("")
@@ -102,7 +103,7 @@ impl NyaTermApp {
                     .child(translation_provider_card(
                         palette,
                         self.tr("translation.google"),
-                        no_key_label,
+                        no_key_label.clone(),
                         true,
                         true,
                         div(),
@@ -119,9 +120,9 @@ impl NyaTermApp {
                         palette,
                         self.tr("translation.deepl"),
                         if deepl_configured {
-                            configured_label
+                            configured_label.clone()
                         } else {
-                            not_configured_label
+                            not_configured_label.clone()
                         },
                         deepl_configured,
                         false,
@@ -139,7 +140,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "translation-clear-deepl",
-                                remove_label,
+                                remove_label.clone(),
                                 cx.listener(|this, _, _, cx| {
                                     this.clear_translation_secret("deepl", cx);
                                 }),
@@ -149,9 +150,9 @@ impl NyaTermApp {
                         palette,
                         self.tr("translation.baidu"),
                         if baidu_configured {
-                            configured_label
+                            configured_label.clone()
                         } else {
-                            not_configured_label
+                            not_configured_label.clone()
                         },
                         baidu_configured,
                         false,
@@ -166,14 +167,14 @@ impl NyaTermApp {
                                     .gap_2()
                                     .child(self.translation_input(
                                         "translation-baidu-app-id",
-                                        app_id_label,
+                                        app_id_label.clone(),
                                         baidu_app_id_value,
                                         TranslateInputField::BaiduAppId,
                                         cx,
                                     ))
                                     .child(self.translation_input(
                                         "translation-baidu-app-key",
-                                        app_key_label,
+                                        app_key_label.clone(),
                                         baidu_key_value,
                                         TranslateInputField::BaiduAppKey,
                                         cx,
@@ -182,7 +183,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "translation-clear-baidu",
-                                remove_label,
+                                remove_label.clone(),
                                 cx.listener(|this, _, _, cx| {
                                     this.clear_translation_secret("baidu", cx);
                                 }),
@@ -192,9 +193,9 @@ impl NyaTermApp {
                         palette,
                         self.tr("translation.ali"),
                         if ali_configured {
-                            configured_label
+                            configured_label.clone()
                         } else {
-                            not_configured_label
+                            not_configured_label.clone()
                         },
                         ali_configured,
                         false,
@@ -209,14 +210,14 @@ impl NyaTermApp {
                                     .gap_2()
                                     .child(self.translation_input(
                                         "translation-ali-app-id",
-                                        app_id_label,
+                                        app_id_label.clone(),
                                         ali_app_id_value,
                                         TranslateInputField::AliAppId,
                                         cx,
                                     ))
                                     .child(self.translation_input(
                                         "translation-ali-app-key",
-                                        app_key_label,
+                                        app_key_label.clone(),
                                         ali_key_value,
                                         TranslateInputField::AliAppKey,
                                         cx,
@@ -225,7 +226,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "translation-clear-ali",
-                                remove_label,
+                                remove_label.clone(),
                                 cx.listener(|this, _, _, cx| {
                                     this.clear_translation_secret("ali", cx);
                                 }),
@@ -280,12 +281,14 @@ impl NyaTermApp {
 
 fn translation_provider_card(
     palette: crate::theme::ThemePalette,
-    title: &'static str,
-    status_label: &'static str,
+    title: impl Into<SharedString>,
+    status_label: impl Into<SharedString>,
     ok: bool,
     free: bool,
     body: impl IntoElement,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
+    let status_label: SharedString = status_label.into();
     let (fg, bg) = if free {
         (palette.link, palette.hover)
     } else if ok {

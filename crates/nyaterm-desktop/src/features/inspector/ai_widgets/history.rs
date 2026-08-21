@@ -218,12 +218,14 @@ impl NyaTermApp {
     pub(in crate::features) fn ai_execution_mode_item(
         &self,
         id: &'static str,
-        title: &'static str,
-        detail: &'static str,
+        title: impl Into<SharedString>,
+        detail: impl Into<SharedString>,
         mode: AgentCommandExecutionMode,
         selected: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let title: SharedString = title.into();
+        let detail: SharedString = detail.into();
         let palette = self.theme_palette();
         div()
             .id(SharedString::from(id))

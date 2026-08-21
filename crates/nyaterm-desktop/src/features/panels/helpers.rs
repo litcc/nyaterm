@@ -1,4 +1,6 @@
-use gpui::{Context, IntoElement, div, prelude::*, px, rgb, svg};
+use std::borrow::Cow;
+
+use gpui::{Context, IntoElement, SharedString, div, prelude::*, px, rgb, svg};
 use nyaterm_core::{QuickCommand, QuickCommandCategory, quick_command_category_sibling_order};
 
 use crate::features::{
@@ -19,9 +21,11 @@ pub(in crate::features::panels) struct QuickCommandCategoryOption {
 pub(in crate::features::panels) fn quick_command_category_options(
     commands: &[QuickCommand],
     categories: &[QuickCommandCategory],
-    all_label: &'static str,
-    uncategorized_label: &'static str,
+    all_label: impl Into<SharedString>,
+    uncategorized_label: impl Into<SharedString>,
 ) -> Vec<QuickCommandCategoryOption> {
+    let all_label: SharedString = all_label.into();
+    let uncategorized_label: SharedString = uncategorized_label.into();
     let mut options = vec![QuickCommandCategoryOption {
         id: "all".to_string(),
         label: all_label.to_string(),
@@ -268,8 +272,8 @@ pub(in crate::features::panels) fn quick_command_color(
 /// One field of the quick command editor.
 pub(in crate::features::panels) struct QuickCommandEditorFieldSpec {
     pub field: QuickCommandEditorField,
-    pub label: &'static str,
-    pub placeholder: &'static str,
+    pub label: Cow<'static, str>,
+    pub placeholder: Cow<'static, str>,
     pub value: String,
     /// Shown beside the caption, as Tauri shows `errors.label` / `errors.command`.
     pub error: Option<String>,

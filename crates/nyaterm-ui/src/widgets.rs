@@ -139,10 +139,11 @@ impl RenderOnce for NyaUniformListScrollbar {
 }
 
 pub fn status_pill(
-    label: &'static str,
+    label: impl Into<SharedString>,
     fg: impl Into<Hsla>,
     bg: impl Into<Hsla>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .rounded_sm()
         .px_2()
@@ -153,7 +154,8 @@ pub fn status_pill(
         .child(label)
 }
 
-pub fn empty_panel(text: &'static str, palette: ThemePalette) -> impl IntoElement {
+pub fn empty_panel(text: impl Into<SharedString>, palette: ThemePalette) -> impl IntoElement {
+    let text: SharedString = text.into();
     div()
         .rounded_md()
         .border_1()
@@ -166,10 +168,12 @@ pub fn empty_panel(text: &'static str, palette: ThemePalette) -> impl IntoElemen
 }
 
 pub fn section_header(
-    title: &'static str,
-    detail: &'static str,
+    title: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
     palette: ThemePalette,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
+    let detail: SharedString = detail.into();
     div()
         .flex()
         .flex_col()
@@ -185,9 +189,10 @@ pub fn section_header(
 
 pub fn capability_line(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .mt_2()
         .flex()
@@ -205,9 +210,10 @@ pub fn capability_line(
 
 pub fn session_info_row(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .rounded_sm()
         .border_1()
@@ -241,10 +247,10 @@ pub fn session_info_row(
 pub fn small_button(
     _palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    NyaButton::new(id.into(), label)
+    NyaButton::new(id.into(), label.into())
         .variant(NyaButtonVariant::Secondary)
         .small()
         .compact()
@@ -253,12 +259,12 @@ pub fn small_button(
 
 pub fn mode_button(
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     active: bool,
     _palette: ThemePalette,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    NyaButton::new(id.into(), label)
+    NyaButton::new(id.into(), label.into())
         .variant(NyaButtonVariant::Ghost)
         .selected(active)
         .small()

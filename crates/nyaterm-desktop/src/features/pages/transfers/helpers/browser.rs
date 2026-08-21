@@ -32,11 +32,12 @@ pub(in crate::features::pages::transfers) fn transfer_browser_search_status(
 pub(in crate::features::pages::transfers) fn sort_header_cell(
     palette: ThemePalette,
     column: TransferBrowserSortColumn,
-    localized_label: &'static str,
+    localized_label: impl Into<SharedString>,
     width: Pixels,
     state: TransferBrowserSortHeaderState,
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
+    let localized_label: SharedString = localized_label.into();
     let is_active = column == state.active_column;
     let is_resizing = state.resizing_column == Some(column);
     let direction_icon = match state.direction {

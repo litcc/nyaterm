@@ -323,9 +323,10 @@ fn ai_message_menu_button(
     palette: crate::theme::ThemePalette,
     id: &'static str,
     icon: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(SharedString::from(id))
         .h(px(28.))

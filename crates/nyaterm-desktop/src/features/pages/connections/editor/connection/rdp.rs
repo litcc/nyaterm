@@ -1,5 +1,5 @@
 use gpui::{
-    Context, FontWeight, IntoElement, div,
+    Context, FontWeight, IntoElement, SharedString, div,
     prelude::{
         FluentBuilder, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled,
     },
@@ -22,11 +22,13 @@ use super::ConnectionEditorSectionContext;
 fn rdp_switch_row(
     palette: crate::theme::ThemePalette,
     id: &'static str,
-    label: &'static str,
-    description: &'static str,
+    label: impl Into<SharedString>,
+    description: impl Into<SharedString>,
     checked: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let description: SharedString = description.into();
     div()
         .rounded_md()
         .border_1()

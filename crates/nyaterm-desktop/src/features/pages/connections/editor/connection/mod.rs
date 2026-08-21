@@ -6,6 +6,7 @@ mod ssh;
 mod telnet;
 mod vnc;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use gpui::{
@@ -229,7 +230,7 @@ impl NyaTermApp {
         let group_options = connection_editor_group_menu_options(
             self.connection_state.groups(),
             &editor,
-            none_label,
+            none_label.clone(),
             self.tr("dialog.newGroup"),
         );
         let group_parent_id = if editor.pending_group_name.is_some() {
@@ -342,7 +343,7 @@ impl NyaTermApp {
         .collect::<Vec<_>>();
         let mut key_options = vec![ConnectionEditorChoice::new(
             None,
-            none_label,
+            none_label.clone(),
             editor.key_id.is_none(),
         )];
         key_options.extend(self.security.ssh_keys().iter().map(|key| {
@@ -368,7 +369,7 @@ impl NyaTermApp {
         }));
         let mut password_options = vec![ConnectionEditorChoice::new(
             None,
-            none_label,
+            none_label.clone(),
             editor.password_id.is_none(),
         )];
         password_options.extend(self.security.passwords().iter().map(|password| {
@@ -1838,7 +1839,7 @@ fn connection_group_path_label(groups: &[Group], group_id: &str) -> Option<Strin
 
 struct ConnectionEditorGroupControlArgs<'a> {
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: Cow<'static, str>,
     display_label: String,
     select_open: bool,
     trigger_bounds: Option<Bounds<Pixels>>,
@@ -2158,9 +2159,11 @@ fn connection_editor_group_popup_position(bounds: Bounds<Pixels>) -> Point<Pixel
 fn connection_editor_group_display_label(
     groups: &[Group],
     editor: &ConnectionEditorState,
-    none_label: &'static str,
-    new_group_label: &'static str,
+    none_label: impl Into<SharedString>,
+    new_group_label: impl Into<SharedString>,
 ) -> String {
+    let none_label: SharedString = none_label.into();
+    let new_group_label: SharedString = new_group_label.into();
     if let Some(name) = editor.pending_group_name.as_deref() {
         return format!("{name} ({new_group_label})");
     }
@@ -2174,9 +2177,11 @@ fn connection_editor_group_display_label(
 fn connection_editor_group_menu_options(
     groups: &[Group],
     editor: &ConnectionEditorState,
-    none_label: &'static str,
-    new_group_label: &'static str,
+    none_label: impl Into<SharedString>,
+    new_group_label: impl Into<SharedString>,
 ) -> Vec<ConnectionEditorGroupMenuOption> {
+    let none_label: SharedString = none_label.into();
+    let new_group_label: SharedString = new_group_label.into();
     let mut options = vec![ConnectionEditorGroupMenuOption {
         value: None,
         label: none_label.to_string(),
@@ -2287,10 +2292,11 @@ pub(in crate::features::pages::connections) fn ordered_connection_groups(
 
 fn connection_description_field(
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     fields: &ConnectionEditorFields,
     cx: &App,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let entity = fields.get(&ConnectionEditorField::Description);
     let handle = entity.map(|field| field.read(cx).focus_handle());
     let focused = entity.is_some_and(|field| field.read(cx).has_focus());
@@ -2335,11 +2341,12 @@ fn connection_description_field(
 fn connection_editor_footer_button(
     palette: crate::theme::ThemePalette,
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     primary: bool,
     enabled: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let background = if primary {
         palette.primary
     } else {

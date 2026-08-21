@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Context, FontWeight, IntoElement, MouseButton, MouseDownEvent, SharedString, div, prelude::*,
     px, rgb, rgba, svg,
@@ -278,7 +280,7 @@ impl NyaTermApp {
         let tooltip = entry
             .i18n_key()
             .map(|key| self.tr(key))
-            .unwrap_or_else(|| entry.label())
+            .unwrap_or_else(|| Cow::Borrowed(entry.label()))
             .to_string();
         let palette = self.theme_palette();
         let active_color = rgb(palette.primary);

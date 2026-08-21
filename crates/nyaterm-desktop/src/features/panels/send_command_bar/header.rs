@@ -9,7 +9,7 @@ impl NyaTermApp {
         _cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let palette = state.palette;
-        let target_kind = state.target_kind;
+        let target_kind = state.target_kind.clone();
         div()
             .flex_none()
             .flex()

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div,
     prelude::*, px, rgb, rgba,
@@ -504,8 +506,8 @@ fn settings_tab_from_nav_id(id: &str) -> Option<SettingsTab> {
 /// Tauri SettingSection: rounded card with optional title/desc and body.
 pub(super) fn settings_form_section(
     palette: ThemePalette,
-    title: Option<&'static str>,
-    desc: Option<&'static str>,
+    title: Option<Cow<'static, str>>,
+    desc: Option<Cow<'static, str>>,
     content: impl IntoElement,
 ) -> impl IntoElement {
     div()

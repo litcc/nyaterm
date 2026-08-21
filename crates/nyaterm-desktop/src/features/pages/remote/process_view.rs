@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Context, IntoElement, ScrollDelta, ScrollWheelEvent, SharedString, div, prelude::*, px, rgb,
     rgba,
@@ -68,7 +70,7 @@ impl NyaTermApp {
         let detail_labels = ProcessDetailLabels {
             cpu: self.tr("processManager.sortCpu"),
             memory: self.tr("resourceMonitor.memory"),
-            rss: "RSS",
+            rss: Cow::Borrowed("RSS"),
             elapsed: self.tr("processManager.elapsed"),
             copy_command: self.tr("processManager.copyCommand"),
             apply_nice: self.tr("processManager.applyNice"),
@@ -160,7 +162,7 @@ impl NyaTermApp {
                             palette,
                             menu_bg,
                             mode,
-                            labels: table_labels,
+                            labels: table_labels.clone(),
                             selected,
                             menu_open: process_state.menu_pid == Some(pid),
                         },
@@ -224,7 +226,7 @@ impl NyaTermApp {
                                     palette,
                                     selected_process,
                                     mode,
-                                    detail_labels,
+                                    detail_labels.clone(),
                                     nice_input.take(),
                                     cx.listener({
                                         let value =

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb,
 };
@@ -22,7 +24,7 @@ impl NyaTermApp {
         let secret_placeholder = if editor.has_secret {
             self.tr("otpManager.secretUnchanged")
         } else {
-            ""
+            Cow::Borrowed("")
         };
 
         div()

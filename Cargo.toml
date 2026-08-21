@@ -82,6 +82,7 @@ russh = { git = "https://github.com/nyakang/russh", rev = "56d5b25ebada870ad5b48
 russh-sftp = { git = "https://github.com/nyakang/russh-sftp", rev = "90e4c8d19f88802bfdbd21ce5bfe46050219e0d9" }
 rusty-leveldb = "4.0"
 rust-embed = { version = "8.11", features = ["include-exclude", "debug-embed"] }
+rust-i18n = "4.2"
 serialport = { version = "4", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }

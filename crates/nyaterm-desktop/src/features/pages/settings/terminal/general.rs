@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb,
@@ -453,7 +455,7 @@ impl NyaTermApp {
                                 TerminalActionMatcherPresentation {
                                     id: "terminal-action-links-ipv4",
                                     label: self.tr("settings.actionLinksMatcherIpv4"),
-                                    example: "192.168.1.1",
+                                    example: Cow::Borrowed("192.168.1.1"),
                                     description: self.tr("settings.actionLinksMatcherIpv4Desc"),
                                     checked: self
                                         .settings
@@ -471,7 +473,7 @@ impl NyaTermApp {
                                 TerminalActionMatcherPresentation {
                                     id: "terminal-action-links-host-port",
                                     label: self.tr("settings.actionLinksMatcherHostPort"),
-                                    example: "localhost:8080",
+                                    example: Cow::Borrowed("localhost:8080"),
                                     description: self.tr("settings.actionLinksMatcherHostPortDesc"),
                                     checked: self
                                         .settings
@@ -489,7 +491,7 @@ impl NyaTermApp {
                                 TerminalActionMatcherPresentation {
                                     id: "terminal-action-links-archive",
                                     label: self.tr("settings.actionLinksMatcherArchive"),
-                                    example: "backup.tar.gz",
+                                    example: Cow::Borrowed("backup.tar.gz"),
                                     description: self.tr("settings.actionLinksMatcherArchiveDesc"),
                                     checked: self
                                         .settings
@@ -510,9 +512,11 @@ impl NyaTermApp {
 
 fn terminal_settings_field_meta(
     palette: ThemePalette,
-    label: &'static str,
-    desc: &'static str,
+    label: impl Into<SharedString>,
+    desc: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let desc: SharedString = desc.into();
     div()
         .min_w_0()
         .child(
@@ -598,9 +602,9 @@ fn terminal_action_matcher_row(
 
 struct TerminalActionMatcherPresentation {
     id: &'static str,
-    label: &'static str,
-    example: &'static str,
-    description: &'static str,
+    label: Cow<'static, str>,
+    example: Cow<'static, str>,
+    description: Cow<'static, str>,
     checked: bool,
     enabled: bool,
 }

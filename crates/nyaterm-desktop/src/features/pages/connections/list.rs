@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use gpui::{
@@ -446,10 +447,11 @@ pub(super) fn connection_editor_select(
 
 pub(super) fn toggle_chip(
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     selected: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(SharedString::from(format!("connection-toggle-{label}")))
         .h(px(28.))
@@ -870,6 +872,15 @@ impl From<&'static str> for FieldLabel {
 
 impl From<String> for FieldLabel {
     fn from(text: String) -> Self {
+        Self {
+            text: SharedString::from(text),
+            required: false,
+        }
+    }
+}
+
+impl<'a> From<Cow<'a, str>> for FieldLabel {
+    fn from(text: Cow<'a, str>) -> Self {
         Self {
             text: SharedString::from(text),
             required: false,

@@ -1,9 +1,10 @@
-use gpui::{IntoElement, div, prelude::*, px, rgb};
+use gpui::{IntoElement, SharedString, div, prelude::*, px, rgb};
 
 pub(in crate::features) fn disabled_inspector_panel(
     palette: crate::theme::ThemePalette,
-    detail: &'static str,
+    detail: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let detail: SharedString = detail.into();
     div()
         .size_full()
         .flex()

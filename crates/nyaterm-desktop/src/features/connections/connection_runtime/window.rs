@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
     WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
@@ -93,7 +95,7 @@ impl Render for ConnectionEditorWindow {
 }
 
 impl NyaTermApp {
-    pub(in crate::features) fn connection_editor_title(&self) -> &'static str {
+    pub(in crate::features) fn connection_editor_title(&self) -> Cow<'static, str> {
         if self.connection_state.editor_is_editing_saved_connection() {
             self.tr("dialog.editConnection")
         } else {

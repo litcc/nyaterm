@@ -298,7 +298,7 @@ impl NyaTermApp {
                                     palette,
                                     delete_id,
                                     "icons/fe/delete.svg",
-                                    remove_label,
+                                    remove_label.clone(),
                                     delete,
                                 )),
                         )
@@ -617,11 +617,13 @@ type AppearanceClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + '
 
 fn appearance_form_section_with_action(
     palette: ThemePalette,
-    title: &'static str,
-    desc: &'static str,
+    title: impl Into<SharedString>,
+    desc: impl Into<SharedString>,
     action: impl IntoElement,
     content: impl IntoElement,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
+    let desc: SharedString = desc.into();
     div()
         .rounded_lg()
         .border_1()
@@ -694,9 +696,10 @@ fn appearance_icon_text_button(
     palette: ThemePalette,
     id: &'static str,
     icon_path: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let destructive = icon_path == "icons/fe/delete.svg";
     let hover = if destructive {
         rgba((palette.danger << 8) | 0x18)
@@ -737,9 +740,10 @@ fn appearance_icon_button(
     palette: ThemePalette,
     id: String,
     icon_path: &'static str,
-    tooltip: &'static str,
+    tooltip: impl Into<SharedString>,
     on_click: AppearanceClickHandler,
 ) -> impl IntoElement {
+    let tooltip: SharedString = tooltip.into();
     let hover = rgba((palette.danger << 8) | 0x18);
     div()
         .id(SharedString::from(id))
@@ -758,6 +762,6 @@ fn appearance_icon_button(
                 .path(icon_path)
                 .text_color(rgb(palette.danger)),
         )
-        .tooltip(move |window, cx| NyaTooltip::new(tooltip).build(window, cx))
+        .tooltip(move |window, cx| NyaTooltip::new(tooltip.clone()).build(window, cx))
         .on_click(on_click)
 }

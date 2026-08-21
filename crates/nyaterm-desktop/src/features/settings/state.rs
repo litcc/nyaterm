@@ -193,6 +193,7 @@ impl SettingsFeatureState {
             ui_font_options,
             terminal_font_options,
         } = init;
+        crate::i18n::apply_locale(&summary.language);
         let master_password = SettingsMasterPasswordState::new(summary.has_master_password);
         let font_options_load_state =
             if ui_font_options.is_empty() && terminal_font_options.is_empty() {
@@ -332,10 +333,12 @@ impl SettingsFeatureState {
 
     pub(in crate::features) fn replace_summary(&mut self, summary: AppSettingsSummary) {
         self.summary = summary;
+        crate::i18n::apply_locale(&self.summary.language);
     }
 
     pub(in crate::features) fn set_language(&mut self, language: &str) {
         self.summary.language = language.to_string();
+        crate::i18n::apply_locale(&self.summary.language);
     }
 
     pub(in crate::features) fn toggle_startup_restore(&mut self) {

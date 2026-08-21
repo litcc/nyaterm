@@ -119,9 +119,10 @@ fn upload_menu_item(
     palette: ThemePalette,
     id: impl Into<String>,
     icon_path: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(SharedString::from(id.into()))
         .h(px(30.))

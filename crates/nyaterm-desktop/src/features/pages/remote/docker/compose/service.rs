@@ -32,7 +32,9 @@ pub(super) fn docker_compose_services_panel(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let DockerRenderContext {
-        palette, labels, ..
+        palette,
+        ref labels,
+        ..
     } = context;
     let DockerComposeServicesPanel {
         project_name,
@@ -67,12 +69,12 @@ pub(super) fn docker_compose_services_panel(
                         .text_size(px(11.))
                         .text_color(rgb(0xfca5a5))
                         .overflow_hidden()
-                        .child(labels.service_load_failed),
+                        .child(labels.service_load_failed.clone()),
                 )
                 .child(small_button(
                     palette,
                     format!("docker-compose-retry-{project_name}"),
-                    labels.retry,
+                    labels.retry.clone(),
                     cx.listener({
                         let project_name = project_name.clone();
                         let config_files = config_files.clone();
@@ -98,14 +100,14 @@ pub(super) fn docker_compose_services_panel(
                     .justify_center()
                     .text_size(px(12.))
                     .text_color(rgb(palette.text_dimmed))
-                    .child(labels.no_services),
+                    .child(labels.no_services.clone()),
             );
         } else {
             for service in services {
                 let service_menu_id = format!("compose-service:{project_key}:{}", service.name);
                 let menu_open = open_menu_id == Some(service_menu_id.as_str());
                 rows = rows.child(docker_compose_service_row(
-                    context,
+                    context.clone(),
                     DockerComposeServiceRow {
                         project_name: project_name.clone(),
                         config_files: config_files.clone(),
@@ -126,7 +128,7 @@ pub(super) fn docker_compose_services_panel(
                 .justify_center()
                 .text_size(px(11.))
                 .text_color(rgb(palette.text_muted))
-                .child(labels.loading_services),
+                .child(labels.loading_services.clone()),
         );
     }
     rows
@@ -138,7 +140,9 @@ fn docker_compose_service_row(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let DockerRenderContext {
-        palette, labels, ..
+        palette,
+        ref labels,
+        ..
     } = context;
     let DockerComposeServiceRow {
         project_name,
@@ -169,7 +173,7 @@ fn docker_compose_service_row(
     let service_status_label = compose_status_label(&service.status);
     let service_status_color = compose_status_color(palette, service_status_label);
     let display_status = if service.status.trim().is_empty() {
-        labels.not_created
+        labels.not_created.clone()
     } else {
         labels.state_label(service_status_label)
     };

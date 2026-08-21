@@ -1,4 +1,4 @@
-use gpui::{Context, FontWeight, IntoElement, div, prelude::*, px, rgb};
+use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{DockerContainer, DockerContainerDetails};
 use nyaterm_ui::NyaScrollable;
@@ -43,13 +43,13 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                             .text_sm()
                             .font_weight(FontWeight(700.))
                             .text_color(rgb(palette.text))
-                            .child(labels.container_details),
+                            .child(labels.container_details.clone()),
                     )
                     .when_some(container_id.clone(), |this, _| {
                         this.child(small_button(
                             palette,
                             "docker-details-loading-close",
-                            labels.close,
+                            labels.close.clone(),
                             cx.listener(|this, _, _, cx| {
                                 this.close_docker_details(cx);
                             }),
@@ -71,7 +71,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                         div()
                             .text_size(px(11.))
                             .text_color(rgb(palette.text_dimmed))
-                            .child(labels.loading),
+                            .child(labels.loading.clone()),
                     )
                     .child(
                         div()
@@ -91,7 +91,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
 
     let mut mounts = div().flex().flex_col().gap_1();
     if details.mounts.is_empty() {
-        mounts = mounts.child(empty_panel(labels.no_matches, palette));
+        mounts = mounts.child(empty_panel(labels.no_matches.clone(), palette));
     } else {
         for mount in &details.mounts {
             mounts = mounts.child(
@@ -134,7 +134,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
 
     let mut networks = div().flex().flex_col().gap_1();
     if details.networks.is_empty() {
-        networks = networks.child(empty_panel(labels.no_matches, palette));
+        networks = networks.child(empty_panel(labels.no_matches.clone(), palette));
     } else {
         for network in &details.networks {
             let ip_address = if network.ip_address.trim().is_empty() {
@@ -182,7 +182,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
             .child(small_button(
                 palette,
                 format!("docker-details-refresh-{}", compact_id(&container_id)),
-                labels.refresh,
+                labels.refresh.clone(),
                 cx.listener(move |this, _, window, cx| {
                     this.load_docker_details(container_id.clone(), window, cx);
                 }),
@@ -190,7 +190,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
             .child(small_button(
                 palette,
                 "docker-details-close",
-                labels.close,
+                labels.close.clone(),
                 cx.listener(|this, _, _, cx| {
                     this.close_docker_details(cx);
                 }),
@@ -241,7 +241,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                 .gap_2()
                 .child(docker_metric(
                     palette,
-                    labels.cpu,
+                    labels.cpu.clone(),
                     details
                         .stats
                         .as_ref()
@@ -250,7 +250,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                 ))
                 .child(docker_metric(
                     palette,
-                    labels.memory,
+                    labels.memory.clone(),
                     details
                         .stats
                         .as_ref()
@@ -259,7 +259,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                 ))
                 .child(docker_metric(
                     palette,
-                    labels.pids,
+                    labels.pids.clone(),
                     details
                         .stats
                         .as_ref()
@@ -280,38 +280,38 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                             .text_sm()
                             .font_weight(FontWeight(700.))
                             .text_color(rgb(palette.text))
-                            .child(labels.identity),
+                            .child(labels.identity.clone()),
                     )
                     .child(docker_detail_line(
                         palette,
-                        labels.container_name,
+                        labels.container_name.clone(),
                         container.name.clone(),
                         truncate_preview(&container.name, 72),
                         true,
-                        labels.copy,
+                        labels.copy.clone(),
                         cx,
                     ))
                     .child(docker_detail_line(
                         palette,
-                        labels.container_id,
+                        labels.container_id.clone(),
                         container.id.clone(),
                         truncate_preview(&container.id, 72),
                         true,
-                        labels.copy,
+                        labels.copy.clone(),
                         cx,
                     ))
                     .child(docker_detail_line(
                         palette,
-                        labels.image,
+                        labels.image.clone(),
                         container.image.clone(),
                         truncate_preview(&container.image, 72),
                         true,
-                        labels.copy,
+                        labels.copy.clone(),
                         cx,
                     ))
                     .child(docker_detail_line(
                         palette,
-                        labels.status,
+                        labels.status.clone(),
                         if container.status.trim().is_empty() {
                             container.state.clone()
                         } else {
@@ -326,21 +326,21 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                             72,
                         ),
                         false,
-                        labels.copy,
+                        labels.copy.clone(),
                         cx,
                     ))
                     .child(docker_detail_line(
                         palette,
-                        labels.created_at,
+                        labels.created_at.clone(),
                         container.created_at.clone(),
                         truncate_preview(&container.created_at, 72),
                         false,
-                        labels.copy,
+                        labels.copy.clone(),
                         cx,
                     ))
                     .child(docker_detail_line(
                         palette,
-                        labels.size,
+                        labels.size.clone(),
                         if container.size.trim().is_empty() {
                             "-".to_string()
                         } else {
@@ -352,7 +352,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                             container.size.clone()
                         },
                         false,
-                        labels.copy,
+                        labels.copy.clone(),
                         cx,
                     )),
             )
@@ -371,47 +371,47 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                         .p_2()
                         .child(docker_detail_line(
                             palette,
-                            labels.started_at,
+                            labels.started_at.clone(),
                             details.started_at.clone(),
                             truncate_preview(&details.started_at, 52),
                             false,
-                            labels.copy,
+                            labels.copy.clone(),
                             cx,
                         ))
                         .child(docker_detail_line(
                             palette,
-                            labels.finished_at,
+                            labels.finished_at.clone(),
                             details.finished_at.clone(),
                             truncate_preview(&details.finished_at, 52),
                             false,
-                            labels.copy,
+                            labels.copy.clone(),
                             cx,
                         ))
                         .child(docker_detail_line(
                             palette,
-                            labels.restart_count,
+                            labels.restart_count.clone(),
                             details.restart_count.to_string(),
                             details.restart_count.to_string(),
                             false,
-                            labels.copy,
+                            labels.copy.clone(),
                             cx,
                         ))
                         .child(docker_detail_line(
                             palette,
-                            labels.entrypoint,
+                            labels.entrypoint.clone(),
                             details.entrypoint.clone(),
                             truncate_preview(&details.entrypoint, 72),
                             true,
-                            labels.copy,
+                            labels.copy.clone(),
                             cx,
                         ))
                         .child(docker_detail_line(
                             palette,
-                            labels.command,
+                            labels.command.clone(),
                             details.command.clone(),
                             truncate_preview(&details.command, 72),
                             true,
-                            labels.copy,
+                            labels.copy.clone(),
                             cx,
                         )),
                 )
@@ -427,12 +427,12 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                                 .text_sm()
                                 .font_weight(FontWeight(700.))
                                 .text_color(rgb(palette.text))
-                                .child(labels.networking),
+                                .child(labels.networking.clone()),
                         )
                         .when_some(container.as_ref(), |this, container| {
                             this.child(docker_detail_line(
                                 palette,
-                                labels.ports,
+                                labels.ports.clone(),
                                 if container.ports.trim().is_empty() {
                                     "-".to_string()
                                 } else {
@@ -444,17 +444,17 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                                     truncate_preview(&docker_ports_value(&container.ports), 96)
                                 },
                                 true,
-                                labels.copy,
+                                labels.copy.clone(),
                                 cx,
                             ))
                         })
                         .child(docker_detail_line(
                             palette,
-                            labels.networks,
+                            labels.networks.clone(),
                             networks_value.clone(),
                             truncate_preview(&networks_value, 96),
                             true,
-                            labels.copy,
+                            labels.copy.clone(),
                             cx,
                         ))
                         .child(networks),
@@ -472,11 +472,11 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                         .text_sm()
                         .font_weight(FontWeight(700.))
                         .text_color(rgb(palette.text))
-                        .child(labels.io),
+                        .child(labels.io.clone()),
                 )
                 .child(docker_detail_line(
                     palette,
-                    labels.net_io,
+                    labels.net_io.clone(),
                     details
                         .stats
                         .as_ref()
@@ -488,12 +488,12 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                         .map(|stats| truncate_preview(&stats.net_io, 96))
                         .unwrap_or_else(|| "-".to_string()),
                     false,
-                    labels.copy,
+                    labels.copy.clone(),
                     cx,
                 ))
                 .child(docker_detail_line(
                     palette,
-                    labels.block_io,
+                    labels.block_io.clone(),
                     details
                         .stats
                         .as_ref()
@@ -505,7 +505,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                         .map(|stats| truncate_preview(&stats.block_io, 96))
                         .unwrap_or_else(|| "-".to_string()),
                     false,
-                    labels.copy,
+                    labels.copy.clone(),
                     cx,
                 )),
         )
@@ -521,15 +521,15 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                         .text_xs()
                         .font_weight(FontWeight(700.))
                         .text_color(rgb(palette.text_muted))
-                        .child(labels.mounts),
+                        .child(labels.mounts.clone()),
                 )
                 .child(docker_detail_line(
                     palette,
-                    labels.mounts,
+                    labels.mounts.clone(),
                     mounts_value.clone(),
                     truncate_preview(&mounts_value, 120),
                     true,
-                    labels.copy,
+                    labels.copy.clone(),
                     cx,
                 ))
                 .child(mounts),
@@ -540,9 +540,10 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
 
 fn docker_metric(
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: impl Into<gpui::SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .rounded_sm()
         .bg(rgb(palette.surface))
@@ -566,13 +567,15 @@ fn docker_metric(
 
 fn docker_detail_line(
     palette: crate::theme::ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
     display_value: String,
     copyable: bool,
-    copy_label: &'static str,
+    copy_label: impl Into<SharedString>,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::Div {
+    let label: SharedString = label.into();
+    let copy_label: SharedString = copy_label.into();
     let copy_value = value.clone();
     div()
         .mt_1()
@@ -586,7 +589,7 @@ fn docker_detail_line(
                 .flex_none()
                 .text_size(px(10.))
                 .text_color(rgb(palette.text_dimmed))
-                .child(label),
+                .child(label.clone()),
         )
         .child(
             div()
@@ -603,8 +606,11 @@ fn docker_detail_line(
                 palette,
                 format!("docker-details-copy-{label}"),
                 copy_label,
-                cx.listener(move |this, _, _, cx| {
-                    this.copy_docker_text(copy_value.clone(), label, cx);
+                cx.listener({
+                    let label = label.clone();
+                    move |this, _, _, cx| {
+                        this.copy_docker_text(copy_value.clone(), &label, cx);
+                    }
                 }),
             ))
         })

@@ -274,7 +274,7 @@ impl NyaTermApp {
                                 this.text_input_box(
                                     format!("transfer.rename.{}", state.old_path),
                                     &state.value,
-                                    TextInputSetup::placeholder(name_placeholder),
+                                    TextInputSetup::placeholder(name_placeholder.clone()),
                                     cx,
                                 )
                                 .into_any_element()

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
@@ -227,7 +229,7 @@ impl NyaTermApp {
                                                     "baidu" => this.tr("translation.baidu"),
                                                     "ali" => this.tr("translation.ali"),
                                                     "youdao" => this.tr("translation.youdao"),
-                                                    _ => provider.as_str(),
+                                                    _ => Cow::Borrowed(provider.as_str()),
                                                 }
                                                 .to_string();
                                                 this.open_translation_dialog(

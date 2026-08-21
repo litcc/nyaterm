@@ -1,69 +1,87 @@
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::borrow::Cow;
 
-use serde_json::Value;
+/// The catalog id every unrecognised language falls back to. Matches the
+/// `fallback` passed to `rust_i18n::i18n!` in the crate root.
+const FALLBACK_LOCALE: &str = "en";
 
-const EN_JSON: &str = include_str!("locales/en.json");
-const ZH_CN_JSON: &str = include_str!("locales/zh-CN.json");
+/// The single simplified-Chinese catalog. Several legacy ids map onto it.
+const SIMPLIFIED_CHINESE_LOCALE: &str = "zh-CN";
 
-static EN_CATALOG: OnceLock<HashMap<String, String>> = OnceLock::new();
-static ZH_CN_CATALOG: OnceLock<HashMap<String, String>> = OnceLock::new();
+/// Map a stored UI language onto a catalog id rust-i18n can resolve.
+///
+/// rust-i18n only de-specialises by stripping subtags, so `zh-Hans` would walk to
+/// `zh` and then to English because no `zh` catalog exists. NyaTerm has persisted
+/// `zh`, `zh_CN`, and `zh-Hans` since the Tauri builds, so those aliases have to be
+/// folded onto `zh-CN` here or existing installs silently switch to English.
+pub(crate) fn normalize_locale(language: &str) -> Cow<'static, str> {
+    let requested = language.trim().replace('_', "-");
+    if is_simplified_chinese(&requested) {
+        return Cow::Borrowed(SIMPLIFIED_CHINESE_LOCALE);
+    }
 
-pub(crate) fn text(language: &str, key: &'static str) -> &'static str {
-    let selected = if is_simplified_chinese(language) {
-        catalog(&ZH_CN_CATALOG, ZH_CN_JSON)
-    } else {
-        catalog(&EN_CATALOG, EN_JSON)
-    };
+    rust_i18n::available_locales!()
+        .into_iter()
+        .find(|locale| locale.eq_ignore_ascii_case(&requested))
+        .unwrap_or(Cow::Borrowed(FALLBACK_LOCALE))
+}
 
-    selected
-        .get(key)
-        .or_else(|| catalog(&EN_CATALOG, EN_JSON).get(key))
-        .map(String::as_str)
-        .unwrap_or(key)
+/// Point rust-i18n's process-wide locale at the stored UI language.
+///
+/// The persisted setting stays authoritative; this is a write-through projection of
+/// it, so it must be called from every writer of that setting. `rust_i18n`'s locale
+/// is a single global shared by every crate in the graph, which is what makes
+/// `gpui-component`'s own widget strings follow the same language.
+pub(crate) fn apply_locale(language: &str) {
+    rust_i18n::set_locale(&normalize_locale(language));
+}
+
+/// Translate against an explicit language rather than the current global locale.
+pub(crate) fn text(language: &str, key: &'static str) -> Cow<'static, str> {
+    let locale = normalize_locale(language);
+    rust_i18n::t!(key, locale = locale.as_ref())
 }
 
 fn is_simplified_chinese(language: &str) -> bool {
-    let normalized = language.trim().replace('_', "-").to_ascii_lowercase();
+    let normalized = language.to_ascii_lowercase();
     normalized == "zh" || normalized == "zh-cn" || normalized.starts_with("zh-hans")
-}
-
-fn catalog(
-    slot: &'static OnceLock<HashMap<String, String>>,
-    json: &'static str,
-) -> &'static HashMap<String, String> {
-    slot.get_or_init(|| {
-        let value: Value = serde_json::from_str(json).expect("embedded locale JSON must be valid");
-        let mut output = HashMap::new();
-        flatten_json(None, &value, &mut output);
-        output
-    })
-}
-
-fn flatten_json(prefix: Option<&str>, value: &Value, output: &mut HashMap<String, String>) {
-    let Value::Object(entries) = value else {
-        return;
-    };
-
-    for (name, value) in entries {
-        let key = prefix.map_or_else(|| name.clone(), |prefix| format!("{prefix}.{name}"));
-        match value {
-            Value::String(text) => {
-                output.insert(key, text.clone());
-            }
-            Value::Object(_) => flatten_json(Some(&key), value, output),
-            _ => {}
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use regex::Regex;
+    use serde_json::Value;
 
-    use super::{EN_CATALOG, EN_JSON, ZH_CN_CATALOG, ZH_CN_JSON, catalog, text};
+    use super::{normalize_locale, text};
+
+    const EN_JSON: &str = include_str!("../../locales/en.json");
+    const ZH_CN_JSON: &str = include_str!("../../locales/zh-CN.json");
+
+    /// Mirror of the flattening `rust_i18n` applies to a version-1 locale file, so
+    /// these tests can reason about the on-disk files rather than the loaded catalog.
+    fn flatten(json: &str) -> HashMap<String, String> {
+        fn walk(prefix: Option<&str>, value: &Value, output: &mut HashMap<String, String>) {
+            let Value::Object(entries) = value else {
+                return;
+            };
+            for (name, value) in entries {
+                let key = prefix.map_or_else(|| name.clone(), |prefix| format!("{prefix}.{name}"));
+                match value {
+                    Value::String(text) => {
+                        output.insert(key, text.clone());
+                    }
+                    Value::Object(_) => walk(Some(&key), value, output),
+                    _ => {}
+                }
+            }
+        }
+
+        let value: Value = serde_json::from_str(json).expect("locale JSON must be valid");
+        let mut output = HashMap::new();
+        walk(None, &value, &mut output);
+        output
+    }
 
     #[test]
     fn resolves_tauri_locale_keys_and_normalizes_chinese_ids() {
@@ -87,11 +105,31 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_legacy_language_ids_onto_shipped_catalogs() {
+        for legacy in ["zh", "zh-CN", "zh_CN", "zh-Hans", "zh-hans-cn", " zh-cn "] {
+            assert_eq!(normalize_locale(legacy), "zh-CN", "for {legacy:?}");
+        }
+        for other in ["en", "en-US", "fr", "", "nonsense"] {
+            assert_eq!(normalize_locale(other), "en", "for {other:?}");
+        }
+    }
+
+    #[test]
+    fn normalized_locales_are_always_catalogs_rust_i18n_can_resolve() {
+        let available = rust_i18n::available_locales!();
+        for language in ["zh", "zh-CN", "zh-Hans", "en", "en-US", "fr", ""] {
+            let normalized = normalize_locale(language);
+            assert!(
+                available.contains(&normalized),
+                "{language:?} normalized to {normalized:?}, which is not in {available:?}"
+            );
+        }
+    }
+
+    #[test]
     fn english_and_chinese_catalogs_have_identical_keys() {
-        let english = catalog(&EN_CATALOG, EN_JSON).keys().collect::<HashSet<_>>();
-        let chinese = catalog(&ZH_CN_CATALOG, ZH_CN_JSON)
-            .keys()
-            .collect::<HashSet<_>>();
+        let english = flatten(EN_JSON).into_keys().collect::<HashSet<_>>();
+        let chinese = flatten(ZH_CN_JSON).into_keys().collect::<HashSet<_>>();
         assert_eq!(english, chinese);
     }
 
@@ -110,10 +148,10 @@ mod tests {
             include_str!("../features/connections/connection_runtime/window.rs"),
             include_str!("../features/connections/state/editor_logic.rs"),
         ];
-        let key_pattern = Regex::new(r#"(?:\btr|self\.tr|I18n)\(\s*\"([^\"]+)\""#)
-            .expect("translation-key regex");
-        let english = catalog(&EN_CATALOG, EN_JSON);
-        let chinese = catalog(&ZH_CN_CATALOG, ZH_CN_JSON);
+        let key_pattern =
+            Regex::new(r#"(?:\btr|self\.tr|I18n)\(\s*"([^"]+)""#).expect("translation-key regex");
+        let english = flatten(EN_JSON);
+        let chinese = flatten(ZH_CN_JSON);
         let mut missing = Vec::new();
         for source in sources {
             for captures in key_pattern.captures_iter(source) {

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::{
     TabActionsMenuGeometry, TabActionsSubmenuGeometry, clamp_tab_actions_position,
     tab_actions_submenu_position,
@@ -40,7 +42,7 @@ pub(super) struct CompactTabActionsMenuState {
 struct TabActionsSubmenuItem {
     id: &'static str,
     icon_path: &'static str,
-    label: &'static str,
+    label: Cow<'static, str>,
     enabled: bool,
     active: bool,
 }

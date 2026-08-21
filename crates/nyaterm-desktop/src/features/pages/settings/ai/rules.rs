@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px,
     rgb,
@@ -59,7 +61,7 @@ impl NyaTermApp {
         &mut self,
         palette: crate::theme::ThemePalette,
         kind: AiActionListKind,
-        title: &'static str,
+        title: Cow<'static, str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let actions = match kind {
@@ -126,13 +128,13 @@ impl NyaTermApp {
                     let name_input = self.text_input_box(
                         name_input_id,
                         &action.name,
-                        TextInputSetup::placeholder(name_placeholder),
+                        TextInputSetup::placeholder(name_placeholder.clone()),
                         cx,
                     );
                     let prompt_input = self.text_input_box(
                         prompt_input_id,
                         &action.prompt,
-                        TextInputSetup::multi_line(prompt_placeholder),
+                        TextInputSetup::multi_line(prompt_placeholder.clone()),
                         cx,
                     );
 
@@ -197,7 +199,7 @@ impl NyaTermApp {
                                         .child(small_button(
                                             palette,
                                             format!("ai-action-delete-{}", action.id),
-                                            delete_label,
+                                            delete_label.clone(),
                                             cx.listener(move |this, _, _, cx| {
                                                 this.remove_ai_action(
                                                     kind,

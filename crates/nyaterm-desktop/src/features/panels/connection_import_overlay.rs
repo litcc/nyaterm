@@ -1,5 +1,6 @@
 use gpui::{
-    App, ClickEvent, Context, FontWeight, IntoElement, Window, div, prelude::*, px, rgb, rgba, svg,
+    App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
+    rgb, rgba, svg,
 };
 
 use crate::features::{
@@ -217,10 +218,12 @@ pub(in crate::features::panels) fn import_source_card(
     palette: ThemePalette,
     id: &'static str,
     icon: &'static str,
-    label: &'static str,
-    hint: &'static str,
+    label: impl Into<SharedString>,
+    hint: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let hint: SharedString = hint.into();
     let hover = rgba((palette.primary << 8) | 0x14);
     div()
         .id(id)
@@ -271,9 +274,10 @@ pub(in crate::features::panels) fn import_source_card(
 pub(in crate::features::panels) fn import_docs_link(
     palette: ThemePalette,
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(id)
         .h(px(28.))

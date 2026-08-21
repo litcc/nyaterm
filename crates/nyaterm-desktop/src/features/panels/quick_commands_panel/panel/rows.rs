@@ -62,7 +62,7 @@ impl NyaTermApp {
             };
             let badge_mode = QuickCommandCardExecutionMode {
                 append: execution_mode == "append",
-                label: badge_label,
+                label: badge_label.clone(),
             };
             // Flattened once per row: the preview lines are `.truncate()`d, and GPUI
             // still splits on newlines when wrapping is off.
@@ -125,6 +125,7 @@ impl NyaTermApp {
                                 &command,
                             );
                             let tooltip_app = cx.entity().downgrade();
+                            let tooltip_badge = badge_mode.clone();
                             move |_, cx| {
                                 cx.new(|_| {
                                     QuickCommandTooltip::new(
@@ -132,7 +133,7 @@ impl NyaTermApp {
                                         card_surface,
                                         tooltip_command.clone(),
                                         tooltip_category.clone(),
-                                        badge_mode,
+                                        tooltip_badge.clone(),
                                         tooltip_app.clone(),
                                     )
                                 })

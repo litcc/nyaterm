@@ -11,11 +11,12 @@ use crate::features::NyaTermApp;
 pub(super) fn security_editor_field(
     app: &mut NyaTermApp,
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
     setup: crate::features::text_inputs::TextInputSetup,
     cx: &mut gpui::Context<NyaTermApp>,
 ) -> gpui::AnyElement {
+    let label: SharedString = label.into();
     let field_id = format!("security.editor.{id}");
     let field = app.text_input(field_id.clone(), &value, setup.clone(), cx);
     let busy = app.security.editor_busy();
@@ -30,11 +31,12 @@ pub(super) fn security_editor_field(
 pub(super) fn security_number_editor_field(
     app: &mut NyaTermApp,
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
     setup: NyaNumberInputOptions,
     cx: &mut gpui::Context<NyaTermApp>,
 ) -> gpui::AnyElement {
+    let label: SharedString = label.into();
     let palette = app.theme_palette();
     let field_id = format!("security.editor.{id}");
     let field = app.number_input(field_id.clone(), &value, setup.clone(), cx);

@@ -1,5 +1,5 @@
 use gpui::prelude::*;
-use gpui::{App, ClickEvent, Context, FontWeight, IntoElement, Window, div, px, rgb};
+use gpui::{App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, px, rgb};
 
 use crate::features::{NyaTermApp, selects::NO_SELECTION_VALUE, text_inputs::TextInputSetup};
 use crate::models::{NetworkTunnelEditorField, NetworkTunnelEditorState};
@@ -230,11 +230,12 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
 pub(in crate::features::pages::tunnels) fn tunnel_editor_input(
     app: &mut NyaTermApp,
     field: NetworkTunnelEditorField,
-    caption: &'static str,
+    caption: impl Into<SharedString>,
     value: String,
     setup: TextInputSetup,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::AnyElement {
+    let caption: SharedString = caption.into();
     if matches!(
         field,
         NetworkTunnelEditorField::ListenPort | NetworkTunnelEditorField::TargetPort
@@ -286,14 +287,15 @@ pub(in crate::features::pages::tunnels) fn tunnel_editor_selector<I>(
     app: &mut NyaTermApp,
     palette: crate::theme::ThemePalette,
     id: I,
-    label: &'static str,
+    label: impl Into<SharedString>,
     options: Vec<NyaSelectOption>,
     selected_value: String,
     cx: &mut Context<NyaTermApp>,
-) -> impl IntoElement + use<I>
+) -> impl IntoElement
 where
     I: Into<String>,
 {
+    let label: SharedString = label.into();
     div()
         .h(px(52.))
         .flex()
@@ -311,11 +313,13 @@ where
 pub(in crate::features::pages::tunnels) fn tunnel_editor_option(
     palette: crate::theme::ThemePalette,
     id: impl Into<String>,
-    title: &'static str,
-    detail: &'static str,
+    title: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
     active: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
+    let detail: SharedString = detail.into();
     // Tauri-like selectable option cards for bind host / auto open.
     div()
         .id(gpui::SharedString::from(id.into()))

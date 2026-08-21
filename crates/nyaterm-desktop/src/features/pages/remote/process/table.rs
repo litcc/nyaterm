@@ -1,4 +1,8 @@
-use gpui::{App, ClickEvent, FontWeight, IntoElement, Window, div, prelude::*, px, rgb};
+use std::borrow::Cow;
+
+use gpui::{
+    App, ClickEvent, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px, rgb,
+};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::RemoteProcess;
 
@@ -11,12 +15,13 @@ use super::resources::{compact_remote_svg_button, usage_color};
 pub(in crate::features::pages::remote) fn process_sort_button(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &str,
+    label: impl Into<SharedString>,
     active: bool,
     direction: RemoteProcessSortDirection,
     numeric: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     // Flat sortable header cell (Tauri table header).
     div()
         .id(gpui::SharedString::from(id.into()))
@@ -138,7 +143,7 @@ where
             palette,
             format!("process-menu-{}", process.pid),
             "icons/conn/more.svg",
-            labels.more,
+            labels.more.clone(),
             on_menu,
         ))
         .when(menu_open, |this| {
@@ -164,44 +169,44 @@ where
                     .child(process_menu_item(
                         palette,
                         format!("process-copy-pid-{}", process.pid),
-                        labels.copy_pid,
+                        labels.copy_pid.clone(),
                         on_copy_pid,
                     ))
                     .child(process_menu_item(
                         palette,
                         format!("process-copy-cmd-{}", process.pid),
-                        labels.copy_command,
+                        labels.copy_command.clone(),
                         on_copy_command,
                     ))
                     .child(process_menu_sep(palette))
                     .child(process_menu_item(
                         palette,
                         format!("process-term-{}", process.pid),
-                        labels.signal_term,
+                        labels.signal_term.clone(),
                         on_term,
                     ))
                     .child(process_menu_item(
                         palette,
                         format!("process-hup-{}", process.pid),
-                        labels.signal_hup,
+                        labels.signal_hup.clone(),
                         on_hup,
                     ))
                     .child(process_menu_item(
                         palette,
                         format!("process-stop-{}", process.pid),
-                        labels.signal_stop,
+                        labels.signal_stop.clone(),
                         on_stop,
                     ))
                     .child(process_menu_item(
                         palette,
                         format!("process-cont-{}", process.pid),
-                        labels.signal_cont,
+                        labels.signal_cont.clone(),
                         on_cont,
                     ))
                     .child(process_menu_item(
                         palette,
                         format!("process-kill-{}", process.pid),
-                        labels.signal_kill,
+                        labels.signal_kill.clone(),
                         on_kill,
                     )),
             )
@@ -338,19 +343,19 @@ where
         .child(body)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::features::pages::remote) struct ProcessTableLabels {
-    pub more: &'static str,
-    pub copy_pid: &'static str,
-    pub copy_command: &'static str,
-    pub signal_term: &'static str,
-    pub signal_hup: &'static str,
-    pub signal_stop: &'static str,
-    pub signal_cont: &'static str,
-    pub signal_kill: &'static str,
+    pub more: Cow<'static, str>,
+    pub copy_pid: Cow<'static, str>,
+    pub copy_command: Cow<'static, str>,
+    pub signal_term: Cow<'static, str>,
+    pub signal_hup: Cow<'static, str>,
+    pub signal_stop: Cow<'static, str>,
+    pub signal_cont: Cow<'static, str>,
+    pub signal_kill: Cow<'static, str>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::features::pages::remote) struct ProcessTableRowPresentation {
     pub palette: ThemePalette,
     pub menu_bg: gpui::Rgba,
@@ -385,9 +390,10 @@ pub(in crate::features::pages::remote) struct ProcessTableRowActions<
 fn process_menu_item(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(gpui::SharedString::from(id.into()))
         .h(px(24.))

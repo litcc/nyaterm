@@ -98,7 +98,7 @@ impl NyaTermApp {
     pub(in crate::features) fn copy_docker_text(
         &mut self,
         value: String,
-        label: &'static str,
+        label: &str,
         cx: &mut Context<Self>,
     ) {
         cx.write_to_clipboard(ClipboardItem::new_string(value));

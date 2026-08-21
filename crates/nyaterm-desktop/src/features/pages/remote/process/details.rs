@@ -1,6 +1,8 @@
+use std::borrow::Cow;
+
 use gpui::{
-    App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent, Window, div, prelude::*, px,
-    rgb,
+    App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent, SharedString, Window, div,
+    prelude::*, px, rgb,
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::RemoteProcess;
@@ -12,14 +14,14 @@ use crate::widgets::small_button;
 use super::data::{ProcessDisplayMode, process_details_height_px};
 use super::resources::usage_color;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(in crate::features::pages::remote) struct ProcessDetailLabels {
-    pub cpu: &'static str,
-    pub memory: &'static str,
-    pub rss: &'static str,
-    pub elapsed: &'static str,
-    pub copy_command: &'static str,
-    pub apply_nice: &'static str,
+    pub cpu: Cow<'static, str>,
+    pub memory: Cow<'static, str>,
+    pub rss: Cow<'static, str>,
+    pub elapsed: Cow<'static, str>,
+    pub copy_command: Cow<'static, str>,
+    pub apply_nice: Cow<'static, str>,
 }
 
 pub(in crate::features::pages::remote) fn process_details(
@@ -59,25 +61,25 @@ pub(in crate::features::pages::remote) fn process_details(
         .gap_1()
         .child(process_metric(
             palette,
-            labels.cpu,
+            labels.cpu.clone(),
             format!("{:.1}%", process.cpu_percent),
             usage_color(palette, process.cpu_percent / 100.),
         ))
         .child(process_metric(
             palette,
-            labels.memory,
+            labels.memory.clone(),
             format!("{:.1}%", process.memory_percent),
             usage_color(palette, process.memory_percent / 100.),
         ))
         .child(process_metric(
             palette,
-            labels.rss,
+            labels.rss.clone(),
             format_file_size(Some(process.rss_kb.saturating_mul(1024))),
             rgb(0xc084fc).into(),
         ))
         .child(process_metric(
             palette,
-            labels.elapsed,
+            labels.elapsed.clone(),
             process.elapsed.clone(),
             rgb(0x34d399).into(),
         ));
@@ -176,7 +178,7 @@ pub(in crate::features::pages::remote) fn process_details(
                 .child(small_button(
                     palette,
                     format!("process-copy-command-{pid}"),
-                    labels.copy_command,
+                    labels.copy_command.clone(),
                     on_copy_command,
                 )),
         )
@@ -206,7 +208,7 @@ pub(in crate::features::pages::remote) fn process_details(
                 .child(small_button(
                     palette,
                     format!("process-nice-apply-{pid}"),
-                    labels.apply_nice,
+                    labels.apply_nice.clone(),
                     cx.listener(move |this, _, window, cx| {
                         this.apply_process_nice_draft(window, cx);
                     }),
@@ -217,10 +219,11 @@ pub(in crate::features::pages::remote) fn process_details(
 
 fn process_metric(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: String,
     color: gpui::Hsla,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .h(px(39.))
         .min_w_0()

@@ -636,7 +636,7 @@ impl ConnectionFeatureState {
         for (field, value, masked, placeholder) in editor_field_seeds(draft) {
             let placeholder = match placeholder {
                 ConnectionEditorPlaceholder::Empty => "",
-                ConnectionEditorPlaceholder::I18n(key) => crate::i18n::text(language, key),
+                ConnectionEditorPlaceholder::I18n(key) => &crate::i18n::text(language, key),
                 ConnectionEditorPlaceholder::Literal(value) => value,
             };
             if let Some(options) = connection_editor_number_options(field) {

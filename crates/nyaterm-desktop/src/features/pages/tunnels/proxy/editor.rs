@@ -1,5 +1,7 @@
+use std::borrow::Cow;
+
 use gpui::prelude::*;
-use gpui::{Context, IntoElement, div, px, rgb};
+use gpui::{Context, IntoElement, SharedString, div, px, rgb};
 
 use super::super::tunnel::tunnel_editor_selector;
 use super::helpers::proxy_protocol_label;
@@ -44,7 +46,7 @@ pub(in crate::features::pages::tunnels) fn network_proxy_editor_content(
     {
         app.tr("network.proxyPasswordKeep")
     } else {
-        ""
+        Cow::Borrowed("")
     };
     let name_input = proxy_editor_input(
         app,
@@ -180,11 +182,12 @@ pub(in crate::features::pages::tunnels) fn network_proxy_editor_content(
 pub(in crate::features::pages::tunnels) fn proxy_editor_input(
     app: &mut NyaTermApp,
     field: NetworkProxyEditorField,
-    caption: &'static str,
+    caption: impl Into<SharedString>,
     value: String,
     setup: TextInputSetup,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::AnyElement {
+    let caption: SharedString = caption.into();
     if field == NetworkProxyEditorField::Port {
         let palette = app.theme_palette();
         return div()

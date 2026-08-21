@@ -26,10 +26,11 @@ enum ExternalSyncButtonStyle {
 fn external_sync_button(
     palette: crate::theme::ThemePalette,
     id: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     style: ExternalSyncButtonStyle,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let transparent = rgba(0x00000000);
     let (background, border, text) = match style {
         ExternalSyncButtonStyle::Ghost => (transparent, transparent, rgb(palette.text_muted)),
@@ -308,11 +309,11 @@ impl NyaTermApp {
             .map(|workspace| workspace.tabs.clone())
             .unwrap_or_default();
         let status = if state.loading {
-            loading_label
+            loading_label.clone()
         } else if state.saving {
-            saving_label
+            saving_label.clone()
         } else if state.conflict {
-            conflict_label
+            conflict_label.clone()
         } else if state.dirty {
             unsaved_label
         } else {
@@ -674,7 +675,7 @@ impl NyaTermApp {
                                     .when(!close_confirm, |this| this.child(small_button(
                                         palette,
                                         "transfer-editor-reload",
-                                        reload_label,
+                                        reload_label.clone(),
                                         cx.listener(|this, _, window, cx| {
                                             if let Some(state) =
                                                 this.transfer.active_editor_tab_mut()
@@ -714,7 +715,7 @@ impl NyaTermApp {
                                         palette,
                                         "transfer-editor-save",
                                         if state.saving {
-                                            saving_label
+                                            saving_label.clone()
                                         } else {
                                             save_label
                                         },
@@ -868,7 +869,7 @@ impl NyaTermApp {
                                         .bg(rgba((palette.bg << 8) | 0xe6))
                                         .text_sm()
                                         .text_color(rgb(palette.text_muted))
-                                        .child(loading_label),
+                                        .child(loading_label.clone()),
                                 )
                             })
                             .when(!has_native_editor, |this| {
@@ -941,7 +942,7 @@ impl NyaTermApp {
                                 .child(small_button(
                                     palette,
                                     "transfer-editor-conflict-cancel",
-                                    cancel_label,
+                                    cancel_label.clone(),
                                     cx.listener(|this, _, _, cx| {
                                         this.cancel_transfer_editor_conflict(cx);
                                     }),
@@ -997,7 +998,7 @@ impl NyaTermApp {
                                 .child(small_button(
                                     palette,
                                     "transfer-editor-unsaved-cancel",
-                                    cancel_label,
+                                    cancel_label.clone(),
                                     cx.listener(|this, _, _, cx| {
                                         this.cancel_transfer_editor_close_confirm(cx);
                                     }),
@@ -1086,10 +1087,12 @@ fn transfer_editor_alert_dialog(
     palette: crate::theme::ThemePalette,
     id: &'static str,
     width: f32,
-    title: &'static str,
-    description: &'static str,
+    title: impl Into<SharedString>,
+    description: impl Into<SharedString>,
     actions: impl IntoElement,
 ) -> impl IntoElement {
+    let title: SharedString = title.into();
+    let description: SharedString = description.into();
     full_window_input_layer(format!("{id}-backdrop"))
         .bg(rgba(0x00000099))
         .flex()

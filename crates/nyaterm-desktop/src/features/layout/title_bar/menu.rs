@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::Context;
 use nyaterm_ui::{NyaAppMenuBar, NyaDialogWindowExt as _, NyaMenuItem};
 
@@ -10,7 +12,7 @@ impl NyaTermApp {
         self.shell.set_title_menu_bar(menu_bar);
     }
 
-    pub(crate) fn title_menu_label(&self, menu: TitleMenu) -> &'static str {
+    pub(crate) fn title_menu_label(&self, menu: TitleMenu) -> Cow<'static, str> {
         self.tr(menu.i18n_key())
     }
 

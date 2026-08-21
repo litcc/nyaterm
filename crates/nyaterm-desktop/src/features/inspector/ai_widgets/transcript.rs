@@ -144,8 +144,9 @@ impl NyaTermApp {
     pub(in crate::features) fn ai_setup_step(
         &self,
         index: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
     ) -> impl IntoElement {
+        let label: SharedString = label.into();
         let palette = self.theme_palette();
         div()
             .w_full()

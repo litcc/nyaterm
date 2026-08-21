@@ -153,21 +153,25 @@ pub(in crate::features) fn tab_menu_separator(palette: ThemePalette) -> impl Int
 pub(in crate::features) fn tab_action_button(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
-    detail: &'static str,
+    label: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let detail: SharedString = detail.into();
     tab_action_button_enabled(palette, id, label, detail, true, on_click)
 }
 
 pub(in crate::features) fn tab_action_button_enabled(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
-    detail: &'static str,
+    label: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let detail: SharedString = detail.into();
     div()
         .id(SharedString::from(id.into()))
         .min_h(px(46.))

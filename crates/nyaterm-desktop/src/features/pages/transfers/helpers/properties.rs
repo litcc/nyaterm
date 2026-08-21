@@ -11,10 +11,11 @@ use super::format_permissions_octal;
 
 pub(in crate::features::pages::transfers) fn symlink_input_row(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     invalid: bool,
     input: AnyElement,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .flex()
         .items_center()
@@ -43,9 +44,10 @@ pub(in crate::features::pages::transfers) fn symlink_input_row(
 
 pub(in crate::features::pages::transfers) fn property_row(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
     value: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .flex()
         .items_start()
@@ -69,8 +71,9 @@ pub(in crate::features::pages::transfers) fn property_row(
 
 pub(in crate::features::pages::transfers) fn property_section_heading(
     palette: ThemePalette,
-    label: &'static str,
+    label: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .mb_3()
         .text_size(px(10.))

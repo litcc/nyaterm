@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
@@ -118,7 +120,7 @@ impl NyaTermApp {
         let target_name = download_file_name_from_remote_path(&prompt.request.target_path);
         let description = self
             .tr("fileTransfer.duplicateDescription")
-            .replace("{{kind}}", kind)
+            .replace("{{kind}}", &kind)
             .replace("{{name}}", &target_name);
 
         full_window_input_layer("duplicate-prompt-overlay")
@@ -244,7 +246,7 @@ impl NyaTermApp {
             HostKeyPromptIssue::Unknown => self.tr("settings.hostKeyVerifyNew"),
             HostKeyPromptIssue::Changed => self.tr("settings.hostKeyVerifyChanged"),
         };
-        let detail_row = |label: &'static str, value: String| {
+        let detail_row = |label: Cow<'static, str>, value: String| {
             div()
                 .flex()
                 .items_start()

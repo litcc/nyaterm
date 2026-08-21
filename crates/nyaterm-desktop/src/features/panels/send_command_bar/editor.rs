@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::state::SendCommandBarViewState;
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, ScrollDelta, ScrollWheelEvent, SharedString,
@@ -16,7 +18,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let palette = state.palette;
-        let input_hint = state.input_hint;
+        let input_hint = state.input_hint.clone();
         let validation_error = state.validation_error;
         let preview = state.preview.clone();
         let is_sending = state.is_sending;
@@ -133,7 +135,7 @@ impl NyaTermApp {
                                         .child(if validation_error {
                                             self.tr("serialSend.hexError")
                                         } else {
-                                            ""
+                                            Cow::Borrowed("")
                                         }),
                                 ),
                         )
@@ -337,10 +339,12 @@ fn send_command_floating_action_button(
     palette: crate::theme::ThemePalette,
     is_sending: bool,
     disabled: bool,
-    send_label: &'static str,
-    stop_label: &'static str,
+    send_label: impl Into<SharedString>,
+    stop_label: impl Into<SharedString>,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let send_label: SharedString = send_label.into();
+    let stop_label: SharedString = stop_label.into();
     let tooltip = if is_sending { stop_label } else { send_label };
     div()
         .id(SharedString::from("bottom-command-floating-send"))
@@ -371,7 +375,7 @@ fn send_command_floating_action_button(
                 })
                 .text_color(rgb(0xffffff)),
         )
-        .tooltip(move |window, cx| NyaTooltip::new(tooltip).build(window, cx))
+        .tooltip(move |window, cx| NyaTooltip::new(tooltip.clone()).build(window, cx))
         .when(!disabled, |this| {
             this.cursor_pointer()
                 .hover(move |this| {

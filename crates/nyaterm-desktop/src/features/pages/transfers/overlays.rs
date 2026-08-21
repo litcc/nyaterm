@@ -155,10 +155,11 @@ impl NyaTermApp {
 fn transfer_job_menu_button(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(SharedString::from(id.into()))
         .h(px(28.))

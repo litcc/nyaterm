@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Context, IntoElement, Window, div, px, rgb};
 use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem};
@@ -8,10 +10,10 @@ use crate::models::NetworkGroupEditorState;
 pub(super) struct NetworkItemMenuConfig {
     pub(super) palette: crate::theme::ThemePalette,
     pub(super) id: String,
-    pub(super) more_label: &'static str,
-    pub(super) edit_label: &'static str,
-    pub(super) move_label: &'static str,
-    pub(super) delete_label: &'static str,
+    pub(super) more_label: Cow<'static, str>,
+    pub(super) edit_label: Cow<'static, str>,
+    pub(super) move_label: Cow<'static, str>,
+    pub(super) delete_label: Cow<'static, str>,
     pub(super) can_move: bool,
 }
 

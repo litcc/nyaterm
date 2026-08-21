@@ -270,7 +270,7 @@ impl NyaTermApp {
                                             KeywordHighlightEditorField::Name,
                                         ),
                                         &rule.name,
-                                        TextInputSetup::placeholder(untitled_rule_label),
+                                        TextInputSetup::placeholder(untitled_rule_label.clone()),
                                         cx,
                                     );
                                     div()
@@ -785,10 +785,11 @@ fn keyword_highlight_action_button(
     palette: ThemePalette,
     id: impl Into<String>,
     icon_path: &'static str,
-    label: &'static str,
+    label: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let hover_bg = palette.hover;
     let hover_text = palette.text;
 
@@ -823,10 +824,11 @@ fn keyword_highlight_icon_button(
     palette: ThemePalette,
     id: impl Into<String>,
     icon_path: &'static str,
-    tooltip: &'static str,
+    tooltip: impl Into<SharedString>,
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let tooltip: SharedString = tooltip.into();
     let hover_bg = rgba((palette.danger << 8) | 0x18);
 
     div()
@@ -843,7 +845,7 @@ fn keyword_highlight_icon_button(
                 .path(icon_path)
                 .text_color(rgb(palette.danger)),
         )
-        .tooltip(move |window, cx| NyaTooltip::new(tooltip).build(window, cx))
+        .tooltip(move |window, cx| NyaTooltip::new(tooltip.clone()).build(window, cx))
         .when(enabled, |this| {
             this.cursor_pointer()
                 .hover(move |this| this.bg(hover_bg))

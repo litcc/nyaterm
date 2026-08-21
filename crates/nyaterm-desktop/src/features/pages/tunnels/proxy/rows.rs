@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::prelude::*;
 use gpui::{Context, FontWeight, IntoElement, div, px, rgb};
 
@@ -20,6 +22,7 @@ pub(in crate::features::pages::tunnels) fn proxy_network_row(
             .command
             .as_deref()
             .filter(|command| !command.trim().is_empty())
+            .map(Cow::Borrowed)
             .unwrap_or_else(|| app.tr("network.proxyCommand"))
             .to_string()
     } else if let Some(username) = proxy.username.as_deref().filter(|value| !value.is_empty()) {

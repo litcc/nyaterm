@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{IntoElement, SharedString, div, prelude::*, px, rgb, rgba, svg};
 use nyaterm_ui::{NyaDropdownMenu, NyaMenuItem};
 
@@ -7,7 +9,7 @@ pub(super) struct QuickCommandRowPresentation<'a> {
     pub execution_mode: &'a str,
     /// Localized badge text. This helper is a free function with no translator of
     /// its own, so the row supplies the string it already looked up.
-    pub badge_label: &'static str,
+    pub badge_label: Cow<'static, str>,
 }
 
 pub(super) struct QuickCommandRowHandlers<OnRun, OnDetails> {
@@ -75,8 +77,9 @@ where
 fn quick_command_execution_badge(
     palette: crate::theme::ThemePalette,
     append: bool,
-    label: &'static str,
+    label: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     let icon = if append {
         "icons/keyboard-return.svg"
     } else {

@@ -31,7 +31,9 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let DockerRenderContext {
-        palette, labels, ..
+        palette,
+        ref labels,
+        ..
     } = context;
     let DockerContainersPanelState {
         has_snapshot,
@@ -51,9 +53,9 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
             .justify_center()
             .child(empty_panel(
                 if has_session {
-                    labels.error
+                    labels.error.clone()
                 } else {
-                    labels.no_session
+                    labels.no_session.clone()
                 },
                 palette,
             ))
@@ -65,7 +67,7 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
             .flex()
             .items_center()
             .justify_center()
-            .child(empty_panel(labels.unavailable, palette))
+            .child(empty_panel(labels.unavailable.clone(), palette))
             .into_any_element();
     }
     if filtered_containers.is_empty() {
@@ -76,9 +78,9 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
             .justify_center()
             .child(empty_panel(
                 if query_empty {
-                    labels.no_containers
+                    labels.no_containers.clone()
                 } else {
-                    labels.no_matches
+                    labels.no_matches.clone()
                 },
                 palette,
             ))
@@ -115,7 +117,12 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
     }
     for container in visible {
         let menu_open = open_menu_id == Some(container.id.as_str());
-        rows = rows.child(docker_container_row(context, container, menu_open, cx));
+        rows = rows.child(docker_container_row(
+            context.clone(),
+            container,
+            menu_open,
+            cx,
+        ));
     }
     if pad_bottom > 0. {
         rows = rows.child(div().h(px(pad_bottom)).w_full().flex_none());
@@ -155,7 +162,9 @@ fn docker_container_row(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let DockerRenderContext {
-        palette, labels, ..
+        palette,
+        ref labels,
+        ..
     } = context;
     let container_id = container.id.clone();
     let details_id = container.id.clone();
@@ -311,7 +320,7 @@ fn docker_container_action_menu(
         .child(docker_menu_item(
             palette,
             format!("docker-menu-logs-{short}"),
-            labels.logs,
+            labels.logs.clone(),
             false,
             cx.listener(move |this, _, _, cx| {
                 this.remote_ops.close_docker_container_menu();
@@ -321,7 +330,7 @@ fn docker_container_action_menu(
         .child(docker_menu_item(
             palette,
             format!("docker-menu-enter-{short}"),
-            labels.enter,
+            labels.enter.clone(),
             !running,
             cx.listener(move |this, _, _, cx| {
                 this.remote_ops.close_docker_container_menu();
@@ -332,7 +341,7 @@ fn docker_container_action_menu(
         .child(docker_menu_item(
             palette,
             format!("docker-menu-start-{short}"),
-            labels.start,
+            labels.start.clone(),
             running,
             cx.listener(move |this, _, window, cx| {
                 this.remote_ops.close_docker_container_menu();
@@ -342,7 +351,7 @@ fn docker_container_action_menu(
         .child(docker_menu_item(
             palette,
             format!("docker-menu-stop-{short}"),
-            labels.stop,
+            labels.stop.clone(),
             !running,
             cx.listener(move |this, _, window, cx| {
                 this.remote_ops.close_docker_container_menu();
@@ -352,7 +361,7 @@ fn docker_container_action_menu(
         .child(docker_menu_item(
             palette,
             format!("docker-menu-restart-{short}"),
-            labels.restart,
+            labels.restart.clone(),
             false,
             cx.listener(move |this, _, window, cx| {
                 this.remote_ops.close_docker_container_menu();
@@ -363,53 +372,60 @@ fn docker_container_action_menu(
         .child(docker_menu_item(
             palette,
             format!("docker-menu-kill-{short}"),
-            labels.kill,
+            labels.kill.clone(),
             !running,
-            cx.listener(move |this, _, window, cx| {
-                this.remote_ops.close_docker_container_menu();
-                let target = if kill_name.trim().is_empty() {
-                    compact_id(&kill_id)
-                } else {
-                    kill_name.clone()
-                };
-                this.request_docker_confirm(
-                    DockerConfirmState {
-                        title: labels.confirm_action_title.to_string(),
-                        detail: labels.confirm_description(labels.kill, &target),
-                        action: DockerConfirmAction::ContainerAction {
-                            container_id: kill_id.clone(),
-                            action: "kill",
+            cx.listener({
+                let kill_labels = labels.clone();
+                move |this, _, window, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    let target = if kill_name.trim().is_empty() {
+                        compact_id(&kill_id)
+                    } else {
+                        kill_name.clone()
+                    };
+                    this.request_docker_confirm(
+                        DockerConfirmState {
+                            title: kill_labels.confirm_action_title.to_string(),
+                            detail: kill_labels.confirm_description(&kill_labels.kill, &target),
+                            action: DockerConfirmAction::ContainerAction {
+                                container_id: kill_id.clone(),
+                                action: "kill",
+                            },
                         },
-                    },
-                    window,
-                    cx,
-                );
+                        window,
+                        cx,
+                    );
+                }
             }),
         ))
         .child(docker_menu_item(
             palette,
             format!("docker-menu-remove-{short}"),
-            labels.delete,
+            labels.delete.clone(),
             false,
-            cx.listener(move |this, _, window, cx| {
-                this.remote_ops.close_docker_container_menu();
-                let target = if remove_name.trim().is_empty() {
-                    compact_id(&remove_id)
-                } else {
-                    remove_name.clone()
-                };
-                this.request_docker_confirm(
-                    DockerConfirmState {
-                        title: labels.confirm_action_title.to_string(),
-                        detail: labels.confirm_description(labels.delete, &target),
-                        action: DockerConfirmAction::ContainerAction {
-                            container_id: remove_id.clone(),
-                            action: "remove",
+            cx.listener({
+                let remove_labels = labels.clone();
+                move |this, _, window, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    let target = if remove_name.trim().is_empty() {
+                        compact_id(&remove_id)
+                    } else {
+                        remove_name.clone()
+                    };
+                    this.request_docker_confirm(
+                        DockerConfirmState {
+                            title: remove_labels.confirm_action_title.to_string(),
+                            detail: remove_labels
+                                .confirm_description(&remove_labels.delete, &target),
+                            action: DockerConfirmAction::ContainerAction {
+                                container_id: remove_id.clone(),
+                                action: "remove",
+                            },
                         },
-                    },
-                    window,
-                    cx,
-                );
+                        window,
+                        cx,
+                    );
+                }
             }),
         ))
 }
@@ -417,10 +433,11 @@ fn docker_container_action_menu(
 fn docker_menu_item(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     disabled: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(SharedString::from(id.into()))
         .h(px(28.))

@@ -54,7 +54,7 @@ impl NyaTermApp {
                     .path("icons/copy.svg")
                     .text_color(rgb(palette.text_muted)),
             )
-            .tooltip(move |window, cx| NyaTooltip::new(copy_label).build(window, cx))
+            .tooltip(move |window, cx| NyaTooltip::new(copy_label.clone()).build(window, cx))
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
                 this.copy_quick_command_text(copy_text.clone(), cx);

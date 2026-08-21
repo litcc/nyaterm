@@ -241,7 +241,7 @@ impl NyaTermApp {
                     .child(toggle("transfer-perm-other-x", "", 0o001))
                     .child(toggle(
                         "transfer-perm-other-special",
-                        self.tr("fileExplorer.permSticky"),
+                        &self.tr("fileExplorer.permSticky"),
                         0o1000,
                     )),
             )

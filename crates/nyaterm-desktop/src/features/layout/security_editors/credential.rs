@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 use nyaterm_core::validate_prompt_regex;
 
@@ -18,7 +20,7 @@ impl NyaTermApp {
         let password_placeholder = if editor.has_password {
             self.tr("credentialManager.passwordUnchanged")
         } else {
-            ""
+            Cow::Borrowed("")
         };
         let username_regex_valid = editor.username_prompt_regex.trim().is_empty()
             || validate_prompt_regex(&editor.username_prompt_regex);

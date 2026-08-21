@@ -1,4 +1,4 @@
-use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
+use gpui::{Context, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -153,7 +153,12 @@ impl NyaTermApp {
     }
 }
 
-fn ai_models_hint(palette: ThemePalette, text: &'static str, warning: bool) -> impl IntoElement {
+fn ai_models_hint(
+    palette: ThemePalette,
+    text: impl Into<SharedString>,
+    warning: bool,
+) -> impl IntoElement {
+    let text: SharedString = text.into();
     div()
         .text_size(px(11.))
         .text_color(rgb(if warning {

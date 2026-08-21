@@ -47,7 +47,7 @@ pub(super) fn docker_compose_project_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-up-{short}"),
-            labels.up,
+            labels.up.clone(),
             false,
             cx.listener({
                 let project_name = project_name.clone();
@@ -67,7 +67,7 @@ pub(super) fn docker_compose_project_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-restart-{short}"),
-            labels.restart,
+            labels.restart.clone(),
             false,
             cx.listener({
                 let project_name = project_name.clone();
@@ -88,14 +88,14 @@ pub(super) fn docker_compose_project_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-down-{short}"),
-            labels.down,
+            labels.down.clone(),
             false,
             cx.listener(move |this, _, window, cx| {
                 this.remote_ops.close_docker_compose_menu();
                 this.request_docker_confirm(
                     DockerConfirmState {
                         title: labels.confirm_action_title.to_string(),
-                        detail: labels.confirm_description(labels.down, &project_name),
+                        detail: labels.confirm_description(&labels.down, &project_name),
                         action: DockerConfirmAction::ComposeAction {
                             project_name: project_name.clone(),
                             config_files: config_files.clone(),
@@ -147,7 +147,7 @@ pub(super) fn docker_compose_service_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-svc-logs-{short}"),
-            labels.logs,
+            labels.logs.clone(),
             false,
             cx.listener({
                 let project_name = project_name.clone();
@@ -167,7 +167,7 @@ pub(super) fn docker_compose_service_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-svc-enter-{short}"),
-            labels.enter,
+            labels.enter.clone(),
             !can_enter,
             cx.listener(move |this, _, _, cx| {
                 this.remote_ops.close_docker_compose_menu();
@@ -180,7 +180,7 @@ pub(super) fn docker_compose_service_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-svc-up-{short}"),
-            labels.up,
+            labels.up.clone(),
             false,
             cx.listener({
                 let project_name = project_name.clone();
@@ -202,7 +202,7 @@ pub(super) fn docker_compose_service_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-svc-stop-{short}"),
-            labels.stop,
+            labels.stop.clone(),
             false,
             cx.listener({
                 let project_name = project_name.clone();
@@ -224,7 +224,7 @@ pub(super) fn docker_compose_service_action_menu(
         .child(compose_menu_item(
             palette,
             format!("compose-svc-restart-{short}"),
-            labels.restart,
+            labels.restart.clone(),
             false,
             cx.listener({
                 let project_name = project_name.clone();
@@ -248,10 +248,11 @@ pub(super) fn docker_compose_service_action_menu(
 pub(in crate::features::pages::remote) fn compose_menu_item(
     palette: ThemePalette,
     id: impl Into<String>,
-    label: &'static str,
+    label: impl Into<SharedString>,
     disabled: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
     div()
         .id(SharedString::from(id.into()))
         .h(px(28.))

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
 
@@ -328,17 +330,19 @@ impl NyaTermApp {
 }
 
 struct TabMouseActionPresentation<'a> {
-    label: &'static str,
-    description: &'static str,
+    label: Cow<'static, str>,
+    description: Cow<'static, str>,
     id: &'static str,
     current: &'a str,
 }
 
 fn settings_field_meta(
     palette: ThemePalette,
-    label: &'static str,
-    desc: &'static str,
+    label: impl Into<SharedString>,
+    desc: impl Into<SharedString>,
 ) -> impl IntoElement {
+    let label: SharedString = label.into();
+    let desc: SharedString = desc.into();
     div()
         .min_w_0()
         .child(

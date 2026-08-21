@@ -39,7 +39,9 @@ pub(in crate::features::pages::remote) fn docker_compose_panel(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let DockerRenderContext {
-        palette, labels, ..
+        palette,
+        ref labels,
+        ..
     } = context;
     let DockerComposePanelState {
         projects,
@@ -51,7 +53,7 @@ pub(in crate::features::pages::remote) fn docker_compose_panel(
     // Tauri Compose tab: dense project rows (≈74px) + chevron + ⋮ overflow; services ≈58px.
     let mut rows = div().flex().flex_col().gap_1();
     if projects.is_empty() {
-        rows = rows.child(empty_panel(labels.no_matches, palette));
+        rows = rows.child(empty_panel(labels.no_matches.clone(), palette));
     } else {
         for project in projects {
             let config_files = Some(project.config_files.clone()).filter(|value| {
@@ -64,7 +66,7 @@ pub(in crate::features::pages::remote) fn docker_compose_panel(
             let project_menu_id = format!("compose-project:{key}");
             let project_menu_open = open_menu_id == Some(project_menu_id.as_str());
             rows = rows.child(docker_compose_project_row(
-                context,
+                context.clone(),
                 DockerComposeProjectRow {
                     project,
                     project_key: &key,
@@ -89,7 +91,9 @@ fn docker_compose_project_row(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let DockerRenderContext {
-        palette, labels, ..
+        palette,
+        ref labels,
+        ..
     } = context;
     let DockerComposeProjectRow {
         project,
@@ -109,7 +113,7 @@ fn docker_compose_project_row(
     let display_status = if project.status.trim().is_empty() {
         "-"
     } else {
-        labels.state_label(status_label)
+        &labels.state_label(status_label)
     };
     let key_for_toggle = project_key.to_string();
 
@@ -248,7 +252,7 @@ fn docker_compose_project_row(
                             ))
                             .when(menu_open, |this| {
                                 this.child(docker_compose_project_action_menu(
-                                    context,
+                                    context.clone(),
                                     project_name.clone(),
                                     config_files.clone(),
                                     &key_for_toggle,

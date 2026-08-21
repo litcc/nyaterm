@@ -50,7 +50,7 @@ impl NyaTermApp {
                     .text_input_box(
                         format!("ai.credential.{}.name", credential.id),
                         &credential.name,
-                        TextInputSetup::placeholder(profile_name_label),
+                        TextInputSetup::placeholder(profile_name_label.clone()),
                         cx,
                     )
                     .into_any_element();
@@ -58,7 +58,7 @@ impl NyaTermApp {
                     .text_input_box(
                         format!("ai.credential.{}.base-url", credential.id),
                         credential.base_url.as_deref().unwrap_or(""),
-                        TextInputSetup::placeholder(base_url_label),
+                        TextInputSetup::placeholder(base_url_label.clone()),
                         cx,
                     )
                     .into_any_element();
@@ -131,7 +131,7 @@ impl NyaTermApp {
                                             this.child(small_button(
                                                 palette,
                                                 format!("ai-cred-delete-{}", credential.id),
-                                                delete_label,
+                                                delete_label.clone(),
                                                 cx.listener(move |this, _, _, cx| {
                                                     this.remove_ai_credential(
                                                         credential_id_delete.clone(),
@@ -156,7 +156,7 @@ impl NyaTermApp {
                         .child(div().flex().justify_end().child(small_button(
                             palette,
                             format!("ai-cred-save-{}", credential_id),
-                            save_label,
+                            save_label.clone(),
                             cx.listener(move |this, _, _, cx| {
                                 this.persist_ai_credential_edits(&credential_id_save, cx);
                             }),
