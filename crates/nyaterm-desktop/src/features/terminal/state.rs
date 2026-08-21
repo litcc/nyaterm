@@ -257,6 +257,21 @@ impl TerminalFeatureState {
         self.search.open && self.search.mode == TerminalSearchMode::Buffer
     }
 
+    /// A recording-history search reply is still outstanding. The reply arrives
+    /// on the recording pipeline queue, which `drain_recording_pipeline_events`
+    /// polls, so the runtime must not drop to the quiet cadence while this is
+    /// set or the result lands up to one quiet interval late.
+    pub(in crate::features) fn history_search_is_pending(&self) -> bool {
+        self.search.history_pending_key.is_some()
+    }
+
+    /// Raise the find-bar flag without the focus and text-input choreography
+    /// `NyaTermApp::open_terminal_search` performs, which needs a `Window`.
+    #[cfg(test)]
+    pub(in crate::features) fn open_search_for_test(&mut self) {
+        self.search.open = true;
+    }
+
     pub(in crate::features) fn input_focus(&self) -> &FocusHandle {
         &self.input.focus
     }

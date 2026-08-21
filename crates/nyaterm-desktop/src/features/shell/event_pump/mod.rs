@@ -447,6 +447,8 @@ impl NyaTermApp {
             && !self.remote_ops.has_pending_job()
             && !self.translation.is_pending()
             && !self.update.is_pending()
+            && !self.cloud_sync.github_auth().pending
+            && !self.terminal.history_search_is_pending()
             && !self.ai.chat_focus_is_pending()
             && !self.transfer.rename_focus_is_pending()
             && !self.session.prompt_credential_focus_is_pending()
@@ -624,5 +626,120 @@ impl NyaTermApp {
             });
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use gpui::{AppContext as _, TestAppContext};
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode};
+    use nyaterm_transport::LocalSessionConfig;
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::models::{SessionLaunchConfig, SessionRuntimeMetadata, TerminalSearchMode};
+
+    const SESSION_ID: &str = "event-pump-session";
+
+    /// Windows clock granularity is coarse enough (~15ms) that a wall-clock
+    /// timestamp alone collides between tests started in the same tick, and two
+    /// apps sharing a directory fight over the same redb file. Keep a counter.
+    static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_test_dir() -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos();
+        let sequence = TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "nyaterm-event-pump-{}-{nanos}-{sequence}",
+            std::process::id()
+        ))
+    }
+
+    /// A workspace with one visible local session and nothing outstanding: the
+    /// state `runtime_quiet_tick_allowed` is meant to recognise.
+    fn quiet_app_with_visible_session(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        let root = unique_test_dir();
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        let app = cx.new(|cx| NyaTermApp::new(runtime, stores, cx));
+        cx.update_entity(&app, |app, _| {
+            app.session.register_session_metadata(
+                SESSION_ID,
+                SessionRuntimeMetadata {
+                    ssh_config: None,
+                    ssh_multiplex_key: None,
+                    source_connection_id: None,
+                    ai_execution_profile: AiExecutionProfile::Posix,
+                    launch_config: SessionLaunchConfig::Local(LocalSessionConfig {
+                        name: "Local session".to_string(),
+                        ..LocalSessionConfig::default()
+                    }),
+                    disconnected: false,
+                },
+            );
+            app.session.select_active_session(SESSION_ID);
+            app.terminal
+                .seed_session_view(SESSION_ID.to_string(), String::new(), "UTF-8");
+            app.shell.show_workspace();
+            // A fresh app starts with the terminal window layout restore
+            // outstanding, which is itself a reason to stay off the quiet cadence.
+            app.terminal.complete_terminal_windows_restore();
+            assert!(
+                app.runtime_quiet_tick_allowed(),
+                "fixture must start on the quiet cadence for these tests to mean anything"
+            );
+        });
+        app
+    }
+
+    #[test]
+    fn quiet_tick_is_blocked_while_github_gist_auth_is_pending() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            app.cloud_sync.begin_github_auth_for_test();
+            assert!(
+                !app.runtime_quiet_tick_allowed(),
+                "device-flow events are polled by drain_github_gist_auth_events, so the \
+                 runtime must not idle at the quiet cadence while one is outstanding"
+            );
+        });
+    }
+
+    #[test]
+    fn quiet_tick_is_blocked_while_recording_history_search_is_pending() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.terminal.open_search_for_test();
+            app.terminal.set_search_mode(TerminalSearchMode::History);
+            app.apply_terminal_search_query("needle".to_string(), cx);
+            assert!(
+                app.terminal.history_search_is_pending(),
+                "fixture must arm a history search"
+            );
+            assert!(
+                !app.runtime_quiet_tick_allowed(),
+                "the reply is polled by drain_recording_pipeline_events, so the runtime \
+                 must not idle at the quiet cadence while one is outstanding"
+            );
+        });
     }
 }

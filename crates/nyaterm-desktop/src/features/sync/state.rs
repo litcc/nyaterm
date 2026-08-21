@@ -135,6 +135,13 @@ impl CloudSyncFeatureState {
         &self.github.auth
     }
 
+    /// Arm the device flow through the real `begin_github_auth` path without the
+    /// worker thread `NyaTermApp::start_github_gist_auth` spawns alongside it.
+    #[cfg(test)]
+    pub(in crate::features) fn begin_github_auth_for_test(&mut self) {
+        let _ = self.begin_github_auth("waiting for github".to_string());
+    }
+
     pub(in crate::features) fn settings_draft_snapshot(
         &self,
     ) -> (CloudSyncSettings, CloudSyncSecretDraft) {
