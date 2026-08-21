@@ -467,13 +467,11 @@ impl NyaTermApp {
             && !self.terminal.action_link_hover_is_pending()
             && !self.recording.has_pending_auto_start()
             && self.transfer.transfer_jobs_are_empty()
-            && self.commands.persistence_is_idle()
             && !self.shell.runtime.open_tabs_persist_dirty
             && !self.shell.runtime.window_layout_persist_dirty
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
             && !self.remote_ops.has_pending_job()
-            && !self.cloud_sync.github_auth().pending
             && !self.terminal.history_search_is_pending()
             && !self.ai.chat_focus_is_pending()
             && !self.transfer.rename_focus_is_pending()
@@ -667,7 +665,10 @@ mod tests {
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
-    use crate::models::{SessionLaunchConfig, SessionRuntimeMetadata, TerminalSearchMode};
+    use crate::models::{
+        GithubGistAuthEvent, GithubGistAuthJobEvent, SessionLaunchConfig, SessionRuntimeMetadata,
+        TerminalSearchMode,
+    };
 
     use super::helpers::{CURSOR_BLINK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL};
 
@@ -783,16 +784,39 @@ mod tests {
         });
     }
 
+    /// The replacement for the quiet-gate term this queue used to need.
+    ///
+    /// No window runtime tick exists in this fixture at all, and
+    /// `run_until_parked` advances the executor without advancing the clock, so
+    /// the event can only have arrived through the drain task. That is what makes
+    /// the old 500ms trap structurally impossible here: a queue with its own
+    /// drain task needs no central predicate to stay responsive.
     #[test]
-    fn quiet_tick_is_blocked_while_github_gist_auth_is_pending() {
+    fn github_gist_auth_events_arrive_without_any_timer() {
         let mut cx = TestAppContext::single();
         let app = quiet_app_with_visible_session(&mut cx);
+        let (tx, job_id) = cx.update_entity(&app, |app, cx| {
+            let start = app
+                .cloud_sync
+                .begin_github_auth_for_test()
+                .expect("the device flow should start");
+            let handles = (start.sender(), start.job_id());
+            app.start_github_gist_auth_event_drain(cx);
+            handles
+        });
+
+        tx.unbounded_send(GithubGistAuthJobEvent {
+            job_id,
+            event: GithubGistAuthEvent::Polling { slow_down: true },
+        })
+        .expect("the drain task holds the receiver");
+        cx.run_until_parked();
+
         cx.update_entity(&app, |app, _| {
-            app.cloud_sync.begin_github_auth_for_test();
-            assert!(
-                !app.runtime_quiet_tick_allowed(),
-                "device-flow events are polled by drain_github_gist_auth_events, so the \
-                 runtime must not idle at the quiet cadence while one is outstanding"
+            assert_eq!(
+                app.cloud_sync.github_auth().message.as_deref(),
+                Some(rust_i18n::t!("settings.githubGistSlowDown").as_ref()),
+                "the polling event should already be applied"
             );
         });
     }

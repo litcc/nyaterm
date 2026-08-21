@@ -1,9 +1,10 @@
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
 };
 use std::time::{Duration, Instant};
+
+use futures::channel::mpsc::UnboundedSender;
 
 use serde::Deserialize;
 use zed_reqwest::StatusCode;
@@ -53,7 +54,7 @@ pub(crate) fn run_github_gist_device_flow(
     job_id: u64,
     existing_gist_id: Option<String>,
     cancel: Arc<AtomicBool>,
-    tx: mpsc::Sender<GithubGistAuthJobEvent>,
+    tx: UnboundedSender<GithubGistAuthJobEvent>,
 ) {
     let result = run_device_flow(job_id, existing_gist_id, &cancel, &tx);
     if cancel.load(Ordering::Relaxed) {
@@ -67,7 +68,7 @@ fn run_device_flow(
     job_id: u64,
     existing_gist_id: Option<String>,
     cancel: &AtomicBool,
-    tx: &mpsc::Sender<GithubGistAuthJobEvent>,
+    tx: &UnboundedSender<GithubGistAuthJobEvent>,
 ) -> Result<(), String> {
     let client_id = github_client_id()?;
     let client = github_client()?;
@@ -82,7 +83,7 @@ fn run_device_flow(
     )?;
     let mut interval = device.interval.unwrap_or(5).max(1);
     let deadline = Instant::now() + Duration::from_secs(device.expires_in.max(1));
-    tx.send(GithubGistAuthJobEvent {
+    tx.unbounded_send(GithubGistAuthJobEvent {
         job_id,
         event: GithubGistAuthEvent::Started {
             user_code: device.user_code,
@@ -159,7 +160,7 @@ fn run_device_flow(
 
         let login = fetch_github_login(&client, &access_token)?;
         let gist_id = resolve_github_gist_id(&client, &access_token, existing_gist_id)?;
-        tx.send(GithubGistAuthJobEvent {
+        tx.unbounded_send(GithubGistAuthJobEvent {
             job_id,
             event: GithubGistAuthEvent::Succeeded {
                 access_token,
@@ -172,8 +173,12 @@ fn run_device_flow(
     }
 }
 
-fn send_event(tx: &mpsc::Sender<GithubGistAuthJobEvent>, job_id: u64, event: GithubGistAuthEvent) {
-    let _ = tx.send(GithubGistAuthJobEvent { job_id, event });
+fn send_event(
+    tx: &UnboundedSender<GithubGistAuthJobEvent>,
+    job_id: u64,
+    event: GithubGistAuthEvent,
+) {
+    let _ = tx.unbounded_send(GithubGistAuthJobEvent { job_id, event });
 }
 
 fn fetch_github_login(client: &Client, access_token: &str) -> Result<String, String> {

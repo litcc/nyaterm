@@ -4,8 +4,9 @@ use std::collections::HashSet;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
-    mpsc,
 };
+
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use nyaterm_core::{CloudSyncError, CloudSyncHistoryEntry, CloudSyncSettings, CloudSyncState};
 
@@ -30,8 +31,11 @@ pub(in crate::features) struct CloudSyncFeatureState {
 
 struct GithubGistAuthFeatureState {
     auth: GithubGistAuthState,
-    tx: mpsc::Sender<GithubGistAuthJobEvent>,
-    rx: mpsc::Receiver<GithubGistAuthJobEvent>,
+    tx: UnboundedSender<GithubGistAuthJobEvent>,
+    /// Taken once by `NyaTermApp::start_github_gist_auth_event_drain`, which
+    /// owns delivery from then on. `None` afterwards, so a second start is a
+    /// no-op.
+    rx: Option<UnboundedReceiver<GithubGistAuthJobEvent>>,
     job_id: u64,
     cancel: Option<Arc<AtomicBool>>,
 }
@@ -40,7 +44,7 @@ pub(in crate::features) struct GithubGistAuthJobStart {
     job_id: u64,
     existing_gist_id: Option<String>,
     cancel: Arc<AtomicBool>,
-    tx: mpsc::Sender<GithubGistAuthJobEvent>,
+    tx: UnboundedSender<GithubGistAuthJobEvent>,
 }
 
 impl GithubGistAuthJobStart {
@@ -56,7 +60,7 @@ impl GithubGistAuthJobStart {
         self.cancel.clone()
     }
 
-    pub(in crate::features) fn sender(&self) -> mpsc::Sender<GithubGistAuthJobEvent> {
+    pub(in crate::features) fn sender(&self) -> UnboundedSender<GithubGistAuthJobEvent> {
         self.tx.clone()
     }
 }
@@ -67,7 +71,7 @@ impl CloudSyncFeatureState {
         state: CloudSyncState,
         history: Vec<CloudSyncHistoryEntry>,
     ) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             settings,
             state,
@@ -81,7 +85,7 @@ impl CloudSyncFeatureState {
             github: GithubGistAuthFeatureState {
                 auth: GithubGistAuthState::default(),
                 tx,
-                rx,
+                rx: Some(rx),
                 job_id: 0,
                 cancel: None,
             },
@@ -138,8 +142,10 @@ impl CloudSyncFeatureState {
     /// Arm the device flow through the real `begin_github_auth` path without the
     /// worker thread `NyaTermApp::start_github_gist_auth` spawns alongside it.
     #[cfg(test)]
-    pub(in crate::features) fn begin_github_auth_for_test(&mut self) {
-        let _ = self.begin_github_auth("waiting for github".to_string());
+    pub(in crate::features) fn begin_github_auth_for_test(
+        &mut self,
+    ) -> Option<GithubGistAuthJobStart> {
+        self.begin_github_auth("waiting for github".to_string())
     }
 
     pub(in crate::features) fn settings_draft_snapshot(
@@ -370,20 +376,21 @@ impl CloudSyncFeatureState {
         self.github.auth = GithubGistAuthState::default();
     }
 
-    pub(super) fn drain_github_auth_events(
+    pub(super) fn take_github_auth_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<GithubGistAuthJobEvent>> {
+        self.github.rx.take()
+    }
+
+    /// Accept one device-flow event if it belongs to the current job.
+    ///
+    /// `cancel_github_auth` and `begin_github_auth` both bump `job_id`, so an
+    /// event from a superseded flow is dropped rather than applied.
+    pub(super) fn accept_github_auth_event(
         &self,
-        limit: usize,
-    ) -> Vec<crate::models::GithubGistAuthEvent> {
-        let mut events = Vec::new();
-        for _ in 0..limit {
-            let Ok(job) = self.github.rx.try_recv() else {
-                break;
-            };
-            if job.job_id == self.github.job_id {
-                events.push(job.event);
-            }
-        }
-        events
+        job: GithubGistAuthJobEvent,
+    ) -> Option<crate::models::GithubGistAuthEvent> {
+        (job.job_id == self.github.job_id).then_some(job.event)
     }
 
     pub(super) fn apply_github_auth_started(
@@ -540,7 +547,14 @@ mod tests {
         assert_eq!(cloud_sync.settings().provider, "webdav");
         assert_eq!(cloud_sync.settings().remote_root, "team");
         assert_eq!(cloud_sync.history().len(), 1);
-        assert!(cloud_sync.drain_github_auth_events(1).is_empty());
+        assert!(
+            cloud_sync
+                .take_github_auth_event_receiver()
+                .expect("a fresh state still holds its receiver")
+                .try_recv()
+                .is_err(),
+            "the device-flow channel starts empty"
+        );
         assert!(!cloud_sync.job_running());
         assert!(cloud_sync.conflict().is_none());
 
@@ -674,28 +688,21 @@ mod tests {
             .expect("auth job should start");
         let job_id = job.job_id();
         let cancel = job.cancel();
-        cloud_sync
-            .github
-            .tx
-            .send(GithubGistAuthJobEvent {
-                job_id: job_id.wrapping_sub(1),
-                event: GithubGistAuthEvent::Cancelled,
-            })
-            .unwrap();
-        cloud_sync
-            .github
-            .tx
-            .send(GithubGistAuthJobEvent {
+        // A superseded job's event must be dropped rather than applied.
+        assert!(
+            cloud_sync
+                .accept_github_auth_event(GithubGistAuthJobEvent {
+                    job_id: job_id.wrapping_sub(1),
+                    event: GithubGistAuthEvent::Cancelled,
+                })
+                .is_none()
+        );
+        assert!(matches!(
+            cloud_sync.accept_github_auth_event(GithubGistAuthJobEvent {
                 job_id,
                 event: GithubGistAuthEvent::Polling { slow_down: true },
-            })
-            .unwrap();
-
-        let events = cloud_sync.drain_github_auth_events(8);
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            events[0],
-            GithubGistAuthEvent::Polling { slow_down: true }
+            }),
+            Some(GithubGistAuthEvent::Polling { slow_down: true })
         ));
 
         cloud_sync.cancel_github_auth();

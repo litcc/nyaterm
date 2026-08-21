@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{FocusHandle, UniformListScrollHandle};
 use nyaterm_core::{
     CommandHistoryEntry, QuickCommand, QuickCommandCategory, QuickCommandCategoryPosition,
@@ -20,7 +21,7 @@ use crate::models::{
     QuickCommandVariablePromptState, QuickCommandViewMode,
 };
 
-use super::runtime_state::{CommandPersistencePoll, CommandRuntimeState};
+use super::runtime_state::CommandRuntimeState;
 
 pub(in crate::features) struct CommandFeatureState {
     catalog: CommandCatalogState,
@@ -225,12 +226,18 @@ impl CommandFeatureState {
         true
     }
 
-    pub(in crate::features) fn poll_persistence(&mut self) -> CommandPersistencePoll {
-        self.runtime.poll()
+    pub(in crate::features) fn take_persistence_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<CommandPersistenceResult>> {
+        self.runtime.take_event_receiver()
     }
 
-    pub(in crate::features) fn persistence_is_idle(&self) -> bool {
-        self.runtime.is_idle()
+    pub(in crate::features) fn note_persistence_event_delivered(&mut self) {
+        self.runtime.note_event_delivered();
+    }
+
+    pub(in crate::features) fn note_persistence_worker_disconnected(&mut self) -> bool {
+        self.runtime.note_worker_disconnected()
     }
 
     pub(in crate::features) fn apply_persistence_result(

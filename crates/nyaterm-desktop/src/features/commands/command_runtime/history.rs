@@ -1,12 +1,8 @@
+use futures::StreamExt as _;
 use gpui::Context;
 use nyaterm_core::{AiCommandCard, truncate_preview};
 
-use crate::features::{
-    NyaTermApp, ai::is_agent_command_card, commands::CommandPersistencePoll,
-    runtime_jobs::AiAgentStepStatus,
-};
-
-const COMMAND_PERSISTENCE_EVENT_DRAIN_LIMIT: usize = 32;
+use crate::features::{NyaTermApp, ai::is_agent_command_card, runtime_jobs::AiAgentStepStatus};
 
 impl NyaTermApp {
     pub(in crate::features) fn insert_ai_command_card(
@@ -264,26 +260,47 @@ impl NyaTermApp {
         }
     }
 
-    pub(in crate::features) fn drain_command_persistence_events(&mut self) -> bool {
-        let mut dirty = false;
-        for _ in 0..COMMAND_PERSISTENCE_EVENT_DRAIN_LIMIT {
-            let event = match self.commands.poll_persistence() {
-                CommandPersistencePoll::Event(event) => event,
-                CommandPersistencePoll::Empty => break,
-                CommandPersistencePoll::Disconnected { had_pending } => {
-                    if had_pending {
-                        self.settings
-                            .update_store_status("command persistence worker disconnected", false);
-                        dirty = true;
-                    }
-                    break;
+    /// Deliver command-history and quick-command persistence results as they
+    /// arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `poll_persistence`, which meant a result waited for the next tick and
+    /// forced `runtime_quiet_tick_allowed` to carry a `commands` term to keep
+    /// that wait short.
+    ///
+    /// The stream ending means the worker thread dropped its sender, which is
+    /// terminal: no further result can arrive, so report it once if anything was
+    /// still outstanding.
+    pub(in crate::features) fn start_command_persistence_event_drain(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut rx) = self.commands.take_persistence_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        this.commands.note_persistence_event_delivered();
+                        if let Err(message) = this.commands.apply_persistence_result(event) {
+                            this.settings.update_store_status(message, false);
+                        }
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    return;
                 }
-            };
-            dirty = true;
-            if let Err(message) = self.commands.apply_persistence_result(event) {
-                self.settings.update_store_status(message, false);
             }
-        }
-        dirty
+            let _ = this.update(cx, |this, cx| {
+                if this.commands.note_persistence_worker_disconnected() {
+                    this.settings
+                        .update_store_status("command persistence worker disconnected", false);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 }

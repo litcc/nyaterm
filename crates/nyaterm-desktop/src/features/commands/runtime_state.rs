@@ -2,6 +2,7 @@
 
 use std::sync::mpsc;
 
+use futures::channel::mpsc::UnboundedReceiver;
 use nyaterm_store::StoreBlockingClient;
 
 use crate::features::{
@@ -11,20 +12,21 @@ use crate::features::{
 
 pub(in crate::features) struct CommandRuntimeState {
     tx: mpsc::Sender<CommandPersistenceRequest>,
-    rx: mpsc::Receiver<CommandPersistenceResult>,
+    /// Taken once by `NyaTermApp::start_command_persistence_event_drain`,
+    /// which owns delivery from then on. `None` afterwards, so a second start
+    /// is a no-op.
+    rx: Option<UnboundedReceiver<CommandPersistenceResult>>,
     pending: usize,
-}
-
-pub(in crate::features) enum CommandPersistencePoll {
-    Event(CommandPersistenceResult),
-    Empty,
-    Disconnected { had_pending: bool },
 }
 
 impl CommandRuntimeState {
     pub(in crate::features) fn new(store: StoreBlockingClient) -> Self {
         let (tx, rx) = spawn_command_persistence_worker(store);
-        Self { tx, rx, pending: 0 }
+        Self {
+            tx,
+            rx: Some(rx),
+            pending: 0,
+        }
     }
 
     pub(in crate::features) fn queue(&mut self, request: CommandPersistenceRequest) -> bool {
@@ -35,20 +37,26 @@ impl CommandRuntimeState {
         true
     }
 
-    pub(in crate::features) fn poll(&mut self) -> CommandPersistencePoll {
-        match self.rx.try_recv() {
-            Ok(event) => {
-                self.pending = self.pending.saturating_sub(1);
-                CommandPersistencePoll::Event(event)
-            }
-            Err(mpsc::TryRecvError::Empty) => CommandPersistencePoll::Empty,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                let had_pending = std::mem::take(&mut self.pending) > 0;
-                CommandPersistencePoll::Disconnected { had_pending }
-            }
-        }
+    pub(in crate::features) fn take_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<CommandPersistenceResult>> {
+        self.rx.take()
     }
 
+    /// Account for one delivered result.
+    pub(in crate::features) fn note_event_delivered(&mut self) {
+        self.pending = self.pending.saturating_sub(1);
+    }
+
+    /// Account for the worker thread dropping its sender, reporting whether any
+    /// request was still outstanding and so lost.
+    pub(in crate::features) fn note_worker_disconnected(&mut self) -> bool {
+        std::mem::take(&mut self.pending) > 0
+    }
+
+    /// The pending counter still gates `note_worker_disconnected`; this read
+    /// accessor is only needed to assert the lifecycle.
+    #[cfg(test)]
     pub(in crate::features) fn is_idle(&self) -> bool {
         self.pending == 0
     }
@@ -58,7 +66,9 @@ impl CommandRuntimeState {
 mod tests {
     use std::sync::mpsc;
 
-    use super::{CommandPersistencePoll, CommandRuntimeState};
+    use futures::channel::mpsc::unbounded;
+
+    use super::CommandRuntimeState;
     use crate::features::{
         runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
     };
@@ -66,10 +76,10 @@ mod tests {
     #[test]
     fn command_runtime_owns_pending_request_lifecycle() {
         let (request_tx, request_rx) = mpsc::channel();
-        let (result_tx, result_rx) = mpsc::channel();
+        let (result_tx, result_rx) = unbounded();
         let mut runtime = CommandRuntimeState {
             tx: request_tx,
-            rx: result_rx,
+            rx: Some(result_rx),
             pending: 0,
         };
 
@@ -83,22 +93,26 @@ mod tests {
             CommandPersistenceRequest::AppendHistory(commands) if commands == ["pwd"]
         ));
 
+        let mut result_rx = runtime
+            .take_event_receiver()
+            .expect("the runtime holds its receiver until the drain starts");
         result_tx
-            .send(CommandPersistenceResult::History(Ok(Vec::new())))
+            .unbounded_send(CommandPersistenceResult::History(Ok(Vec::new())))
             .expect("result channel should stay connected");
         assert!(matches!(
-            runtime.poll(),
-            CommandPersistencePoll::Event(CommandPersistenceResult::History(Ok(history)))
-                if history.is_empty()
+            result_rx
+                .try_recv()
+                .expect("the result should be queued"),
+            CommandPersistenceResult::History(Ok(history)) if history.is_empty()
         ));
+        runtime.note_event_delivered();
         assert!(runtime.is_idle());
 
         assert!(runtime.queue(CommandPersistenceRequest::AppendHistory(Vec::new())));
-        drop(result_tx);
-        assert!(matches!(
-            runtime.poll(),
-            CommandPersistencePoll::Disconnected { had_pending: true }
-        ));
+        assert!(
+            runtime.note_worker_disconnected(),
+            "a request outstanding when the worker drops its sender is lost and must be reported"
+        );
         assert!(runtime.is_idle());
     }
 }

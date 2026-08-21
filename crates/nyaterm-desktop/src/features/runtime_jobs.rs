@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use futures::channel::mpsc::{UnboundedReceiver, unbounded};
+
 use nyaterm_core::{
     AiCommandCard, AiMode, AiModelDiscovery, CommandHistoryEntry, CommandObservation,
 };
@@ -244,10 +246,12 @@ pub(in crate::features) fn spawn_command_persistence_worker(
     store: StoreBlockingClient,
 ) -> (
     mpsc::Sender<CommandPersistenceRequest>,
-    mpsc::Receiver<CommandPersistenceResult>,
+    UnboundedReceiver<CommandPersistenceResult>,
 ) {
+    // The request side stays a blocking channel: the worker thread parks on
+    // `recv`. Only the result side is read from the GPUI thread.
     let (request_tx, request_rx) = mpsc::channel();
-    let (result_tx, result_rx) = mpsc::channel();
+    let (result_tx, result_rx) = unbounded();
     let _ = std::thread::Builder::new()
         .name("nyaterm-command-persistence".to_string())
         .spawn(move || {
@@ -275,7 +279,7 @@ pub(in crate::features) fn spawn_command_persistence_worker(
                         CommandPersistenceResult::QuickCommandUseCount { command_id, result }
                     }
                 };
-                if result_tx.send(result).is_err() {
+                if result_tx.unbounded_send(result).is_err() {
                     break;
                 }
             }

@@ -71,6 +71,8 @@ impl NyaTermApp {
         self.start_tunnel_event_drain(cx);
         self.start_translation_event_drain(cx);
         self.start_update_event_drain(cx);
+        self.start_github_gist_auth_event_drain(cx);
+        self.start_command_persistence_event_drain(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()

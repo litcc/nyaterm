@@ -123,10 +123,6 @@ impl NyaTermApp {
                 | self.drain_npu_events()
                 | self.drain_docker_events()
         );
-        drain_stage!(
-            maintenance,
-            self.drain_command_persistence_events() | self.drain_github_gist_auth_events(cx)
-        );
 
         dirty
     }
@@ -194,7 +190,6 @@ impl NyaTermApp {
             && !self.shell.runtime.window_layout_persist_dirty
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
-            && self.commands.persistence_is_idle()
         {
             dirty |= self.drive_pending_focus(window, cx);
             // During connect settle, skip blink notifies so first frames stay free.
