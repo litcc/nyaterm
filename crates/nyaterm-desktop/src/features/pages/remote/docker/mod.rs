@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::Rgba;
@@ -20,12 +22,10 @@ pub(in crate::features::pages::remote) struct DockerLabels {
     pub kill: Cow<'static, str>,
     pub delete: Cow<'static, str>,
     pub confirm_action_title: Cow<'static, str>,
-    pub confirm_action_desc: Cow<'static, str>,
     pub networks: Cow<'static, str>,
     pub remove_image: Cow<'static, str>,
     pub remove_volume: Cow<'static, str>,
     pub remove_network: Cow<'static, str>,
-    pub volume_driver: Cow<'static, str>,
     pub up: Cow<'static, str>,
     pub down: Cow<'static, str>,
     pub loading_services: Cow<'static, str>,
@@ -72,13 +72,16 @@ pub(in crate::features::pages::remote) struct DockerLabels {
 
 impl DockerLabels {
     pub fn confirm_description(&self, action: &str, target: &str) -> String {
-        self.confirm_action_desc
-            .replace("{{action}}", action)
-            .replace("{{target}}", target)
+        t!(
+            "dockerManager.confirmActionDesc",
+            action = action,
+            target = target
+        )
+        .to_string()
     }
 
     pub fn volume_driver_label(&self, driver: &str) -> String {
-        self.volume_driver.replace("{{driver}}", driver)
+        t!("dockerManager.volumeDriver", driver = driver).to_string()
     }
 
     pub fn state_label(&self, state: &str) -> Cow<'static, str> {

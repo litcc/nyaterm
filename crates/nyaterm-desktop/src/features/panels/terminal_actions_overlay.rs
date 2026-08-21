@@ -23,9 +23,11 @@ impl NyaTermApp {
         let buffer_tail = self.active_terminal_buffer_tail();
         let visible_lines = visible_text.lines().count();
         let buffer_chars = buffer_tail.chars().count();
-        let summary = t!("terminalActions.summary")
-            .replace("{{lines}}", &visible_lines.to_string())
-            .replace("{{chars}}", &buffer_chars.to_string());
+        let summary = t!(
+            "terminalActions.summary",
+            lines = visible_lines,
+            chars = buffer_chars
+        );
         let visible_for_translate = visible_text.clone();
         let visible_for_ai = terminal_action_prompt_text(&visible_text, 2_800);
         let buffer_for_ai = terminal_action_prompt_text(buffer_tail, 4_000);

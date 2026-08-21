@@ -75,19 +75,27 @@ impl NyaTermApp {
         };
         let progress_label = if is_sending {
             if infinite_progress {
-                let round = t!("serialSend.shellProgressInfinite")
-                    .replace("{{current}}", &send.round.max(1).to_string());
-                let units = t!("serialSend.shellProgressUnits")
-                    .replace("{{completed}}", &progress_completed.to_string())
-                    .replace("{{total}}", "∞");
+                let round = t!(
+                    "serialSend.shellProgressInfinite",
+                    current = send.round.max(1)
+                );
+                let units = t!(
+                    "serialSend.shellProgressUnits",
+                    completed = progress_completed,
+                    total = "∞"
+                );
                 format!("{round} · {units}")
             } else {
-                let units = t!("serialSend.shellProgressUnits")
-                    .replace("{{completed}}", &progress_completed.to_string())
-                    .replace("{{total}}", &send.total.to_string());
-                let round = t!("serialSend.shellProgressRound")
-                    .replace("{{current}}", &send.round.max(1).to_string())
-                    .replace("{{total}}", &send.rounds.max(1).to_string());
+                let units = t!(
+                    "serialSend.shellProgressUnits",
+                    completed = progress_completed,
+                    total = send.total
+                );
+                let round = t!(
+                    "serialSend.shellProgressRound",
+                    current = send.round.max(1),
+                    total = send.rounds.max(1)
+                );
                 format!("{units} · {round}")
             }
         } else {

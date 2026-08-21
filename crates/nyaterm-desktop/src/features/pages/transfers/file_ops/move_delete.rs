@@ -45,7 +45,7 @@ impl NyaTermApp {
         self.shell.set_status("remote move opened".to_string());
         self.open_form_dialog(
             (
-                t!("fileExplorer.moveTo").replace("{{name}}", &truncate_preview(&name, 48)),
+                t!("fileExplorer.moveTo", name = truncate_preview(&name, 48)).to_string(),
                 384.,
                 t!("common.save").to_string(),
                 |app, _, cx| app.transfer_move_dialog_content(cx),
@@ -196,10 +196,13 @@ impl NyaTermApp {
         }
         let delete_count = paths.len();
         let title = if delete_count == 1 {
-            t!("fileExplorer.sureDelete")
-                .replace("{{name}}", &remote_file_name(&paths[0].display_path))
+            t!(
+                "fileExplorer.sureDelete",
+                name = remote_file_name(&paths[0].display_path)
+            )
+            .to_string()
         } else {
-            t!("fileExplorer.sureDeleteMultiple").replace("{{count}}", &delete_count.to_string())
+            t!("fileExplorer.sureDeleteMultiple", count = delete_count).to_string()
         };
         let preview = paths
             .iter()
@@ -214,9 +217,7 @@ impl NyaTermApp {
             detail.push_str(&preview);
             if remaining > 0 {
                 detail.push('\n');
-                detail.push_str(
-                    &t!("fileExplorer.moreItems").replace("{{count}}", &remaining.to_string()),
-                );
+                detail.push_str(&t!("fileExplorer.moreItems", count = remaining));
             }
         }
         self.shell

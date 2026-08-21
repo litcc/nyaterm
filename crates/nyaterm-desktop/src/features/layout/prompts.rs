@@ -120,9 +120,11 @@ impl NyaTermApp {
             t!("fileTransfer.duplicateKindFile")
         };
         let target_name = download_file_name_from_remote_path(&prompt.request.target_path);
-        let description = t!("fileTransfer.duplicateDescription")
-            .replace("{{kind}}", &kind)
-            .replace("{{name}}", &target_name);
+        let description = t!(
+            "fileTransfer.duplicateDescription",
+            kind = kind,
+            name = target_name
+        );
 
         full_window_input_layer("duplicate-prompt-overlay")
             .bg(rgba(0x00000080))
@@ -482,12 +484,11 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let title = if prompt.request.round > 1 {
-            t!("otp.titleWithRound").replace("{{round}}", &prompt.request.round.to_string())
+            t!("otp.titleWithRound", round = prompt.request.round).to_string()
         } else {
             t!("otp.title").to_string()
         };
-        let description =
-            t!("otp.description").replace("{{name}}", &prompt.request.connection_name);
+        let description = t!("otp.description", name = prompt.request.connection_name);
         let challenge_title = prompt.request.name.trim();
         let challenge_instructions = prompt.request.instructions.trim();
         let mut fields = div().min_w_0().flex().flex_col().gap_3();
@@ -629,7 +630,7 @@ impl NyaTermApp {
                         } else {
                             palette.text_muted
                         }))
-                        .child(t!("otp.expiresIn").replace("{{seconds}}", &remaining.to_string())),
+                        .child(t!("otp.expiresIn", seconds = remaining)),
                 );
             } else if is_hotp && !has_code {
                 otp_panel = otp_panel.child(

@@ -215,9 +215,12 @@ impl NyaTermApp {
     ) {
         self.shell
             .set_status("network group delete confirmation opened".to_string());
-        let description = t!("network.deleteGroupConfirm")
-            .replace("{{name}}", &label)
-            .replace("{{count}}", &item_count.to_string());
+        let description = t!(
+            "network.deleteGroupConfirm",
+            name = label,
+            count = item_count
+        )
+        .to_string();
         self.open_confirm_dialog(
             (
                 t!("network.deleteGroup").to_string(),

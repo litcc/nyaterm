@@ -138,10 +138,6 @@ impl NyaTermApp {
                                 visible_segments: visible_breadcrumbs.clone(),
                                 overflow_segments: overflow_breadcrumbs.clone(),
                                 overflow_label: t!("fileExplorer.breadcrumbOverflow").to_string(),
-                                show_child_directories_label: t!(
-                                    "fileExplorer.showChildDirectories"
-                                )
-                                .to_string(),
                             },
                             cx,
                         ))
@@ -540,7 +536,6 @@ fn transfer_browser_breadcrumb_row(
         visible_segments,
         overflow_segments,
         overflow_label,
-        show_child_directories_label,
     } = presentation;
     let mut row = div()
         .id(SharedString::from("transfer-browser-path-display"))
@@ -605,7 +600,8 @@ fn transfer_browser_breadcrumb_row(
         let label_path = segment.path.clone();
         let children_path = segment.path.clone();
         let children_branch = branch_child_path.clone();
-        let children_tooltip = show_child_directories_label.replace("{{path}}", &segment.path);
+        let children_tooltip =
+            t!("fileExplorer.showChildDirectories", path = segment.path).to_string();
         row = row.child(
             div()
                 .flex()
@@ -701,7 +697,6 @@ struct TransferBrowserBreadcrumbRowPresentation {
     visible_segments: Vec<TransferBrowserBreadcrumbSegment>,
     overflow_segments: Vec<TransferBrowserBreadcrumbSegment>,
     overflow_label: String,
-    show_child_directories_label: String,
 }
 
 fn transfer_browser_path_menu_entries(

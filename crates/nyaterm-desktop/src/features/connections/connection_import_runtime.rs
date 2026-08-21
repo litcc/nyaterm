@@ -226,8 +226,7 @@ impl NyaTermApp {
             ConnectionImportResult::Imported(count) => {
                 self.refresh_store_from_runtime_and_sync_theme(cx);
                 self.connection_state.expand_all_catalog_groups();
-                let message =
-                    t!("savedConnections.importSuccess").replace("{{count}}", &count.to_string());
+                let message = t!("savedConnections.importSuccess", count = count);
                 self.shell.set_status(message.clone());
                 self.settings.update_store_status(message, true);
             }
@@ -249,7 +248,7 @@ impl NyaTermApp {
                     self.prompt_connection_session_import(ConnectionImportSource::Termius, cx);
                     return;
                 }
-                let message = t!("savedConnections.importFailed").replace("{{error}}", &error);
+                let message = t!("savedConnections.importFailed", error = error);
                 self.shell.set_status(message.clone());
                 self.settings.update_store_status(message, false);
             }

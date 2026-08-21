@@ -190,7 +190,7 @@ impl NyaTermApp {
             .filter(|detail| !detail.is_empty());
         let detected_label = detected
             .as_ref()
-            .map(|language| t!("translation.detectedLang").replace("{{lang}}", language));
+            .map(|language| t!("translation.detectedLang", lang = language));
 
         let source_box = div()
             .id(SharedString::from("translation-dialog-source"))

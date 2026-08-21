@@ -644,20 +644,9 @@ impl NyaTermApp {
                                     && footer_stats.total_item_count > 0,
                                 |this| {
                                     this.child(if footer_stats.selected_item_count > 0 {
-                                        t!("fileExplorer.selectedItems")
-                                            .replace(
-                                                "{{selected}}",
-                                                &footer_stats.selected_item_count.to_string(),
-                                            )
-                                            .replace(
-                                                "{{total}}",
-                                                &footer_stats.total_item_count.to_string(),
-                                            )
+                                        t!("fileExplorer.selectedItems", selected = footer_stats.selected_item_count.to_string(),, total = footer_stats.total_item_count.to_string(),)
                                     } else {
-                                        t!("fileExplorer.totalItems").replace(
-                                            "{{count}}",
-                                            &footer_stats.total_item_count.to_string(),
-                                        )
+                                        t!("fileExplorer.totalItems", count = footer_stats.total_item_count.to_string(),)
                                     })
                                     .child(footer_size_text)
                                 },

@@ -222,10 +222,8 @@ impl NyaTermApp {
                                         .text_size(px(10.))
                                         .text_color(rgb(palette.text_dimmed))
                                         .child(match byte_count {
-                                            Some(n) => t!("serialSend.hexByteCount")
-                                                .replace("{{count}}", &n.to_string()),
-                                            None => t!("serialSend.hexByteCount")
-                                                .replace("{{count}}", "0"),
+                                            Some(n) => t!("serialSend.hexByteCount", count = n),
+                                            None => t!("serialSend.hexByteCount", count = "0"),
                                         }),
                                 ),
                         )

@@ -52,9 +52,9 @@ impl NyaTermApp {
             ConnectionEditorValidationError::SerialPortRequired => {
                 t!("dialog.serialPortRequired").into()
             }
-            ConnectionEditorValidationError::BaudRateInvalid => t!("dialog.baudRateInvalid")
-                .replace("{{min}}", "1")
-                .replace("{{max}}", "4000000"),
+            ConnectionEditorValidationError::BaudRateInvalid => {
+                t!("dialog.baudRateInvalid", min = "1", max = "4000000").into()
+            }
             ConnectionEditorValidationError::RdpDisplayWidthInvalid => {
                 t!("dialog.rdpDisplayWidthInvalid").into()
             }
@@ -71,15 +71,14 @@ impl NyaTermApp {
                 t!("dialog.postLoginCommandRequired").into()
             }
             ConnectionEditorValidationError::PostLoginDelayInvalid => {
-                t!("dialog.postLoginDelayInvalid")
-                    .replace("{{min}}", "0")
-                    .replace("{{max}}", "60000")
+                t!("dialog.postLoginDelayInvalid", min = "0", max = "60000").into()
             }
-            ConnectionEditorValidationError::SftpShellDetectionTimeoutInvalid => {
-                t!("dialog.sftpShellDetectionTimeoutInvalid")
-                    .replace("{{min}}", "100")
-                    .replace("{{max}}", "60000")
-            }
+            ConnectionEditorValidationError::SftpShellDetectionTimeoutInvalid => t!(
+                "dialog.sftpShellDetectionTimeoutInvalid",
+                min = "100",
+                max = "60000"
+            )
+            .into(),
             ConnectionEditorValidationError::SshAgentEndpoint(error) => match error {
                 nyaterm_core::SshAgentEndpointValidationError::Empty => {
                     t!("dialog.sshAgentEndpointEmpty").into()
@@ -102,12 +101,19 @@ impl NyaTermApp {
             },
             ConnectionEditorValidationError::SshAlgorithms(
                 SshAlgorithmValidationError::EmptyList { kind },
-            ) => t!("dialog.algorithmListRequired").replace("{{category}}", &algorithm_kind(*kind)),
+            ) => t!(
+                "dialog.algorithmListRequired",
+                category = algorithm_kind(*kind)
+            )
+            .into(),
             ConnectionEditorValidationError::SshAlgorithms(
                 SshAlgorithmValidationError::Unsupported { kind, algorithm },
-            ) => t!("dialog.algorithmUnsupportedError")
-                .replace("{{algorithm}}", algorithm)
-                .replace("{{category}}", &algorithm_kind(*kind)),
+            ) => t!(
+                "dialog.algorithmUnsupportedError",
+                algorithm = algorithm,
+                category = algorithm_kind(*kind)
+            )
+            .into(),
         }
     }
 
@@ -560,7 +566,7 @@ impl NyaTermApp {
                 ConnectionKindTab::Vnc => "VNC",
             };
             self.shell
-                .set_status(t!("dialog.connectionTypeChanged").replace("{{type}}", kind_label));
+                .set_status(t!("dialog.connectionTypeChanged", "type" => kind_label));
         }
         cx.notify();
     }
@@ -577,7 +583,6 @@ impl NyaTermApp {
                 t!("dialog.selectShellExecutable").to_string(),
             )),
         };
-        let selected_status = t!("dialog.shellPathSelected").to_string();
         let cancelled_status = t!("dialog.shellPathSelectionCancelled").to_string();
         let receiver = cx.prompt_for_paths(options);
         self.shell
@@ -592,7 +597,7 @@ impl NyaTermApp {
                     let path = path.display().to_string();
                     this.connection_state.apply_editor_shell_path(path.clone());
                     this.shell
-                        .set_status(selected_status.replace("{{path}}", &path));
+                        .set_status(t!("dialog.shellPathSelected", path = path).to_string());
                 } else {
                     this.shell.set_status(cancelled_status);
                 }
@@ -615,7 +620,6 @@ impl NyaTermApp {
                 t!("dialog.selectWorkingDirectory").to_string(),
             )),
         };
-        let selected_status = t!("dialog.workingDirectorySelected").to_string();
         let cancelled_status = t!("dialog.workingDirectorySelectionCancelled").to_string();
         let receiver = cx.prompt_for_paths(options);
         self.shell
@@ -630,7 +634,7 @@ impl NyaTermApp {
                     let path = path.display().to_string();
                     this.connection_state.apply_editor_working_dir(path.clone());
                     this.shell
-                        .set_status(selected_status.replace("{{path}}", &path));
+                        .set_status(t!("dialog.workingDirectorySelected", path = path).to_string());
                 } else {
                     this.shell.set_status(cancelled_status);
                 }
@@ -799,8 +803,7 @@ impl NyaTermApp {
                     }
                 }
                 Err(error) => {
-                    let message =
-                        t!("dialog.connectionSaveFailed").replace("{{error}}", &error.to_string());
+                    let message = t!("dialog.connectionSaveFailed", error = error).to_string();
                     this.set_connection_editor_error(message, cx);
                 }
             },

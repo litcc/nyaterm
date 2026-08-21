@@ -98,9 +98,12 @@ impl NyaTermApp {
                         .item_count_completed
                         .zip(progress.item_count_total)
                         .map(|(completed, total)| {
-                            t!("fileTransfer.directoryProgress")
-                                .replace("{{completed}}", &completed.to_string())
-                                .replace("{{total}}", &total.to_string())
+                            t!(
+                                "fileTransfer.directoryProgress",
+                                completed = completed,
+                                total = total
+                            )
+                            .to_string()
                         })
                 });
                 list = list.child(transfer_job_row(

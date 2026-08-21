@@ -62,9 +62,7 @@ impl NyaTermApp {
         target_options.extend(state.group_targets.iter().map(|(group_id, name, count)| {
             NyaSelectOption::new(
                 format!("group:{group_id}"),
-                t!("serialSend.groupSession")
-                    .replace("{{name}}", name)
-                    .replace("{{count}}", &count.to_string()),
+                t!("serialSend.groupSession", name = name, count = count),
             )
         }));
         let selected_target = match &state.send.target {

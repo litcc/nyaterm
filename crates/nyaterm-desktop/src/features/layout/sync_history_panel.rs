@@ -118,17 +118,17 @@ impl NyaTermApp {
                     _ => "settings.syncState.idle",
                 });
                 let trigger_label =
-                    t!("settings.historyTrigger").replace("{{value}}", &entry.trigger);
+                    t!("settings.historyTrigger", value = entry.trigger).to_string();
                 let provider = entry
                     .provider
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
                     .map(format_cloud_provider)
                     .unwrap_or_else(|| "-".to_string());
-                let provider_label = t!("settings.historyProvider").replace("{{value}}", &provider);
+                let provider_label = t!("settings.historyProvider", value = provider).to_string();
                 let duration =
                     format_duration_ms(entry.duration_ms).unwrap_or_else(|| "-".to_string());
-                let duration_label = t!("settings.historyDuration").replace("{{value}}", &duration);
+                let duration_label = t!("settings.historyDuration", value = duration).to_string();
                 rows = rows.child(cloud_sync_history_row(
                     palette,
                     entry,

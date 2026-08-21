@@ -341,9 +341,11 @@ impl NyaTermApp {
             let line_start = before.rfind('\n').map(|index| index + 1).unwrap_or(0);
             (line, before[line_start..].chars().count() + 1)
         });
-        let cursor_label = t!("fileEditor.lineColumn")
-            .replace("{{line}}", &cursor_line.to_string())
-            .replace("{{column}}", &cursor_column.to_string());
+        let cursor_label = t!(
+            "fileEditor.lineColumn",
+            line = cursor_line,
+            column = cursor_column
+        );
         let search_matches = editor_search_matches(&state.content, &state.search_query);
         let active_match = state
             .active_match

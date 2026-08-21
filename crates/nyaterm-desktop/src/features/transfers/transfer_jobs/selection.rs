@@ -62,7 +62,7 @@ impl NyaTermApp {
             return;
         }
         let title = transfer_job_title(&job.kind);
-        let description = t!("fileTransfer.deleteConfirmDesc").replace("{{name}}", &title);
+        let description = t!("fileTransfer.deleteConfirmDesc", name = title).to_string();
         self.transfer.select_transfer_job_id(&job_id);
         self.open_confirm_dialog(
             (

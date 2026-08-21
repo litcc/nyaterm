@@ -100,7 +100,7 @@ impl NyaTermApp {
         self.open_confirm_dialog(
             (
                 t!("savedConnections.delete").to_string(),
-                t!("savedConnections.deleteConfirm").replace("{{name}}", &label),
+                t!("savedConnections.deleteConfirm", name = label).to_string(),
                 t!("savedConnections.delete").to_string(),
                 true,
                 move |app, _, cx| {
@@ -125,8 +125,7 @@ impl NyaTermApp {
         self.open_confirm_dialog(
             (
                 t!("savedConnections.deleteSelected").to_string(),
-                t!("savedConnections.deleteSelectedConfirm")
-                    .replace("{{count}}", &count.to_string()),
+                t!("savedConnections.deleteSelectedConfirm", count = count).to_string(),
                 t!("savedConnections.delete").to_string(),
                 true,
                 move |app, _, cx| {
@@ -204,10 +203,13 @@ impl NyaTermApp {
         let label = group.name.clone();
         self.shell
             .set_status("confirm connection group delete".to_string());
-        let message = t!("savedConnections.deleteFolderConfirm")
-            .replace("{{name}}", &label)
-            .replace("{{count}}", &connection_count.to_string())
-            .replace("{{childCount}}", &child_group_count.to_string());
+        let message = t!(
+            "savedConnections.deleteFolderConfirm",
+            name = label,
+            count = connection_count,
+            childCount = child_group_count
+        )
+        .to_string();
         self.open_confirm_dialog(
             (
                 t!("savedConnections.deleteFolder").to_string(),

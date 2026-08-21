@@ -42,7 +42,7 @@ fn is_simplified_chinese(language: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
     use std::fs;
     use std::path::Path;
 
@@ -129,6 +129,66 @@ mod tests {
         }
     }
 
+    /// Entries whose `{{..}}` is literal text rather than an i18n slot.
+    ///
+    /// `quickCommands.commandPlaceholder` documents NyaTerm's own quick-command
+    /// variable syntax, which is handlebars-shaped and parsed by
+    /// `parse_quick_command_variables`. It is never interpolated by `t!`.
+    const HANDLEBARS_IS_LITERAL: &[&str] = &["quickCommands.commandPlaceholder"];
+
+    #[test]
+    fn placeholders_use_the_rust_i18n_syntax() {
+        // A leftover `{{name}}` would render literally: rust-i18n only substitutes
+        // `%{name}`, and nothing else interpolates these strings any more.
+        let mut stragglers = Vec::new();
+        for (locale, json) in [("en", EN_JSON), ("zh-CN", ZH_CN_JSON)] {
+            for (key, value) in flatten(json) {
+                if value.contains("{{") && !HANDLEBARS_IS_LITERAL.contains(&key.as_str()) {
+                    stragglers.push(format!("{locale}/{key}: {value}"));
+                }
+            }
+        }
+        stragglers.sort();
+        assert!(
+            stragglers.is_empty(),
+            "handlebars placeholders left behind: {stragglers:#?}"
+        );
+    }
+
+    #[test]
+    fn translations_agree_on_their_placeholders() {
+        // A translation that drops or renames a placeholder leaves the argument
+        // unsubstituted for that locale only, which no other test would catch.
+        let placeholder = Regex::new(r"%\{(\w+)\}").expect("placeholder regex");
+        let names = |value: &str| {
+            placeholder
+                .captures_iter(value)
+                .map(|c| c[1].to_string())
+                .collect::<BTreeSet<_>>()
+        };
+
+        let english = flatten(EN_JSON);
+        let chinese = flatten(ZH_CN_JSON);
+        let mut mismatched = Vec::new();
+        for (key, en_value) in &english {
+            if HANDLEBARS_IS_LITERAL.contains(&key.as_str()) {
+                continue;
+            }
+            let Some(zh_value) = chinese.get(key) else {
+                continue; // covered by the key-parity test
+            };
+            let (want, got) = (names(en_value), names(zh_value));
+            if want != got {
+                mismatched.push(format!("{key}: en {want:?} vs zh-CN {got:?}"));
+            }
+        }
+        mismatched.sort();
+        assert!(
+            mismatched.is_empty(),
+            "placeholder mismatch: {mismatched:#?}"
+        );
+    }
+
     #[test]
     fn english_and_chinese_catalogs_have_identical_keys() {
         let english = flatten(EN_JSON).into_keys().collect::<HashSet<_>>();
@@ -190,9 +250,12 @@ mod tests {
         assert_eq!(text("en", "dialog.telnetAutoLogin"), "Auto Login");
         assert_eq!(text("zh-CN", "dialog.telnetAutoLogin"), "自动登录");
         assert_eq!(
-            text("en", "dialog.algorithmUnsupportedError")
-                .replace("{{algorithm}}", "future-kex")
-                .replace("{{category}}", "key exchanges"),
+            rust_i18n::t!(
+                "dialog.algorithmUnsupportedError",
+                locale = "en",
+                algorithm = "future-kex",
+                category = "key exchanges"
+            ),
             "future-kex is not supported in key exchanges."
         );
     }

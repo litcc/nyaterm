@@ -238,7 +238,7 @@ impl NyaTermApp {
         };
         let group_parent_hint = group_parent_id
             .and_then(|id| connection_group_path_label(self.connection_state.groups(), id))
-            .map(|path| t!("dialog.newGroupParentHint").replace("{{group}}", &path))
+            .map(|path| t!("dialog.newGroupParentHint", group = path).to_string())
             .unwrap_or_else(|| t!("dialog.newGroupRootHint").to_string());
         let key_label = editor
             .key_id
@@ -585,7 +585,10 @@ impl NyaTermApp {
             nyaterm_core::resolve_ssh_terminal_type(editor.ssh_profile, editor.terminal_type);
         let mut ssh_terminal_options = vec![ConnectionEditorChoice::new(
             None,
-            t!("dialog.sshTerminalTypeDefault").replace("{{value}}", effective_terminal.as_str()),
+            t!(
+                "dialog.sshTerminalTypeDefault",
+                value = effective_terminal.as_str()
+            ),
             editor.terminal_type.is_none(),
         )];
         ssh_terminal_options.extend(

@@ -55,7 +55,7 @@ impl NyaTermApp {
             .map(|group| group.name.clone());
         let pending_delete_message = pending_delete_name
             .as_ref()
-            .map(|name| t!("syncGroup.deleteGroupConfirm").replace("{{name}}", name));
+            .map(|name| t!("syncGroup.deleteGroupConfirm", name = name));
         let mut group_list = div()
             .id(SharedString::from("sync-groups-list"))
             .flex_1()
@@ -138,10 +138,7 @@ impl NyaTermApp {
                             .mt_1()
                             .text_xs()
                             .text_color(rgb(palette.text_muted))
-                            .child(
-                                t!("syncGroup.sessionCount")
-                                    .replace("{{count}}", &session_count.to_string()),
-                            ),
+                            .child(t!("syncGroup.sessionCount", count = session_count)),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_sync_group(group.id.clone(), cx);

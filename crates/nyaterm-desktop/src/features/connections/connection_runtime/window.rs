@@ -206,9 +206,8 @@ fn open_connection_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut 
         }
         Err(error) => {
             app.connection_state.clear_editor_window();
-            app.shell.set_status(
-                t!("dialog.connectionEditorOpenFailed").replace("{{error}}", &error.to_string()),
-            );
+            app.shell
+                .set_status(t!("dialog.connectionEditorOpenFailed", error = error));
             cx.notify();
         }
     });

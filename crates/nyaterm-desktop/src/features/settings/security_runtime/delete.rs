@@ -28,7 +28,7 @@ impl NyaTermApp {
             ),
             SecurityAuthTab::Otp => ("otpManager.deleteTitle", "otpManager.deleteConfirm"),
         };
-        let message = t!(description_key).replace("{{name}}", &label);
+        let message = t!(description_key, name = label).to_string();
         self.open_confirm_dialog(
             (
                 t!(title_key).to_string(),

@@ -122,10 +122,13 @@ impl NyaTermApp {
             self.signal_process(pid, signal, window, cx);
             return;
         }
-        let description = t!("processManager.confirmSignalDesc")
-            .replace("{{signal}}", signal)
-            .replace("{{pid}}", &pid.to_string())
-            .replace("{{command}}", &format!("kill -{signal} -- {pid}"));
+        let description = t!(
+            "processManager.confirmSignalDesc",
+            signal = signal,
+            pid = pid,
+            command = format!("kill -{signal} -- {pid}")
+        )
+        .to_string();
         self.open_confirm_dialog(
             (
                 t!("processManager.confirmSignalTitle").to_string(),

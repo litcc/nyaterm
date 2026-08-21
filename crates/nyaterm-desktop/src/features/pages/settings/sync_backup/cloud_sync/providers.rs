@@ -492,14 +492,12 @@ impl NyaTermApp {
                             .text_color(rgb(palette.text_muted))
                             .when_some(login, |this, login| {
                                 this.child(
-                                    t!("settings.githubGistConnectedAs")
-                                        .replace("{{login}}", &login),
+                                    t!("settings.githubGistConnectedAs", login = login),
                                 )
                             })
                             .when(!gist_id.is_empty(), |this| {
                                 this.child(
-                                    t!("settings.githubGistCurrentId")
-                                        .replace("{{gistId}}", &truncate_preview(&gist_id, 10)),
+                                    t!("settings.githubGistCurrentId", gistId = truncate_preview(&gist_id, 10)),
                                 )
                             })
                             .when_some(message, |this, message| this.child(message)),

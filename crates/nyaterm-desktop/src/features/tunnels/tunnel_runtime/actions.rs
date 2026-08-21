@@ -157,7 +157,7 @@ impl NyaTermApp {
         self.open_confirm_dialog(
             (
                 format!("{} {type_label}", t!("common.delete")),
-                t!("common.deletingConfirm").replace("{{name}}", &label),
+                t!("common.deletingConfirm", name = label).to_string(),
                 t!("common.delete").to_string(),
                 true,
                 move |app, _, cx| {

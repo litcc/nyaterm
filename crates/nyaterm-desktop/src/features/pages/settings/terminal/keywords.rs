@@ -27,7 +27,6 @@ impl NyaTermApp {
         let keyword_highlighting_enabled = self.settings.keyword_config().enabled;
         let expanded = self.settings.keyword_highlight_presentation().expanded_id;
         let builtin_ids = nyaterm_core::builtin_keyword_rule_ids();
-        let pattern_count_template = t!("settings.keywordHighlightPatternCount");
         let untitled_rule_label = t!("settings.keywordHighlightNewRule");
 
         settings_form_section(
@@ -487,9 +486,9 @@ impl NyaTermApp {
                                                     .text_size(px(10.))
                                                     .text_color(rgb(palette.text_muted))
                                                     .child(
-                                                        pattern_count_template.replace(
-                                                            "{{count}}",
-                                                            &pattern_count.to_string(),
+                                                        t!(
+                                                            "settings.keywordHighlightPatternCount",
+                                                            count = pattern_count
                                                         ),
                                                     ),
                                             )

@@ -176,7 +176,7 @@ impl NyaTermApp {
         self.shell
             .set_status("quick command delete confirmation opened".to_string());
         let title = t!("quickCommands.delete").to_string();
-        let message = t!("quickCommands.deleteConfirm").replace("{{name}}", &command.label);
+        let message = t!("quickCommands.deleteConfirm", name = command.label).to_string();
         let cancel_label = t!("common.cancel").to_string();
         let delete_label = t!("common.delete").to_string();
         let app = cx.weak_entity();
@@ -284,9 +284,12 @@ impl NyaTermApp {
         self.shell
             .set_status("quick command category delete confirmation opened".to_string());
         let title = t!("quickCommands.deleteCategory").to_string();
-        let message = t!("quickCommands.deleteCategoryConfirm")
-            .replace("{{name}}", &category_name)
-            .replace("{{count}}", &command_count.to_string());
+        let message = t!(
+            "quickCommands.deleteCategoryConfirm",
+            name = category_name,
+            count = command_count
+        )
+        .to_string();
         self.open_confirm_dialog_with_cancel(
             (
                 title,

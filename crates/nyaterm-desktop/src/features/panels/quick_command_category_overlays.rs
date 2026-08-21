@@ -49,9 +49,11 @@ impl NyaTermApp {
                         .map(|category| category.name.clone())
                 });
         let hint = match parent_name {
-            Some(parent_name) => {
-                t!("quickCommands.newCategoryParentHint").replace("{{category}}", &parent_name)
-            }
+            Some(parent_name) => t!(
+                "quickCommands.newCategoryParentHint",
+                category = parent_name
+            )
+            .to_string(),
             None => t!("quickCommands.newCategoryRootHint").to_string(),
         };
         self.quick_command_category_name_dialog_content(

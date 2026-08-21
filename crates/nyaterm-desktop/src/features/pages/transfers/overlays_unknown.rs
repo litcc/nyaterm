@@ -40,7 +40,7 @@ impl NyaTermApp {
             state.entry.name.clone()
         };
         let title = t!("fileExplorer.unknownFileTypeTitle").to_string();
-        let description = t!("fileExplorer.unknownFileTypeDesc").replace("{{name}}", &name);
+        let description = t!("fileExplorer.unknownFileTypeDesc", name = name);
         let cancel_label = t!("common.cancel").to_string();
         let internal_label = t!("fileExplorer.unknownFileTypeOpenInternal").to_string();
         let external_label = t!("fileExplorer.unknownFileTypeOpenExternal").to_string();

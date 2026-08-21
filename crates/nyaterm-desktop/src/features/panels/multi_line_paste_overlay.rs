@@ -30,9 +30,11 @@ impl NyaTermApp {
         let input_entity = cx.entity();
         let draft_text = draft.text.clone();
         let normalized = normalize_paste_newlines(&draft_text);
-        let stats = t!("terminal.multiLinePasteStats")
-            .replace("{{lines}}", &normalized.split('\n').count().to_string())
-            .replace("{{chars}}", &draft_text.chars().count().to_string());
+        let stats = t!(
+            "terminal.multiLinePasteStats",
+            lines = normalized.split('\n').count(),
+            chars = draft_text.chars().count()
+        );
         let can_send = !draft_text.is_empty();
         let preview_height = (viewport_h - 160.).clamp(128., 288.);
         let mut preview = div()

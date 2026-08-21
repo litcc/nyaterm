@@ -94,9 +94,12 @@ impl NyaTermApp {
             return;
         }
         let label = group.name.clone();
-        let description = t!("savedConnections.openAllConnectionsConfirm")
-            .replace("{{name}}", &label)
-            .replace("{{count}}", &connection_count.to_string());
+        let description = t!(
+            "savedConnections.openAllConnectionsConfirm",
+            name = label,
+            count = connection_count
+        )
+        .to_string();
         self.open_confirm_dialog(
             (
                 t!("savedConnections.openAllConnections").to_string(),

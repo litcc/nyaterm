@@ -105,8 +105,11 @@ impl NyaTermApp {
         let Some(state) = self.transfer.properties_dialog() else {
             return;
         };
-        let title = t!("fileExplorer.propertiesOf")
-            .replace("{{name}}", &truncate_preview(&state.entry.name, 42));
+        let title = t!(
+            "fileExplorer.propertiesOf",
+            name = truncate_preview(&state.entry.name, 42)
+        )
+        .to_string();
         self.open_form_dialog(
             (
                 title,

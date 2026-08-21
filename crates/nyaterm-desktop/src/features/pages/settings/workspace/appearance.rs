@@ -370,7 +370,7 @@ impl NyaTermApp {
             t!("settings.backgroundImageOpacity")
         };
         let desc = if content {
-            t!("settings.backgroundContentOpacityDesc").replace("{{value}}", "82%")
+            t!("settings.backgroundContentOpacityDesc", value = "82%").to_string()
         } else {
             t!("settings.backgroundImageOpacityDesc").to_string()
         };

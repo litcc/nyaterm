@@ -155,7 +155,11 @@ impl NyaTermApp {
         let category_display = if editor.category_draft.trim().is_empty() {
             category_label.clone()
         } else {
-            t!("quickCommands.createCategory").replace("{{name}}", editor.category_draft.trim())
+            t!(
+                "quickCommands.createCategory",
+                name = editor.category_draft.trim()
+            )
+            .to_string()
         };
         let mut color_swatches = div().flex().items_center().gap_2().flex_wrap();
         for option in QUICK_COMMAND_COLOR_OPTIONS {

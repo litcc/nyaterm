@@ -19,7 +19,7 @@ impl NyaTermApp {
             .session
             .display_name(session_id)
             .unwrap_or_else(|| short_id(session_id).to_string());
-        let detail = t!("savedConnections.connecting").replace("{{name}}", &name);
+        let detail = t!("savedConnections.connecting", name = name);
         div()
             .size_full()
             .flex()
