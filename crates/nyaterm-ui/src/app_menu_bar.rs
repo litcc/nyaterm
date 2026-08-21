@@ -80,7 +80,11 @@ impl NyaAppMenu {
 pub struct NyaAppMenuBar {
     menus: Vec<Entity<NyaAppMenuEntry>>,
     selected_index: Option<usize>,
+    /// Where focus was before the bar opened, restored when it closes.
     action_context: Option<FocusHandle>,
+    /// The popup handle the bar last focused, held so it outlives the popup and
+    /// stays resolvable while the bar decides whether the focus is still its own.
+    owned_focus: Option<FocusHandle>,
 }
 
 impl NyaAppMenuBar {
@@ -89,6 +93,7 @@ impl NyaAppMenuBar {
             menus: Vec::new(),
             selected_index: None,
             action_context: None,
+            owned_focus: None,
         });
         let entries = menus
             .into_iter()
@@ -103,6 +108,19 @@ impl NyaAppMenuBar {
             cx.notify();
         });
         bar
+    }
+
+    /// Whether focus is still on the popup the bar opened, or on a submenu of it.
+    ///
+    /// An unfocused window counts as the bar's: nothing else claimed focus, so
+    /// putting it back where the bar found it is still the right move.
+    fn owns_focus(&self, window: &Window, cx: &App) -> bool {
+        let Some(focused) = window.focused(cx) else {
+            return true;
+        };
+        self.owned_focus
+            .as_ref()
+            .is_some_and(|owned| owned == &focused || owned.contains(&focused, window))
     }
 
     fn set_selected_index(
@@ -129,7 +147,17 @@ impl NyaAppMenuBar {
         if index.is_none()
             && let Some(action_context) = self.action_context.take()
         {
-            action_context.focus(window, cx);
+            let bar_still_owns_focus = self.owns_focus(window, cx);
+            self.owned_focus = None;
+            // Restoring focus is only the bar's to do while it still holds it. An
+            // item's handler may have moved focus deliberately - opening a dialog
+            // focuses the dialog - and a dialog dismisses through `Cancel` and
+            // `Confirm` dispatched along the focused element's dispatch path. Taking
+            // focus back here would leave its close, cancel and confirm controls
+            // inert, and leave them that way, since nothing focuses it again.
+            if bar_still_owns_focus {
+                action_context.focus(window, cx);
+            }
         }
 
         self.selected_index = index;
@@ -325,6 +353,9 @@ impl NyaAppMenuEntry {
         ));
         let focus_handle = popup.read(cx).focus_handle(cx);
         focus_handle.focus(window, cx);
+        self.bar.update(cx, |bar, _| {
+            bar.owned_focus = Some(focus_handle.clone());
+        });
         self.popup_menu = Some(popup.clone());
         popup
     }
@@ -378,13 +409,14 @@ mod tests {
     use std::rc::Rc;
 
     use gpui::{
-        Context, DismissEvent, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-        Modifiers, ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement as _,
-        Styled as _, TestAppContext, VisualTestContext, Window, deferred, div, point, px,
+        AppContext as _, Context, DismissEvent, Entity, FocusHandle, InteractiveElement as _,
+        IntoElement, Modifiers, ParentElement as _, Pixels, Point, Render,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, VisualTestContext, Window,
+        deferred, div, point, px,
     };
 
     use super::{NyaAppMenu, NyaAppMenuBar};
-    use crate::NyaMenuItem;
+    use crate::{NyaDialogWindowExt as _, NyaMenuItem};
 
     struct MenuBarFixture {
         bar: Entity<NyaAppMenuBar>,
@@ -787,5 +819,74 @@ mod tests {
     #[test]
     fn menu_popup_priority_matches_the_component_popup_layer() {
         assert_eq!(super::MENU_POPUP_PRIORITY, gpui_base::POPUP_PRIORITY);
+    }
+
+    /// A menu item that opens a dialog keeps the dialog focused.
+    ///
+    /// The bar restores focus to wherever it found it when it closes, and it
+    /// closes right after running an item. A dialog is dismissed by dispatching
+    /// `Cancel`/`Confirm` along the focused element's dispatch path, so pulling
+    /// focus back out of one the item just opened leaves its close, cancel and
+    /// confirm controls inert - and leaves them that way, because nothing focuses
+    /// the dialog again. Reported as Help > About being unclosable once anything
+    /// had left focus on an element outside the bar.
+    #[gpui::test]
+    fn an_item_that_opens_a_dialog_keeps_it_focused(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let captured: Rc<RefCell<Option<Entity<MenuBarFixture>>>> = Rc::new(RefCell::new(None));
+        let capture = captured.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let content = cx.new(|cx| {
+                let original_focus = cx.focus_handle();
+                original_focus.focus(window, cx);
+                MenuBarFixture {
+                    bar: NyaAppMenuBar::new(
+                        [NyaAppMenu::new(
+                            "help",
+                            |_| "Help".into(),
+                            move |_, _| {
+                                vec![NyaMenuItem::action("About").on_click(|_, window, cx| {
+                                    window.open_nya_dialog(cx, |dialog, _, _| {
+                                        dialog.title("About").content(
+                                            div().debug_selector(|| "about-body".to_string()),
+                                        )
+                                    });
+                                })]
+                            },
+                        )],
+                        cx,
+                    ),
+                    original_focus,
+                }
+            });
+            *capture.borrow_mut() = Some(content.clone());
+            crate::nya_root(content, window, cx)
+        });
+
+        let content = captured.borrow().clone().expect("fixture should be built");
+        let (bar, original_focus) = content.read_with(cx, |content, _| {
+            (content.bar.clone(), content.original_focus.clone())
+        });
+        let entry = bar.read_with(cx, |bar, _| bar.menus[0].clone());
+
+        entry.update_in(cx, |entry, window, cx| entry.toggle(window, cx));
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        draw(cx);
+
+        assert_eq!(bar.read_with(cx, |bar, _| bar.selected_index), None);
+        cx.update(|window, cx| {
+            assert!(
+                window.has_active_nya_dialog(cx),
+                "the item should have opened the dialog"
+            );
+            assert_ne!(
+                window.focused(cx).as_ref(),
+                Some(&original_focus),
+                "closing the bar must not pull focus out of the dialog the item opened"
+            );
+        });
     }
 }
