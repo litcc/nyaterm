@@ -3,6 +3,7 @@ use nyaterm_core::SavedConnection;
 use nyaterm_ui::{NyaDialogWindowExt as _, NyaMenuItem};
 
 use crate::features::NyaTermApp;
+use crate::models::ConnectionListContextTarget;
 
 use super::editor::ordered_connection_groups;
 
@@ -248,6 +249,35 @@ impl NyaTermApp {
                     this.delete_selected_connections(window, cx);
                 })),
         ]
+    }
+
+    /// Items for the list's single context menu, chosen by what was right-clicked.
+    ///
+    /// The list cannot nest a menu per row: one right-click would open the row's
+    /// and the list's together, and the one that never receives the click keeps
+    /// re-focusing itself, which leaves any dialog opened afterwards unable to
+    /// see its own dismiss actions.
+    pub(in crate::features::pages::connections) fn connection_list_target_context_menu_items(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Vec<NyaMenuItem> {
+        match self.connection_state.list_context_target().clone() {
+            ConnectionListContextTarget::List => self.connection_list_context_menu_items(cx),
+            ConnectionListContextTarget::Group(group_id) => {
+                self.connection_group_context_menu_items(group_id, cx)
+            }
+            ConnectionListContextTarget::Connection(connection_id) => {
+                let Some(connection) = self
+                    .connection_state
+                    .connection_by_id(&connection_id)
+                    .cloned()
+                else {
+                    // The row went away between the press and the build.
+                    return self.connection_list_context_menu_items(cx);
+                };
+                self.connection_context_menu_items(connection, cx)
+            }
+        }
     }
 
     pub(in crate::features::pages::connections) fn connection_list_context_menu_items(

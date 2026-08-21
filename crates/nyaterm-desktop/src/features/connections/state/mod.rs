@@ -19,9 +19,10 @@ use crate::models::{
     ConnectionEditorAdvancedTab, ConnectionEditorField, ConnectionEditorPasswordSource,
     ConnectionEditorRdpTab, ConnectionEditorSelect, ConnectionEditorSshAlgorithmTab,
     ConnectionEditorState, ConnectionEditorTelnetTab, ConnectionGroupEditorMode,
-    ConnectionGroupEditorState, ConnectionImportSource, ConnectionKindTab, ConnectionSortMode,
-    NetworkGroupEditorState, NetworkMovePickerState, NetworkProxyEditorField,
-    NetworkProxyEditorState, NetworkTab, NetworkTunnelEditorField, NetworkTunnelEditorState,
+    ConnectionGroupEditorState, ConnectionImportSource, ConnectionKindTab,
+    ConnectionListContextTarget, ConnectionSortMode, NetworkGroupEditorState,
+    NetworkMovePickerState, NetworkProxyEditorField, NetworkProxyEditorState, NetworkTab,
+    NetworkTunnelEditorField, NetworkTunnelEditorState,
 };
 use nyaterm_ui::{
     NyaInputEvent, NyaInputState, NyaNumberInputEvent, NyaNumberInputOptions, NyaNumberInputState,
@@ -150,6 +151,9 @@ struct ConnectionListState {
     search_applied_query: Option<String>,
     selected_ids: HashSet<String>,
     last_selected_id: Option<String>,
+    /// What the last right-click landed on, read by the list's single context
+    /// menu when it builds its items.
+    context_target: ConnectionListContextTarget,
     search_revision: u64,
     sort_revision: u64,
     expanded_groups_revision: u64,
@@ -244,6 +248,7 @@ impl ConnectionFeatureState {
                 search_applied_query: None,
                 selected_ids: HashSet::new(),
                 last_selected_id: None,
+                context_target: ConnectionListContextTarget::default(),
                 search_revision: 0,
                 sort_revision: 0,
                 expanded_groups_revision: 0,
@@ -530,7 +535,25 @@ impl ConnectionFeatureState {
     }
 
     pub fn prepare_list_connection_context_menu(&mut self, connection_id: String) {
+        self.list.context_target = ConnectionListContextTarget::Connection(connection_id.clone());
         self.list.select_for_context_menu(connection_id);
+    }
+
+    pub fn prepare_list_group_context_menu(&mut self, group_id: String) {
+        self.list.context_target = ConnectionListContextTarget::Group(group_id);
+    }
+
+    /// Aim the list's context menu at the list itself.
+    ///
+    /// Rows and group headers re-aim it from their own capture-phase handlers,
+    /// which run after this one, so a right-click that misses every row is the
+    /// case that keeps this value.
+    pub fn prepare_list_context_menu(&mut self) {
+        self.list.context_target = ConnectionListContextTarget::List;
+    }
+
+    pub fn list_context_target(&self) -> &ConnectionListContextTarget {
+        &self.list.context_target
     }
 
     pub fn toggle_list_group_expanded(&mut self, group_id: String) -> bool {

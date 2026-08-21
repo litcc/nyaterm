@@ -79,6 +79,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     use gpui::{
         AppContext as _, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
@@ -642,5 +643,159 @@ mod tests {
                 "the close button should dismiss the dialog"
             );
         });
+    }
+
+    /// A list that owns the only context menu and aims it from its rows.
+    ///
+    /// This is the shape a NyaTerm list has to compose: the list carries one
+    /// `NyaContextMenu`, resets the target on capture, and each row re-aims it
+    /// from its own capture handler.
+    struct ListContextMenuFixture {
+        target: Rc<RefCell<&'static str>>,
+    }
+
+    impl Render for ListContextMenuFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let reset_target = self.target.clone();
+            let row_target = self.target.clone();
+            let build_target = self.target.clone();
+            crate::NyaContextMenu::new_dynamic(
+                div()
+                    .id("list-context-menu")
+                    .size_full()
+                    .capture_any_mouse_down(move |event: &gpui::MouseDownEvent, _, _| {
+                        if event.button == MouseButton::Right {
+                            *reset_target.borrow_mut() = "list";
+                        }
+                    })
+                    .child(
+                        div()
+                            .id("list-row")
+                            .w(px(200.))
+                            .h(px(34.))
+                            .debug_selector(|| "list-row".to_string())
+                            .capture_any_mouse_down(move |event: &gpui::MouseDownEvent, _, _| {
+                                if event.button == MouseButton::Right {
+                                    *row_target.borrow_mut() = "row";
+                                }
+                            })
+                            // A row that swallows the bubble must still let the
+                            // list's menu open.
+                            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation()),
+                    ),
+                move |_, _| {
+                    vec![crate::NyaMenuItem::action(*build_target.borrow()).on_click(
+                        |_, window, cx| {
+                            window.open_nya_dialog(cx, |dialog, _, _| {
+                                dialog
+                                    .width(400.)
+                                    .title(
+                                        div()
+                                            .debug_selector(|| "focus-dialog-title".to_string())
+                                            .child("Delete"),
+                                    )
+                                    .confirm(NyaDialogFooter::new("Cancel", "Delete").danger())
+                                    .content(
+                                        div()
+                                            .debug_selector(|| "focus-dialog-content".to_string())
+                                            .h(px(60.))
+                                            .child("Delete this?"),
+                                    )
+                            });
+                        },
+                    )]
+                },
+            )
+        }
+    }
+
+    fn right_click(cx: &mut VisualTestContext, position: gpui::Point<gpui::Pixels>) {
+        cx.simulate_event(gpui::MouseDownEvent {
+            button: MouseButton::Right,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        cx.simulate_event(gpui::MouseUpEvent {
+            button: MouseButton::Right,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        });
+        cx.run_until_parked();
+        draw(cx);
+        draw(cx);
+    }
+
+    /// A dialog opened from a context-menu item stays dismissable.
+    ///
+    /// `ContextMenu` re-focuses its own menu on every layout pass while it is
+    /// open, and a dialog is dismissed by dispatching `Cancel`/`Confirm` along the
+    /// focused element's path. A menu that is still open therefore takes focus
+    /// back on the frame after the dialog appears, and the close button, the
+    /// cancel button and the confirm button all stop responding - permanently,
+    /// since the menu goes on taking it. A list must own exactly one menu so the
+    /// item click always dismisses the one that opened.
+    #[gpui::test]
+    fn dialog_from_a_list_context_menu_item_stays_dismissable(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let target = Rc::new(RefCell::new("none"));
+        let fixture_target = target.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let view = cx.new(|_| ListContextMenuFixture {
+                target: fixture_target,
+            });
+            nya_root(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+
+        let row = cx.debug_bounds("list-row").expect("row should render");
+
+        // Pressing empty space below the row keeps the list as the target.
+        right_click(cx, point(row.center().x, row.bottom() + px(120.)));
+        assert_eq!(*target.borrow(), "list");
+
+        // Pressing the row re-aims the same menu at the row.
+        right_click(cx, row.center());
+        assert_eq!(*target.borrow(), "row");
+
+        for round in 1..=2 {
+            if round > 1 {
+                right_click(cx, row.center());
+            }
+            cx.simulate_keystrokes("down enter");
+            cx.run_until_parked();
+            draw(cx);
+            cx.update(|window, cx| {
+                assert!(
+                    window.has_active_nya_dialog(cx),
+                    "round {round}: the menu item should open the dialog"
+                );
+            });
+
+            // Let frames go by: a menu left open would take focus back here.
+            for _ in 0..4 {
+                draw(cx);
+                cx.run_until_parked();
+            }
+
+            let close = dialog_close_button_center(cx, 400.);
+            cx.simulate_click(close, Modifiers::default());
+            cx.run_until_parked();
+            draw(cx);
+            cx.executor().advance_clock(Duration::from_millis(400));
+            cx.run_until_parked();
+            draw(cx);
+
+            cx.update(|window, cx| {
+                assert!(
+                    !window.has_active_nya_dialog(cx),
+                    "round {round}: the close button should dismiss the dialog"
+                );
+            });
+        }
     }
 }

@@ -408,6 +408,24 @@ impl std::fmt::Debug for ConnectionEditorState {
     }
 }
 
+/// What the saved-connections list's context menu was opened on.
+///
+/// The list owns exactly one context menu and picks its items from this. Giving
+/// a row its own nested menu instead would open both on a single right-click,
+/// because `ContextMenu` registers a plain hitbox-gated mouse listener and the
+/// outer one runs first, before the row can stop propagation. Only the menu that
+/// receives the item click dismisses, and the one left open keeps re-focusing
+/// itself every layout pass - which strands whatever opens next, since a dialog
+/// dismisses through actions routed along the focused element's path.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum ConnectionListContextTarget {
+    /// Empty space in the list, below or beside the rows.
+    #[default]
+    List,
+    Connection(String),
+    Group(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConnectionGroupEditorMode {
     Create,

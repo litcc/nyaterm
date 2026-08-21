@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use gpui::{
     AnyElement, AppContext as _, Context, FontWeight, IntoElement, KeyDownEvent, MouseButton,
-    Render, SharedString, Window, div,
+    MouseDownEvent, Render, SharedString, Window, div,
     prelude::{
         FluentBuilder, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled,
     },
     px, relative, rgb, rgba, svg,
 };
 use nyaterm_core::SavedConnection;
-use nyaterm_ui::{NyaContextMenu, NyaInput};
+use nyaterm_ui::NyaInput;
 
 use crate::features::{
     NyaTermApp, connections::ConnectionDragKind, connections::ConnectionDragPayload,
@@ -131,8 +131,6 @@ impl NyaTermApp {
             return div().flex().flex_col().child(body);
         }
 
-        let context_items = self
-            .connection_group_context_menu_items(section.group_id.clone().unwrap_or_default(), cx);
         let group_header = div()
             .id(SharedString::from(format!(
                 "connection-section-{}",
@@ -186,7 +184,17 @@ impl NyaTermApp {
                 MouseButton::Left,
                 cx.listener(|_, _, _, cx| cx.stop_propagation()),
             )
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            // Aims the list's one context menu at this group. Capture, so it runs
+            // before the menu is built and regardless of who stops the bubble.
+            .capture_any_mouse_down({
+                let menu_group_id = section.group_id.clone().unwrap_or_default();
+                cx.listener(move |this, event: &MouseDownEvent, _, _| {
+                    if event.button == MouseButton::Right {
+                        this.connection_state
+                            .prepare_list_group_context_menu(menu_group_id.clone());
+                    }
+                })
+            })
             .when_some(
                 (!editing_group)
                     .then_some(section.group_id.clone())
@@ -329,7 +337,6 @@ impl NyaTermApp {
                     }))
                     .child(editor_error.unwrap_or_else(|| count.to_string())),
             );
-        let group_header = NyaContextMenu::new(group_header, context_items);
         div().flex().flex_col().child(group_header).child(body)
     }
 
@@ -475,11 +482,9 @@ impl NyaTermApp {
         let show_after = drop_position == Some(ConnectionDropPosition::After);
         let show_inside = drop_position == Some(ConnectionDropPosition::Inside);
         let row_id = connection.id.clone();
-        let context_items = self.connection_context_menu_items(connection.clone(), cx);
-
         // Tauri ConnectionItem: py-1.5 single-line row (~34px) with hover actions.
         let palette = self.theme_palette();
-        let row = div()
+        div()
             .id(SharedString::from(format!(
                 "connection-row-{}",
                 connection.id
@@ -594,13 +599,13 @@ impl NyaTermApp {
                     cx.stop_propagation();
                 }),
             )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
+            // Aims the list's one context menu at this row. Capture, so it runs
+            // before the menu is built and regardless of who stops the bubble.
+            .capture_any_mouse_down(cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                if event.button == MouseButton::Right {
                     this.prepare_connection_context_menu(menu_id.clone(), cx);
-                }),
-            )
+                }
+            }))
             .on_click(
                 cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
                     cx.stop_propagation();
@@ -699,7 +704,6 @@ impl NyaTermApp {
                         .rounded_full()
                         .bg(rgb(palette.link)),
                 )
-            });
-        NyaContextMenu::new(row, context_items)
+            })
     }
 }

@@ -385,6 +385,24 @@ impl RenderOnce for NyaDropdownMenu {
     }
 }
 
+/// A right-click menu attached to an element.
+///
+/// Exactly one of these may cover any given point. Nesting a second one inside
+/// the first opens both on a single right-click: `ContextMenu` arms a plain
+/// hitbox-gated mouse listener, and the outer element's listener is registered
+/// last and so runs first, before the inner one - a `cx.stop_propagation()` on
+/// the inner element cannot prevent it. Only the menu that receives the item
+/// click dismisses, and the one left open re-focuses itself on every layout
+/// pass. Anything opened afterwards therefore loses focus on the next frame, and
+/// because a dialog is dismissed by dispatching `Cancel`/`Confirm` along the
+/// focused element's path, its close, cancel and confirm controls all stop
+/// responding for the rest of the session.
+///
+/// For a list, put the single menu on the list and aim it with
+/// [`NyaContextMenu::new_dynamic`]: reset the target from a capture-phase
+/// handler on the list, and re-aim it from a capture-phase handler on each row.
+/// Capture runs outermost first, so the row's handler wins, and it runs before
+/// the menu is built regardless of who stops the bubble.
 #[derive(IntoElement)]
 pub struct NyaContextMenu<E>
 where

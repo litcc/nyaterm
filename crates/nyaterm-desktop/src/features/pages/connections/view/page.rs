@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use gpui::{
     AnyElement, Context, IntoElement, KeyDownEvent, ListHorizontalSizingBehavior, MouseButton,
-    SharedString, UniformListScrollHandle, div,
+    MouseDownEvent, SharedString, UniformListScrollHandle, div,
     prelude::{InteractiveElement, ParentElement, StatefulInteractiveElement, Styled},
     px, rgb, svg, uniform_list,
 };
@@ -222,7 +222,27 @@ impl NyaTermApp {
         // matches a single scroll surface, and the vendor skips painting an axis
         // whose content fits.
         let list = list.scrollbar(&list_scroll, NyaScrollbarAxis::Both);
-        let list = NyaContextMenu::new(list, self.connection_list_context_menu_items(cx));
+        // One context menu for the whole list, aimed by whatever the press landed
+        // on. Rows and group headers re-aim it from their own capture handlers,
+        // which run inside this one, so the reset here is what a press on empty
+        // space keeps. Nesting a menu per row instead opens both menus on a single
+        // right-click, and the one that never receives the click goes on
+        // re-focusing itself every layout pass - stranding any dialog opened
+        // afterwards, because a dialog is dismissed through actions routed along
+        // the focused element's path.
+        let menu_app = cx.entity();
+        let list = NyaContextMenu::new_dynamic(
+            list.capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, _| {
+                if event.button == MouseButton::Right {
+                    this.connection_state.prepare_list_context_menu();
+                }
+            })),
+            move |_, cx| {
+                menu_app.update(cx, |this, cx| {
+                    this.connection_list_target_context_menu_items(cx)
+                })
+            },
+        );
 
         // Tauri: PanelHeader (shared stack) + search/action strip + flat tree list.
         // Count is shown in the shared panel header via meta; strip hosts search + icons.
