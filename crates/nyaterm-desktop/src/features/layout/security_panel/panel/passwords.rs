@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, FontWeight, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 
@@ -17,9 +19,9 @@ impl NyaTermApp {
         let mut body = security_auth_body_base("security-passwords-body");
         body = body.child(security_tab_toolbar(
             palette,
-            self.tr("passwordManager.title"),
+            t!("passwordManager.title"),
             "security-add-password",
-            self.tr("passwordManager.add"),
+            t!("passwordManager.add"),
             self.security.password_editor().is_none(),
             cx.listener(|this, _, window, cx| {
                 this.open_security_password_editor(None, window, cx);
@@ -27,7 +29,7 @@ impl NyaTermApp {
         ));
         if self.security.passwords().is_empty() {
             body = body.child(empty_panel(
-                self.tr("passwordManager.noPasswords"),
+                t!("passwordManager.noPasswords"),
                 self.theme_palette(),
             ));
         } else {
@@ -54,11 +56,11 @@ impl NyaTermApp {
                     revealed_value
                         .clone()
                         .filter(|v| !v.is_empty())
-                        .unwrap_or_else(|| self.tr("secretUnlock.emptySecret").to_string())
+                        .unwrap_or_else(|| t!("secretUnlock.emptySecret").to_string())
                 } else if entry.has_password {
                     String::new()
                 } else {
-                    self.tr("secretUnlock.emptySecret").to_string()
+                    t!("secretUnlock.emptySecret").to_string()
                 };
                 rows = rows.child(
                     div()
@@ -115,7 +117,7 @@ impl NyaTermApp {
                                                             format!("security-pw-copy-{id}"),
                                                             "icons/copy.svg",
                                                         )
-                                                        .tooltip(self.tr("common.copyToClipboard"))
+                                                        .tooltip(t!("common.copyToClipboard"))
                                                         .on_click(cx.listener(
                                                             move |this, _, window, cx| {
                                                                 this.copy_security_password(
@@ -147,7 +149,7 @@ impl NyaTermApp {
                                             "icons/eye.svg"
                                         },
                                     )
-                                    .tooltip(self.tr(if is_revealed {
+                                    .tooltip(t!(if is_revealed {
                                         "passwordManager.hidePassword"
                                     } else {
                                         "passwordManager.showPassword"
@@ -167,7 +169,7 @@ impl NyaTermApp {
                                         format!("security-pw-edit-{id}"),
                                         "icons/edit.svg",
                                     )
-                                    .tooltip(self.tr("common.edit"))
+                                    .tooltip(t!("common.edit"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.open_security_password_editor(
@@ -183,7 +185,7 @@ impl NyaTermApp {
                                         format!("security-pw-del-{id}"),
                                         "icons/delete.svg",
                                     )
-                                    .tooltip(self.tr("common.delete"))
+                                    .tooltip(t!("common.delete"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.request_delete_security_password(

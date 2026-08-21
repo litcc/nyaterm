@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::time::Duration;
 use std::time::Instant;
 
@@ -49,10 +51,10 @@ impl NyaTermApp {
             Duration::from_secs_f64(model_stats.widest_ms / 1000.0),
             perf_context,
         );
-        let empty_connections_label = self.tr("savedConnections.empty");
-        let empty_connections_hint = self.tr("savedConnections.emptyHint");
-        let no_results_label = self.tr("savedConnections.noResults");
-        let empty_group_label = self.tr("savedConnections.emptyGroup");
+        let empty_connections_label = t!("savedConnections.empty");
+        let empty_connections_hint = t!("savedConnections.emptyHint");
+        let no_results_label = t!("savedConnections.noResults");
+        let empty_group_label = t!("savedConnections.emptyGroup");
 
         // Keep the flattened model cheap to rebuild, then let GPUI instantiate only
         // the rows intersecting the scroll viewport.
@@ -278,7 +280,7 @@ impl NyaTermApp {
         };
         let sort_tint = (sort_mode != ConnectionSortMode::Default).then_some(palette.primary);
         let sort_flipped = sort_mode == ConnectionSortMode::NameDesc;
-        let sort_tooltip = self.tr(match sort_mode {
+        let sort_tooltip = t!(match sort_mode {
             ConnectionSortMode::Default => "savedConnections.sortDefault",
             ConnectionSortMode::NameAsc => "savedConnections.sortNameAsc",
             ConnectionSortMode::NameDesc => "savedConnections.sortNameDesc",
@@ -286,7 +288,7 @@ impl NyaTermApp {
         let more_menu = NyaDropdownMenu::new("connections-more")
             .icon("icons/conn/more.svg")
             .icon_size(px(14.))
-            .tooltip(self.tr("common.more"))
+            .tooltip(t!("common.more"))
             .min_width(px(180.))
             .items(self.connection_more_menu_items(cx))
             .on_trigger(|_, _, cx| cx.stop_propagation());
@@ -349,7 +351,7 @@ impl NyaTermApp {
                 palette,
                 "connections-temp-ssh",
                 "icons/conn/flash.svg",
-                self.tr("temporarySsh.title"),
+                t!("temporarySsh.title"),
                 cx.listener(|this, _, window, cx| {
                     this.open_temporary_ssh_link_dialog(window, cx);
                 }),
@@ -358,7 +360,7 @@ impl NyaTermApp {
                 palette,
                 "connections-new-group",
                 "icons/fe/new-folder.svg",
-                self.tr("savedConnections.newFolder"),
+                t!("savedConnections.newFolder"),
                 cx.listener(|this, _, window, cx| {
                     this.open_connection_group_editor(None, None, window, cx);
                 }),
@@ -367,7 +369,7 @@ impl NyaTermApp {
                 palette,
                 "connections-new",
                 "icons/conn/add.svg",
-                self.tr("savedConnections.newConnection"),
+                t!("savedConnections.newConnection"),
                 cx.listener(|this, _, window, cx| {
                     this.open_connection_editor(None, None, false, window, cx);
                 }),

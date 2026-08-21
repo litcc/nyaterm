@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -93,7 +95,7 @@ impl NyaTermApp {
             .search_input_box(
                 "sessions.filter",
                 &search_draft,
-                TextInputSetup::placeholder(self.tr("activeSessions.searchPlaceholder")),
+                TextInputSetup::placeholder(t!("activeSessions.searchPlaceholder")),
                 cx,
             )
             .into_any_element();
@@ -106,7 +108,7 @@ impl NyaTermApp {
                 .text_center()
                 .text_size(px(11.))
                 .text_color(rgb(palette.text_dimmed))
-                .child(self.tr("panel.noActiveSessions"))
+                .child(t!("panel.noActiveSessions"))
                 .into_any_element()
         } else if rows.is_empty() {
             div()
@@ -117,7 +119,7 @@ impl NyaTermApp {
                 .text_center()
                 .text_size(px(11.))
                 .text_color(rgb(palette.text_dimmed))
-                .child(self.tr("activeSessions.noMatches"))
+                .child(t!("activeSessions.noMatches"))
                 .into_any_element()
         } else {
             uniform_list(
@@ -463,19 +465,19 @@ impl NyaTermApp {
                 .start_reconnect_is_pending(reconnect_session_id.as_str());
         let can_disconnect = !is_busy && !is_disconnected;
         let reconnect_label = if busy_action.as_deref() == Some("reconnect") {
-            self.tr("tabCtx.reconnecting").to_string()
+            t!("tabCtx.reconnecting").to_string()
         } else {
-            self.tr("tabCtx.reconnect").to_string()
+            t!("tabCtx.reconnect").to_string()
         };
         let disconnect_label = if busy_action.as_deref() == Some("disconnect") {
-            self.tr("tabCtx.disconnecting").to_string()
+            t!("tabCtx.disconnecting").to_string()
         } else {
-            self.tr("tabCtx.disconnect").to_string()
+            t!("tabCtx.disconnect").to_string()
         };
         let menu = NyaDropdownMenu::new(format!("active-session-more-{}", session.id))
             .icon("icons/session/more.svg")
             .icon_size(px(14.))
-            .tooltip(self.tr("common.more"))
+            .tooltip(t!("common.more"))
             .disabled(is_busy)
             .min_width(px(160.))
             .items([
@@ -611,7 +613,7 @@ impl NyaTermApp {
                                 palette,
                                 format!("active-session-rename-{rename_session_id}"),
                                 "icons/session/rename.svg",
-                                self.tr("tabCtx.rename").to_string(),
+                                t!("tabCtx.rename").to_string(),
                                 !is_busy,
                                 cx.listener(move |this, _, window, cx| {
                                     cx.stop_propagation();

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, Context, KeyDownEvent, Window};
 use nyaterm_core::{
     DiagnosticsExportOptions, DiagnosticsRuntimeSnapshot, export_diagnostics_archive,
@@ -12,7 +14,7 @@ use crate::models::TransferJobStatus;
 impl NyaTermApp {
     pub(in crate::features) fn lock_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let lock_status = if self.settings.summary().has_master_password {
-            self.tr("lockScreen.passwordPlaceholder").to_string()
+            t!("lockScreen.passwordPlaceholder").to_string()
         } else {
             String::new()
         };
@@ -55,14 +57,14 @@ impl NyaTermApp {
                     }
                     Ok(true) => {}
                     Ok(false) if this.security.screen_lock_password_draft() == password => {
-                        let status = this.tr("lockScreen.wrongPassword").to_string();
+                        let status = t!("lockScreen.wrongPassword").to_string();
                         this.security.clear_screen_lock_password_with_status(status);
                         this.reset_text_input("lock-screen.password", "", cx);
                         this.shell.set_status("screen unlock rejected".to_string());
                     }
                     Ok(false) => {}
                     Err(error) if this.security.screen_lock_password_draft() == password => {
-                        let status = format!("{}: {error}", this.tr("lockScreen.unlockFailed"));
+                        let status = format!("{}: {error}", t!("lockScreen.unlockFailed"));
                         this.security.clear_screen_lock_password_with_status(status);
                         this.reset_text_input("lock-screen.password", "", cx);
                         this.shell.set_status("screen unlock failed".to_string());
@@ -89,7 +91,7 @@ impl NyaTermApp {
             "enter" => self.submit_lock_unlock(cx),
             "escape" if !self.settings.summary().has_master_password => self.unlock_app(cx),
             "escape" => {
-                let status = self.tr("lockScreen.passwordPlaceholder").to_string();
+                let status = t!("lockScreen.passwordPlaceholder").to_string();
                 self.security.clear_screen_lock_password_with_status(status);
                 self.reset_text_input("lock-screen.password", "", cx);
                 cx.notify();
@@ -103,7 +105,7 @@ impl NyaTermApp {
         text: String,
         cx: &mut Context<Self>,
     ) {
-        let status = self.tr("lockScreen.passwordPlaceholder").to_string();
+        let status = t!("lockScreen.passwordPlaceholder").to_string();
         self.security.set_screen_lock_password_draft(text, status);
         cx.notify();
     }

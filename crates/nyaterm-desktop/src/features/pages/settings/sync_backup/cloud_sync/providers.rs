@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 
@@ -19,28 +21,28 @@ impl NyaTermApp {
             .gap_2()
             .child(self.cloud_sync_input(
                 "cloud-webdav-endpoint",
-                self.tr("settings.webdavEndpoint"),
+                t!("settings.webdavEndpoint"),
                 self.cloud_sync.settings().webdav.endpoint.clone(),
                 CloudSyncInputField::WebdavEndpoint,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-webdav-root",
-                self.tr("settings.providerRoot"),
+                t!("settings.providerRoot"),
                 self.cloud_sync.settings().webdav.root.clone(),
                 CloudSyncInputField::WebdavRoot,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-webdav-username",
-                self.tr("dialog.username"),
+                t!("dialog.username"),
                 self.cloud_sync.settings().webdav.username.clone(),
                 CloudSyncInputField::WebdavUsername,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-webdav-password",
-                self.tr("dialog.password"),
+                t!("dialog.password"),
                 password,
                 CloudSyncInputField::WebdavPassword,
                 cx,
@@ -67,49 +69,49 @@ impl NyaTermApp {
                     .gap_2()
                     .child(self.cloud_sync_input(
                         "cloud-s3-endpoint",
-                        self.tr("settings.s3Endpoint"),
+                        t!("settings.s3Endpoint"),
                         self.cloud_sync.settings().s3.endpoint.clone(),
                         CloudSyncInputField::S3Endpoint,
                         cx,
                     ))
                     .child(self.cloud_sync_input(
                         "cloud-s3-bucket",
-                        self.tr("settings.s3Bucket"),
+                        t!("settings.s3Bucket"),
                         self.cloud_sync.settings().s3.bucket.clone(),
                         CloudSyncInputField::S3Bucket,
                         cx,
                     ))
                     .child(self.cloud_sync_input(
                         "cloud-s3-region",
-                        self.tr("settings.s3Region"),
+                        t!("settings.s3Region"),
                         self.cloud_sync.settings().s3.region.clone(),
                         CloudSyncInputField::S3Region,
                         cx,
                     ))
                     .child(self.cloud_sync_input(
                         "cloud-s3-root",
-                        self.tr("settings.providerRoot"),
+                        t!("settings.providerRoot"),
                         self.cloud_sync.settings().s3.root.clone(),
                         CloudSyncInputField::S3Root,
                         cx,
                     ))
                     .child(self.cloud_sync_input(
                         "cloud-s3-access-key",
-                        self.tr("settings.s3AccessKeyId"),
+                        t!("settings.s3AccessKeyId"),
                         access_key,
                         CloudSyncInputField::S3AccessKeyId,
                         cx,
                     ))
                     .child(self.cloud_sync_input(
                         "cloud-s3-secret-key",
-                        self.tr("settings.s3SecretAccessKey"),
+                        t!("settings.s3SecretAccessKey"),
                         secret_key,
                         CloudSyncInputField::S3SecretAccessKey,
                         cx,
                     ))
                     .child(self.cloud_sync_input(
                         "cloud-s3-session-token",
-                        self.tr("settings.s3SessionToken"),
+                        t!("settings.s3SessionToken"),
                         session_token,
                         CloudSyncInputField::S3SessionToken,
                         cx,
@@ -117,10 +119,8 @@ impl NyaTermApp {
             )
             .child(settings_form_row(
                 palette,
-                self.tr("settings.s3VirtualHostStyle"),
-                Some(SharedString::from(
-                    self.tr("settings.s3VirtualHostStyleDesc"),
-                )),
+                t!("settings.s3VirtualHostStyle"),
+                Some(SharedString::from(t!("settings.s3VirtualHostStyleDesc"))),
                 settings_switch_with_enabled(
                     palette,
                     "cloud-s3-url-style",
@@ -189,7 +189,7 @@ impl NyaTermApp {
                 } else {
                     "cloud-onedrive-root"
                 },
-                self.tr("settings.providerRoot"),
+                t!("settings.providerRoot"),
                 root,
                 root_field,
                 cx,
@@ -200,7 +200,7 @@ impl NyaTermApp {
                 } else {
                     "cloud-onedrive-access-token"
                 },
-                self.tr("settings.driveAccessToken"),
+                t!("settings.driveAccessToken"),
                 access_token,
                 access_field,
                 cx,
@@ -211,7 +211,7 @@ impl NyaTermApp {
                 } else {
                     "cloud-onedrive-refresh-token"
                 },
-                self.tr("settings.driveRefreshToken"),
+                t!("settings.driveRefreshToken"),
                 refresh_token,
                 refresh_field,
                 cx,
@@ -222,7 +222,7 @@ impl NyaTermApp {
                 } else {
                     "cloud-onedrive-client-id"
                 },
-                self.tr("settings.driveClientId"),
+                t!("settings.driveClientId"),
                 client_id,
                 id_field,
                 cx,
@@ -233,7 +233,7 @@ impl NyaTermApp {
                 } else {
                     "cloud-onedrive-client-secret"
                 },
-                self.tr("settings.driveClientSecret"),
+                t!("settings.driveClientSecret"),
                 client_secret,
                 secret_field,
                 cx,
@@ -255,28 +255,28 @@ impl NyaTermApp {
             .gap_2()
             .child(self.cloud_sync_input(
                 "cloud-aliyun-drive-root",
-                self.tr("settings.providerRoot"),
+                t!("settings.providerRoot"),
                 self.cloud_sync.settings().aliyun_drive.root.clone(),
                 CloudSyncInputField::AliyunDriveRoot,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-aliyun-drive-type",
-                self.tr("settings.aliyunDriveType"),
+                t!("settings.aliyunDriveType"),
                 self.cloud_sync.settings().aliyun_drive.drive_type.clone(),
                 CloudSyncInputField::AliyunDriveType,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-aliyun-drive-access-token",
-                self.tr("settings.driveAccessToken"),
+                t!("settings.driveAccessToken"),
                 access_token,
                 CloudSyncInputField::AliyunDriveAccessToken,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-aliyun-drive-refresh-token",
-                self.tr("settings.driveRefreshToken"),
+                t!("settings.driveRefreshToken"),
                 refresh_token,
                 CloudSyncInputField::AliyunDriveRefreshToken,
                 cx,
@@ -284,7 +284,7 @@ impl NyaTermApp {
             .child(
                 self.cloud_sync_input(
                     "cloud-aliyun-drive-client-id",
-                    self.tr("settings.driveClientId"),
+                    t!("settings.driveClientId"),
                     self.cloud_sync
                         .settings()
                         .aliyun_drive
@@ -297,7 +297,7 @@ impl NyaTermApp {
             )
             .child(self.cloud_sync_input(
                 "cloud-aliyun-drive-client-secret",
-                self.tr("settings.driveClientSecret"),
+                t!("settings.driveClientSecret"),
                 client_secret,
                 CloudSyncInputField::AliyunDriveClientSecret,
                 cx,
@@ -317,7 +317,7 @@ impl NyaTermApp {
             .child(
                 self.cloud_sync_input(
                     "cloud-gitee-endpoint",
-                    self.tr("settings.giteeSnippetApiEndpoint"),
+                    t!("settings.giteeSnippetApiEndpoint"),
                     self.cloud_sync
                         .settings()
                         .gitee_snippet
@@ -329,14 +329,14 @@ impl NyaTermApp {
             )
             .child(self.cloud_sync_input(
                 "cloud-gitee-gist",
-                self.tr("settings.giteeSnippetId"),
+                t!("settings.giteeSnippetId"),
                 self.cloud_sync.settings().gitee_snippet.gist_id.clone(),
                 CloudSyncInputField::GiteeGistId,
                 cx,
             ))
             .child(self.cloud_sync_input(
                 "cloud-gitee-token",
-                self.tr("settings.giteeSnippetAccessToken"),
+                t!("settings.giteeSnippetAccessToken"),
                 token,
                 CloudSyncInputField::GiteeToken,
                 cx,
@@ -360,9 +360,9 @@ impl NyaTermApp {
                 .as_deref()
                 .is_some_and(|token| !token.trim().is_empty());
         let auth_label = if connected {
-            self.tr("settings.githubGistReconnect")
+            t!("settings.githubGistReconnect")
         } else {
-            self.tr("settings.githubGistConnect")
+            t!("settings.githubGistConnect")
         };
         let gist_id = self.cloud_sync.settings().github_gist.gist_id.clone();
         let user_code = self.cloud_sync.github_auth().user_code.clone();
@@ -379,7 +379,7 @@ impl NyaTermApp {
                     .opacity(if pending { 0.55 } else { 1.0 })
                     .child(self.cloud_sync_input(
                         "cloud-github-gist",
-                        self.tr("settings.githubGistId"),
+                        t!("settings.githubGistId"),
                         gist_id.clone(),
                         CloudSyncInputField::GithubGistId,
                         cx,
@@ -387,8 +387,8 @@ impl NyaTermApp {
             )
             .child(settings_form_row(
                 palette,
-                self.tr("settings.githubGistAuth"),
-                Some(SharedString::from(self.tr("settings.githubGistAuthDesc"))),
+                t!("settings.githubGistAuth"),
+                Some(SharedString::from(t!("settings.githubGistAuthDesc"))),
                 div()
                     .flex()
                     .items_center()
@@ -406,7 +406,7 @@ impl NyaTermApp {
                         this.child(cloud_sync_action_button(
                             palette,
                             "cloud-github-cancel",
-                            self.tr("common.cancel"),
+                            t!("common.cancel"),
                             true,
                             cx.listener(|this, _, _, cx| {
                                 this.cancel_github_gist_auth(cx);
@@ -430,7 +430,7 @@ impl NyaTermApp {
                             div()
                                 .text_xs()
                                 .text_color(rgb(palette.text_muted))
-                                .child(self.tr("settings.githubGistUserCode")),
+                                .child(t!("settings.githubGistUserCode")),
                         )
                         .child(
                             div()
@@ -449,7 +449,7 @@ impl NyaTermApp {
                                 .child(cloud_sync_action_button(
                                     palette,
                                     "cloud-github-copy-code",
-                                    self.tr("settings.copyGithubGistUserCode"),
+                                    t!("settings.copyGithubGistUserCode"),
                                     true,
                                     cx.listener(|this, _, _, cx| {
                                         this.copy_github_gist_user_code(cx);
@@ -492,13 +492,13 @@ impl NyaTermApp {
                             .text_color(rgb(palette.text_muted))
                             .when_some(login, |this, login| {
                                 this.child(
-                                    self.tr("settings.githubGistConnectedAs")
+                                    t!("settings.githubGistConnectedAs")
                                         .replace("{{login}}", &login),
                                 )
                             })
                             .when(!gist_id.is_empty(), |this| {
                                 this.child(
-                                    self.tr("settings.githubGistCurrentId")
+                                    t!("settings.githubGistCurrentId")
                                         .replace("{{gistId}}", &truncate_preview(&gist_id, 10)),
                                 )
                             })

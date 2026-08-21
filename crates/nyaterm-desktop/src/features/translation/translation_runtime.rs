@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{ClipboardItem, Context, IntoElement, SharedString, Window, div, prelude::*, px, rgb};
 use nyaterm_core::TranslationSettings;
 use nyaterm_store::{StoreDomain, store_request};
@@ -124,7 +126,7 @@ impl NyaTermApp {
             return;
         }
         self.open_content_dialog(
-            self.tr("translation.title").to_string(),
+            t!("translation.title").to_string(),
             540.,
             |app, _, cx| app.translation_dialog_content(cx).into_any_element(),
             |app, cx| {
@@ -165,13 +167,13 @@ impl NyaTermApp {
         let source = dialog.source_text.clone();
         let pending = self.translation.is_pending();
         let status = self.translation.status().to_string();
-        let source_label = self.tr("translation.sourceText");
-        let translated_label = self.tr("translation.translatedText");
-        let loading_label = self.tr("translation.loading");
-        let error_label = self.tr("translation.error");
-        let copy_label = self.tr("translation.copy");
-        let close_label = self.tr("translation.close");
-        let copied_label = self.tr("translation.copied");
+        let source_label = t!("translation.sourceText");
+        let translated_label = t!("translation.translatedText");
+        let loading_label = t!("translation.loading");
+        let error_label = t!("translation.error");
+        let copy_label = t!("translation.copy");
+        let close_label = t!("translation.close");
+        let copied_label = t!("translation.copied");
         let result = self.translation.result_snapshot();
         let detected = result
             .as_ref()
@@ -186,10 +188,9 @@ impl NyaTermApp {
             .strip_prefix("translation failed:")
             .map(str::trim)
             .filter(|detail| !detail.is_empty());
-        let detected_label = detected.as_ref().map(|language| {
-            self.tr("translation.detectedLang")
-                .replace("{{lang}}", language)
-        });
+        let detected_label = detected
+            .as_ref()
+            .map(|language| t!("translation.detectedLang").replace("{{lang}}", language));
 
         let source_box = div()
             .id(SharedString::from("translation-dialog-source"))

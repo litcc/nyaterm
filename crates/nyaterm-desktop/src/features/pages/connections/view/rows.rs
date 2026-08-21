@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::sync::Arc;
 
 use gpui::{
@@ -93,7 +95,7 @@ impl NyaTermApp {
             .list_group_is_expanded(section.group_id.as_deref());
         let group_id = section.group_id.clone();
         let group_label = section.label.clone();
-        let empty_group_label = self.tr("savedConnections.emptyGroup");
+        let empty_group_label = t!("savedConnections.emptyGroup");
         let count = section.total_count;
         let editing_group = section
             .group_id
@@ -660,7 +662,7 @@ impl NyaTermApp {
                         palette,
                         format!("connection-connect-{}", connection.id),
                         "icons/conn/connect.svg",
-                        self.tr("savedConnections.connect"),
+                        t!("savedConnections.connect"),
                         cx.listener(move |this, _, window, cx| {
                             this.start_saved_connection(connect_connection.clone(), window, cx);
                         }),
@@ -669,7 +671,7 @@ impl NyaTermApp {
                         palette,
                         format!("connection-edit-{}", connection.id),
                         "icons/net/edit.svg",
-                        self.tr("savedConnections.edit"),
+                        t!("savedConnections.edit"),
                         cx.listener(move |this, _, window, cx| {
                             this.open_connection_editor(
                                 Some(edit_id.clone()),

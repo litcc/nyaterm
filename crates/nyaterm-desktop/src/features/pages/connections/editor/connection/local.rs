@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, div,
     prelude::{InteractiveElement, ParentElement, StatefulInteractiveElement, Styled},
@@ -21,10 +23,8 @@ pub(super) fn connection_editor_local_section(
     let ConnectionEditorSectionContext {
         palette,
         editor: _,
-        language,
         fields,
     } = section;
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     div()
         .flex()
         .flex_col()
@@ -38,7 +38,7 @@ pub(super) fn connection_editor_local_section(
                     div()
                         .text_xs()
                         .text_color(rgb(palette.text_muted))
-                        .child(tr("dialog.shellPath")),
+                        .child(t!("dialog.shellPath")),
                 )
                 .child(
                     div()
@@ -95,7 +95,7 @@ pub(super) fn connection_editor_local_section(
         )
         .child(editor_field(
             palette,
-            tr("dialog.shellArgs"),
+            t!("dialog.shellArgs"),
             ConnectionEditorField::ShellArgs,
             fields,
             cx,
@@ -107,7 +107,7 @@ pub(super) fn connection_editor_local_section(
                 .gap_2()
                 .child(div().min_w_0().flex_1().child(editor_field(
                     palette,
-                    tr("dialog.workingDir"),
+                    t!("dialog.workingDir"),
                     ConnectionEditorField::WorkingDir,
                     fields,
                     cx,
@@ -115,7 +115,7 @@ pub(super) fn connection_editor_local_section(
                 .child(small_button(
                     palette,
                     "connection-editor-cwd-browse",
-                    tr("settings.browse"),
+                    t!("settings.browse"),
                     cx.listener(|this, _, _, cx| {
                         this.prompt_connection_editor_working_dir(cx);
                     }),
@@ -128,7 +128,7 @@ pub(super) fn connection_editor_local_section(
                 cx,
             },
             "connection-editor-local-encoding",
-            tr("connection.encoding"),
+            t!("connection.encoding"),
             ConnectionEditorSelect::Encoding,
         ))
 }

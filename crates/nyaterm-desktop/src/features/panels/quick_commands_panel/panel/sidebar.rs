@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext as _, Context, FontWeight, SharedString, div, prelude::*, px, rgb, rgba};
 use nyaterm_ui::{NyaContextMenu, NyaMenuItem, NyaScrollable};
 
@@ -225,7 +227,7 @@ impl NyaTermApp {
             .quick_category_move_neighbor(&category_id, false)
             .is_some();
         vec![
-            NyaMenuItem::action(self.tr("quickCommands.addCategory"))
+            NyaMenuItem::action(t!("quickCommands.addCategory"))
                 .icon("icons/fe/new-folder.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_new_quick_command_category(
@@ -234,7 +236,7 @@ impl NyaTermApp {
                         cx,
                     );
                 })),
-            NyaMenuItem::action(self.tr("quickCommands.addCommand"))
+            NyaMenuItem::action(t!("quickCommands.addCommand"))
                 .icon("icons/conn/terminal.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_new_quick_command_editor_in_category(
@@ -244,25 +246,25 @@ impl NyaTermApp {
                     );
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("dialog.moveUp"))
+            NyaMenuItem::action(t!("dialog.moveUp"))
                 .icon("icons/chevron-up.svg")
                 .disabled(!can_move_up)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.move_quick_command_category(move_up_id.clone(), true, cx);
                 })),
-            NyaMenuItem::action(self.tr("dialog.moveDown"))
+            NyaMenuItem::action(t!("dialog.moveDown"))
                 .icon("icons/chevron-down.svg")
                 .disabled(!can_move_down)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.move_quick_command_category(move_down_id.clone(), false, cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("quickCommands.edit"))
+            NyaMenuItem::action(t!("quickCommands.edit"))
                 .icon("icons/net/edit.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_rename_quick_command_category(rename_id.clone(), window, cx);
                 })),
-            NyaMenuItem::action(self.tr("common.delete"))
+            NyaMenuItem::action(t!("common.delete"))
                 .icon("icons/net/delete.svg")
                 .danger()
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -276,12 +278,12 @@ impl NyaTermApp {
     /// category, and a command with no category.
     fn quick_command_pseudo_category_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("quickCommands.addCategory"))
+            NyaMenuItem::action(t!("quickCommands.addCategory"))
                 .icon("icons/fe/new-folder.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_new_quick_command_category(None, window, cx);
                 })),
-            NyaMenuItem::action(self.tr("quickCommands.addCommand"))
+            NyaMenuItem::action(t!("quickCommands.addCommand"))
                 .icon("icons/conn/terminal.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_new_quick_command_editor_in_category(None, window, cx);

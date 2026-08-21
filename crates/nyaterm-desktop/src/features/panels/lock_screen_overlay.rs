@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, Window, WindowControlArea, div,
     prelude::*, px, rgb, rgba, svg,
@@ -30,15 +32,15 @@ impl NyaTermApp {
         };
         let lock_status = if self.security.screen_lock_status().trim().is_empty() {
             if self.settings.summary().has_master_password {
-                self.tr("lockScreen.passwordPlaceholder").to_string()
+                t!("lockScreen.passwordPlaceholder").to_string()
             } else {
-                self.tr("settings.masterPasswordRequired").to_string()
+                t!("settings.masterPasswordRequired").to_string()
             }
         } else {
             self.security.screen_lock_status().to_string()
         };
-        let status_is_error = lock_status == self.tr("lockScreen.wrongPassword")
-            || lock_status.starts_with(self.tr("lockScreen.unlockFailed").as_ref());
+        let status_is_error = lock_status == t!("lockScreen.wrongPassword")
+            || lock_status.starts_with(t!("lockScreen.unlockFailed").as_ref());
 
         div()
             .id(SharedString::from("lock-screen-overlay"))
@@ -152,7 +154,7 @@ impl NyaTermApp {
                                 div()
                                     .text_xl()
                                     .font_weight(FontWeight(800.))
-                                    .child(self.tr("lockScreen.title")),
+                                    .child(t!("lockScreen.title")),
                             )
                             .child(
                                 div()
@@ -161,7 +163,7 @@ impl NyaTermApp {
                                     .text_sm()
                                     .line_height(px(20.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(self.tr("lockScreen.message")),
+                                    .child(t!("lockScreen.message")),
                             )
                             .when(self.settings.summary().has_master_password, |this| {
                                 this.child(
@@ -228,7 +230,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "lock-screen-unlock",
-                                self.tr("lockScreen.unlock"),
+                                t!("lockScreen.unlock"),
                                 cx.listener(|this, _, _, cx| {
                                     this.submit_lock_unlock(cx);
                                 }),

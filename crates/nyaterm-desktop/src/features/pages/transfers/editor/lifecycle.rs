@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_transport::{RemoteFilePath, SshSessionConfig};
 
@@ -130,7 +132,7 @@ impl NyaTermApp {
     ) {
         let remote_path = remote_file_path.display_path.clone();
         let Some(config) = self.transfer_editor_ssh_config(session_id.as_deref()) else {
-            let error = self.tr("fileEditor.sourceSessionUnavailable").to_string();
+            let error = t!("fileEditor.sourceSessionUnavailable").to_string();
             self.transfer.fail_editor_load_tab(&tab_id, error.clone());
             self.shell.set_status(error);
             cx.notify();
@@ -222,7 +224,7 @@ impl NyaTermApp {
             return;
         }
         let Some(config) = self.transfer_editor_ssh_config(snapshot.session_id.as_deref()) else {
-            let error = self.tr("fileEditor.sourceSessionUnavailable").to_string();
+            let error = t!("fileEditor.sourceSessionUnavailable").to_string();
             self.transfer
                 .set_editor_tab_error_by_id(&snapshot.id, error.clone());
             self.shell.set_status(error);

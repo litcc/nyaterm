@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -688,15 +690,12 @@ impl NyaTermApp {
             .and_then(|view| view.performance_overlay);
         let performance_overlay_copy = performance_overlay.map(|overlay| match overlay {
             TerminalPerformanceOverlay::Overloaded => (
-                self.tr("terminal.largeOutputProtectionActive").to_string(),
-                self.tr("terminal.largeOutputProtectionActiveDetail")
-                    .to_string(),
+                t!("terminal.largeOutputProtectionActive").to_string(),
+                t!("terminal.largeOutputProtectionActiveDetail").to_string(),
             ),
             TerminalPerformanceOverlay::Recovered => (
-                self.tr("terminal.largeOutputProtectionRecovered")
-                    .to_string(),
-                self.tr("terminal.largeOutputProtectionRecoveredDetail")
-                    .to_string(),
+                t!("terminal.largeOutputProtectionRecovered").to_string(),
+                t!("terminal.largeOutputProtectionRecoveredDetail").to_string(),
             ),
         });
         let (render_cache_hits, render_cache_misses) = self

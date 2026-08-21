@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, ClipboardItem, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent,
     SharedString, Window, div, prelude::*, px, rgb, svg,
@@ -112,7 +114,7 @@ impl NyaTermApp {
                         palette,
                         "ai-message-menu-quote",
                         "icons/quote.svg",
-                        self.tr("ai.quote"),
+                        t!("ai.quote"),
                         cx.listener(move |this, _, _, cx| {
                             this.quote_ai_message_text(quote_text.clone(), cx);
                         }),
@@ -121,7 +123,7 @@ impl NyaTermApp {
                         palette,
                         "ai-message-menu-copy",
                         "icons/copy.svg",
-                        self.tr("ai.copy"),
+                        t!("ai.copy"),
                         cx.listener(move |this, _, _, cx| {
                             this.copy_ai_message_text(copy_text.clone(), cx);
                         }),
@@ -238,9 +240,9 @@ impl NyaTermApp {
                                 rgb(palette.text_muted)
                             })
                             .child(if streaming {
-                                self.tr("ai.thinking")
+                                t!("ai.thinking")
                             } else {
-                                self.tr("ai.thoughtComplete")
+                                t!("ai.thoughtComplete")
                             }),
                     )
                     .child(
@@ -265,7 +267,7 @@ impl NyaTermApp {
                     .py_2()
                     .text_size(px(11.))
                     .text_color(rgb(palette.link))
-                    .child(self.tr("ai.thinking")),
+                    .child(t!("ai.thinking")),
             );
         }
 

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AppContext, ClipboardItem, Context, IntoElement as _, KeyDownEvent, PathPromptOptions,
     SharedString, Window,
@@ -72,12 +74,12 @@ impl NyaTermApp {
             .key_editor()
             .is_some_and(|editor| editor.id.is_some())
         {
-            self.tr("securityAuth.editKeyTitle")
+            t!("securityAuth.editKeyTitle")
         } else {
-            self.tr("securityAuth.newKeyTitle")
+            t!("securityAuth.newKeyTitle")
         }
         .to_string();
-        let save = self.tr("common.save").to_string();
+        let save = t!("common.save").to_string();
         self.open_guarded_form_dialog(
             (
                 title,
@@ -404,7 +406,7 @@ impl NyaTermApp {
         };
         let request_id = self.security.begin_private_key_view(name);
         self.open_content_dialog(
-            self.tr("settings.privateKeyDialogTitle").to_string(),
+            t!("settings.privateKeyDialogTitle").to_string(),
             720.,
             |app, _, cx| app.security_private_key_view(cx).into_any_element(),
             |app, cx| app.close_security_private_key_view(cx),
@@ -427,12 +429,9 @@ impl NyaTermApp {
                     Ok(Some(key)) => key
                         .key_data
                         .filter(|value| !value.is_empty())
-                        .ok_or_else(|| this.tr("settings.privateKeyEmpty").to_string()),
-                    Ok(None) => Err(this.tr("settings.privateKeyEmpty").to_string()),
-                    Err(error) => Err(format!(
-                        "{}: {error}",
-                        this.tr("settings.privateKeyLoadFailed")
-                    )),
+                        .ok_or_else(|| t!("settings.privateKeyEmpty").to_string()),
+                    Ok(None) => Err(t!("settings.privateKeyEmpty").to_string()),
+                    Err(error) => Err(format!("{}: {error}", t!("settings.privateKeyLoadFailed"))),
                 };
                 if this.security.finish_private_key_view(request_id, value) {
                     cx.notify();
@@ -447,8 +446,7 @@ impl NyaTermApp {
             && !value.is_empty()
         {
             cx.write_to_clipboard(ClipboardItem::new_string(value.to_string()));
-            self.security
-                .set_status(self.tr("common.copied").to_string());
+            self.security.set_status(t!("common.copied").to_string());
             cx.notify();
         }
     }

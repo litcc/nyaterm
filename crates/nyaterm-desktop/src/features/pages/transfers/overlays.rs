@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
@@ -89,7 +91,7 @@ impl NyaTermApp {
                     .child(transfer_job_menu_button(
                         palette,
                         "transfer-job-menu-pause",
-                        self.tr("fileTransfer.pause"),
+                        t!("fileTransfer.pause"),
                         can_pause,
                         cx.listener(move |this, _, _, cx| {
                             this.transfer.close_transfer_job_menu();
@@ -99,7 +101,7 @@ impl NyaTermApp {
                     .child(transfer_job_menu_button(
                         palette,
                         "transfer-job-menu-resume",
-                        self.tr("fileTransfer.resume"),
+                        t!("fileTransfer.resume"),
                         can_resume,
                         cx.listener(move |this, _, _, cx| {
                             this.transfer.close_transfer_job_menu();
@@ -109,7 +111,7 @@ impl NyaTermApp {
                     .child(transfer_job_menu_button(
                         palette,
                         "transfer-job-menu-retry",
-                        self.tr("fileTransfer.retry"),
+                        t!("fileTransfer.retry"),
                         can_retry,
                         cx.listener(move |this, _, window, cx| {
                             this.transfer.close_transfer_job_menu();
@@ -119,7 +121,7 @@ impl NyaTermApp {
                     .child(transfer_job_menu_button(
                         palette,
                         "transfer-job-menu-cancel",
-                        self.tr("fileTransfer.cancel"),
+                        t!("fileTransfer.cancel"),
                         can_cancel,
                         cx.listener(move |this, _, _, cx| {
                             this.transfer.close_transfer_job_menu();
@@ -130,7 +132,7 @@ impl NyaTermApp {
                     .child(transfer_job_menu_button(
                         palette,
                         "transfer-job-menu-open-target",
-                        self.tr("fileTransfer.openTargetDirectory"),
+                        t!("fileTransfer.openTargetDirectory"),
                         can_open_target,
                         cx.listener(move |this, _, _, cx| {
                             this.transfer.close_transfer_job_menu();
@@ -141,7 +143,7 @@ impl NyaTermApp {
                     .child(transfer_job_menu_button(
                         palette,
                         "transfer-job-menu-delete",
-                        self.tr("fileTransfer.delete"),
+                        t!("fileTransfer.delete"),
                         can_delete,
                         cx.listener(move |this, _, window, cx| {
                             this.transfer.close_transfer_job_menu();

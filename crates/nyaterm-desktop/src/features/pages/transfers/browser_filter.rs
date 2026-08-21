@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_transport::{SftpFileEntry, SftpFileType};
 
@@ -76,7 +78,7 @@ impl NyaTermApp {
         let field = self.text_input(
             "transfer.browser.search",
             &self.transfer.browser_view().search.clone(),
-            TextInputSetup::placeholder(self.tr("fileExplorer.searchPlaceholder")),
+            TextInputSetup::placeholder(t!("fileExplorer.searchPlaceholder")),
             cx,
         );
         window.focus(&field.read(cx).focus_handle(), cx);

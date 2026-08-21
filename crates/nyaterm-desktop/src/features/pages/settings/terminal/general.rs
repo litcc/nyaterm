@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -23,7 +25,7 @@ impl NyaTermApp {
             .text_input_box(
                 "settings.terminal.x11-display",
                 &self.settings.summary().x11_display.clone(),
-                TextInputSetup::placeholder(self.tr("settings.x11DisplayPlaceholder")),
+                TextInputSetup::placeholder(t!("settings.x11DisplayPlaceholder")),
                 cx,
             )
             .into_any_element();
@@ -51,8 +53,8 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.scrollbackLines"),
-                        Some(SharedString::from(self.tr("settings.scrollbackLinesDesc"))),
+                        t!("settings.scrollbackLines"),
+                        Some(SharedString::from(t!("settings.scrollbackLinesDesc"))),
                         self.number_input_box(
                             "settings.number.terminal-scrollback-lines",
                             self.settings
@@ -68,24 +70,21 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.keepAliveMode"),
-                        Some(SharedString::from(
-                            self.tr("settings.keepAliveModeCompatibleDescription"),
-                        )),
+                        t!("settings.keepAliveMode"),
+                        Some(SharedString::from(t!(
+                            "settings.keepAliveModeCompatibleDescription"
+                        ))),
                         self.settings_select_control(
                             "settings.terminal.keep-alive-mode",
                             vec![
                                 NyaSelectOption::new(
                                     "compatible",
-                                    self.tr("settings.keepAliveModeCompatible"),
+                                    t!("settings.keepAliveModeCompatible"),
                                 ),
-                                NyaSelectOption::new(
-                                    "strict",
-                                    self.tr("settings.keepAliveModeStrict"),
-                                ),
+                                NyaSelectOption::new("strict", t!("settings.keepAliveModeStrict")),
                                 NyaSelectOption::new(
                                     "disabled",
-                                    self.tr("settings.keepAliveModeDisabled"),
+                                    t!("settings.keepAliveModeDisabled"),
                                 ),
                             ],
                             self.settings.summary().terminal_keep_alive_mode.clone(),
@@ -95,10 +94,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.keepAliveInterval"),
-                        Some(SharedString::from(
-                            self.tr("settings.keepAliveIntervalDesc"),
-                        )),
+                        t!("settings.keepAliveInterval"),
+                        Some(SharedString::from(t!("settings.keepAliveIntervalDesc"))),
                         self.number_input_box(
                             "settings.number.terminal-keep-alive-interval",
                             self.settings
@@ -117,17 +114,15 @@ impl NyaTermApp {
                             .gap_2()
                             .child(terminal_settings_field_meta(
                                 palette,
-                                self.tr("settings.x11Display"),
-                                self.tr("settings.x11DisplayDesc"),
+                                t!("settings.x11Display"),
+                                t!("settings.x11DisplayDesc"),
                             ))
                             .child(div().w_full().max_w(px(520.)).child(x11_display_input)),
                     )
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.hardwareAcceleration"),
-                        Some(SharedString::from(
-                            self.tr("settings.hardwareAccelerationDesc"),
-                        )),
+                        t!("settings.hardwareAcceleration"),
+                        Some(SharedString::from(t!("settings.hardwareAccelerationDesc"))),
                         settings_switch(
                             palette,
                             "terminal-hardware-acceleration",
@@ -139,8 +134,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.lowLatencyMode"),
-                        Some(SharedString::from(self.tr("settings.lowLatencyModeDesc"))),
+                        t!("settings.lowLatencyMode"),
+                        Some(SharedString::from(t!("settings.lowLatencyModeDesc"))),
                         settings_switch(
                             palette,
                             "terminal-low-latency-mode",
@@ -152,8 +147,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.zebraStripes"),
-                        Some(SharedString::from(self.tr("settings.zebraStripesDesc"))),
+                        t!("settings.zebraStripes"),
+                        Some(SharedString::from(t!("settings.zebraStripesDesc"))),
                         settings_switch(
                             palette,
                             "terminal-zebra-stripes",
@@ -165,10 +160,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showWorkspacePadding"),
-                        Some(SharedString::from(
-                            self.tr("settings.showWorkspacePaddingDesc"),
-                        )),
+                        t!("settings.showWorkspacePadding"),
+                        Some(SharedString::from(t!("settings.showWorkspacePaddingDesc"))),
                         settings_switch(
                             palette,
                             "terminal-workspace-padding",
@@ -180,8 +173,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showLineNumbers"),
-                        Some(SharedString::from(self.tr("settings.showLineNumbersDesc"))),
+                        t!("settings.showLineNumbers"),
+                        Some(SharedString::from(t!("settings.showLineNumbersDesc"))),
                         settings_switch(
                             palette,
                             "terminal-line-numbers",
@@ -193,8 +186,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showTimestamps"),
-                        Some(SharedString::from(self.tr("settings.showTimestampsDesc"))),
+                        t!("settings.showTimestamps"),
+                        Some(SharedString::from(t!("settings.showTimestampsDesc"))),
                         settings_switch(
                             palette,
                             "terminal-timestamps",
@@ -212,8 +205,8 @@ impl NyaTermApp {
                                 .gap_2()
                                 .child(terminal_settings_field_meta(
                                     palette,
-                                    self.tr("settings.timestampFormat"),
-                                    self.tr("settings.timestampFormatDesc"),
+                                    t!("settings.timestampFormat"),
+                                    t!("settings.timestampFormatDesc"),
                                 ))
                                 .child(
                                     div().w_full().max_w(px(520.)).child(timestamp_format_input),
@@ -222,10 +215,10 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("terminal.showMultiLinePasteDialog"),
-                        Some(SharedString::from(
-                            self.tr("terminal.showMultiLinePasteDialogDesc"),
-                        )),
+                        t!("terminal.showMultiLinePasteDialog"),
+                        Some(SharedString::from(t!(
+                            "terminal.showMultiLinePasteDialogDesc"
+                        ))),
                         settings_switch(
                             palette,
                             "terminal-multi-line-paste",
@@ -239,8 +232,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("terminal.pasteImageAsPath"),
-                        Some(SharedString::from(self.tr("terminal.pasteImageAsPathDesc"))),
+                        t!("terminal.pasteImageAsPath"),
+                        Some(SharedString::from(t!("terminal.pasteImageAsPathDesc"))),
                         settings_switch(
                             palette,
                             "terminal-paste-image-path",
@@ -252,8 +245,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showRemoteStats"),
-                        Some(SharedString::from(self.tr("settings.showRemoteStatsDesc"))),
+                        t!("settings.showRemoteStats"),
+                        Some(SharedString::from(t!("settings.showRemoteStatsDesc"))),
                         settings_switch(
                             palette,
                             "terminal-remote-stats",
@@ -266,10 +259,8 @@ impl NyaTermApp {
                     .when(self.settings.summary().ui_show_remote_stats, |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.remoteStatsInterval"),
-                            Some(SharedString::from(
-                                self.tr("settings.remoteStatsIntervalDesc"),
-                            )),
+                            t!("settings.remoteStatsInterval"),
+                            Some(SharedString::from(t!("settings.remoteStatsIntervalDesc"))),
                             self.number_input_box(
                                 "settings.number.remote-stats-interval",
                                 self.settings
@@ -284,8 +275,8 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showGpuMonitor"),
-                        Some(SharedString::from(self.tr("settings.showGpuMonitorDesc"))),
+                        t!("settings.showGpuMonitor"),
+                        Some(SharedString::from(t!("settings.showGpuMonitorDesc"))),
                         settings_switch(
                             palette,
                             "terminal-gpu-monitor",
@@ -298,10 +289,8 @@ impl NyaTermApp {
                     .when(self.settings.summary().ui_show_gpu_monitor, |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.gpuMonitorInterval"),
-                            Some(SharedString::from(
-                                self.tr("settings.gpuMonitorIntervalDesc"),
-                            )),
+                            t!("settings.gpuMonitorInterval"),
+                            Some(SharedString::from(t!("settings.gpuMonitorIntervalDesc"))),
                             self.number_input_box(
                                 "settings.number.gpu-monitor-interval",
                                 self.settings
@@ -316,10 +305,8 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showAscendNpuMonitor"),
-                        Some(SharedString::from(
-                            self.tr("settings.showAscendNpuMonitorDesc"),
-                        )),
+                        t!("settings.showAscendNpuMonitor"),
+                        Some(SharedString::from(t!("settings.showAscendNpuMonitorDesc"))),
                         settings_switch(
                             palette,
                             "terminal-ascend-npu-monitor",
@@ -332,10 +319,10 @@ impl NyaTermApp {
                     .when(self.settings.summary().ui_show_ascend_npu_monitor, |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.ascendNpuMonitorInterval"),
-                            Some(SharedString::from(
-                                self.tr("settings.ascendNpuMonitorIntervalDesc"),
-                            )),
+                            t!("settings.ascendNpuMonitorInterval"),
+                            Some(SharedString::from(t!(
+                                "settings.ascendNpuMonitorIntervalDesc"
+                            ))),
                             self.number_input_box(
                                 "settings.number.ascend-npu-monitor-interval",
                                 self.settings
@@ -350,10 +337,8 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showProcessManager"),
-                        Some(SharedString::from(
-                            self.tr("settings.showProcessManagerDesc"),
-                        )),
+                        t!("settings.showProcessManager"),
+                        Some(SharedString::from(t!("settings.showProcessManagerDesc"))),
                         settings_switch(
                             palette,
                             "terminal-process-manager",
@@ -366,10 +351,10 @@ impl NyaTermApp {
                     .when(self.settings.summary().ui_show_process_manager, |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.processManagerInterval"),
-                            Some(SharedString::from(
-                                self.tr("settings.processManagerIntervalDesc"),
-                            )),
+                            t!("settings.processManagerInterval"),
+                            Some(SharedString::from(t!(
+                                "settings.processManagerIntervalDesc"
+                            ))),
                             self.number_input_box(
                                 "settings.number.process-manager-interval",
                                 self.settings
@@ -384,10 +369,8 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.showDockerManager"),
-                        Some(SharedString::from(
-                            self.tr("settings.showDockerManagerDesc"),
-                        )),
+                        t!("settings.showDockerManager"),
+                        Some(SharedString::from(t!("settings.showDockerManagerDesc"))),
                         settings_switch(
                             palette,
                             "terminal-docker-manager",
@@ -400,10 +383,8 @@ impl NyaTermApp {
                     .when(self.settings.summary().ui_show_docker_manager, |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.dockerManagerInterval"),
-                            Some(SharedString::from(
-                                self.tr("settings.dockerManagerIntervalDesc"),
-                            )),
+                            t!("settings.dockerManagerInterval"),
+                            Some(SharedString::from(t!("settings.dockerManagerIntervalDesc"))),
                             self.number_input_box(
                                 "settings.number.docker-manager-interval",
                                 self.settings
@@ -427,8 +408,8 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.actionLinks"),
-                        Some(SharedString::from(self.tr("settings.actionLinksDesc"))),
+                        t!("settings.actionLinks"),
+                        Some(SharedString::from(t!("settings.actionLinksDesc"))),
                         settings_switch(
                             palette,
                             "terminal-action-links",
@@ -443,7 +424,7 @@ impl NyaTermApp {
                             .text_size(px(13.))
                             .font_weight(FontWeight(500.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("settings.actionLinksMatchers")),
+                            .child(t!("settings.actionLinksMatchers")),
                     )
                     .child(
                         div()
@@ -454,9 +435,9 @@ impl NyaTermApp {
                                 palette,
                                 TerminalActionMatcherPresentation {
                                     id: "terminal-action-links-ipv4",
-                                    label: self.tr("settings.actionLinksMatcherIpv4"),
+                                    label: t!("settings.actionLinksMatcherIpv4"),
                                     example: Cow::Borrowed("192.168.1.1"),
-                                    description: self.tr("settings.actionLinksMatcherIpv4Desc"),
+                                    description: t!("settings.actionLinksMatcherIpv4Desc"),
                                     checked: self
                                         .settings
                                         .summary()
@@ -472,9 +453,9 @@ impl NyaTermApp {
                                 palette,
                                 TerminalActionMatcherPresentation {
                                     id: "terminal-action-links-host-port",
-                                    label: self.tr("settings.actionLinksMatcherHostPort"),
+                                    label: t!("settings.actionLinksMatcherHostPort"),
                                     example: Cow::Borrowed("localhost:8080"),
-                                    description: self.tr("settings.actionLinksMatcherHostPortDesc"),
+                                    description: t!("settings.actionLinksMatcherHostPortDesc"),
                                     checked: self
                                         .settings
                                         .summary()
@@ -490,9 +471,9 @@ impl NyaTermApp {
                                 palette,
                                 TerminalActionMatcherPresentation {
                                     id: "terminal-action-links-archive",
-                                    label: self.tr("settings.actionLinksMatcherArchive"),
+                                    label: t!("settings.actionLinksMatcherArchive"),
                                     example: Cow::Borrowed("backup.tar.gz"),
-                                    description: self.tr("settings.actionLinksMatcherArchiveDesc"),
+                                    description: t!("settings.actionLinksMatcherArchiveDesc"),
                                     checked: self
                                         .settings
                                         .summary()

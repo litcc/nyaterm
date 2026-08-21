@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb, svg};
 use nyaterm_core::truncate_preview;
 
@@ -241,7 +243,7 @@ impl NyaTermApp {
                         .border_color(rgb(palette.surface_elevated))
                         .text_size(px(10.))
                         .text_color(rgb(palette.link))
-                        .child(self.tr("ai.agentExecuting")),
+                        .child(t!("ai.agentExecuting")),
                 );
             }
 

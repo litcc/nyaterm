@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use nyaterm_ui::NyaScrollable;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -1053,18 +1055,18 @@ impl NyaTermApp {
         }
         let menu_w = 380.0_f32;
         let menu_h = suggestion_overlay_desired_height(state.items.len(), 28.0);
-        let title = self.tr("suggestions.title");
-        let match_label = self.tr(if state.items.len() == 1 {
+        let title = t!("suggestions.title");
+        let match_label = t!(if state.items.len() == 1 {
             "suggestions.match"
         } else {
             "suggestions.matches"
         });
         let footer = format!(
             "↑↓ {} · Enter {} · Tab {} · Esc {}",
-            self.tr("suggestions.select"),
-            self.tr("suggestions.execute"),
-            self.tr("suggestions.fill"),
-            self.tr("suggestions.dismiss")
+            t!("suggestions.select"),
+            t!("suggestions.execute"),
+            t!("suggestions.fill"),
+            t!("suggestions.dismiss")
         );
         let Some(placement) = self.suggestion_overlay_position_for_session(
             Some(&state.session_id),

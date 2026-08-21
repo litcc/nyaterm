@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, FontWeight, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 
@@ -31,7 +33,7 @@ impl NyaTermApp {
                         .text_xs()
                         .font_weight(FontWeight(600.))
                         .text_color(rgb(palette.text))
-                        .child(self.tr("otpManager.title")),
+                        .child(t!("otpManager.title")),
                 )
                 .child(
                     div()
@@ -41,9 +43,9 @@ impl NyaTermApp {
                         .child(
                             nyaterm_ui::NyaIconButton::new("security-otp-scan-qr", "icons/qr.svg")
                                 .tooltip(if self.security.otp_qr_importing() {
-                                    self.tr("otpManager.scanningQr")
+                                    t!("otpManager.scanningQr")
                                 } else {
-                                    self.tr("otpManager.scanQr")
+                                    t!("otpManager.scanQr")
                                 })
                                 .disabled(actions_disabled)
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -52,7 +54,7 @@ impl NyaTermApp {
                         )
                         .child(
                             nyaterm_ui::NyaIconButton::new("security-add-otp", "icons/plus.svg")
-                                .tooltip(self.tr("otpManager.add"))
+                                .tooltip(t!("otpManager.add"))
                                 .disabled(actions_disabled)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_security_otp_editor(None, window, cx);
@@ -63,7 +65,7 @@ impl NyaTermApp {
 
         if self.security.otp_entries().is_empty() {
             return body.child(empty_panel(
-                self.tr("otpManager.noEntries"),
+                t!("otpManager.noEntries"),
                 self.theme_palette(),
             ));
         }
@@ -171,7 +173,7 @@ impl NyaTermApp {
                                         "icons/eye.svg"
                                     },
                                 )
-                                .tooltip(self.tr(if visible {
+                                .tooltip(t!(if visible {
                                     "otpManager.hideCodes"
                                 } else {
                                     "otpManager.showCodes"
@@ -191,7 +193,7 @@ impl NyaTermApp {
                                     format!("security-otp-edit-{id}"),
                                     "icons/edit.svg",
                                 )
-                                .tooltip(self.tr("common.edit"))
+                                .tooltip(t!("common.edit"))
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.open_security_otp_editor(
@@ -208,9 +210,9 @@ impl NyaTermApp {
                                     "icons/send.svg",
                                 )
                                 .tooltip(if can_send {
-                                    self.tr("otp.sendToTerminal")
+                                    t!("otp.sendToTerminal")
                                 } else {
-                                    self.tr("otpManager.noActiveTerminal")
+                                    t!("otpManager.noActiveTerminal")
                                 })
                                 .disabled(!can_send)
                                 .on_click(cx.listener(
@@ -228,7 +230,7 @@ impl NyaTermApp {
                                     format!("security-otp-del-{id}"),
                                     "icons/delete.svg",
                                 )
-                                .tooltip(self.tr("common.delete"))
+                                .tooltip(t!("common.delete"))
                                 .on_click(cx.listener(
                                     move |this, _, window, cx| {
                                         this.request_delete_security_otp(
@@ -272,7 +274,7 @@ impl NyaTermApp {
                                                 format!("security-otp-copy-{id}"),
                                                 "icons/copy.svg",
                                             )
-                                            .tooltip(self.tr("otp.copyCode"))
+                                            .tooltip(t!("otp.copyCode"))
                                             .disabled(code.is_empty())
                                             .on_click(
                                                 cx.listener(move |this, _, window, cx| {
@@ -310,7 +312,7 @@ impl NyaTermApp {
                                     this.child(
                                         nyaterm_ui::NyaButton::new(
                                             format!("security-otp-generate-{id}"),
-                                            self.tr("otp.generateCode"),
+                                            t!("otp.generateCode"),
                                         )
                                         .small()
                                         .on_click(

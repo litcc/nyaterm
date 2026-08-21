@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{ClipboardItem, Context};
 use nyaterm_core::{AiAction, AiContext};
 use nyaterm_transport::{RecordingMode, RecordingStatus};
@@ -39,7 +41,7 @@ impl NyaTermApp {
         if has_selection {
             let selected_for_copy = selected.clone();
             items.push(
-                NyaMenuItem::action(self.tr("terminalCtx.copy"))
+                NyaMenuItem::action(t!("terminalCtx.copy"))
                     .icon("icons/copy.svg")
                     .shortcut(copy_sc)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -52,7 +54,7 @@ impl NyaTermApp {
             let selected_for_find = selected.clone();
             let find_session_id = session_id.clone();
             items.push(
-                NyaMenuItem::action(self.tr("terminalCtx.find"))
+                NyaMenuItem::action(t!("terminalCtx.find"))
                     .icon("icons/fe/search.svg")
                     .shortcut(find_sc)
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -66,20 +68,19 @@ impl NyaTermApp {
 
             let search_items = self.terminal_online_search_menu_items(&selected, cx);
             items.push(
-                NyaMenuItem::submenu(self.tr("terminalCtx.searchOnline"), search_items)
+                NyaMenuItem::submenu(t!("terminalCtx.searchOnline"), search_items)
                     .icon("icons/menu/travel-explore.svg"),
             );
 
             let ai_items = self.terminal_ai_context_menu_items(&session_id, &selected, cx);
             if !ai_items.is_empty() {
-                items
-                    .push(NyaMenuItem::submenu(self.tr("ai.title"), ai_items).icon("icons/ai.svg"));
+                items.push(NyaMenuItem::submenu(t!("ai.title"), ai_items).icon("icons/ai.svg"));
             }
 
             let translation_items = self.terminal_translation_menu_items(&selected, cx);
             if !translation_items.is_empty() {
                 items.push(
-                    NyaMenuItem::submenu(self.tr("terminalCtx.translate"), translation_items)
+                    NyaMenuItem::submenu(t!("terminalCtx.translate"), translation_items)
                         .icon("icons/translation.svg"),
                 );
             }
@@ -89,14 +90,14 @@ impl NyaTermApp {
             let paste_selected_session_id = session_id.clone();
             items.extend([
                 NyaMenuItem::separator(),
-                NyaMenuItem::action(self.tr("terminalCtx.paste"))
+                NyaMenuItem::action(t!("terminalCtx.paste"))
                     .icon("icons/menu/paste.svg")
                     .shortcut(paste_sc)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_workspace_pane(paste_session_id.clone(), cx);
                         this.paste_from_clipboard(window, cx);
                     })),
-                NyaMenuItem::action(self.tr("terminalCtx.pasteSelectedText"))
+                NyaMenuItem::action(t!("terminalCtx.pasteSelectedText"))
                     .icon("icons/menu/paste-go.svg")
                     .shortcut(paste_sel_sc)
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -108,14 +109,14 @@ impl NyaTermApp {
             let paste_session_id = session_id.clone();
             let find_session_id = session_id.clone();
             items.extend([
-                NyaMenuItem::action(self.tr("terminalCtx.paste"))
+                NyaMenuItem::action(t!("terminalCtx.paste"))
                     .icon("icons/menu/paste.svg")
                     .shortcut(paste_sc)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.activate_workspace_pane(paste_session_id.clone(), cx);
                         this.paste_from_clipboard(window, cx);
                     })),
-                NyaMenuItem::action(self.tr("terminalCtx.find"))
+                NyaMenuItem::action(t!("terminalCtx.find"))
                     .icon("icons/fe/search.svg")
                     .shortcut(find_sc)
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -131,24 +132,24 @@ impl NyaTermApp {
         let select_all_session_id = session_id;
         items.extend([
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("terminalCtx.clearScreen"))
+            NyaMenuItem::action(t!("terminalCtx.clearScreen"))
                 .icon("icons/menu/clear-all.svg")
                 .shortcut(clear_sc)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.activate_workspace_pane(clear_screen_session_id.clone(), cx);
                     this.send_terminal_clear_screen(cx);
                 })),
-            NyaMenuItem::action(self.tr("terminalCtx.clearAll"))
+            NyaMenuItem::action(t!("terminalCtx.clearAll"))
                 .icon("icons/menu/delete-sweep.svg")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.activate_workspace_pane(clear_all_session_id.clone(), cx);
                     this.clear_terminal(cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::submenu(self.tr("terminalCtx.recordingLogs"), recording_items)
+            NyaMenuItem::submenu(t!("terminalCtx.recordingLogs"), recording_items)
                 .icon("icons/session/record.svg"),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("terminalCtx.selectAll"))
+            NyaMenuItem::action(t!("terminalCtx.selectAll"))
                 .icon("icons/menu/select-all.svg")
                 .shortcut(select_all_sc)
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -181,13 +182,13 @@ impl NyaTermApp {
             let open_path = status.file_path.clone();
             let reveal_path = status.file_path;
             vec![
-                NyaMenuItem::action(self.tr("recording.stop"))
+                NyaMenuItem::action(t!("recording.stop"))
                     .icon("icons/session/stop.svg")
                     .shortcut(shortcut)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.stop_recording_for_session(&stop_session_id, cx);
                     })),
-                NyaMenuItem::action(self.tr("recording.openLog"))
+                NyaMenuItem::action(t!("recording.openLog"))
                     .icon("icons/file/description.svg")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let Some(path) = open_path.as_ref() else {
@@ -196,7 +197,7 @@ impl NyaTermApp {
                         cx.open_with_system(path);
                         this.shell.set_status("recording opened".to_string());
                     })),
-                NyaMenuItem::action(self.tr("recording.showInFolder"))
+                NyaMenuItem::action(t!("recording.showInFolder"))
                     .icon("icons/session/folder-open.svg")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let Some(path) = reveal_path.as_ref() else {
@@ -211,7 +212,7 @@ impl NyaTermApp {
             let transcript_session_id = session_id.to_string();
             let raw_session_id = session_id.to_string();
             vec![
-                NyaMenuItem::action(self.tr("recording.startTranscriptLog"))
+                NyaMenuItem::action(t!("recording.startTranscriptLog"))
                     .icon("icons/file/description.svg")
                     .shortcut(shortcut)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -221,7 +222,7 @@ impl NyaTermApp {
                             cx,
                         );
                     })),
-                NyaMenuItem::action(self.tr("recording.startRawLog"))
+                NyaMenuItem::action(t!("recording.startRawLog"))
                     .icon("icons/session/record.svg")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.start_recording_for_session(&raw_session_id, RecordingMode::Raw, cx);
@@ -231,12 +232,12 @@ impl NyaTermApp {
         let save_session_id = session_id.to_string();
         items.extend([
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("recording.saveTranscript"))
+            NyaMenuItem::action(t!("recording.saveTranscript"))
                 .icon("icons/file/description.svg")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.save_session_transcript_for_session(&save_session_id, cx);
                 })),
-            NyaMenuItem::action(self.tr("terminalCtx.recordingSettings"))
+            NyaMenuItem::action(t!("terminalCtx.recordingSettings"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.shell.set_settings_active_tab(SettingsTab::Transfer);
                     this.open_page(NavItem::Settings, cx);
@@ -337,17 +338,16 @@ impl NyaTermApp {
         available_translation_providers(self.translation.settings())
             .into_iter()
             .map(|(id, _)| {
-                let label = self
-                    .tr(match id.as_str() {
-                        "google" => "translation.google",
-                        "microsoft" => "translation.microsoft",
-                        "deepl" => "translation.deepl",
-                        "baidu" => "translation.baidu",
-                        "ali" => "translation.ali",
-                        "youdao" => "translation.youdao",
-                        _ => "translation.provider",
-                    })
-                    .to_string();
+                let label = t!(match id.as_str() {
+                    "google" => "translation.google",
+                    "microsoft" => "translation.microsoft",
+                    "deepl" => "translation.deepl",
+                    "baidu" => "translation.baidu",
+                    "ali" => "translation.ali",
+                    "youdao" => "translation.youdao",
+                    _ => "translation.provider",
+                })
+                .to_string();
                 let selected = selected.to_string();
                 let provider_id = id.clone();
                 let provider_label = label.clone();

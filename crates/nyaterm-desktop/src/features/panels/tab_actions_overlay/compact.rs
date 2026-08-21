@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use super::{
@@ -196,7 +198,7 @@ impl NyaTermApp {
                         panel = panel.child(tab_menu_separator(palette)).child(tab_menu_item(
                             palette,
                             "tab-ctx-color-reset",
-                            self.tr("tabCtx.resetColor"),
+                            t!("tabCtx.resetColor"),
                             cx.listener(move |this, _, _, cx| {
                                 this.select_session(reset_color_session_id.clone(), cx);
                                 this.close_tab_actions(cx);
@@ -210,7 +212,7 @@ impl NyaTermApp {
                         .child(tab_menu_item_enabled(
                             palette,
                             "tab-ctx-multiplex",
-                            self.tr("tabCtx.multiplexSsh"),
+                            t!("tabCtx.multiplexSsh"),
                             can_multiplex,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(multiplex_session_id.clone(), cx);
@@ -228,7 +230,7 @@ impl NyaTermApp {
                         .child(tab_menu_item_enabled(
                             palette,
                             "tab-ctx-multiplex-run",
-                            self.tr("tabCtx.multiplexSshWithCommand"),
+                            t!("tabCtx.multiplexSshWithCommand"),
                             can_multiplex,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(multiplex_startup_session_id.clone(), cx);
@@ -255,7 +257,7 @@ impl NyaTermApp {
                         .child(tab_menu_item_enabled(
                             palette,
                             "tab-ctx-ai-explain",
-                            self.tr("ai.explainRecent"),
+                            t!("ai.explainRecent"),
                             can_use_ai,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(explain_session_id.clone(), cx);
@@ -286,7 +288,7 @@ impl NyaTermApp {
                         .child(tab_menu_item_enabled(
                             palette,
                             "tab-ctx-ai-analyze",
-                            self.tr("ai.analyzeError"),
+                            t!("ai.analyzeError"),
                             can_use_ai,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(analyze_session_id.clone(), cx);
@@ -375,7 +377,7 @@ impl NyaTermApp {
                         TabActionsSubmenuItem {
                             id: "tab-ctx-set-color",
                             icon_path: "icons/menu/palette.svg",
-                            label: self.tr("tabCtx.setColor"),
+                            label: t!("tabCtx.setColor"),
                             enabled: true,
                             active: active_submenu == Some(TabActionsSubmenu::Color),
                         },
@@ -393,7 +395,7 @@ impl NyaTermApp {
                     .child(tab_menu_item(
                         palette,
                         "tab-ctx-rename",
-                        self.tr("tabCtx.rename"),
+                        t!("tabCtx.rename"),
                         cx.listener(move |this, _, window, cx| {
                             this.close_tab_actions(cx);
                             this.open_rename_session(rename_session_id.clone(), window, cx);
@@ -407,9 +409,9 @@ impl NyaTermApp {
                             "tab-ctx-lock"
                         },
                         if locked {
-                            self.tr("tabCtx.unlockTab")
+                            t!("tabCtx.unlockTab")
                         } else {
-                            self.tr("tabCtx.lockTab")
+                            t!("tabCtx.lockTab")
                         },
                         cx.listener(move |this, _, _, cx| {
                             this.close_tab_actions(cx);
@@ -419,7 +421,7 @@ impl NyaTermApp {
                     .child(tab_menu_item(
                         palette,
                         "tab-ctx-copy-name",
-                        self.tr("tabCtx.copyName"),
+                        t!("tabCtx.copyName"),
                         cx.listener(move |this, _, _, cx| {
                             this.close_tab_actions(cx);
                             this.copy_session_name(&copy_name_session_id, cx);
@@ -428,7 +430,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-copy-ip",
-                        self.tr("tabCtx.copyIp"),
+                        t!("tabCtx.copyIp"),
                         can_copy_ssh,
                         cx.listener(move |this, _, _, cx| {
                             this.select_session(copy_host_session_id.clone(), cx);
@@ -440,7 +442,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-duplicate",
-                        self.tr("tabCtx.duplicate"),
+                        t!("tabCtx.duplicate"),
                         can_spawn_session,
                         cx.listener(move |this, _, window, cx| {
                             this.select_session(duplicate_session_id.clone(), cx);
@@ -457,7 +459,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-duplicate-run",
-                        self.tr("tabCtx.duplicateWithCommand"),
+                        t!("tabCtx.duplicateWithCommand"),
                         can_spawn_session,
                         cx.listener(move |this, _, window, cx| {
                             this.select_session(startup_session_id.clone(), cx);
@@ -476,7 +478,7 @@ impl NyaTermApp {
                         TabActionsSubmenuItem {
                             id: "tab-ctx-ssh-advanced",
                             icon_path: "icons/menu/split.svg",
-                            label: self.tr("tabCtx.sshAdvanced"),
+                            label: t!("tabCtx.sshAdvanced"),
                             enabled: can_multiplex,
                             active: active_submenu == Some(TabActionsSubmenu::SshAdvanced),
                         },
@@ -502,7 +504,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-reconnect",
-                        self.tr("tabCtx.reconnect"),
+                        t!("tabCtx.reconnect"),
                         can_reconnect,
                         cx.listener(move |this, _, window, cx| {
                             this.select_session(reconnect_session_id.clone(), cx);
@@ -521,7 +523,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-disconnect",
-                        self.tr("tabCtx.disconnect"),
+                        t!("tabCtx.disconnect"),
                         can_disconnect,
                         cx.listener(move |this, _, _, cx| {
                             this.close_tab_actions(cx);
@@ -539,7 +541,7 @@ impl NyaTermApp {
                         TabActionsSubmenuItem {
                             id: "tab-ctx-ai",
                             icon_path: "icons/ai.svg",
-                            label: self.tr("ai.title"),
+                            label: t!("ai.title"),
                             enabled: true,
                             active: active_submenu == Some(TabActionsSubmenu::Ai),
                         },
@@ -558,7 +560,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-split-h",
-                        self.tr("tabCtx.splitHorizontal"),
+                        t!("tabCtx.splitHorizontal"),
                         can_spawn_session,
                         cx.listener(move |this, _, window, cx| {
                             this.select_session(split_horizontal_session_id.clone(), cx);
@@ -580,7 +582,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-split-v",
-                        self.tr("tabCtx.splitVertical"),
+                        t!("tabCtx.splitVertical"),
                         can_spawn_session,
                         cx.listener(move |this, _, window, cx| {
                             this.select_session(split_vertical_session_id.clone(), cx);
@@ -603,7 +605,7 @@ impl NyaTermApp {
                         this.child(tab_menu_item(
                             palette,
                             "tab-ctx-unsplit",
-                            self.tr("tabCtx.unsplit"),
+                            t!("tabCtx.unsplit"),
                             cx.listener(|this, _, _, cx| {
                                 this.close_tab_actions(cx);
                                 this.unsplit_workspace(cx);
@@ -614,7 +616,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-close",
-                        self.tr("tabCtx.close"),
+                        t!("tabCtx.close"),
                         !locked,
                         cx.listener(move |this, _, _, cx| {
                             this.close_tab_actions(cx);
@@ -624,7 +626,7 @@ impl NyaTermApp {
                     .child(tab_menu_item(
                         palette,
                         "tab-ctx-close-all",
-                        self.tr("tabCtx.closeAll"),
+                        t!("tabCtx.closeAll"),
                         cx.listener(|this, _, window, cx| {
                             this.close_tab_actions(cx);
                             this.open_close_all_sessions_confirm(window, cx);
@@ -633,7 +635,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-close-others",
-                        self.tr("tabCtx.closeInactive"),
+                        t!("tabCtx.closeInactive"),
                         can_close_inactive,
                         cx.listener(move |this, _, _, cx| {
                             this.close_tab_actions(cx);
@@ -643,7 +645,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-close-right",
-                        self.tr("tabCtx.closeRight"),
+                        t!("tabCtx.closeRight"),
                         can_close_right,
                         cx.listener(move |this, _, _, cx| {
                             this.close_tab_actions(cx);
@@ -653,7 +655,7 @@ impl NyaTermApp {
                     .child(tab_menu_item_enabled(
                         palette,
                         "tab-ctx-info",
-                        self.tr("tabCtx.sessionInfo"),
+                        t!("tabCtx.sessionInfo"),
                         can_session_info,
                         cx.listener(move |this, _, window, cx| {
                             this.select_session(info_session_id.clone(), cx);

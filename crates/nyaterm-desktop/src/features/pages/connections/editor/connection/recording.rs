@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, div,
     prelude::{FluentBuilder, ParentElement, Styled},
@@ -18,10 +20,8 @@ pub(super) fn connection_editor_recording_section(
     let ConnectionEditorSectionContext {
         palette,
         editor,
-        language,
         fields,
     } = section;
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     let use_global = editor.recording.is_none();
     let auto_start = editor
         .recording
@@ -50,14 +50,14 @@ pub(super) fn connection_editor_recording_section(
                             div()
                                 .text_xs()
                                 .font_weight(FontWeight(500.))
-                                .child(tr("dialog.connectionRecording")),
+                                .child(t!("dialog.connectionRecording")),
                         )
                         .child(
                             div()
                                 .mt_1()
                                 .text_size(px(10.))
                                 .text_color(rgb(palette.text_muted))
-                                .child(tr("dialog.connectionRecordingDesc")),
+                                .child(t!("dialog.connectionRecordingDesc")),
                         ),
                 )
                 .child(
@@ -69,7 +69,7 @@ pub(super) fn connection_editor_recording_section(
                             div()
                                 .text_xs()
                                 .text_color(rgb(palette.text_muted))
-                                .child(tr("dialog.recordingUseGlobal")),
+                                .child(t!("dialog.recordingUseGlobal")),
                         )
                         .child(
                             NyaSwitch::new("connection-recording-use-global")
@@ -98,14 +98,14 @@ pub(super) fn connection_editor_recording_section(
                                 div()
                                     .text_xs()
                                     .font_weight(FontWeight(500.))
-                                    .child(tr("dialog.recordingAutoStart")),
+                                    .child(t!("dialog.recordingAutoStart")),
                             )
                             .child(
                                 div()
                                     .mt_1()
                                     .text_size(px(10.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(tr("dialog.recordingAutoStartDesc")),
+                                    .child(t!("dialog.recordingAutoStartDesc")),
                             ),
                     )
                     .child(
@@ -126,7 +126,7 @@ pub(super) fn connection_editor_recording_section(
                     cx,
                 },
                 "connection-editor-recording-mode",
-                tr("dialog.recordingMode"),
+                t!("dialog.recordingMode"),
                 ConnectionEditorSelect::RecordingMode,
             ))
         })

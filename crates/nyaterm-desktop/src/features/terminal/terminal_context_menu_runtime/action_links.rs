@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 
@@ -254,7 +256,7 @@ impl NyaTermApp {
                                 .border_color(rgb(palette.border))
                                 .text_size(px(10.))
                                 .text_color(rgb(palette.text_muted))
-                                .child(self.tr("terminal.actionLinkAltClickHint")),
+                                .child(t!("terminal.actionLinkAltClickHint")),
                         )
                     }),
             )

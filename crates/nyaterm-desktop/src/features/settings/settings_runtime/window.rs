@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
     WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
@@ -41,7 +43,7 @@ impl Render for SettingsWindow {
                 app.theme_palette(),
                 app.gpui_ui_font().font(),
                 app.settings.summary().ui_font_size.clamp(12, 24) as f32,
-                app.tr("settings.title").to_string(),
+                t!("settings.title").to_string(),
             )
         });
         window.set_window_title(&title);
@@ -132,7 +134,7 @@ fn open_settings_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut App) {
         return;
     }
 
-    let title = app.read(cx).tr("settings.title").to_string();
+    let title = t!("settings.title").to_string();
     let bounds = Bounds::centered(None, size(px(800.), px(560.)), cx);
     let close_app = app.clone();
     let view_app = app.clone();

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, Context, Window};
 
 use crate::features::NyaTermApp;
@@ -26,12 +28,12 @@ impl NyaTermApp {
             ),
             SecurityAuthTab::Otp => ("otpManager.deleteTitle", "otpManager.deleteConfirm"),
         };
-        let message = self.tr(description_key).replace("{{name}}", &label);
+        let message = t!(description_key).replace("{{name}}", &label);
         self.open_confirm_dialog(
             (
-                self.tr(title_key).to_string(),
+                t!(title_key).to_string(),
                 message,
-                self.tr("common.delete").to_string(),
+                t!("common.delete").to_string(),
                 true,
                 move |app, window, cx| {
                     app.delete_security_item(kind, id.clone(), label.clone(), window, cx)

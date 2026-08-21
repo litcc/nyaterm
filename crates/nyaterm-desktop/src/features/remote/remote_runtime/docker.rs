@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_transport::DockerService;
 
@@ -445,7 +447,7 @@ impl NyaTermApp {
             (
                 title,
                 detail,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 true,
                 move |app, window, cx| {
                     app.run_confirmed_docker_action(confirm.clone(), window, cx);

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::prelude::*;
@@ -23,7 +25,7 @@ pub(in crate::features::pages::tunnels) fn proxy_network_row(
             .as_deref()
             .filter(|command| !command.trim().is_empty())
             .map(Cow::Borrowed)
-            .unwrap_or_else(|| app.tr("network.proxyCommand"))
+            .unwrap_or_else(|| t!("network.proxyCommand"))
             .to_string()
     } else if let Some(username) = proxy.username.as_deref().filter(|value| !value.is_empty()) {
         format!("{username}@{}:{}", proxy.host, proxy.port)
@@ -77,10 +79,10 @@ pub(in crate::features::pages::tunnels) fn proxy_network_row(
             NetworkItemMenuConfig {
                 palette,
                 id: format!("proxy-actions-{}", proxy.id),
-                more_label: app.tr("common.more"),
-                edit_label: app.tr("common.edit"),
-                move_label: app.tr("network.moveToGroup"),
-                delete_label: app.tr("common.delete"),
+                more_label: t!("common.more"),
+                edit_label: t!("common.edit"),
+                move_label: t!("network.moveToGroup"),
+                delete_label: t!("common.delete"),
                 can_move: !app.tunnel_state.proxy_groups().is_empty(),
             },
             cx.listener(move |this, _, window, cx| {
@@ -106,7 +108,6 @@ pub(in crate::features::pages::tunnels) fn proxy_move_picker(
     proxy_id: String,
     current_group_id: Option<String>,
     groups: &[ProxyGroup],
-    app: &NyaTermApp,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::Div {
     let mut targets = div().flex().flex_wrap().items_center().gap_2();
@@ -121,8 +122,8 @@ pub(in crate::features::pages::tunnels) fn proxy_move_picker(
                 .bg(rgb(palette.hover))
                 .child(format!(
                     "{} · {}",
-                    app.tr("network.ungrouped"),
-                    app.tr("network.current")
+                    t!("network.ungrouped"),
+                    t!("network.current")
                 )),
         );
     } else {
@@ -130,7 +131,7 @@ pub(in crate::features::pages::tunnels) fn proxy_move_picker(
         targets = targets.child(small_button(
             palette,
             format!("network-proxy-move-{proxy_id}-ungrouped"),
-            app.tr("network.ungrouped"),
+            t!("network.ungrouped"),
             cx.listener(move |this, _, _, cx| {
                 this.move_proxy_to_group(target_id.clone(), None, cx);
             }),
@@ -140,7 +141,7 @@ pub(in crate::features::pages::tunnels) fn proxy_move_picker(
     for group in groups {
         if current_group_id.as_deref() == Some(group.id.as_str()) {
             targets = targets.child(status_pill(
-                app.tr("network.current"),
+                t!("network.current"),
                 rgb(palette.success),
                 rgb(palette.hover),
             ));
@@ -156,7 +157,7 @@ pub(in crate::features::pages::tunnels) fn proxy_move_picker(
             targets = targets.child(small_button(
                 palette,
                 format!("network-proxy-move-{proxy_id}-{}", group.id),
-                app.tr("network.moveHere"),
+                t!("network.moveHere"),
                 cx.listener(move |this, _, _, cx| {
                     this.move_proxy_to_group(target_id.clone(), Some(group_id.clone()), cx);
                 }),
@@ -185,7 +186,7 @@ pub(in crate::features::pages::tunnels) fn proxy_move_picker(
                 .text_xs()
                 .font_weight(FontWeight(700.))
                 .text_color(rgb(palette.text))
-                .child(app.tr("network.moveToGroup")),
+                .child(t!("network.moveToGroup")),
         )
         .child(targets)
 }

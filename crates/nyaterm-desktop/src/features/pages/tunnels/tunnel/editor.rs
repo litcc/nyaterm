@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, px, rgb};
 
@@ -13,9 +15,9 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let type_options = vec![
-        NyaSelectOption::new("local", app.tr("network.localTunnel")),
-        NyaSelectOption::new("remote", app.tr("network.remoteTunnel")),
-        NyaSelectOption::new("dynamic", app.tr("network.dynamicTunnel")),
+        NyaSelectOption::new("local", t!("network.localTunnel")),
+        NyaSelectOption::new("remote", t!("network.remoteTunnel")),
+        NyaSelectOption::new("dynamic", t!("network.dynamicTunnel")),
     ];
     let selected_type = match editor.tunnel_type.as_str() {
         "remote" => "remote",
@@ -25,7 +27,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
     .to_string();
     let mut group_options = vec![NyaSelectOption::new(
         NO_SELECTION_VALUE,
-        app.tr("network.ungrouped"),
+        t!("network.ungrouped"),
     )];
     group_options.extend(
         app.tunnel_state
@@ -40,7 +42,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
         .unwrap_or_else(|| NO_SELECTION_VALUE.to_string());
     let mut connection_options = vec![NyaSelectOption::new(
         NO_SELECTION_VALUE,
-        app.tr("network.connectionPickerPlaceholder"),
+        t!("network.connectionPickerPlaceholder"),
     )];
     connection_options.extend(
         app.connection_state
@@ -60,18 +62,18 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
     let name_input = tunnel_editor_input(
         app,
         NetworkTunnelEditorField::Name,
-        app.tr("network.tunnelName"),
+        t!("network.tunnelName"),
         editor.name.clone(),
-        TextInputSetup::placeholder(app.tr("network.tunnelNamePlaceholder")),
+        TextInputSetup::placeholder(t!("network.tunnelNamePlaceholder")),
         cx,
     );
     let listen_port_input = tunnel_editor_input(
         app,
         NetworkTunnelEditorField::ListenPort,
         match editor.tunnel_type.as_str() {
-            "remote" => app.tr("network.listenPortRemote"),
-            "dynamic" => app.tr("network.listenPortDynamic"),
-            _ => app.tr("network.listenPortLocal"),
+            "remote" => t!("network.listenPortRemote"),
+            "dynamic" => t!("network.listenPortDynamic"),
+            _ => t!("network.listenPortLocal"),
         },
         editor.listen_port.clone(),
         TextInputSetup::default(),
@@ -83,8 +85,8 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
             app,
             NetworkTunnelEditorField::TargetPort,
             match editor.tunnel_type.as_str() {
-                "remote" => app.tr("network.targetPortRemote"),
-                _ => app.tr("network.targetPortLocal"),
+                "remote" => t!("network.targetPortRemote"),
+                _ => t!("network.targetPortLocal"),
             },
             editor.target_port.clone(),
             TextInputSetup::default(),
@@ -96,8 +98,8 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
             app,
             NetworkTunnelEditorField::TargetHost,
             match editor.tunnel_type.as_str() {
-                "remote" => app.tr("network.targetHostRemote"),
-                _ => app.tr("network.targetHostLocal"),
+                "remote" => t!("network.targetHostRemote"),
+                _ => t!("network.targetHostLocal"),
             },
             editor.target_host.clone(),
             TextInputSetup::placeholder("127.0.0.1"),
@@ -113,7 +115,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
             div()
                 .text_size(px(12.))
                 .text_color(rgb(palette.text_muted))
-                .child(app.tr("network.tunnelDialogDescription")),
+                .child(t!("network.tunnelDialogDescription")),
         )
         .child(
             div()
@@ -125,7 +127,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
                     app,
                     palette,
                     "network-tunnel-editor-type",
-                    app.tr("network.tunnelType"),
+                    t!("network.tunnelType"),
                     type_options,
                     selected_type,
                     cx,
@@ -134,7 +136,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
                     app,
                     palette,
                     "network-tunnel-editor-group",
-                    app.tr("network.group"),
+                    t!("network.group"),
                     group_options,
                     selected_group,
                     cx,
@@ -144,7 +146,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
             app,
             palette,
             "network-tunnel-editor-connection",
-            app.tr("network.selectedConnection"),
+            t!("network.selectedConnection"),
             connection_options,
             selected_connection,
             cx,
@@ -170,8 +172,8 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
                 .child(tunnel_editor_option(
                     palette,
                     "network-tunnel-editor-bind-local",
-                    app.tr("network.bindLocalhostOnly"),
-                    app.tr("network.bindLocalhostOnlyHint"),
+                    t!("network.bindLocalhostOnly"),
+                    t!("network.bindLocalhostOnlyHint"),
                     editor.bind_localhost,
                     cx.listener(|this, _, _, cx| {
                         this.set_network_tunnel_bind_localhost(true, cx);
@@ -180,8 +182,8 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
                 .child(tunnel_editor_option(
                     palette,
                     "network-tunnel-editor-bind-all",
-                    app.tr("network.bindAllInterfaces"),
-                    app.tr("network.bindAllInterfacesHint"),
+                    t!("network.bindAllInterfaces"),
+                    t!("network.bindAllInterfacesHint"),
                     !editor.bind_localhost,
                     cx.listener(|this, _, _, cx| {
                         this.set_network_tunnel_bind_localhost(false, cx);
@@ -191,8 +193,8 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
         .child(tunnel_editor_option(
             palette,
             "network-tunnel-editor-auto",
-            app.tr("network.autoOpen"),
-            app.tr("network.tunnelConnectionHint"),
+            t!("network.autoOpen"),
+            t!("network.tunnelConnectionHint"),
             editor.auto_open,
             cx.listener(|this, _, _, cx| {
                 this.toggle_network_tunnel_auto_open(cx);
@@ -212,7 +214,7 @@ pub(in crate::features::pages::tunnels) fn network_tunnel_editor_content(
                     div()
                         .text_xs()
                         .text_color(rgb(palette.text_muted))
-                        .child(app.tr("network.tunnelPreview")),
+                        .child(t!("network.tunnelPreview")),
                 )
                 .child(
                     div()

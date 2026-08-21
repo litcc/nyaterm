@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AppContext as _, Context, FontWeight, IntoElement, Point, Render, Window, div, prelude::*, px,
     rgb,
@@ -47,9 +49,9 @@ impl NyaTermApp {
         let mut body = security_auth_body_base("security-credentials-body");
         body = body.child(security_tab_toolbar(
             palette,
-            self.tr("credentialManager.title"),
+            t!("credentialManager.title"),
             "security-add-credential",
-            self.tr("credentialManager.add"),
+            t!("credentialManager.add"),
             self.security.credential_editor().is_none(),
             cx.listener(|this, _, window, cx| {
                 this.open_security_credential_editor(None, window, cx);
@@ -57,7 +59,7 @@ impl NyaTermApp {
         ));
         if self.security.credentials().is_empty() {
             body = body.child(empty_panel(
-                self.tr("credentialManager.noCredentials"),
+                t!("credentialManager.noCredentials"),
                 self.theme_palette(),
             ));
         } else {
@@ -170,7 +172,7 @@ impl NyaTermApp {
                                                         } else {
                                                             rgb(palette.text_muted)
                                                         })
-                                                        .child(self.tr(if entry.enabled {
+                                                        .child(t!(if entry.enabled {
                                                             "credentialManager.enabled"
                                                         } else {
                                                             "credentialManager.disabled"
@@ -200,7 +202,7 @@ impl NyaTermApp {
                                                         )
                                                         .icon_size(px(11.))
                                                         .tooltip(
-                                                            self.tr("common.copyToClipboard"),
+                                                            t!("common.copyToClipboard"),
                                                         )
                                                         .on_click(cx.listener(
                                                             move |this, _, _, cx| {
@@ -239,7 +241,7 @@ impl NyaTermApp {
                                                             )
                                                             .icon_size(px(11.))
                                                             .tooltip(
-                                                                self.tr("common.copyToClipboard"),
+                                                                t!("common.copyToClipboard"),
                                                             )
                                                             .on_click(cx.listener(
                                                                 move |this, _, _, cx| {
@@ -271,7 +273,7 @@ impl NyaTermApp {
                                             "icons/eye.svg"
                                         },
                                     )
-                                    .tooltip(self.tr(if is_revealed {
+                                    .tooltip(t!(if is_revealed {
                                         "credentialManager.hidePassword"
                                     } else {
                                         "credentialManager.showPassword"
@@ -291,7 +293,7 @@ impl NyaTermApp {
                                         format!("security-cred-edit-{id}"),
                                         "icons/edit.svg",
                                     )
-                                    .tooltip(self.tr("common.edit"))
+                                    .tooltip(t!("common.edit"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.open_security_credential_editor(
@@ -307,7 +309,7 @@ impl NyaTermApp {
                                         format!("security-cred-del-{id}"),
                                         "icons/delete.svg",
                                     )
-                                    .tooltip(self.tr("common.delete"))
+                                    .tooltip(t!("common.delete"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.request_delete_security_credential(

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -62,10 +64,10 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         // Tauri SettingsPage shell: compact header + narrow nav + scroll content.
         let palette = self.theme_palette();
-        let settings_title = self.tr("settings.title");
-        let active_group = self.tr(self.shell.settings_active_tab().group_i18n_key());
-        let active_label = self.tr(self.shell.settings_active_tab().i18n_key());
-        let back_label = self.tr("common.close");
+        let settings_title = t!("settings.title");
+        let active_group = t!(self.shell.settings_active_tab().group_i18n_key());
+        let active_label = t!(self.shell.settings_active_tab().i18n_key());
+        let back_label = t!("common.close");
         div()
             .flex()
             .flex_col()
@@ -162,16 +164,16 @@ impl NyaTermApp {
         let apply_disabled = !dirty || validation_error.is_some();
         let confirm_disabled = validation_error.is_some();
         let status = validation_error.clone().unwrap_or_else(|| {
-            self.tr(if dirty {
+            t!(if dirty {
                 "fileEditor.unsavedDesc"
             } else {
                 "updater.noUpdate"
             })
             .to_string()
         });
-        let cancel_label = self.tr("common.cancel");
-        let apply_label = self.tr("common.apply");
-        let confirm_label = self.tr("common.confirm");
+        let cancel_label = t!("common.cancel");
+        let apply_label = t!("common.apply");
+        let confirm_label = t!("common.confirm");
 
         div()
             .h(px(52.))
@@ -286,7 +288,7 @@ impl NyaTermApp {
         let palette = self.theme_palette();
         let active_tab = self.shell.settings_active_tab();
         let active_item_id = settings_tab_nav_id(active_tab);
-        let active_label = self.tr(active_tab.i18n_key());
+        let active_label = t!(active_tab.i18n_key());
         let content = self.settings_tab_content(active_tab, cx);
         let select_app = cx.entity();
         let toggle_app = select_app.clone();
@@ -299,7 +301,7 @@ impl NyaTermApp {
         )
         .palette(palette)
         .active_title(active_label)
-        .sidebar_title(self.tr("settings.title"))
+        .sidebar_title(t!("settings.title"))
         .viewport_width(viewport_width)
         .compact_breakpoint(640.)
         .wide_breakpoint(1024.)
@@ -327,7 +329,7 @@ impl NyaTermApp {
         vec![
             NyaSettingsNavGroup::new(
                 "workspace",
-                self.tr("settings.groupWorkspace"),
+                t!("settings.groupWorkspace"),
                 "icons/workspace.svg",
             )
             .accent(palette.link)
@@ -340,7 +342,7 @@ impl NyaTermApp {
             ]),
             NyaSettingsNavGroup::new(
                 "terminal_session",
-                self.tr("settings.groupTerminalSession"),
+                t!("settings.groupTerminalSession"),
                 "icons/conn/terminal.svg",
             )
             .accent(palette.success)
@@ -350,7 +352,7 @@ impl NyaTermApp {
                 self.settings_nav_item(SettingsTab::Search),
                 self.settings_nav_item(SettingsTab::Translation),
             ]),
-            NyaSettingsNavGroup::new("ai_group", self.tr("ai.title"), "icons/ai.svg")
+            NyaSettingsNavGroup::new("ai_group", t!("ai.title"), "icons/ai.svg")
                 .accent(0xbc8cff)
                 .expanded(self.shell.settings_group_is_expanded("ai_group"))
                 .items([
@@ -369,7 +371,7 @@ impl NyaTermApp {
     fn settings_nav_item(&self, tab: SettingsTab) -> NyaSettingsNavItem {
         NyaSettingsNavItem::new(
             settings_tab_nav_id(tab),
-            self.tr(tab.i18n_key()),
+            t!(tab.i18n_key()),
             tab.icon_path(),
         )
     }

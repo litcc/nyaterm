@@ -1,7 +1,3 @@
-use std::borrow::Cow;
-
-use super::NyaTermApp;
-
 mod labels;
 pub(in crate::features) use labels::{
     TerminalTimestampFormatter, ai_agent_step_status_style, cloud_sync_history_status,
@@ -25,11 +21,3 @@ pub(in crate::features) use markdown::{
     InlineMdStyle, MarkdownBlock, extract_think_content, parse_inline_markdown,
     parse_markdown_blocks,
 };
-
-impl NyaTermApp {
-    /// Translate against the process-wide locale, which `crate::i18n::apply_locale`
-    /// keeps in step with the persisted UI language.
-    pub(in crate::features) fn tr(&self, key: &'static str) -> Cow<'static, str> {
-        rust_i18n::t!(key)
-    }
-}

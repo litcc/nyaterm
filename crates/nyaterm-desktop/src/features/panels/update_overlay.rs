@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, FontWeight, IntoElement, div, prelude::*, px, rgb};
 use nyaterm_core::RuntimeMode;
 use nyaterm_ui::NyaScrollable;
@@ -28,15 +30,15 @@ impl NyaTermApp {
             .and_then(|info| info.html_url.clone())
             .unwrap_or_else(|| RELEASES_URL.to_string());
         let title = if checking {
-            self.tr("updater.checking")
+            t!("updater.checking")
         } else if failed {
-            self.tr("updater.updateFailed")
+            t!("updater.updateFailed")
         } else if available && portable {
-            self.tr("updater.portableManualTitle")
+            t!("updater.portableManualTitle")
         } else if available {
-            self.tr("updater.newVersionAvailable")
+            t!("updater.newVersionAvailable")
         } else {
-            self.tr("updater.noUpdate")
+            t!("updater.noUpdate")
         };
 
         div()
@@ -69,18 +71,18 @@ impl NyaTermApp {
                                     .text_color(rgb(palette.text_muted))
                                     .child(format!(
                                         "{}: v{}",
-                                        self.tr("updater.currentVersion"),
+                                        t!("updater.currentVersion"),
                                         info.current_version
                                     ))
                                     .child(format!(
                                         "{}: v{}",
-                                        self.tr("updater.newVersion"),
+                                        t!("updater.newVersion"),
                                         info.latest_version
                                     ))
                                     .when_some(info.release_date.clone(), |this, date| {
                                         this.child(format!(
                                             "{}: {}",
-                                            self.tr("updater.releaseDate"),
+                                            t!("updater.releaseDate"),
                                             date
                                         ))
                                     }),
@@ -89,7 +91,7 @@ impl NyaTermApp {
                             this.child(div().text_xs().text_color(rgb(palette.text_muted)).child(
                                 format!(
                                     "{}: v{}",
-                                    self.tr("updater.currentVersion"),
+                                    t!("updater.currentVersion"),
                                     info.current_version
                                 ),
                             ))
@@ -111,7 +113,7 @@ impl NyaTermApp {
                                 .text_xs()
                                 .line_height(px(18.))
                                 .text_color(rgb(palette.text_muted))
-                                .child(self.tr("updater.portableManualDesc")),
+                                .child(t!("updater.portableManualDesc")),
                         )
                     }),
             )
@@ -135,7 +137,7 @@ impl NyaTermApp {
                                     .text_xs()
                                     .font_weight(FontWeight(600.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(self.tr("updater.releaseNotes")),
+                                    .child(t!("updater.releaseNotes")),
                             )
                             .child(
                                 div()
@@ -159,7 +161,7 @@ impl NyaTermApp {
                         .child(small_button(
                             palette,
                             "update-close",
-                            self.tr("common.close"),
+                            t!("common.close"),
                             cx.listener(|this, _, window, cx| {
                                 this.close_update_dialog(window, cx);
                             }),
@@ -168,7 +170,7 @@ impl NyaTermApp {
                             this.child(dialog_action_button(
                                 palette,
                                 "update-retry",
-                                self.tr("updater.retry"),
+                                t!("updater.retry"),
                                 false,
                                 cx.listener(|this, _, _, cx| {
                                     this.start_update_check(cx);
@@ -179,7 +181,7 @@ impl NyaTermApp {
                             this.child(dialog_action_button(
                                 palette,
                                 "update-open-releases",
-                                self.tr("updater.openReleases"),
+                                t!("updater.openReleases"),
                                 false,
                                 cx.listener(move |this, _, _, cx| {
                                     this.open_external_url_for_ui(&release_url, cx);

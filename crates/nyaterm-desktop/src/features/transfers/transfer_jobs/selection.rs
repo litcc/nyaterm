@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, MouseDownEvent, Window};
 
 use super::super::transfer_widgets::transfer_job_title;
@@ -60,15 +62,13 @@ impl NyaTermApp {
             return;
         }
         let title = transfer_job_title(&job.kind);
-        let description = self
-            .tr("fileTransfer.deleteConfirmDesc")
-            .replace("{{name}}", &title);
+        let description = t!("fileTransfer.deleteConfirmDesc").replace("{{name}}", &title);
         self.transfer.select_transfer_job_id(&job_id);
         self.open_confirm_dialog(
             (
-                self.tr("fileTransfer.deleteConfirmTitle").to_string(),
+                t!("fileTransfer.deleteConfirmTitle").to_string(),
                 description,
-                self.tr("fileTransfer.delete").to_string(),
+                t!("fileTransfer.delete").to_string(),
                 true,
                 move |app, _, cx| {
                     let removed = app.transfer.delete_transfer_job(&job_id);

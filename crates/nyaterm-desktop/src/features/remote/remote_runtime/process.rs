@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{ClipboardItem, Context, Window};
 use nyaterm_transport::SshProcessService;
 
@@ -120,16 +122,15 @@ impl NyaTermApp {
             self.signal_process(pid, signal, window, cx);
             return;
         }
-        let description = self
-            .tr("processManager.confirmSignalDesc")
+        let description = t!("processManager.confirmSignalDesc")
             .replace("{{signal}}", signal)
             .replace("{{pid}}", &pid.to_string())
             .replace("{{command}}", &format!("kill -{signal} -- {pid}"));
         self.open_confirm_dialog(
             (
-                self.tr("processManager.confirmSignalTitle").to_string(),
+                t!("processManager.confirmSignalTitle").to_string(),
                 description,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 true,
                 move |app, window, cx| {
                     app.signal_process(pid, signal, window, cx);

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::HashSet;
 
 use gpui::{
@@ -44,17 +46,16 @@ impl NyaTermApp {
         let search_input = self.text_input(
             "sync.groups.search",
             &search_draft,
-            TextInputSetup::placeholder(self.tr("syncGroup.searchPlaceholder")),
+            TextInputSetup::placeholder(t!("syncGroup.searchPlaceholder")),
             cx,
         );
         let pending_delete_name = self
             .sync_input
             .pending_delete_group()
             .map(|group| group.name.clone());
-        let pending_delete_message = pending_delete_name.as_ref().map(|name| {
-            self.tr("syncGroup.deleteGroupConfirm")
-                .replace("{{name}}", name)
-        });
+        let pending_delete_message = pending_delete_name
+            .as_ref()
+            .map(|name| t!("syncGroup.deleteGroupConfirm").replace("{{name}}", name));
         let mut group_list = div()
             .id(SharedString::from("sync-groups-list"))
             .flex_1()
@@ -74,7 +75,7 @@ impl NyaTermApp {
                     .p_3()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("syncGroup.noGroups")),
+                    .child(t!("syncGroup.noGroups")),
             );
         }
         for group in self.sync_input.groups().to_vec() {
@@ -138,7 +139,7 @@ impl NyaTermApp {
                             .text_xs()
                             .text_color(rgb(palette.text_muted))
                             .child(
-                                self.tr("syncGroup.sessionCount")
+                                t!("syncGroup.sessionCount")
                                     .replace("{{count}}", &session_count.to_string()),
                             ),
                     )
@@ -188,7 +189,7 @@ impl NyaTermApp {
                     .p_3()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr(if has_sessions {
+                    .child(t!(if has_sessions {
                         "syncGroup.noSessionMatches"
                     } else {
                         "syncGroup.noSessions"
@@ -246,7 +247,7 @@ impl NyaTermApp {
                                                 if active {
                                                     format!(
                                                         " · {}",
-                                                        self.tr("sessionQuickSwitcher.active")
+                                                        t!("sessionQuickSwitcher.active")
                                                     )
                                                 } else {
                                                     String::new()
@@ -261,11 +262,11 @@ impl NyaTermApp {
                                     .gap_2()
                                     .child(status_pill(
                                         if paused {
-                                            self.tr("syncGroup.paused")
+                                            t!("syncGroup.paused")
                                         } else if in_group {
-                                            self.tr("syncGroup.activeMembers")
+                                            t!("syncGroup.activeMembers")
                                         } else {
-                                            self.tr("syncGroup.filterAvailable")
+                                            t!("syncGroup.filterAvailable")
                                         },
                                         if paused {
                                             rgb(0xfacc15)
@@ -286,9 +287,9 @@ impl NyaTermApp {
                                         palette,
                                         format!("sync-session-toggle-{session_id}"),
                                         if in_group {
-                                            self.tr("common.remove")
+                                            t!("common.remove")
                                         } else {
-                                            self.tr("common.add")
+                                            t!("common.add")
                                         },
                                         cx.listener({
                                             let session_id = session_id.clone();
@@ -305,9 +306,9 @@ impl NyaTermApp {
                                             palette,
                                             format!("sync-session-pause-{session_id}"),
                                             if paused {
-                                                self.tr("syncGroup.resumeSync")
+                                                t!("syncGroup.resumeSync")
                                             } else {
-                                                self.tr("syncGroup.pauseSync")
+                                                t!("syncGroup.pauseSync")
                                             },
                                             cx.listener({
                                                 let session_id = session_id.clone();
@@ -404,7 +405,7 @@ impl NyaTermApp {
                                             .text_sm()
                                             .font_weight(FontWeight(800.))
                                             .text_color(rgb(palette.text))
-                                            .child(self.tr("syncGroup.title")),
+                                            .child(t!("syncGroup.title")),
                                     )
                             )
                             .child(
@@ -414,14 +415,14 @@ impl NyaTermApp {
                                     .gap_2()
                                     .child(small_button(palette,
                                         "sync-group-new",
-                                        self.tr("syncGroup.newGroup"),
+                                        t!("syncGroup.newGroup"),
                                         cx.listener(|this, _, _, cx| {
                                             this.create_sync_group(cx);
                                         }),
                                     ))
                                     .child(small_button(palette,
                                         "sync-group-close",
-                                        self.tr("common.close"),
+                                        t!("common.close"),
                                         cx.listener(|this, _, _, cx| {
                                             this.close_sync_groups(cx);
                                         }),
@@ -453,7 +454,7 @@ impl NyaTermApp {
                                             .text_xs()
                                             .font_weight(FontWeight(800.))
                                             .text_color(rgb(palette.text_muted))
-                                            .child(self.tr("syncGroup.groups")),
+                                            .child(t!("syncGroup.groups")),
                                     )
                                     .child(group_list),
                             )
@@ -535,7 +536,7 @@ impl NyaTermApp {
                                                             .text_xs()
                                                             .font_weight(FontWeight(800.))
                                                             .text_color(rgb(palette.text_muted))
-                                                            .child(self.tr("syncGroup.sessions")),
+                                                            .child(t!("syncGroup.sessions")),
                                                     )
                                                     .child(
                                                         div()
@@ -558,9 +559,9 @@ impl NyaTermApp {
                                                             .as_ref()
                                                             .is_some_and(|group| group.enabled)
                                                         {
-                                                            self.tr("syncGroup.disable")
+                                                            t!("syncGroup.disable")
                                                         } else {
-                                                            self.tr("syncGroup.enable")
+                                                            t!("syncGroup.enable")
                                                         },
                                                         cx.listener(|this, _, _, cx| {
                                                             this.toggle_selected_sync_group_enabled(cx);
@@ -568,7 +569,7 @@ impl NyaTermApp {
                                                     ))
                                                     .child(small_button(palette,
                                                         "sync-group-delete",
-                                                        self.tr("syncGroup.deleteGroup"),
+                                                        t!("syncGroup.deleteGroup"),
                                                         cx.listener(|this, _, _, cx| {
                                                             this.request_delete_selected_sync_group(cx);
                                                         }),
@@ -588,7 +589,7 @@ impl NyaTermApp {
                                             .child(small_button(
                                                 palette,
                                                 "sync-group-select-all",
-                                                self.tr("syncGroup.selectAll"),
+                                                t!("syncGroup.selectAll"),
                                                 cx.listener(|this, _, _, cx| {
                                                     this.select_all_sync_group_sessions(cx);
                                                 }),
@@ -596,7 +597,7 @@ impl NyaTermApp {
                                             .child(small_button(
                                                 palette,
                                                 "sync-group-add-filtered",
-                                                self.tr("syncGroup.addFiltered"),
+                                                t!("syncGroup.addFiltered"),
                                                 cx.listener(|this, _, _, cx| {
                                                     this.add_filtered_sync_group_sessions(cx);
                                                 }),
@@ -604,7 +605,7 @@ impl NyaTermApp {
                                             .child(small_button(
                                                 palette,
                                                 "sync-group-remove-filtered",
-                                                self.tr("syncGroup.removeFiltered"),
+                                                t!("syncGroup.removeFiltered"),
                                                 cx.listener(|this, _, _, cx| {
                                                     this.remove_filtered_sync_group_sessions(cx);
                                                 }),
@@ -612,7 +613,7 @@ impl NyaTermApp {
                                             .child(small_button(
                                                 palette,
                                                 "sync-group-same-host",
-                                                self.tr("syncGroup.selectSameHost"),
+                                                t!("syncGroup.selectSameHost"),
                                                 cx.listener(|this, _, _, cx| {
                                                     this.select_same_host_sync_group_sessions(cx);
                                                 }),
@@ -620,7 +621,7 @@ impl NyaTermApp {
                                             .child(small_button(
                                                 palette,
                                                 "sync-group-clear-all",
-                                                self.tr("syncGroup.deselectAll"),
+                                                t!("syncGroup.deselectAll"),
                                                 cx.listener(|this, _, _, cx| {
                                                     this.clear_sync_group_sessions(cx);
                                                 }),
@@ -655,7 +656,7 @@ impl NyaTermApp {
                                         .text_sm()
                                         .font_weight(FontWeight(800.))
                                         .text_color(rgb(palette.text))
-                                        .child(self.tr("syncGroup.deleteGroup")),
+                                        .child(t!("syncGroup.deleteGroup")),
                                 )
                                 .child(
                                     div()
@@ -673,7 +674,7 @@ impl NyaTermApp {
                                         .child(small_button(
                                             palette,
                                             "sync-group-delete-cancel",
-                                            self.tr("common.cancel"),
+                                            t!("common.cancel"),
                                             cx.listener(|this, _, _, cx| {
                                                 this.cancel_delete_sync_group(cx);
                                             }),
@@ -681,7 +682,7 @@ impl NyaTermApp {
                                         .child(dialog_action_button(
                                             palette,
                                             "sync-group-delete-confirm",
-                                            self.tr("syncGroup.deleteGroup"),
+                                            t!("syncGroup.deleteGroup"),
                                             true,
                                             cx.listener(|this, _, _, cx| {
                                                 this.confirm_delete_sync_group(cx);

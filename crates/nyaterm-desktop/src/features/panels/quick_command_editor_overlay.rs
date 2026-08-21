@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent, SharedString,
     Window, div, prelude::*, px, rgb, rgba, svg,
@@ -46,26 +48,26 @@ impl NyaTermApp {
             .quick_editor_snapshot()
             .unwrap_or_else(QuickCommandEditorState::blank);
         let title = self.quick_command_editor_title();
-        let uncategorized_label = self.tr("quickCommands.uncategorized");
-        let category_label_text = self.tr("quickCommands.category");
-        let category_search_label = self.tr("quickCommands.searchOrCreateCategory");
-        let new_category_placeholder = self.tr("quickCommands.newCategoryPlaceholder");
-        let new_category_root_hint = self.tr("quickCommands.newCategoryRootHint");
-        let description_label = self.tr("quickCommands.description");
-        let description_placeholder = self.tr("quickCommands.descriptionPlaceholder");
-        let label_name = self.tr("quickCommands.labelName");
-        let label_placeholder = self.tr("quickCommands.labelPlaceholder");
-        let color_tag_label = self.tr("quickCommands.colorTag");
-        let pin_label = self.tr("quickCommands.pin");
-        let execution_mode_label = self.tr("quickCommands.executionMode");
-        let execute_label = self.tr("quickCommands.executeImmediately");
-        let append_label = self.tr("quickCommands.appendOnly");
-        let execute_hint = self.tr("quickCommands.executeHint");
-        let append_hint = self.tr("quickCommands.appendHint");
-        let command_script_label = self.tr("quickCommands.commandScript");
-        let command_placeholder = self.tr("quickCommands.commandPlaceholder");
-        let cancel_label = self.tr("common.cancel");
-        let save_label = self.tr("common.save");
+        let uncategorized_label = t!("quickCommands.uncategorized");
+        let category_label_text = t!("quickCommands.category");
+        let category_search_label = t!("quickCommands.searchOrCreateCategory");
+        let new_category_placeholder = t!("quickCommands.newCategoryPlaceholder");
+        let new_category_root_hint = t!("quickCommands.newCategoryRootHint");
+        let description_label = t!("quickCommands.description");
+        let description_placeholder = t!("quickCommands.descriptionPlaceholder");
+        let label_name = t!("quickCommands.labelName");
+        let label_placeholder = t!("quickCommands.labelPlaceholder");
+        let color_tag_label = t!("quickCommands.colorTag");
+        let pin_label = t!("quickCommands.pin");
+        let execution_mode_label = t!("quickCommands.executionMode");
+        let execute_label = t!("quickCommands.executeImmediately");
+        let append_label = t!("quickCommands.appendOnly");
+        let execute_hint = t!("quickCommands.executeHint");
+        let append_hint = t!("quickCommands.appendHint");
+        let command_script_label = t!("quickCommands.commandScript");
+        let command_placeholder = t!("quickCommands.commandPlaceholder");
+        let cancel_label = t!("common.cancel");
+        let save_label = t!("common.save");
         let wide_fields = viewport_width >= 768.;
         // A field-scoped error shows beside its caption, as Tauri's does; only a
         // general error gets the box at the top of the dialog.
@@ -153,8 +155,7 @@ impl NyaTermApp {
         let category_display = if editor.category_draft.trim().is_empty() {
             category_label.clone()
         } else {
-            self.tr("quickCommands.createCategory")
-                .replace("{{name}}", editor.category_draft.trim())
+            t!("quickCommands.createCategory").replace("{{name}}", editor.category_draft.trim())
         };
         let mut color_swatches = div().flex().items_center().gap_2().flex_wrap();
         for option in QUICK_COMMAND_COLOR_OPTIONS {

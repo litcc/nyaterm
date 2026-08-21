@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, FontWeight, IntoElement, KeyDownEvent,
     SharedString, Window, div, prelude::*, px, rgb, rgba, svg,
@@ -90,11 +92,11 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = self.theme_palette();
-        let title = self.tr("fileExplorer.fileModified");
-        let prompt_label = self.tr("fileExplorer.uploadPrompt");
-        let cancel_label = self.tr("common.cancel");
-        let always_label = self.tr("fileExplorer.alwaysUpload");
-        let upload_once_label = self.tr("fileExplorer.uploadOnce");
+        let title = t!("fileExplorer.fileModified");
+        let prompt_label = t!("fileExplorer.uploadPrompt");
+        let cancel_label = t!("common.cancel");
+        let always_label = t!("fileExplorer.alwaysUpload");
+        let upload_once_label = t!("fileExplorer.uploadOnce");
         let ignore_prompt_id = prompt_id.clone();
         let always_prompt_id = prompt_id.clone();
         let upload_prompt_id = prompt_id.clone();
@@ -248,34 +250,34 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let loading_label = self.tr("common.loading");
-        let saving_label = self.tr("common.saving");
-        let save_label = self.tr("common.save");
-        let cancel_label = self.tr("common.cancel");
-        let saved_label = self.tr("fileEditor.saved");
-        let unsaved_label = self.tr("fileEditor.unsaved");
-        let conflict_label = self.tr("fileEditor.conflictTitle");
-        let conflict_desc = self.tr("fileEditor.conflictDesc");
-        let unsaved_title = self.tr("fileEditor.unsavedTitle");
-        let unsaved_desc = self.tr("fileEditor.unsavedDesc");
-        let reload_dirty_title = self.tr("fileEditor.reloadDirtyTitle");
-        let reload_dirty_desc = self.tr("fileEditor.reloadDirtyDesc");
-        let reload_label = self.tr("fileEditor.reload");
-        let confirm_reload_label = self.tr("fileEditor.discardAndReload");
-        let open_external_label = self.tr("fileEditor.openExternal");
-        let force_save_label = self.tr("fileEditor.forceSave");
-        let save_all_label = self.tr("fileEditor.saveAll");
-        let save_close_label = self.tr("fileEditor.saveAndClose");
-        let discard_label = self.tr("fileEditor.discard");
-        let search_placeholder = self.tr("fileEditor.searchPlaceholder");
-        let previous_match_label = self.tr("fileEditor.previousMatch");
-        let next_match_label = self.tr("fileEditor.nextMatch");
-        let clear_search_label = self.tr("fileEditor.clearSearch");
-        let no_match_label = self.tr("fileEditor.noMatch");
-        let bytes_label = self.tr("fileEditor.bytes");
-        let encoding_label = self.tr("fileEditor.encodingUtf8");
-        let line_ending_label = self.tr("fileEditor.lineEndingLf");
-        let plain_text_label = self.tr("fileEditor.plainText");
+        let loading_label = t!("common.loading");
+        let saving_label = t!("common.saving");
+        let save_label = t!("common.save");
+        let cancel_label = t!("common.cancel");
+        let saved_label = t!("fileEditor.saved");
+        let unsaved_label = t!("fileEditor.unsaved");
+        let conflict_label = t!("fileEditor.conflictTitle");
+        let conflict_desc = t!("fileEditor.conflictDesc");
+        let unsaved_title = t!("fileEditor.unsavedTitle");
+        let unsaved_desc = t!("fileEditor.unsavedDesc");
+        let reload_dirty_title = t!("fileEditor.reloadDirtyTitle");
+        let reload_dirty_desc = t!("fileEditor.reloadDirtyDesc");
+        let reload_label = t!("fileEditor.reload");
+        let confirm_reload_label = t!("fileEditor.discardAndReload");
+        let open_external_label = t!("fileEditor.openExternal");
+        let force_save_label = t!("fileEditor.forceSave");
+        let save_all_label = t!("fileEditor.saveAll");
+        let save_close_label = t!("fileEditor.saveAndClose");
+        let discard_label = t!("fileEditor.discard");
+        let search_placeholder = t!("fileEditor.searchPlaceholder");
+        let previous_match_label = t!("fileEditor.previousMatch");
+        let next_match_label = t!("fileEditor.nextMatch");
+        let clear_search_label = t!("fileEditor.clearSearch");
+        let no_match_label = t!("fileEditor.noMatch");
+        let bytes_label = t!("fileEditor.bytes");
+        let encoding_label = t!("fileEditor.encodingUtf8");
+        let line_ending_label = t!("fileEditor.lineEndingLf");
+        let plain_text_label = t!("fileEditor.plainText");
         let workspace = self.transfer.editor_workspace_snapshot();
         let state = workspace
             .as_ref()
@@ -339,8 +341,7 @@ impl NyaTermApp {
             let line_start = before.rfind('\n').map(|index| index + 1).unwrap_or(0);
             (line, before[line_start..].chars().count() + 1)
         });
-        let cursor_label = self
-            .tr("fileEditor.lineColumn")
+        let cursor_label = t!("fileEditor.lineColumn")
             .replace("{{line}}", &cursor_line.to_string())
             .replace("{{column}}", &cursor_column.to_string());
         let search_matches = editor_search_matches(&state.content, &state.search_query);

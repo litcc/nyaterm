@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -97,9 +99,9 @@ impl Render for ConnectionEditorWindow {
 impl NyaTermApp {
     pub(in crate::features) fn connection_editor_title(&self) -> Cow<'static, str> {
         if self.connection_state.editor_is_editing_saved_connection() {
-            self.tr("dialog.editConnection")
+            t!("dialog.editConnection")
         } else {
-            self.tr("dialog.newConnection")
+            t!("dialog.newConnection")
         }
     }
 
@@ -185,7 +187,7 @@ fn open_connection_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut 
                 close_app.update(cx, |app, cx| {
                     app.connection_state.close_editor();
                     app.shell
-                        .set_status(app.tr("dialog.connectionEditorClosed").to_string());
+                        .set_status(t!("dialog.connectionEditorClosed").to_string());
                     cx.notify();
                 });
                 true
@@ -205,8 +207,7 @@ fn open_connection_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut 
         Err(error) => {
             app.connection_state.clear_editor_window();
             app.shell.set_status(
-                app.tr("dialog.connectionEditorOpenFailed")
-                    .replace("{{error}}", &error.to_string()),
+                t!("dialog.connectionEditorOpenFailed").replace("{{error}}", &error.to_string()),
             );
             cx.notify();
         }

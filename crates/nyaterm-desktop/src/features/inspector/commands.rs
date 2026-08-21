@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{ClickEvent, Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 use nyaterm_ui::NyaScrollable;
@@ -20,7 +22,7 @@ impl NyaTermApp {
                     .text_center()
                     .text_size(px(11.))
                     .text_color(rgb(palette.text_dimmed))
-                    .child(self.tr("panel.noCommandsYet")),
+                    .child(t!("panel.noCommandsYet")),
             );
         } else {
             for (index, command) in history.into_iter().enumerate() {

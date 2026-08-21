@@ -6,6 +6,8 @@ mod ssh;
 mod telnet;
 mod vnc;
 
+use rust_i18n::t;
+
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
@@ -50,7 +52,6 @@ use crate::models::{
 struct ConnectionEditorSectionContext<'a> {
     palette: crate::theme::ThemePalette,
     editor: &'a ConnectionEditorState,
-    language: &'a str,
     fields: &'a ConnectionEditorFields,
 }
 
@@ -93,7 +94,7 @@ impl NyaTermApp {
             cx,
         );
         let searchable = connection_editor_select_is_searchable(select_key);
-        let search_placeholder = connection_editor_select_search_placeholder(self, select_key);
+        let search_placeholder = connection_editor_select_search_placeholder(select_key);
         select.update(cx, |select, cx| {
             select.set_placeholder(placeholder, cx);
             select.set_searchable(searchable, cx);
@@ -139,26 +140,24 @@ impl NyaTermApp {
     }
 
     pub(super) fn ssh_agent_endpoint_choices(
-        language: &str,
         endpoint: &nyaterm_core::SshAgentEndpoint,
     ) -> Vec<ConnectionEditorChoice> {
-        let tr = |key: &'static str| crate::i18n::text(language, key);
         let selected = Self::ssh_agent_endpoint_value(endpoint);
         let mut choices = vec![ConnectionEditorChoice::new(
             Some("auto".to_string()),
-            tr("dialog.sshAgentAuto"),
+            t!("dialog.sshAgentAuto"),
             selected == "auto",
         )];
         if cfg!(unix) {
             choices.extend([
                 ConnectionEditorChoice::new(
                     Some("environment".to_string()),
-                    tr("dialog.sshAgentEnvironment"),
+                    t!("dialog.sshAgentEnvironment"),
                     selected == "environment",
                 ),
                 ConnectionEditorChoice::new(
                     Some("unix_socket".to_string()),
-                    tr("dialog.sshAgentUnixSocket"),
+                    t!("dialog.sshAgentUnixSocket"),
                     selected == "unix_socket",
                 ),
             ]);
@@ -167,12 +166,12 @@ impl NyaTermApp {
             choices.extend([
                 ConnectionEditorChoice::new(
                     Some("windows_openssh".to_string()),
-                    tr("dialog.sshAgentWindowsOpenSsh"),
+                    t!("dialog.sshAgentWindowsOpenSsh"),
                     selected == "windows_openssh",
                 ),
                 ConnectionEditorChoice::new(
                     Some("pageant".to_string()),
-                    tr("dialog.sshAgentPageant"),
+                    t!("dialog.sshAgentPageant"),
                     selected == "pageant",
                 ),
             ]);
@@ -180,20 +179,20 @@ impl NyaTermApp {
         if !nyaterm_core::ssh_agent_endpoint_supported_on_current_platform(endpoint) {
             let label = match endpoint {
                 nyaterm_core::SshAgentEndpoint::Environment { .. } => {
-                    tr("dialog.sshAgentEnvironment")
+                    t!("dialog.sshAgentEnvironment")
                 }
                 nyaterm_core::SshAgentEndpoint::UnixSocket { .. } => {
-                    tr("dialog.sshAgentUnixSocket")
+                    t!("dialog.sshAgentUnixSocket")
                 }
-                nyaterm_core::SshAgentEndpoint::Pageant => tr("dialog.sshAgentPageant"),
+                nyaterm_core::SshAgentEndpoint::Pageant => t!("dialog.sshAgentPageant"),
                 nyaterm_core::SshAgentEndpoint::WindowsOpenSsh => {
-                    tr("dialog.sshAgentWindowsOpenSsh")
+                    t!("dialog.sshAgentWindowsOpenSsh")
                 }
-                nyaterm_core::SshAgentEndpoint::Auto => tr("dialog.sshAgentAuto"),
+                nyaterm_core::SshAgentEndpoint::Auto => t!("dialog.sshAgentAuto"),
             };
             choices.push(ConnectionEditorChoice::new(
                 Some(selected.to_string()),
-                format!("{} ({})", label, tr("dialog.sshAgentUnavailableOnPlatform")),
+                format!("{} ({})", label, t!("dialog.sshAgentUnavailableOnPlatform")),
                 true,
             ));
         }
@@ -209,29 +208,28 @@ impl NyaTermApp {
         self.connection_state
             .ensure_editor_forwarding_endpoint_fields(cx);
         let palette = self.theme_palette();
-        let language = self.settings.summary().language.clone();
         let title = if editor.id.is_some() {
-            self.tr("dialog.editConnection")
+            t!("dialog.editConnection")
         } else {
-            self.tr("dialog.newConnection")
+            t!("dialog.newConnection")
         };
-        let local_label = self.tr("dialog.localTerminal");
-        let serial_label = self.tr("dialog.serial");
-        let name_label = self.tr("dialog.connectionName");
-        let description_label = self.tr("dialog.description");
-        let group_title = self.tr("dialog.group");
-        let cancel_label = self.tr("common.cancel");
-        let save_label = self.tr("common.save");
-        let none_label = self.tr("dialog.none");
-        let icon_label = self.tr("dialog.icon");
-        let icon_auto_detect_label = self.tr("dialog.iconAutoDetect");
-        let icon_auto_detect_hint = self.tr("dialog.iconAutoDetectTooltip");
+        let local_label = t!("dialog.localTerminal");
+        let serial_label = t!("dialog.serial");
+        let name_label = t!("dialog.connectionName");
+        let description_label = t!("dialog.description");
+        let group_title = t!("dialog.group");
+        let cancel_label = t!("common.cancel");
+        let save_label = t!("common.save");
+        let none_label = t!("dialog.none");
+        let icon_label = t!("dialog.icon");
+        let icon_auto_detect_label = t!("dialog.iconAutoDetect");
+        let icon_auto_detect_hint = t!("dialog.iconAutoDetectTooltip");
         let icon_auto_detect = editor.icon_auto_detect;
         let group_options = connection_editor_group_menu_options(
             self.connection_state.groups(),
             &editor,
             none_label.clone(),
-            self.tr("dialog.newGroup"),
+            t!("dialog.newGroup"),
         );
         let group_parent_id = if editor.pending_group_name.is_some() {
             editor.pending_group_parent_id.as_deref()
@@ -240,11 +238,8 @@ impl NyaTermApp {
         };
         let group_parent_hint = group_parent_id
             .and_then(|id| connection_group_path_label(self.connection_state.groups(), id))
-            .map(|path| {
-                self.tr("dialog.newGroupParentHint")
-                    .replace("{{group}}", &path)
-            })
-            .unwrap_or_else(|| self.tr("dialog.newGroupRootHint").to_string());
+            .map(|path| t!("dialog.newGroupParentHint").replace("{{group}}", &path))
+            .unwrap_or_else(|| t!("dialog.newGroupRootHint").to_string());
         let key_label = editor
             .key_id
             .as_deref()
@@ -266,7 +261,7 @@ impl NyaTermApp {
                     .find(|password| password.id == id)
                     .map(|password| password.name.clone())
             })
-            .unwrap_or_else(|| self.tr("dialog.selectPassword").to_string());
+            .unwrap_or_else(|| t!("dialog.selectPassword").to_string());
         let otp_label = editor
             .otp_id
             .as_deref()
@@ -285,7 +280,7 @@ impl NyaTermApp {
                         }
                     })
             })
-            .unwrap_or_else(|| self.tr("dialog.noOtp").to_string());
+            .unwrap_or_else(|| t!("dialog.noOtp").to_string());
         let proxy_label = editor
             .proxy_id
             .as_deref()
@@ -318,7 +313,7 @@ impl NyaTermApp {
                         }
                     })
             })
-            .unwrap_or_else(|| self.tr("dialog.noProxy").to_string());
+            .unwrap_or_else(|| t!("dialog.noProxy").to_string());
         let jump_label = editor
             .proxy_jump_id
             .as_deref()
@@ -329,12 +324,12 @@ impl NyaTermApp {
                     .find(|connection| connection.id == id)
                     .map(|connection| connection.name.clone())
             })
-            .unwrap_or_else(|| self.tr("dialog.noProxyJump").to_string());
+            .unwrap_or_else(|| t!("dialog.noProxyJump").to_string());
         let auth_options = [
-            ("none", self.tr("dialog.noAuthentication")),
-            ("password", self.tr("dialog.password")),
-            ("key", self.tr("dialog.privateKey")),
-            ("agent", self.tr("dialog.sshAgent")),
+            ("none", t!("dialog.noAuthentication")),
+            ("password", t!("dialog.password")),
+            ("key", t!("dialog.privateKey")),
+            ("agent", t!("dialog.sshAgent")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -381,7 +376,7 @@ impl NyaTermApp {
         }));
         let mut otp_options = vec![ConnectionEditorChoice::new(
             None,
-            self.tr("dialog.noOtp"),
+            t!("dialog.noOtp"),
             editor.otp_id.is_none(),
         )];
         otp_options.extend(self.security.otp_entries().iter().map(|entry| {
@@ -421,7 +416,7 @@ impl NyaTermApp {
         }));
         let mut proxy_options = vec![ConnectionEditorChoice::new(
             None,
-            self.tr("dialog.noProxy"),
+            t!("dialog.noProxy"),
             editor.proxy_id.is_none(),
         )];
         proxy_options.extend(self.tunnel_state.proxies().iter().map(|proxy| {
@@ -464,7 +459,7 @@ impl NyaTermApp {
         }));
         let mut jump_options = vec![ConnectionEditorChoice::new(
             None,
-            self.tr("dialog.noProxyJump"),
+            t!("dialog.noProxyJump"),
             editor.proxy_jump_id.is_none(),
         )];
         jump_options.extend(
@@ -523,8 +518,8 @@ impl NyaTermApp {
                 }),
         );
         let backspace_options = [
-            ("del", self.tr("dialog.backspaceDel")),
-            ("ctrl-h", self.tr("dialog.backspaceCtrlH")),
+            ("del", t!("dialog.backspaceDel")),
+            ("ctrl-h", t!("dialog.backspaceCtrlH")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -558,7 +553,7 @@ impl NyaTermApp {
             .into_iter()
             .map(|value| {
                 let label = if value == "global" {
-                    self.tr("connection.encodingFollowGlobal").to_string()
+                    t!("connection.encodingFollowGlobal").to_string()
                 } else {
                     value.to_string()
                 };
@@ -570,8 +565,8 @@ impl NyaTermApp {
             })
             .collect::<Vec<_>>();
         let ssh_profile_options = [
-            ("standard", self.tr("dialog.sshProfileStandard")),
-            ("network_device", self.tr("dialog.sshProfileNetworkDevice")),
+            ("standard", t!("dialog.sshProfileStandard")),
+            ("network_device", t!("dialog.sshProfileNetworkDevice")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -590,8 +585,7 @@ impl NyaTermApp {
             nyaterm_core::resolve_ssh_terminal_type(editor.ssh_profile, editor.terminal_type);
         let mut ssh_terminal_options = vec![ConnectionEditorChoice::new(
             None,
-            self.tr("dialog.sshTerminalTypeDefault")
-                .replace("{{value}}", effective_terminal.as_str()),
+            t!("dialog.sshTerminalTypeDefault").replace("{{value}}", effective_terminal.as_str()),
             editor.terminal_type.is_none(),
         )];
         ssh_terminal_options.extend(
@@ -607,12 +601,9 @@ impl NyaTermApp {
                 .collect::<Vec<_>>(),
         );
         let rdp_certificate_options = [
-            ("prompt", self.tr("dialog.rdpCertificatePrompt")),
-            ("strict", self.tr("dialog.rdpCertificateStrict")),
-            (
-                "accept-temporarily",
-                self.tr("dialog.rdpCertificateTemporary"),
-            ),
+            ("prompt", t!("dialog.rdpCertificatePrompt")),
+            ("strict", t!("dialog.rdpCertificateStrict")),
+            ("accept-temporarily", t!("dialog.rdpCertificateTemporary")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -625,8 +616,8 @@ impl NyaTermApp {
         })
         .collect::<Vec<_>>();
         let rdp_display_options = [
-            ("fit-window", self.tr("dialog.rdpDisplayFitWindow")),
-            ("fixed", self.tr("dialog.rdpDisplayFixed")),
+            ("fit-window", t!("dialog.rdpDisplayFitWindow")),
+            ("fixed", t!("dialog.rdpDisplayFixed")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -638,8 +629,8 @@ impl NyaTermApp {
         })
         .collect::<Vec<_>>();
         let rdp_clipboard_options = [
-            ("text-only", self.tr("dialog.rdpClipboardTextOnly")),
-            ("disabled", self.tr("dialog.disabled")),
+            ("text-only", t!("dialog.rdpClipboardTextOnly")),
+            ("disabled", t!("dialog.disabled")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -651,9 +642,9 @@ impl NyaTermApp {
         })
         .collect::<Vec<_>>();
         let vnc_security_options = [
-            ("auto", self.tr("dialog.vncSecurityAuto")),
-            ("none", self.tr("dialog.vncSecurityNone")),
-            ("vnc-auth", self.tr("dialog.vncSecurityPassword")),
+            ("auto", t!("dialog.vncSecurityAuto")),
+            ("none", t!("dialog.vncSecurityNone")),
+            ("vnc-auth", t!("dialog.vncSecurityPassword")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -665,9 +656,9 @@ impl NyaTermApp {
         })
         .collect::<Vec<_>>();
         let vnc_scale_options = [
-            ("fit", self.tr("dialog.vncScaleFit")),
-            ("stretch", self.tr("dialog.vncScaleStretch")),
-            ("actual", self.tr("dialog.vncScaleActual")),
+            ("fit", t!("dialog.vncScaleFit")),
+            ("stretch", t!("dialog.vncScaleStretch")),
+            ("actual", t!("dialog.vncScaleActual")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -684,8 +675,8 @@ impl NyaTermApp {
             .and_then(|settings| settings.mode)
             .unwrap_or(nyaterm_core::RecordingMode::Transcript);
         let recording_mode_options = [
-            ("transcript", self.tr("dialog.recordingModeTranscript")),
-            ("raw", self.tr("dialog.recordingModeRaw")),
+            ("transcript", t!("dialog.recordingModeTranscript")),
+            ("raw", t!("dialog.recordingModeRaw")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -701,12 +692,12 @@ impl NyaTermApp {
         })
         .collect::<Vec<_>>();
         let sftp_cwd_options = [
-            ("off", self.tr("dialog.sftpCwdFollowOff")),
+            ("off", t!("dialog.sftpCwdFollowOff")),
             (
                 "shell_integration",
-                self.tr("dialog.sftpCwdFollowShellIntegration"),
+                t!("dialog.sftpCwdFollowShellIntegration"),
             ),
-            ("rc_file", self.tr("dialog.sftpCwdFollowRcFile")),
+            ("rc_file", t!("dialog.sftpCwdFollowRcFile")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -721,8 +712,7 @@ impl NyaTermApp {
             .into_iter()
             .map(|value| {
                 let label = if value == "terminal" {
-                    self.tr("dialog.sftpFilenameEncodingFollowTerminal")
-                        .to_string()
+                    t!("dialog.sftpFilenameEncodingFollowTerminal").to_string()
                 } else {
                     value.to_string()
                 };
@@ -734,9 +724,9 @@ impl NyaTermApp {
             })
             .collect::<Vec<_>>();
         let ssh_algorithm_mode_options = [
-            ("compatible", self.tr("dialog.algorithmModeCompatible")),
-            ("secure", self.tr("dialog.algorithmModeSecure")),
-            ("custom", self.tr("dialog.algorithmModeCustom")),
+            ("compatible", t!("dialog.algorithmModeCompatible")),
+            ("secure", t!("dialog.algorithmModeSecure")),
+            ("custom", t!("dialog.algorithmModeCustom")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -790,11 +780,11 @@ impl NyaTermApp {
             })
             .collect::<Vec<_>>();
         let parity_options = [
-            ("none", self.tr("dialog.parityNone")),
-            ("odd", self.tr("dialog.parityOdd")),
-            ("even", self.tr("dialog.parityEven")),
-            ("mark", self.tr("dialog.parityMark")),
-            ("space", self.tr("dialog.paritySpace")),
+            ("none", t!("dialog.parityNone")),
+            ("odd", t!("dialog.parityOdd")),
+            ("even", t!("dialog.parityEven")),
+            ("mark", t!("dialog.parityMark")),
+            ("space", t!("dialog.paritySpace")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -814,7 +804,7 @@ impl NyaTermApp {
         let policy_options = [
             ConnectionEditorChoice::new(
                 Some("allowlist".to_string()),
-                self.tr("dialog.sshAgentPolicyAllowlist"),
+                t!("dialog.sshAgentPolicyAllowlist"),
                 matches!(
                     editor.agent_forwarding_config.policy,
                     nyaterm_core::SshAgentForwardingPolicy::Allowlist { .. }
@@ -822,29 +812,28 @@ impl NyaTermApp {
             ),
             ConnectionEditorChoice::new(
                 Some("all".to_string()),
-                self.tr("dialog.sshAgentPolicyAll"),
+                t!("dialog.sshAgentPolicyAll"),
                 matches!(
                     editor.agent_forwarding_config.policy,
                     nyaterm_core::SshAgentForwardingPolicy::All
                 ),
             ),
         ];
-        let ssh_agent_endpoint_options =
-            Self::ssh_agent_endpoint_choices(language.as_str(), &editor.agent_endpoint);
+        let ssh_agent_endpoint_options = Self::ssh_agent_endpoint_choices(&editor.agent_endpoint);
         let shell_label = match editor.shell_path.as_str() {
-            "powershell.exe" => self.tr("dialog.shellPowerShell"),
-            "cmd.exe" => self.tr("dialog.shellCmd"),
-            "bash" => self.tr("dialog.shellBash"),
-            "wsl.exe" => self.tr("dialog.shellWsl"),
-            "wt.exe" => self.tr("dialog.shellWindowsTerminal"),
-            _ => self.tr("dialog.shellCustom"),
+            "powershell.exe" => t!("dialog.shellPowerShell"),
+            "cmd.exe" => t!("dialog.shellCmd"),
+            "bash" => t!("dialog.shellBash"),
+            "wsl.exe" => t!("dialog.shellWsl"),
+            "wt.exe" => t!("dialog.shellWindowsTerminal"),
+            _ => t!("dialog.shellCustom"),
         };
         let shell_options = [
-            ("powershell.exe", self.tr("dialog.shellPowerShell")),
-            ("cmd.exe", self.tr("dialog.shellCmd")),
-            ("bash", self.tr("dialog.shellBash")),
-            ("wsl.exe", self.tr("dialog.shellWsl")),
-            ("wt.exe", self.tr("dialog.shellWindowsTerminal")),
+            ("powershell.exe", t!("dialog.shellPowerShell")),
+            ("cmd.exe", t!("dialog.shellCmd")),
+            ("bash", t!("dialog.shellBash")),
+            ("wsl.exe", t!("dialog.shellWsl")),
+            ("wt.exe", t!("dialog.shellWindowsTerminal")),
         ]
         .into_iter()
         .map(|(value, label)| {
@@ -886,7 +875,7 @@ impl NyaTermApp {
             (
                 ConnectionEditorSelect::Encoding,
                 encoding_options.as_slice(),
-                self.tr("connection.encodingFollowGlobal").to_string(),
+                t!("connection.encodingFollowGlobal").to_string(),
             ),
             (
                 ConnectionEditorSelect::SftpCwdFollowMode,
@@ -896,8 +885,7 @@ impl NyaTermApp {
             (
                 ConnectionEditorSelect::SftpFilenameEncoding,
                 sftp_filename_encoding_options.as_slice(),
-                self.tr("dialog.sftpFilenameEncodingFollowTerminal")
-                    .to_string(),
+                t!("dialog.sftpFilenameEncodingFollowTerminal").to_string(),
             ),
             (
                 ConnectionEditorSelect::SshAlgorithmMode,
@@ -907,12 +895,12 @@ impl NyaTermApp {
             (
                 ConnectionEditorSelect::SshAgentEndpoint,
                 ssh_agent_endpoint_options.as_slice(),
-                self.tr("dialog.sshAgentAuto").to_string(),
+                t!("dialog.sshAgentAuto").to_string(),
             ),
             (
                 ConnectionEditorSelect::SshAgentForwardingPolicy,
                 policy_options.as_slice(),
-                self.tr("dialog.sshAgentPolicyAllowlist").to_string(),
+                t!("dialog.sshAgentPolicyAllowlist").to_string(),
             ),
             (
                 ConnectionEditorSelect::SshProfile,
@@ -967,12 +955,12 @@ impl NyaTermApp {
             (
                 ConnectionEditorSelect::SerialPort,
                 serial_port_options.as_slice(),
-                self.tr("dialog.selectSerialPort").to_string(),
+                t!("dialog.selectSerialPort").to_string(),
             ),
             (
                 ConnectionEditorSelect::BaudRate,
                 baud_options.as_slice(),
-                self.tr("dialog.customBaudRate").to_string(),
+                t!("dialog.customBaudRate").to_string(),
             ),
             (
                 ConnectionEditorSelect::DataBits,
@@ -1002,7 +990,7 @@ impl NyaTermApp {
             .iter()
             .enumerate()
             .map(|(index, endpoint)| {
-                let choices = Self::ssh_agent_endpoint_choices(language.as_str(), endpoint);
+                let choices = Self::ssh_agent_endpoint_choices(endpoint);
                 let options = Self::connection_editor_select_options(&choices);
                 let selected_value = Some(Self::ssh_agent_endpoint_value(endpoint).to_string());
                 let select = self.select_entity(
@@ -1043,7 +1031,6 @@ impl NyaTermApp {
         let section_context = ConnectionEditorSectionContext {
             palette,
             editor: &editor,
-            language: &language,
             fields: &fields,
         };
         let mut icon_grid = div().grid().grid_cols(7).gap_1();
@@ -1288,7 +1275,7 @@ impl NyaTermApp {
                                                 self.connection_state.groups(),
                                                 &editor,
                                                 none_label,
-                                                self.tr("dialog.newGroup"),
+                                                t!("dialog.newGroup"),
                                             ),
                                             select_open: group_select_open,
                                             trigger_bounds: self
@@ -1407,7 +1394,7 @@ impl NyaTermApp {
             .child(card)
             .when(agent_identity_picker_open, |this| {
                 this.child(connection_editor_agent_identity_picker(
-                    palette, &language, &editor, cx,
+                    palette, &editor, cx,
                 ))
             });
         if native_window {
@@ -1454,11 +1441,9 @@ impl NyaTermApp {
 
 fn connection_editor_agent_identity_picker(
     palette: crate::theme::ThemePalette,
-    language: &str,
     editor: &ConnectionEditorState,
     cx: &mut Context<NyaTermApp>,
 ) -> AnyElement {
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     let allowlist_fingerprints: &[String] = match &editor.agent_forwarding_config.policy {
         nyaterm_core::SshAgentForwardingPolicy::Allowlist { fingerprints } => fingerprints,
         nyaterm_core::SshAgentForwardingPolicy::All => &[],
@@ -1470,9 +1455,9 @@ fn connection_editor_agent_identity_picker(
                 format!(
                     "{} {}{}",
                     preview.identities.len(),
-                    tr("dialog.sshAgentPreviewIdentityCount"),
+                    t!("dialog.sshAgentPreviewIdentityCount"),
                     if preview.truncated {
-                        format!(" · {}", tr("dialog.sshAgentPreviewTruncated"))
+                        format!(" · {}", t!("dialog.sshAgentPreviewTruncated"))
                     } else {
                         String::new()
                     }
@@ -1484,8 +1469,8 @@ fn connection_editor_agent_identity_picker(
                 .iter()
                 .any(|value| value == &fingerprint);
             let source = match identity.source.as_str() {
-                "external_agent" => tr("dialog.sshAgentExternalSource").to_string(),
-                "stored_key" => tr("dialog.sshAgentStoredKeysSource").to_string(),
+                "external_agent" => t!("dialog.sshAgentExternalSource").to_string(),
+                "stored_key" => t!("dialog.sshAgentStoredKeysSource").to_string(),
                 _ => identity.source.clone(),
             };
             identity_list = identity_list.child(
@@ -1560,15 +1545,15 @@ fn connection_editor_agent_identity_picker(
                     .text_color(rgb(palette.warning))
                     .child(format!(
                         "{} #{}: {} ({})",
-                        tr("dialog.sshAgentPreviewError"),
+                        t!("dialog.sshAgentPreviewError"),
                         error.custom_endpoint_index + 1,
                         error.endpoint_type,
                         match error.code {
                             nyaterm_transport::SshAgentEndpointPreviewErrorCode::ConnectFailed => {
-                                tr("dialog.sshAgentEndpointConnectFailed")
+                                t!("dialog.sshAgentEndpointConnectFailed")
                             }
                             nyaterm_transport::SshAgentEndpointPreviewErrorCode::IdentityEnumerationFailed => {
-                                tr("dialog.sshAgentEndpointIdentityEnumerationFailed")
+                                t!("dialog.sshAgentEndpointIdentityEnumerationFailed")
                             }
                         }
                     )),
@@ -1581,7 +1566,7 @@ fn connection_editor_agent_identity_picker(
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
                     .text_center()
-                    .child(tr("dialog.sshAgentEndpointListEmpty")),
+                    .child(t!("dialog.sshAgentEndpointListEmpty")),
             );
         }
     } else {
@@ -1592,17 +1577,17 @@ fn connection_editor_agent_identity_picker(
                 .text_color(rgb(palette.text_muted))
                 .text_center()
                 .child(if editor.agent_preview_loading {
-                    tr("dialog.sshAgentPreviewLoading")
+                    t!("dialog.sshAgentPreviewLoading")
                 } else {
-                    tr("dialog.sshAgentPreviewRefresh")
+                    t!("dialog.sshAgentPreviewRefresh")
                 }),
         );
     }
 
     let refresh_label = if editor.agent_preview_loading {
-        tr("dialog.sshAgentPreviewLoading")
+        t!("dialog.sshAgentPreviewLoading")
     } else {
-        tr("dialog.sshAgentPreviewRefresh")
+        t!("dialog.sshAgentPreviewRefresh")
     };
     let picker_card = div()
         .id("connection-agent-identity-picker-card")
@@ -1631,7 +1616,7 @@ fn connection_editor_agent_identity_picker(
                         .font_weight(FontWeight(700.))
                         .text_color(rgb(palette.text))
                         .text_center()
-                        .child(tr("dialog.sshAgentIdentityPickerTitle")),
+                        .child(t!("dialog.sshAgentIdentityPickerTitle")),
                 )
                 .child(
                     div()
@@ -1656,7 +1641,7 @@ fn connection_editor_agent_identity_picker(
                 .text_sm()
                 .text_color(rgb(palette.text_muted))
                 .text_center()
-                .child(tr("dialog.sshAgentIdentityPickerDescription")),
+                .child(t!("dialog.sshAgentIdentityPickerDescription")),
         )
         .child(
             NyaScrollArea::new("connection-agent-identity-picker-list")
@@ -1708,7 +1693,7 @@ fn connection_editor_agent_identity_picker(
                         .text_color(rgb(palette.on_primary))
                         .cursor_pointer()
                         .hover(|this| this.bg(rgb(palette.primary_hover)))
-                        .child(tr("dialog.sshAgentIdentityPickerDone"))
+                        .child(t!("dialog.sshAgentIdentityPickerDone"))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.set_connection_editor_agent_identity_picker_open(false, cx);
                         })),
@@ -1806,16 +1791,13 @@ fn connection_editor_select_is_searchable(select: ConnectionEditorSelect) -> boo
     )
 }
 
-fn connection_editor_select_search_placeholder(
-    app: &NyaTermApp,
-    select: ConnectionEditorSelect,
-) -> Option<String> {
+fn connection_editor_select_search_placeholder(select: ConnectionEditorSelect) -> Option<String> {
     match select {
-        ConnectionEditorSelect::SavedPassword => Some(app.tr("dialog.selectPassword").to_string()),
-        ConnectionEditorSelect::SshKey => Some(app.tr("dialog.privateKey").to_string()),
-        ConnectionEditorSelect::Otp => Some(app.tr("dialog.searchOtpEntries").to_string()),
-        ConnectionEditorSelect::Proxy => Some(app.tr("network.searchProxies").to_string()),
-        ConnectionEditorSelect::ProxyJump => Some(app.tr("network.searchConnections").to_string()),
+        ConnectionEditorSelect::SavedPassword => Some(t!("dialog.selectPassword").to_string()),
+        ConnectionEditorSelect::SshKey => Some(t!("dialog.privateKey").to_string()),
+        ConnectionEditorSelect::Otp => Some(t!("dialog.searchOtpEntries").to_string()),
+        ConnectionEditorSelect::Proxy => Some(t!("network.searchProxies").to_string()),
+        ConnectionEditorSelect::ProxyJump => Some(t!("network.searchConnections").to_string()),
         ConnectionEditorSelect::SshAgentForwardingPolicy => None,
         _ => None,
     }

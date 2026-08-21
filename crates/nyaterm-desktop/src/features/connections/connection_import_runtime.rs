@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, Context, IntoElement, PathPromptOptions, SharedString, Window};
 use nyaterm_store::StoreDomain;
 use nyaterm_ui::NyaDialogWindowExt as _;
@@ -69,7 +71,7 @@ impl NyaTermApp {
         self.shell
             .set_status("select a connection import source".to_string());
         self.open_content_dialog(
-            self.tr("settings.importConfig").to_string(),
+            t!("settings.importConfig").to_string(),
             480.,
             |app, _, cx| app.connection_import_dialog_content(cx).into_any_element(),
             |_, _| {},
@@ -224,9 +226,8 @@ impl NyaTermApp {
             ConnectionImportResult::Imported(count) => {
                 self.refresh_store_from_runtime_and_sync_theme(cx);
                 self.connection_state.expand_all_catalog_groups();
-                let message = self
-                    .tr("savedConnections.importSuccess")
-                    .replace("{{count}}", &count.to_string());
+                let message =
+                    t!("savedConnections.importSuccess").replace("{{count}}", &count.to_string());
                 self.shell.set_status(message.clone());
                 self.settings.update_store_status(message, true);
             }
@@ -248,9 +249,7 @@ impl NyaTermApp {
                     self.prompt_connection_session_import(ConnectionImportSource::Termius, cx);
                     return;
                 }
-                let message = self
-                    .tr("savedConnections.importFailed")
-                    .replace("{{error}}", &error);
+                let message = t!("savedConnections.importFailed").replace("{{error}}", &error);
                 self.shell.set_status(message.clone());
                 self.settings.update_store_status(message, false);
             }

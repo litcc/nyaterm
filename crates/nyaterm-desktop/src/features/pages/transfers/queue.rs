@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, SharedString,
     StatefulInteractiveElement as _, Styled as _, div, px, rgb,
@@ -51,7 +53,7 @@ impl NyaTermApp {
         let download_path = self
             .resolved_transfer_download_dir()
             .map(|path| truncate_preview(&path.display().to_string(), 64))
-            .unwrap_or_else(|| format!("{}: -", self.tr("fileTransfer.downloadPath")));
+            .unwrap_or_else(|| format!("{}: -", t!("fileTransfer.downloadPath")));
 
         let mut list = div().flex().flex_col();
         if self.session.active_id().is_none() {
@@ -64,7 +66,7 @@ impl NyaTermApp {
                     .py_6()
                     .text_size(px(11.))
                     .text_color(rgb(palette.text_dimmed))
-                    .child(self.tr("fileExplorer.connectToSession")),
+                    .child(t!("fileExplorer.connectToSession")),
             );
         } else if visible_jobs.is_empty() {
             list = list.child(
@@ -76,19 +78,19 @@ impl NyaTermApp {
                     .py_6()
                     .text_size(px(11.))
                     .text_color(rgb(palette.text_dimmed))
-                    .child(self.tr("fileTransfer.noTransfers")),
+                    .child(t!("fileTransfer.noTransfers")),
             );
         } else {
             list = list.gap(px(2.)).p_1();
             let row_labels = TransferJobRowLabels {
-                transferring: self.tr("fileTransfer.transferring").to_string(),
-                paused: self.tr("fileTransfer.paused").to_string(),
-                cancelling: self.tr("fileTransfer.cancelling").to_string(),
-                cancelled: self.tr("fileTransfer.cancelled").to_string(),
-                completed: self.tr("fileTransfer.completed").to_string(),
-                failed: self.tr("fileTransfer.failed").to_string(),
-                streaming: self.tr("fileTransfer.streaming").to_string(),
-                unknown_size: self.tr("fileTransfer.unknownSize").to_string(),
+                transferring: t!("fileTransfer.transferring").to_string(),
+                paused: t!("fileTransfer.paused").to_string(),
+                cancelling: t!("fileTransfer.cancelling").to_string(),
+                cancelled: t!("fileTransfer.cancelled").to_string(),
+                completed: t!("fileTransfer.completed").to_string(),
+                failed: t!("fileTransfer.failed").to_string(),
+                streaming: t!("fileTransfer.streaming").to_string(),
+                unknown_size: t!("fileTransfer.unknownSize").to_string(),
             };
             for job in ordered_transfer_jobs(&visible_jobs) {
                 let directory_progress = job.progress.as_ref().and_then(|progress| {
@@ -96,7 +98,7 @@ impl NyaTermApp {
                         .item_count_completed
                         .zip(progress.item_count_total)
                         .map(|(completed, total)| {
-                            self.tr("fileTransfer.directoryProgress")
+                            t!("fileTransfer.directoryProgress")
                                 .replace("{{completed}}", &completed.to_string())
                                 .replace("{{total}}", &total.to_string())
                         })
@@ -128,7 +130,7 @@ impl NyaTermApp {
                 this.handle_transfer_queue_key_down(event, window, cx);
             }))
             .child(panel_header_with_actions(
-                self.tr("panel.fileTransfer"),
+                t!("panel.fileTransfer"),
                 "",
                 palette,
                 self.shell_transparent_color(palette.section_header),
@@ -141,7 +143,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-pause-all",
                             "icons/transfer/pause.svg",
-                            self.tr("fileTransfer.pauseAll"),
+                            t!("fileTransfer.pauseAll"),
                             has_running,
                             cx.listener(|this, _, _, cx| {
                                 this.pause_all_transfer_jobs(cx);
@@ -151,7 +153,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-resume-all",
                             "icons/transfer/play.svg",
-                            self.tr("fileTransfer.resumeAll"),
+                            t!("fileTransfer.resumeAll"),
                             has_paused,
                             cx.listener(|this, _, _, cx| {
                                 this.resume_all_transfer_jobs(cx);
@@ -161,7 +163,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-cancel-all",
                             "icons/transfer/stop.svg",
-                            self.tr("fileTransfer.cancelAll"),
+                            t!("fileTransfer.cancelAll"),
                             has_active,
                             cx.listener(|this, _, _, cx| {
                                 this.cancel_all_transfer_jobs(cx);
@@ -171,7 +173,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-clear-completed",
                             "icons/transfer/playlist-remove.svg",
-                            self.tr("fileTransfer.clearCompleted"),
+                            t!("fileTransfer.clearCompleted"),
                             has_completed,
                             cx.listener(|this, _, _, cx| {
                                 this.clear_completed_transfer_jobs(cx);
@@ -181,7 +183,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-clear-stopped",
                             "icons/transfer/clear-all.svg",
-                            self.tr("fileTransfer.clearAll"),
+                            t!("fileTransfer.clearAll"),
                             has_stopped,
                             cx.listener(|this, _, _, cx| {
                                 this.clear_stopped_transfer_jobs(cx);
@@ -219,7 +221,7 @@ impl NyaTermApp {
                             .cursor_pointer()
                             .hover(|this| this.text_color(rgb(palette.text)))
                             .tooltip({
-                                let label = self.tr("fileTransfer.downloadPath").to_string();
+                                let label = t!("fileTransfer.downloadPath").to_string();
                                 move |window, cx| NyaTooltip::new(label.clone()).build(window, cx)
                             })
                             .child(download_path)

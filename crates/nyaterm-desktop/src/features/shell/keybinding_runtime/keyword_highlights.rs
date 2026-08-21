@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, Context, KeyDownEvent, PathPromptOptions, SharedString, Window};
 use nyaterm_core::KeywordHighlightRule;
 use nyaterm_store::{StoreDomain, store_request};
@@ -236,7 +238,7 @@ impl NyaTermApp {
         let input = self.text_input(
             keyword_highlight_text_input_id(&id, KeywordHighlightEditorField::Name),
             "New rule",
-            TextInputSetup::placeholder(self.tr("settings.keywordHighlightNewRule")),
+            TextInputSetup::placeholder(t!("settings.keywordHighlightNewRule")),
             cx,
         );
         window.focus(&input.read(cx).focus_handle(), cx);
@@ -307,7 +309,7 @@ impl NyaTermApp {
             .unwrap_or_default();
         let setup = match field {
             KeywordHighlightEditorField::Name => {
-                TextInputSetup::placeholder(self.tr("settings.keywordHighlightNewRule"))
+                TextInputSetup::placeholder(t!("settings.keywordHighlightNewRule"))
             }
             KeywordHighlightEditorField::Patterns => TextInputSetup::multi_line(""),
             KeywordHighlightEditorField::ColorDark | KeywordHighlightEditorField::ColorLight => {

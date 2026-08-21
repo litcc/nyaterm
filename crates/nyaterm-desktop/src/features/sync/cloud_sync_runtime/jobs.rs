@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::time::Instant;
 
 use gpui::{AppContext, Context};
@@ -37,7 +39,7 @@ impl NyaTermApp {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 let status = match result {
-                    Ok(()) => this.tr("settings.syncTestSuccess").to_string(),
+                    Ok(()) => t!("settings.syncTestSuccess").to_string(),
                     Err(error) => format!("provider test failed: {error}"),
                 };
                 this.cloud_sync.finish_job_with_status(status);

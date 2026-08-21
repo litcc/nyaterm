@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
 
@@ -34,25 +36,25 @@ impl NyaTermApp {
             _ => "prompt",
         };
 
-        let master_section_label = self.tr("settings.masterPasswordSection");
-        let master_switch_label = self.tr("settings.masterPasswordSwitch");
-        let master_switch_desc = self.tr("settings.masterPasswordSwitchDesc");
-        let master_locked_desc = self.tr("settings.masterPasswordLockedByCloudSync");
-        let master_set_label = self.tr("settings.masterPasswordIsSet");
-        let master_input_label = self.tr(if has_stored_master_password {
+        let master_section_label = t!("settings.masterPasswordSection");
+        let master_switch_label = t!("settings.masterPasswordSwitch");
+        let master_switch_desc = t!("settings.masterPasswordSwitchDesc");
+        let master_locked_desc = t!("settings.masterPasswordLockedByCloudSync");
+        let master_set_label = t!("settings.masterPasswordIsSet");
+        let master_input_label = t!(if has_stored_master_password {
             "settings.masterPasswordNew"
         } else {
             "settings.masterPassword"
         });
-        let master_input_desc = self.tr("settings.masterPasswordDesc");
-        let session_security_label = self.tr("settings.sessionSecurity");
-        let screen_lock_label = self.tr("settings.enableScreenLock");
-        let screen_lock_desc = self.tr("settings.enableScreenLockDesc");
-        let idle_lock_label = self.tr("settings.idleLockMinutes");
-        let idle_lock_desc = self.tr("settings.idleLockMinutesDesc");
-        let minutes_label = self.tr("common.minutes");
-        let host_key_label = self.tr("settings.hostKeyPolicy");
-        let host_key_desc = self.tr("settings.hostKeyPolicyDesc");
+        let master_input_desc = t!("settings.masterPasswordDesc");
+        let session_security_label = t!("settings.sessionSecurity");
+        let screen_lock_label = t!("settings.enableScreenLock");
+        let screen_lock_desc = t!("settings.enableScreenLockDesc");
+        let idle_lock_label = t!("settings.idleLockMinutes");
+        let idle_lock_desc = t!("settings.idleLockMinutesDesc");
+        let minutes_label = t!("common.minutes");
+        let host_key_label = t!("settings.hostKeyPolicy");
+        let host_key_desc = t!("settings.hostKeyPolicyDesc");
 
         div()
             .flex()
@@ -158,9 +160,9 @@ impl NyaTermApp {
                     host_key_label,
                     Some(SharedString::from(host_key_desc)),
                     vec![
-                        NyaSelectOption::new("strict", self.tr("settings.hostKeyStrict")),
-                        NyaSelectOption::new("prompt", self.tr("settings.hostKeyPrompt")),
-                        NyaSelectOption::new("accept", self.tr("settings.hostKeyAccept")),
+                        NyaSelectOption::new("strict", t!("settings.hostKeyStrict")),
+                        NyaSelectOption::new("prompt", t!("settings.hostKeyPrompt")),
+                        NyaSelectOption::new("accept", t!("settings.hostKeyAccept")),
                     ],
                     host_key_policy,
                     false,

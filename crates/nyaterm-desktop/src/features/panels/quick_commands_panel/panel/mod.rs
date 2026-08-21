@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -125,8 +127,8 @@ impl NyaTermApp {
         let categories = quick_command_category_options(
             self.commands.quick_commands(),
             self.commands.quick_command_categories(),
-            self.tr("quickCommands.allCategories"),
-            self.tr("quickCommands.uncategorized"),
+            t!("quickCommands.allCategories"),
+            t!("quickCommands.uncategorized"),
         );
         let palette = self.theme_palette();
         let popover_bg = self.shell_surface_color(palette.surface);
@@ -139,14 +141,14 @@ impl NyaTermApp {
         let search_field = self.text_input(
             "quick-command.search",
             &search_draft,
-            TextInputSetup::placeholder(self.tr("quickCommands.search")),
+            TextInputSetup::placeholder(t!("quickCommands.search")),
             cx,
         );
         let ai_prompt_input = self
             .text_input_box(
                 "quick-command.ai-prompt",
                 &ai_prompt_draft,
-                TextInputSetup::placeholder(self.tr("ai.placeholder")),
+                TextInputSetup::placeholder(t!("ai.placeholder")),
                 cx,
             )
             .into_any_element();
@@ -221,12 +223,12 @@ impl NyaTermApp {
                                 .text_color(rgb(palette.text_muted))
                                 .path("icons/conn/terminal.svg"),
                         )
-                        .child(self.tr("quickCommands.noCommandsFound"))
+                        .child(t!("quickCommands.noCommandsFound"))
                         .when(total_commands == 0, |this| {
                             this.child(small_button(
                                 palette,
                                 "quick-command-empty-add",
-                                self.tr("quickCommands.addCommand"),
+                                t!("quickCommands.addCommand"),
                                 cx.listener(|this, _, window, cx| {
                                     this.open_new_quick_command_editor(window, cx);
                                 }),
@@ -309,7 +311,7 @@ impl NyaTermApp {
                             .text_size(px(11.))
                             .font_weight(FontWeight(700.))
                             .text_color(rgb(palette.text_muted))
-                            .child(self.tr("panel.quickCommands")),
+                            .child(t!("panel.quickCommands")),
                     )
                     .when(total_commands > 0, |this| {
                         this.child(
@@ -363,11 +365,11 @@ impl NyaTermApp {
                     .child(quick_command_sort_menu_button(
                         QuickCommandSortMenuConfig {
                             current: self.commands.quick_sort_mode(),
-                            sort_label: self.tr("quickCommands.sort"),
-                            created_label: self.tr("quickCommands.sortByCreated"),
-                            name_label: self.tr("quickCommands.sortByName"),
-                            usage_label: self.tr("quickCommands.sortByUseCount"),
-                            custom_label: self.tr("quickCommands.sortCustom"),
+                            sort_label: t!("quickCommands.sort"),
+                            created_label: t!("quickCommands.sortByCreated"),
+                            name_label: t!("quickCommands.sortByName"),
+                            usage_label: t!("quickCommands.sortByUseCount"),
+                            custom_label: t!("quickCommands.sortCustom"),
                         },
                         cx,
                     ))
@@ -375,10 +377,10 @@ impl NyaTermApp {
                         QuickCommandViewMenuConfig {
                             current: self.commands.quick_view_mode(),
                             icon_path: view_icon,
-                            view_label: self.tr("quickCommands.viewMode"),
-                            list_label: self.tr("quickCommands.listMode"),
-                            compact_label: self.tr("quickCommands.compactListMode"),
-                            tile_label: self.tr("quickCommands.tileMode"),
+                            view_label: t!("quickCommands.viewMode"),
+                            list_label: t!("quickCommands.listMode"),
+                            compact_label: t!("quickCommands.compactListMode"),
+                            tile_label: t!("quickCommands.tileMode"),
                         },
                         cx,
                     ))
@@ -388,7 +390,7 @@ impl NyaTermApp {
                         "quick-command-add",
                         "icons/conn/add.svg",
                         false,
-                        self.tr("quickCommands.addCommand"),
+                        t!("quickCommands.addCommand"),
                         cx.listener(|this, _, window, cx| {
                             this.close_quick_command_toolbar_popovers();
                             this.open_new_quick_command_editor(window, cx);
@@ -399,7 +401,7 @@ impl NyaTermApp {
                         "quick-command-import",
                         "icons/import.svg",
                         self.commands.quick_import_path_prompt().is_some(),
-                        self.tr("quickCommands.import"),
+                        t!("quickCommands.import"),
                         cx.listener(|this, _, window, cx| {
                             this.close_quick_command_toolbar_popovers();
                             this.open_quick_command_import_dialog(window, cx);
@@ -410,7 +412,7 @@ impl NyaTermApp {
                         "quick-command-export",
                         "icons/menu/export.svg",
                         false,
-                        self.tr("quickCommands.export"),
+                        t!("quickCommands.export"),
                         cx.listener(|this, _, _, cx| {
                             this.close_quick_command_toolbar_popovers();
                             this.prompt_quick_command_export(cx);
@@ -423,8 +425,8 @@ impl NyaTermApp {
                             open: self.commands.quick_ai_popover_is_open(),
                             prompt: self.commands.quick_ai_prompt_draft().to_string(),
                             prompt_input: ai_prompt_input,
-                            button_label: self.tr("ai.generateCommand"),
-                            generate_label: self.tr("ai.generate"),
+                            button_label: t!("ai.generateCommand"),
+                            generate_label: t!("ai.generate"),
                         },
                         cx,
                     )),

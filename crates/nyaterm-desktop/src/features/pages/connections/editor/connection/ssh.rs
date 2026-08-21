@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::HashSet;
 
 use gpui::{
@@ -111,13 +113,11 @@ fn ssh_algorithm_move_button(
 
 fn ssh_algorithm_list(
     palette: crate::theme::ThemePalette,
-    language: &str,
     tab: ConnectionEditorSshAlgorithmTab,
     options: &[SshAlgorithmOption],
     selected_values: &[String],
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     let selected = selected_values.iter().cloned().collect::<HashSet<_>>();
     let option_by_id = options
         .iter()
@@ -145,10 +145,10 @@ fn ssh_algorithm_list(
         .gap_1();
     for (row_index, (id, risk, enabled)) in rows.into_iter().enumerate() {
         let risk_label = match risk {
-            Some(SshAlgorithmRisk::Modern) => tr("dialog.algorithmRiskModern"),
-            Some(SshAlgorithmRisk::Legacy) => tr("dialog.algorithmRiskLegacy"),
-            Some(SshAlgorithmRisk::Insecure) => tr("dialog.algorithmRiskInsecure"),
-            None => tr("dialog.algorithmUnsupported"),
+            Some(SshAlgorithmRisk::Modern) => t!("dialog.algorithmRiskModern"),
+            Some(SshAlgorithmRisk::Legacy) => t!("dialog.algorithmRiskLegacy"),
+            Some(SshAlgorithmRisk::Insecure) => t!("dialog.algorithmRiskInsecure"),
+            None => t!("dialog.algorithmUnsupported"),
         };
         let risk_color = match risk {
             Some(SshAlgorithmRisk::Modern) => palette.success,
@@ -233,7 +233,7 @@ fn ssh_algorithm_list(
                             palette,
                             format!("connection-ssh-algorithm-up-{tab:?}-{row_index}"),
                             "icons/chevron-up.svg",
-                            tr("dialog.moveUp").to_string(),
+                            t!("dialog.moveUp").to_string(),
                             move_up_enabled,
                             cx.listener(move |this, _, _, cx| {
                                 this.move_connection_editor_ssh_algorithm(tab, &move_up_id, -1, cx);
@@ -243,7 +243,7 @@ fn ssh_algorithm_list(
                             palette,
                             format!("connection-ssh-algorithm-down-{tab:?}-{row_index}"),
                             "icons/chevron-down.svg",
-                            tr("dialog.moveDown").to_string(),
+                            t!("dialog.moveDown").to_string(),
                             move_down_enabled,
                             cx.listener(move |this, _, _, cx| {
                                 this.move_connection_editor_ssh_algorithm(
@@ -269,7 +269,6 @@ pub(super) fn connection_editor_ssh_section(
     let ConnectionEditorSectionContext {
         palette,
         editor,
-        language,
         fields,
     } = section;
     let SshConnectionSectionLabels {
@@ -278,7 +277,6 @@ pub(super) fn connection_editor_ssh_section(
         jump: jump_label,
     } = labels;
     let SshConnectionSectionOptions { auth: auth_options } = options;
-    let tr = |key: &'static str| crate::i18n::text(language, key);
 
     let auth_tab_options = auth_options
         .iter()
@@ -312,10 +310,10 @@ pub(super) fn connection_editor_ssh_section(
 
     let advanced_tabs = NyaTabs::new("connection-advanced-network-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.proxySelect")),
-            NyaTabItem::new(tr("dialog.proxyJump")),
-            NyaTabItem::new(tr("dialog.twoFactorAuth")),
-            NyaTabItem::new(tr("dialog.sshAgentForwardingTab")),
+            NyaTabItem::new(t!("dialog.proxySelect")),
+            NyaTabItem::new(t!("dialog.proxyJump")),
+            NyaTabItem::new(t!("dialog.twoFactorAuth")),
+            NyaTabItem::new(t!("dialog.sshAgentForwardingTab")),
         ])
         .selected_index(match editor.advanced_network_tab {
             ConnectionEditorAdvancedTab::Proxy => 0,
@@ -336,11 +334,11 @@ pub(super) fn connection_editor_ssh_section(
 
     let behavior_tabs = NyaTabs::new("connection-advanced-behavior-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.commandExecution")),
-            NyaTabItem::new(tr("dialog.encodingSettings")),
+            NyaTabItem::new(t!("dialog.commandExecution")),
+            NyaTabItem::new(t!("dialog.encodingSettings")),
             NyaTabItem::new("SFTP"),
-            NyaTabItem::new(tr("dialog.x11Forwarding")),
-            NyaTabItem::new(tr("dialog.backspaceMode")),
+            NyaTabItem::new(t!("dialog.x11Forwarding")),
+            NyaTabItem::new(t!("dialog.backspaceMode")),
         ])
         .selected_index(match editor.advanced_behavior_tab {
             ConnectionEditorAdvancedTab::PostLogin => 0,
@@ -363,9 +361,9 @@ pub(super) fn connection_editor_ssh_section(
 
     let password_source_tabs = NyaTabs::new("connection-password-source-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.askWhenConnecting")),
-            NyaTabItem::new(tr("dialog.directPassword")),
-            NyaTabItem::new(tr("dialog.savedPassword")),
+            NyaTabItem::new(t!("dialog.askWhenConnecting")),
+            NyaTabItem::new(t!("dialog.directPassword")),
+            NyaTabItem::new(t!("dialog.savedPassword")),
         ])
         .selected_index(match editor.password_source {
             ConnectionEditorPasswordSource::Ask => 0,
@@ -387,21 +385,21 @@ pub(super) fn connection_editor_ssh_section(
         .gap_3()
         .child(editor_field(
             palette,
-            required(tr("dialog.host")),
+            required(t!("dialog.host")),
             ConnectionEditorField::Host,
             fields,
             cx,
         ))
         .child(editor_stepper_field(
             palette,
-            required(tr("dialog.port")),
+            required(t!("dialog.port")),
             ConnectionEditorField::Port,
             fields,
             cx,
         ))
         .child(editor_field(
             palette,
-            required(tr("dialog.username")),
+            required(t!("dialog.username")),
             ConnectionEditorField::Username,
             fields,
             cx,
@@ -415,7 +413,7 @@ pub(super) fn connection_editor_ssh_section(
                     div()
                         .text_xs()
                         .text_color(rgb(palette.text_muted))
-                        .child(tr("dialog.authentication")),
+                        .child(t!("dialog.authentication")),
                 )
                 .child(auth_tabs),
         )
@@ -428,7 +426,7 @@ pub(super) fn connection_editor_ssh_section(
                     .bg(rgba((palette.accent << 8) | 0x18))
                     .text_size(px(10.))
                     .text_color(rgb(palette.text_muted))
-                    .child(tr("dialog.noAuthenticationDescription")),
+                    .child(t!("dialog.noAuthenticationDescription")),
             )
         })
         .when(editor.auth_mode == "password", |this| {
@@ -441,7 +439,7 @@ pub(super) fn connection_editor_ssh_section(
                         div()
                             .text_xs()
                             .text_color(rgb(palette.text_muted))
-                            .child(tr("dialog.passwordSource")),
+                            .child(t!("dialog.passwordSource")),
                     )
                     .child(password_source_tabs)
                     .when(
@@ -455,7 +453,7 @@ pub(super) fn connection_editor_ssh_section(
                                     .bg(rgba((palette.accent << 8) | 0x18))
                                     .text_size(px(10.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(tr("dialog.askPasswordDescription")),
+                                    .child(t!("dialog.askPasswordDescription")),
                             )
                         },
                     )
@@ -464,7 +462,7 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(editor_field(
                                 palette,
-                                tr("dialog.password"),
+                                t!("dialog.password"),
                                 ConnectionEditorField::Password,
                                 fields,
                                 cx,
@@ -481,7 +479,7 @@ pub(super) fn connection_editor_ssh_section(
                                     cx,
                                 },
                                 "connection-editor-saved-password",
-                                tr("dialog.savedPassword"),
+                                t!("dialog.savedPassword"),
                                 ConnectionEditorSelect::SavedPassword,
                             ))
                         },
@@ -517,13 +515,13 @@ pub(super) fn connection_editor_ssh_section(
                                             .text_xs()
                                             .font_weight(FontWeight(600.))
                                             .text_color(rgb(palette.text))
-                                            .child(tr("dialog.sshAgentEndpoint")),
+                                            .child(t!("dialog.sshAgentEndpoint")),
                                     )
                                     .child(
                                         div()
                                             .text_size(px(10.))
                                             .text_color(rgb(palette.text_muted))
-                                            .child(tr("dialog.sshAgentAuthDesc")),
+                                            .child(t!("dialog.sshAgentAuthDesc")),
                                     ),
                             )
                             .child(
@@ -544,7 +542,7 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(editor_field(
                                 palette,
-                                tr("dialog.sshAgentEnvironmentVariable"),
+                                t!("dialog.sshAgentEnvironmentVariable"),
                                 ConnectionEditorField::AgentEnvironmentVariable,
                                 fields,
                                 cx,
@@ -559,7 +557,7 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(editor_field(
                                 palette,
-                                tr("dialog.sshAgentSocketPath"),
+                                t!("dialog.sshAgentSocketPath"),
                                 ConnectionEditorField::AgentUnixSocket,
                                 fields,
                                 cx,
@@ -578,7 +576,7 @@ pub(super) fn connection_editor_ssh_section(
                         cx,
                     },
                     "connection-editor-key",
-                    tr("dialog.privateKey"),
+                    t!("dialog.privateKey"),
                     ConnectionEditorSelect::SshKey,
                 ))
             },
@@ -605,7 +603,7 @@ pub(super) fn connection_editor_ssh_section(
                         })
                         .text_color(rgb(palette.text_muted)),
                 )
-                .child(tr("dialog.advancedConfig"))
+                .child(t!("dialog.advancedConfig"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_connection_editor_flag(ConnectionEditorToggle::Advanced, cx);
                 })),
@@ -622,7 +620,7 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.proxySelect"),
+                                t!("dialog.proxySelect"),
                                 truncate_preview(&proxy_label, 48),
                                 connection_editor_select(
                                     ConnectionEditorRenderContext {
@@ -631,7 +629,7 @@ pub(super) fn connection_editor_ssh_section(
                                         cx,
                                     },
                                     "connection-editor-proxy",
-                                    tr("dialog.proxySelect"),
+                                    t!("dialog.proxySelect"),
                                     ConnectionEditorSelect::Proxy,
                                 ),
                             ))
@@ -642,7 +640,7 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.proxyJump"),
+                                t!("dialog.proxyJump"),
                                 truncate_preview(&jump_label, 48),
                                 connection_editor_select(
                                     ConnectionEditorRenderContext {
@@ -651,7 +649,7 @@ pub(super) fn connection_editor_ssh_section(
                                         cx,
                                     },
                                     "connection-editor-jump",
-                                    tr("dialog.selectProxyJump"),
+                                    t!("dialog.selectProxyJump"),
                                     ConnectionEditorSelect::ProxyJump,
                                 ),
                             ))
@@ -662,7 +660,7 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.twoFactorAuth"),
+                                t!("dialog.twoFactorAuth"),
                                 truncate_preview(&otp_label, 36),
                                 div()
                                     .flex()
@@ -675,12 +673,12 @@ pub(super) fn connection_editor_ssh_section(
                                             cx,
                                         },
                                         "connection-editor-otp",
-                                        tr("dialog.selectOtp"),
+                                        t!("dialog.selectOtp"),
                                         ConnectionEditorSelect::Otp,
                                     ))
                                     .child(toggle_chip(
                                         palette,
-                                        tr("dialog.autoFillOtp"),
+                                        t!("dialog.autoFillOtp"),
                                         editor.auto_fill_otp,
                                         cx.listener(|this, _, _, cx| {
                                             this.toggle_connection_editor_flag(
@@ -794,7 +792,7 @@ pub(super) fn connection_editor_ssh_section(
                                             |this| {
                                                 this.child(forwarding_endpoint_editor_field(
                                                     palette,
-                                                    tr("dialog.sshAgentEnvironmentVariable"),
+                                                    t!("dialog.sshAgentEnvironmentVariable"),
                                                     index,
                                                     ConnectionEditorField::AgentForwardingEnvironmentVariable,
                                                     fields,
@@ -810,7 +808,7 @@ pub(super) fn connection_editor_ssh_section(
                                             |this| {
                                                 this.child(forwarding_endpoint_editor_field(
                                                     palette,
-                                                    tr("dialog.sshAgentSocketPath"),
+                                                    t!("dialog.sshAgentSocketPath"),
                                                     index,
                                                     ConnectionEditorField::AgentForwardingSocketPath,
                                                     fields,
@@ -856,7 +854,7 @@ pub(super) fn connection_editor_ssh_section(
                                         .path("icons/settings.svg")
                                         .text_color(rgb(palette.text_muted)),
                                 )
-                                .child(tr("dialog.sshAgentManageAllowlist"));
+                                .child(t!("dialog.sshAgentManageAllowlist"));
                             if can_choose_identity {
                                 choose_identity = choose_identity
                                     .cursor_pointer()
@@ -895,13 +893,13 @@ pub(super) fn connection_editor_ssh_section(
                                                             .text_sm()
                                                             .font_weight(FontWeight(600.))
                                                             .text_color(rgb(palette.text))
-                                                            .child(tr("dialog.sshAgentForwarding")),
+                                                            .child(t!("dialog.sshAgentForwarding")),
                                                     )
                                                     .child(
                                                         div()
                                                             .text_xs()
                                                             .text_color(rgb(palette.text_muted))
-                                                            .child(tr("dialog.sshAgentForwardingDescription")),
+                                                            .child(t!("dialog.sshAgentForwardingDescription")),
                                                     ),
                                             )
                                             .child(crate::features::pages::settings::settings_switch(
@@ -930,7 +928,7 @@ pub(super) fn connection_editor_ssh_section(
                                                     .text_sm()
                                                     .font_weight(FontWeight(600.))
                                                     .text_color(rgb(palette.text))
-                                                    .child(tr("dialog.sshAgentForwardingSources")),
+                                                    .child(t!("dialog.sshAgentForwardingSources")),
                                             )
                                             .child(
                                                 div()
@@ -945,8 +943,8 @@ pub(super) fn connection_editor_ssh_section(
                                                             .text_color(rgb(palette.text))
                                                             .child(format!(
                                                                 "{} ({})",
-                                                                tr("dialog.sshAgentExternalSource"),
-                                                                tr("dialog.sshAgentEndpointList"),
+                                                                t!("dialog.sshAgentExternalSource"),
+                                                                t!("dialog.sshAgentEndpointList"),
                                                             )),
                                                     )
                                                     .child(crate::features::pages::settings::settings_switch(
@@ -984,7 +982,7 @@ pub(super) fn connection_editor_ssh_section(
                                                                         .flex_1()
                                                                         .text_xs()
                                                                         .text_color(rgb(palette.text_muted))
-                                                                        .child(tr("dialog.sshAgentEndpointListDescription")),
+                                                                        .child(t!("dialog.sshAgentEndpointListDescription")),
                                                                 )
                                                                 .child(
                                                                     div()
@@ -998,7 +996,7 @@ pub(super) fn connection_editor_ssh_section(
                                                                         .text_color(rgb(palette.text))
                                                                         .cursor_pointer()
                                                                         .hover(|this| this.bg(rgb(palette.hover)))
-                                                                        .child(tr("dialog.sshAgentAddEndpoint"))
+                                                                        .child(t!("dialog.sshAgentAddEndpoint"))
                                                                         .on_click(add_endpoint),
                                                                 ),
                                                         )
@@ -1012,7 +1010,7 @@ pub(super) fn connection_editor_ssh_section(
                                                                     .py_2()
                                                                     .text_xs()
                                                                     .text_color(rgb(palette.text_muted))
-                                                                    .child(tr("dialog.sshAgentEndpointListEmpty")),
+                                                                    .child(t!("dialog.sshAgentEndpointListEmpty")),
                                                             )
                                                         })
                                                         .child(endpoint_rows),
@@ -1029,7 +1027,7 @@ pub(super) fn connection_editor_ssh_section(
                                                             .min_w_0()
                                                             .text_xs()
                                                             .text_color(rgb(palette.text))
-                                                            .child(tr("dialog.sshAgentStoredKeysSource")),
+                                                            .child(t!("dialog.sshAgentStoredKeysSource")),
                                                     )
                                                     .child(crate::features::pages::settings::settings_switch(
                                                         palette,
@@ -1057,7 +1055,7 @@ pub(super) fn connection_editor_ssh_section(
                                                     .text_sm()
                                                     .font_weight(FontWeight(600.))
                                                     .text_color(rgb(palette.text))
-                                                    .child(tr("dialog.sshAgentForwardingPolicy")),
+                                                    .child(t!("dialog.sshAgentForwardingPolicy")),
                                             )
                                             .child(
                                                 div()
@@ -1084,13 +1082,13 @@ pub(super) fn connection_editor_ssh_section(
                                                                     rgb(palette.text_muted)
                                                                 })
                                                                 .child(if allowlist_count == 0 {
-                                                                    tr("dialog.sshAgentAllowlistEmpty")
+                                                                    t!("dialog.sshAgentAllowlistEmpty")
                                                                         .to_string()
                                                                 } else {
                                                                     format!(
                                                                         "{} {}",
                                                                         allowlist_count,
-                                                                        tr("dialog.sshAgentAllowlistCount"),
+                                                                        t!("dialog.sshAgentAllowlistCount"),
                                                                     )
                                                                 }),
                                                         )
@@ -1106,7 +1104,7 @@ pub(super) fn connection_editor_ssh_section(
                                             .pt_3()
                                             .text_xs()
                                             .text_color(rgb(palette.warning))
-                                            .child(tr("dialog.sshAgentForwardingWarning")),
+                                            .child(t!("dialog.sshAgentForwardingWarning")),
                                     ),
                             )
                         },
@@ -1117,15 +1115,15 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.postLoginCommand"),
-                                tr("dialog.postLoginCommandDesc"),
+                                t!("dialog.postLoginCommand"),
+                                t!("dialog.postLoginCommandDesc"),
                                 div()
                                     .flex()
                                     .flex_col()
                                     .gap_2()
                                     .child(toggle_chip(
                                         palette,
-                                        tr("dialog.enabled"),
+                                        t!("dialog.enabled"),
                                         editor.post_login_enabled,
                                         cx.listener(|this, _, _, cx| {
                                             this.toggle_connection_editor_flag(
@@ -1137,7 +1135,7 @@ pub(super) fn connection_editor_ssh_section(
                                     .when(editor.post_login_enabled, |this| {
                                         this.child(editor_field(
                                             palette,
-                                            tr("dialog.postLoginCommandContent"),
+                                            t!("dialog.postLoginCommandContent"),
                                             ConnectionEditorField::PostLoginCommand,
                                             fields,
                                             cx,
@@ -1145,7 +1143,7 @@ pub(super) fn connection_editor_ssh_section(
                                         .child(
                                             editor_field(
                                                 palette,
-                                                tr("dialog.postLoginDelay"),
+                                                t!("dialog.postLoginDelay"),
                                                 ConnectionEditorField::PostLoginDelay,
                                                 fields,
                                                 cx,
@@ -1160,8 +1158,8 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.encodingSettings"),
-                                tr("connection.encodingFollowGlobal"),
+                                t!("dialog.encodingSettings"),
+                                t!("connection.encodingFollowGlobal"),
                                 div()
                                     .flex()
                                     .flex_col()
@@ -1173,7 +1171,7 @@ pub(super) fn connection_editor_ssh_section(
                                             cx,
                                         },
                                         "connection-editor-ssh-profile",
-                                        tr("dialog.sshProfile"),
+                                        t!("dialog.sshProfile"),
                                         ConnectionEditorSelect::SshProfile,
                                     ))
                                     .child(connection_editor_select(
@@ -1183,7 +1181,7 @@ pub(super) fn connection_editor_ssh_section(
                                             cx,
                                         },
                                         "connection-editor-ssh-terminal-type",
-                                        tr("dialog.sshTerminalType"),
+                                        t!("dialog.sshTerminalType"),
                                         ConnectionEditorSelect::SshTerminalType,
                                     ))
                                     .child(connection_editor_select(
@@ -1193,7 +1191,7 @@ pub(super) fn connection_editor_ssh_section(
                                             cx,
                                         },
                                         "connection-editor-ssh-encoding",
-                                        tr("connection.encoding"),
+                                        t!("connection.encoding"),
                                         ConnectionEditorSelect::Encoding,
                                     ))
                                     .when(
@@ -1209,7 +1207,7 @@ pub(super) fn connection_editor_ssh_section(
                                                     .p_2()
                                                     .text_size(px(10.))
                                                     .text_color(rgb(palette.text_muted))
-                                                    .child(tr(
+                                                    .child(t!(
                                                         "dialog.sshNetworkDeviceLimitations",
                                                     )),
                                             )
@@ -1223,15 +1221,15 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.sftpAdvanced"),
-                                tr("dialog.sftpAdvancedDesc"),
+                                t!("dialog.sftpAdvanced"),
+                                t!("dialog.sftpAdvancedDesc"),
                                 div()
                                     .flex()
                                     .flex_col()
                                     .gap_2()
                                     .child(toggle_chip(
                                         palette,
-                                        tr("dialog.enabled"),
+                                        t!("dialog.enabled"),
                                         editor.sftp_enabled,
                                         cx.listener(|this, _, _, cx| {
                                             this.toggle_connection_editor_flag(
@@ -1247,12 +1245,12 @@ pub(super) fn connection_editor_ssh_section(
                                             cx,
                                         },
                                         "connection-editor-sftp-cwd",
-                                        tr("dialog.sftpCwdFollowMode"),
+                                        t!("dialog.sftpCwdFollowMode"),
                                         ConnectionEditorSelect::SftpCwdFollowMode,
                                     ))
                                     .child(editor_field(
                                         palette,
-                                        tr("dialog.sftpShellDetectionTimeout"),
+                                        t!("dialog.sftpShellDetectionTimeout"),
                                         ConnectionEditorField::SftpShellDetectionTimeout,
                                         fields,
                                         cx,
@@ -1264,7 +1262,7 @@ pub(super) fn connection_editor_ssh_section(
                                             cx,
                                         },
                                         "connection-editor-sftp-filename-encoding",
-                                        tr("dialog.sftpFilenameEncoding"),
+                                        t!("dialog.sftpFilenameEncoding"),
                                         ConnectionEditorSelect::SftpFilenameEncoding,
                                     )),
                             ))
@@ -1275,11 +1273,11 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.x11Forwarding"),
-                                tr("dialog.x11ForwardingDesc"),
+                                t!("dialog.x11Forwarding"),
+                                t!("dialog.x11ForwardingDesc"),
                                 toggle_chip(
                                     palette,
-                                    tr("dialog.enabled"),
+                                    t!("dialog.enabled"),
                                     editor.x11_forwarding,
                                     cx.listener(|this, _, _, cx| {
                                         this.toggle_connection_editor_flag(
@@ -1296,8 +1294,8 @@ pub(super) fn connection_editor_ssh_section(
                         |this| {
                             this.child(ssh_advanced_content(
                                 palette,
-                                tr("dialog.backspaceMode"),
-                                tr("dialog.sshBackspaceModeDesc"),
+                                t!("dialog.backspaceMode"),
+                                t!("dialog.sshBackspaceModeDesc"),
                                 connection_editor_select(
                                     ConnectionEditorRenderContext {
                                         palette,
@@ -1305,7 +1303,7 @@ pub(super) fn connection_editor_ssh_section(
                                         cx,
                                     },
                                     "connection-editor-backspace",
-                                    tr("dialog.backspaceMode"),
+                                    t!("dialog.backspaceMode"),
                                     ConnectionEditorSelect::Backspace,
                                 ),
                             ))
@@ -1315,10 +1313,10 @@ pub(super) fn connection_editor_ssh_section(
                         let supported = nyaterm_transport::supported_ssh_algorithms();
                         let algorithm_tabs = NyaTabs::new("connection-ssh-algorithm-tabs")
                             .items([
-                                NyaTabItem::new(tr("dialog.algorithmKexTab")),
-                                NyaTabItem::new(tr("dialog.algorithmCiphersTab")),
-                                NyaTabItem::new(tr("dialog.algorithmMacsTab")),
-                                NyaTabItem::new(tr("dialog.algorithmHostKeysTab")),
+                                NyaTabItem::new(t!("dialog.algorithmKexTab")),
+                                NyaTabItem::new(t!("dialog.algorithmCiphersTab")),
+                                NyaTabItem::new(t!("dialog.algorithmMacsTab")),
+                                NyaTabItem::new(t!("dialog.algorithmHostKeysTab")),
                             ])
                             .selected_index(match editor.ssh_algorithm_tab {
                                 ConnectionEditorSshAlgorithmTab::KeyExchange => 0,
@@ -1354,14 +1352,14 @@ pub(super) fn connection_editor_ssh_section(
                             ),
                         };
                         let mode_description = match editor.ssh_algorithm_mode.as_str() {
-                            "secure" => tr("dialog.algorithmModeSecureDesc"),
-                            "custom" => tr("dialog.algorithmModeCustomDesc"),
-                            _ => tr("dialog.algorithmModeCompatibleDesc"),
+                            "secure" => t!("dialog.algorithmModeSecureDesc"),
+                            "custom" => t!("dialog.algorithmModeCustomDesc"),
+                            _ => t!("dialog.algorithmModeCompatibleDesc"),
                         };
                         ssh_advanced_content(
                             palette,
-                            tr("dialog.sshAlgorithms"),
-                            tr("dialog.sshAlgorithmsDesc"),
+                            t!("dialog.sshAlgorithms"),
+                            t!("dialog.sshAlgorithmsDesc"),
                             div()
                                 .flex()
                                 .flex_col()
@@ -1373,7 +1371,7 @@ pub(super) fn connection_editor_ssh_section(
                                         cx,
                                     },
                                     "connection-editor-ssh-algorithm-mode",
-                                    tr("dialog.algorithmMode"),
+                                    t!("dialog.algorithmMode"),
                                     ConnectionEditorSelect::SshAlgorithmMode,
                                 ))
                                 .child(
@@ -1385,7 +1383,6 @@ pub(super) fn connection_editor_ssh_section(
                                 .when(editor.ssh_algorithm_mode == "custom", |this| {
                                     this.child(algorithm_tabs).child(ssh_algorithm_list(
                                         palette,
-                                        language,
                                         editor.ssh_algorithm_tab,
                                         options,
                                         selected_values,

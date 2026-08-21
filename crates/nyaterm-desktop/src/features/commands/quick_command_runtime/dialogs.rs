@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{ClipboardItem, Context, ParentElement as _, Window, div};
 use nyaterm_core::{QuickCommandCategory, uuid};
 use nyaterm_store::{StoreDomain, store_request};
@@ -173,12 +175,10 @@ impl NyaTermApp {
         };
         self.shell
             .set_status("quick command delete confirmation opened".to_string());
-        let title = self.tr("quickCommands.delete").to_string();
-        let message = self
-            .tr("quickCommands.deleteConfirm")
-            .replace("{{name}}", &command.label);
-        let cancel_label = self.tr("common.cancel").to_string();
-        let delete_label = self.tr("common.delete").to_string();
+        let title = t!("quickCommands.delete").to_string();
+        let message = t!("quickCommands.deleteConfirm").replace("{{name}}", &command.label);
+        let cancel_label = t!("common.cancel").to_string();
+        let delete_label = t!("common.delete").to_string();
         let app = cx.weak_entity();
         let command_id = command.id.clone();
         let command_label = command.label.clone();
@@ -283,16 +283,15 @@ impl NyaTermApp {
             });
         self.shell
             .set_status("quick command category delete confirmation opened".to_string());
-        let title = self.tr("quickCommands.deleteCategory").to_string();
-        let message = self
-            .tr("quickCommands.deleteCategoryConfirm")
+        let title = t!("quickCommands.deleteCategory").to_string();
+        let message = t!("quickCommands.deleteCategoryConfirm")
             .replace("{{name}}", &category_name)
             .replace("{{count}}", &command_count.to_string());
         self.open_confirm_dialog_with_cancel(
             (
                 title,
                 message,
-                self.tr("common.delete").to_string(),
+                t!("common.delete").to_string(),
                 true,
                 |app, _, cx| app.confirm_delete_quick_command_category(cx),
                 |app, cx| app.cancel_delete_quick_command_category(cx),
@@ -402,9 +401,9 @@ impl NyaTermApp {
             .set_status("quick command category rename opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("quickCommands.renameCategory").to_string(),
+                t!("quickCommands.renameCategory").to_string(),
                 384.,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 |app, _, cx| app.quick_command_category_rename_dialog_content(cx),
                 |app, _, cx| app.confirm_rename_quick_command_category(cx),
                 |app, cx| app.cancel_rename_quick_command_category(cx),
@@ -434,7 +433,7 @@ impl NyaTermApp {
         };
         let name = rename.draft.trim().to_string();
         if name.is_empty() {
-            let message = self.tr("quickCommands.categoryNameRequired").to_string();
+            let message = t!("quickCommands.categoryNameRequired").to_string();
             self.commands.set_quick_category_rename_error(message);
             cx.notify();
             return false;
@@ -447,7 +446,7 @@ impl NyaTermApp {
                 category.id != rename.id && category.name.trim().eq_ignore_ascii_case(name.as_str())
             })
         {
-            let message = self.tr("quickCommands.categoryNameDuplicated").to_string();
+            let message = t!("quickCommands.categoryNameDuplicated").to_string();
             self.commands.set_quick_category_rename_error(message);
             cx.notify();
             return false;
@@ -497,9 +496,9 @@ impl NyaTermApp {
                             );
                         } else {
                             let message = if duplicated {
-                                this.tr("quickCommands.categoryNameDuplicated").to_string()
+                                t!("quickCommands.categoryNameDuplicated").to_string()
                             } else {
-                                this.tr("quickCommands.categoryUnavailable").to_string()
+                                t!("quickCommands.categoryUnavailable").to_string()
                             };
                             this.commands
                                 .set_quick_category_rename_error(message.clone());
@@ -551,9 +550,9 @@ impl NyaTermApp {
             .set_status("quick command category editor opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("quickCommands.addCategory").to_string(),
+                t!("quickCommands.addCategory").to_string(),
                 384.,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 |app, _, cx| app.quick_command_category_create_dialog_content(cx),
                 |app, _, cx| app.confirm_create_quick_command_category(cx),
                 |app, cx| app.cancel_create_quick_command_category(cx),
@@ -583,7 +582,7 @@ impl NyaTermApp {
         };
         let name = create.draft.trim().to_string();
         if name.is_empty() {
-            let message = self.tr("quickCommands.categoryNameRequired").to_string();
+            let message = t!("quickCommands.categoryNameRequired").to_string();
             self.commands.set_quick_category_create_error(message);
             cx.notify();
             return false;
@@ -594,7 +593,7 @@ impl NyaTermApp {
             .iter()
             .any(|category| category.name.trim().eq_ignore_ascii_case(name.as_str()))
         {
-            let message = self.tr("quickCommands.categoryNameDuplicated").to_string();
+            let message = t!("quickCommands.categoryNameDuplicated").to_string();
             self.commands.set_quick_category_create_error(message);
             cx.notify();
             return false;
@@ -652,9 +651,9 @@ impl NyaTermApp {
                             );
                         } else {
                             let message = if duplicated {
-                                this.tr("quickCommands.categoryNameDuplicated").to_string()
+                                t!("quickCommands.categoryNameDuplicated").to_string()
                             } else {
-                                this.tr("quickCommands.categoryCreateFailed").to_string()
+                                t!("quickCommands.categoryCreateFailed").to_string()
                             };
                             this.commands
                                 .set_quick_category_create_error(message.clone());

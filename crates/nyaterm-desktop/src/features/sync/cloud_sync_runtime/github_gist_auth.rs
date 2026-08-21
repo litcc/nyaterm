@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{ClipboardItem, Context};
 
 use crate::features::NyaTermApp;
@@ -11,7 +13,7 @@ impl NyaTermApp {
         if !self.cloud_sync_form_enabled() {
             return;
         }
-        let waiting_message = self.tr("settings.githubGistWaitingForAuth").to_string();
+        let waiting_message = t!("settings.githubGistWaitingForAuth").to_string();
         let Some(job) = self.cloud_sync.begin_github_auth(waiting_message) else {
             return;
         };
@@ -36,7 +38,7 @@ impl NyaTermApp {
         };
         cx.write_to_clipboard(ClipboardItem::new_string(code));
         self.cloud_sync
-            .set_status(self.tr("settings.githubGistUserCodeCopied").to_string());
+            .set_status(t!("settings.githubGistUserCodeCopied").to_string());
         cx.notify();
     }
 
@@ -65,7 +67,7 @@ impl NyaTermApp {
                     user_code,
                     verification_uri,
                 } => {
-                    let message = self.tr("settings.githubGistWaitingForAuth").to_string();
+                    let message = t!("settings.githubGistWaitingForAuth").to_string();
                     self.cloud_sync.apply_github_auth_started(
                         user_code,
                         verification_uri.clone(),
@@ -74,13 +76,12 @@ impl NyaTermApp {
                     self.open_external_url_for_ui(&verification_uri, cx);
                 }
                 GithubGistAuthEvent::Polling { slow_down } => {
-                    let message = self
-                        .tr(if slow_down {
-                            "settings.githubGistSlowDown"
-                        } else {
-                            "settings.githubGistWaitingForAuth"
-                        })
-                        .to_string();
+                    let message = t!(if slow_down {
+                        "settings.githubGistSlowDown"
+                    } else {
+                        "settings.githubGistWaitingForAuth"
+                    })
+                    .to_string();
                     self.cloud_sync.apply_github_auth_polling(message);
                 }
                 GithubGistAuthEvent::Succeeded {
@@ -88,7 +89,7 @@ impl NyaTermApp {
                     gist_id,
                     login,
                 } => {
-                    let message = self.tr("settings.githubGistConnected").to_string();
+                    let message = t!("settings.githubGistConnected").to_string();
                     self.cloud_sync.apply_github_auth_succeeded(
                         access_token,
                         gist_id,
@@ -99,7 +100,7 @@ impl NyaTermApp {
                 }
                 GithubGistAuthEvent::Failed(error) => {
                     let message = if error.contains("OAuth Client ID is not configured") {
-                        self.tr("settings.githubGistClientIdMissing").to_string()
+                        t!("settings.githubGistClientIdMissing").to_string()
                     } else {
                         error
                     };

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, Window};
 use nyaterm_ui::NyaDialogWindowExt as _;
 
@@ -17,7 +19,7 @@ impl NyaTermApp {
             return;
         }
         self.open_content_dialog(
-            self.tr("updater.checking").to_string(),
+            t!("updater.checking").to_string(),
             560.,
             |app, _, cx| app.update_dialog_content(cx).into_any_element(),
             |_, _| {},

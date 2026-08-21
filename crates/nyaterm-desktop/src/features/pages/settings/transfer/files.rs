@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
 use nyaterm_ui::NyaSelectOption;
 
@@ -18,7 +20,7 @@ impl NyaTermApp {
             .text_input_box(
                 "settings.transfer.download-path",
                 &self.settings.summary().transfer_download_path.clone(),
-                TextInputSetup::placeholder(self.tr("settings.downloadPath")),
+                TextInputSetup::placeholder(t!("settings.downloadPath")),
                 cx,
             )
             .into_any_element();
@@ -39,15 +41,15 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.downloadPath"),
-                        Some(SharedString::from(self.tr("settings.downloadPathDesc"))),
+                        t!("settings.downloadPath"),
+                        Some(SharedString::from(t!("settings.downloadPathDesc"))),
                         settings_input_action_control(
                             260.,
                             download_path_input,
                             small_button(
                                 palette,
                                 "transfer-browse-download",
-                                self.tr("settings.browse"),
+                                t!("settings.browse"),
                                 cx.listener(|this, _, _, cx| {
                                     this.prompt_transfer_download_path_setting(cx);
                                 }),
@@ -56,8 +58,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.askSaveLocation"),
-                        Some(SharedString::from(self.tr("settings.askSaveLocationDesc"))),
+                        t!("settings.askSaveLocation"),
+                        Some(SharedString::from(t!("settings.askSaveLocationDesc"))),
                         settings_switch(
                             palette,
                             "transfer-ask-save",
@@ -69,20 +71,15 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.duplicateStrategy"),
-                        Some(SharedString::from(
-                            self.tr("settings.duplicateStrategyDesc"),
-                        )),
+                        t!("settings.duplicateStrategy"),
+                        Some(SharedString::from(t!("settings.duplicateStrategyDesc"))),
                         self.settings_select_control(
                             "settings.transfer.duplicate-strategy",
                             vec![
-                                NyaSelectOption::new(
-                                    "overwrite",
-                                    self.tr("settings.strategyOverwrite"),
-                                ),
-                                NyaSelectOption::new("skip", self.tr("settings.strategySkip")),
-                                NyaSelectOption::new("rename", self.tr("settings.strategyRename")),
-                                NyaSelectOption::new("ask", self.tr("settings.strategyAsk")),
+                                NyaSelectOption::new("overwrite", t!("settings.strategyOverwrite")),
+                                NyaSelectOption::new("skip", t!("settings.strategySkip")),
+                                NyaSelectOption::new("rename", t!("settings.strategyRename")),
+                                NyaSelectOption::new("ask", t!("settings.strategyAsk")),
                             ],
                             selected_policy,
                             false,

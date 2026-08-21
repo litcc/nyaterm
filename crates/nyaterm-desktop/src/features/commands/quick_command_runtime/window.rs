@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -83,9 +85,9 @@ impl NyaTermApp {
             .quick_editor()
             .is_some_and(|editor| editor.original.is_some())
         {
-            self.tr("quickCommands.editCommand")
+            t!("quickCommands.editCommand")
         } else {
-            self.tr("quickCommands.addCommand")
+            t!("quickCommands.addCommand")
         }
     }
 

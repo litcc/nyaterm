@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -483,7 +485,7 @@ impl NyaTermApp {
                 let basis = weights[index] / total;
                 let title = panel
                     .i18n_key()
-                    .map(|key| self.tr(key))
+                    .map(|key| t!(key))
                     .unwrap_or_else(|| Cow::Borrowed(panel.panel_title()));
                 let actions = self.side_panel_header_actions(panel, cx);
                 let palette = self.theme_palette();
@@ -526,7 +528,7 @@ impl NyaTermApp {
     ) -> gpui::Div {
         let title = panel
             .i18n_key()
-            .map(|key| self.tr(key))
+            .map(|key| t!(key))
             .unwrap_or_else(|| Cow::Borrowed(panel.panel_title()));
         let actions = self.side_panel_header_actions(panel, cx);
         let palette = self.theme_palette();
@@ -591,7 +593,7 @@ impl NyaTermApp {
                             .find(|model| model.id == model_id)
                             .map(|model| truncate_preview(&model.name, 28))
                     })
-                    .unwrap_or_else(|| self.tr("ai.notConfigured").to_string());
+                    .unwrap_or_else(|| t!("ai.notConfigured").to_string());
                 SharedString::from(label)
             }
             NavItem::ActiveSessions => SharedString::from(""),
@@ -624,9 +626,9 @@ impl NyaTermApp {
                 .map(|overview| {
                     SharedString::from(format!(
                         "{} {} · {} {}",
-                        self.tr("gpuMonitor.driver"),
+                        t!("gpuMonitor.driver"),
                         panel_meta_version_or_dash(&overview.driver_version),
-                        self.tr("gpuMonitor.cuda"),
+                        t!("gpuMonitor.cuda"),
                         panel_meta_version_or_dash(&overview.cuda_version)
                     ))
                 })
@@ -639,9 +641,9 @@ impl NyaTermApp {
                 .map(|overview| {
                     SharedString::from(format!(
                         "{} {} · {} {}",
-                        self.tr("ascendNpuMonitor.driver"),
+                        t!("ascendNpuMonitor.driver"),
                         panel_meta_version_or_dash(&overview.driver_version),
-                        self.tr("ascendNpuMonitor.cann"),
+                        t!("ascendNpuMonitor.cann"),
                         panel_meta_version_or_dash(&overview.cann_version)
                     ))
                 })
@@ -702,7 +704,7 @@ impl NyaTermApp {
                                     "icons/ai/exec-confirm.svg"
                                 }
                             },
-                            self.tr("ai.agentCommandExecutionMode"),
+                            t!("ai.agentCommandExecutionMode"),
                             !ai_running,
                             cx.listener(|this, _, _, cx| {
                                 this.ai.toggle_execution_menu();
@@ -713,7 +715,7 @@ impl NyaTermApp {
                             palette,
                             "ai-header-history-toggle",
                             "icons/ai/history.svg",
-                            self.tr("ai.history"),
+                            t!("ai.history"),
                             true,
                             cx.listener(|this, _, window, cx| {
                                 if this.ai.toggle_history() {
@@ -737,7 +739,7 @@ impl NyaTermApp {
                             palette,
                             "ai-header-open-settings",
                             "icons/ai/settings.svg",
-                            self.tr("ai.settings"),
+                            t!("ai.settings"),
                             true,
                             cx.listener(|this, _, _, cx| {
                                 this.ai.close_transient_menus();
@@ -749,7 +751,7 @@ impl NyaTermApp {
                             palette,
                             "ai-header-new-chat",
                             "icons/ai/new.svg",
-                            self.tr("ai.newChat"),
+                            t!("ai.newChat"),
                             !ai_running,
                             cx.listener(|this, _, _, cx| {
                                 this.start_new_ai_chat(cx);
@@ -767,7 +769,7 @@ impl NyaTermApp {
                         palette,
                         "stats-header-refresh",
                         "icons/fe/refresh.svg",
-                        self.tr("resourceMonitor.refresh"),
+                        t!("resourceMonitor.refresh"),
                         can_refresh,
                         cx.listener(|this, _, window, cx| {
                             this.refresh_stats(window, cx);
@@ -785,7 +787,7 @@ impl NyaTermApp {
                         palette,
                         "gpu-header-refresh",
                         "icons/fe/refresh.svg",
-                        self.tr("resourceMonitor.refresh"),
+                        t!("resourceMonitor.refresh"),
                         can_refresh,
                         cx.listener(|this, _, window, cx| {
                             this.refresh_gpu(window, cx);
@@ -803,7 +805,7 @@ impl NyaTermApp {
                         palette,
                         "npu-header-refresh",
                         "icons/fe/refresh.svg",
-                        self.tr("resourceMonitor.refresh"),
+                        t!("resourceMonitor.refresh"),
                         can_refresh,
                         cx.listener(|this, _, window, cx| {
                             this.refresh_npu(window, cx);
@@ -821,7 +823,7 @@ impl NyaTermApp {
                         palette,
                         "process-header-refresh",
                         "icons/fe/refresh.svg",
-                        self.tr("common.refresh"),
+                        t!("common.refresh"),
                         can_refresh,
                         cx.listener(|this, _, window, cx| {
                             this.refresh_processes(window, cx);
@@ -835,8 +837,8 @@ impl NyaTermApp {
                 let can_refresh = self.session.active_ssh_config().is_some()
                     && !self.remote_ops.docker_is_pending();
                 let can_prune = can_refresh && self.remote_ops.docker_can_prune();
-                let more_label = self.tr("dockerManager.moreActions").to_string();
-                let prune_label = self.tr("dockerManager.prune");
+                let more_label = t!("dockerManager.moreActions").to_string();
+                let prune_label = t!("dockerManager.prune");
                 Some(
                     div()
                         .flex()
@@ -846,7 +848,7 @@ impl NyaTermApp {
                             palette,
                             "docker-header-refresh",
                             "icons/fe/refresh.svg",
-                            self.tr("common.refresh"),
+                            t!("common.refresh"),
                             can_refresh,
                             cx.listener(|this, _, window, cx| {
                                 this.refresh_docker(window, cx);
@@ -921,7 +923,7 @@ impl NyaTermApp {
                         palette,
                         "sync-history-header-refresh",
                         "icons/fe/refresh.svg",
-                        self.tr("resourceMonitor.refresh"),
+                        t!("resourceMonitor.refresh"),
                         true,
                         cx.listener(|this, _, _, cx| {
                             this.queue_cloud_sync_history_refresh(None, cx);

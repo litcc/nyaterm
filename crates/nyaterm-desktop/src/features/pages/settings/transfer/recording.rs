@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 use nyaterm_core::{ExistingFileBehavior, RecordingMode, RecordingRotationPolicy};
 use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
@@ -21,7 +23,7 @@ impl NyaTermApp {
             .text_input_box(
                 "settings.recording.path",
                 &self.settings.summary().recording_path.clone(),
-                TextInputSetup::placeholder(self.tr("settings.recordingPath")),
+                TextInputSetup::placeholder(t!("settings.recordingPath")),
                 cx,
             )
             .into_any_element();
@@ -56,26 +58,24 @@ impl NyaTermApp {
 
         div().flex().flex_col().gap_3().child(settings_form_section(
             palette,
-            Some(self.tr("settings.recordingSettings")),
-            Some(self.tr("settings.recordingSettingsDesc")),
+            Some(t!("settings.recordingSettings")),
+            Some(t!("settings.recordingSettingsDesc")),
             div()
                 .flex()
                 .flex_col()
                 .gap_3()
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingDefaultMode"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingDefaultModeDesc"),
-                    )),
+                    t!("settings.recordingDefaultMode"),
+                    Some(SharedString::from(t!("settings.recordingDefaultModeDesc"))),
                     self.settings_select_control(
                         "settings.recording.default-mode",
                         vec![
                             NyaSelectOption::new(
                                 "transcript",
-                                self.tr("settings.recordingModeTranscript"),
+                                t!("settings.recordingModeTranscript"),
                             ),
-                            NyaSelectOption::new("raw", self.tr("settings.recordingModeRaw")),
+                            NyaSelectOption::new("raw", t!("settings.recordingModeRaw")),
                         ],
                         mode_value,
                         false,
@@ -84,15 +84,15 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingPath"),
-                    Some(SharedString::from(self.tr("settings.recordingPathDesc"))),
+                    t!("settings.recordingPath"),
+                    Some(SharedString::from(t!("settings.recordingPathDesc"))),
                     settings_input_action_control(
                         260.,
                         recording_path_input,
                         small_button(
                             palette,
                             "settings-recording-path-browse",
-                            self.tr("settings.browse"),
+                            t!("settings.browse"),
                             cx.listener(|this, _, _, cx| {
                                 this.prompt_recording_path_setting(cx);
                             }),
@@ -108,13 +108,13 @@ impl NyaTermApp {
                             div()
                                 .text_size(px(13.))
                                 .text_color(gpui::rgb(palette.text))
-                                .child(self.tr("settings.recordingPathTemplate")),
+                                .child(t!("settings.recordingPathTemplate")),
                         )
                         .child(
                             div()
                                 .text_size(px(11.))
                                 .text_color(gpui::rgb(palette.text_dimmed))
-                                .child(self.tr("settings.recordingPathTemplateDesc")),
+                                .child(t!("settings.recordingPathTemplateDesc")),
                         )
                         .child(
                             div()
@@ -125,10 +125,8 @@ impl NyaTermApp {
                 )
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingAutoStart"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingAutoStartDesc"),
-                    )),
+                    t!("settings.recordingAutoStart"),
+                    Some(SharedString::from(t!("settings.recordingAutoStartDesc"))),
                     settings_switch(
                         palette,
                         "settings-recording-auto",
@@ -140,10 +138,10 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingIncludeMetadata"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingIncludeMetadataDesc"),
-                    )),
+                    t!("settings.recordingIncludeMetadata"),
+                    Some(SharedString::from(t!(
+                        "settings.recordingIncludeMetadataDesc"
+                    ))),
                     settings_switch(
                         palette,
                         "settings-recording-metadata",
@@ -155,10 +153,10 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingIncludeIoLabels"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingIncludeIoLabelsDesc"),
-                    )),
+                    t!("settings.recordingIncludeIoLabels"),
+                    Some(SharedString::from(t!(
+                        "settings.recordingIncludeIoLabelsDesc"
+                    ))),
                     settings_switch(
                         palette,
                         "settings-recording-labels",
@@ -170,10 +168,10 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingIncludeTimestamps"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingIncludeTimestampsDesc"),
-                    )),
+                    t!("settings.recordingIncludeTimestamps"),
+                    Some(SharedString::from(t!(
+                        "settings.recordingIncludeTimestampsDesc"
+                    ))),
                     settings_switch(
                         palette,
                         "settings-recording-timestamps",
@@ -185,22 +183,17 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingRotation"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingRotationDesc"),
-                    )),
+                    t!("settings.recordingRotation"),
+                    Some(SharedString::from(t!("settings.recordingRotationDesc"))),
                     self.settings_select_control(
                         "settings.recording.rotation",
                         vec![
                             NyaSelectOption::new(
                                 "session",
-                                self.tr("settings.recordingRotationSession"),
+                                t!("settings.recordingRotationSession"),
                             ),
-                            NyaSelectOption::new(
-                                "daily",
-                                self.tr("settings.recordingRotationDaily"),
-                            ),
-                            NyaSelectOption::new("size", self.tr("settings.recordingRotationSize")),
+                            NyaSelectOption::new("daily", t!("settings.recordingRotationDaily")),
+                            NyaSelectOption::new("size", t!("settings.recordingRotationSize")),
                         ],
                         rotation_value,
                         false,
@@ -215,10 +208,10 @@ impl NyaTermApp {
                     |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.recordingRotationSizeLimit"),
-                            Some(SharedString::from(
-                                self.tr("settings.recordingRotationSizeLimitDesc"),
-                            )),
+                            t!("settings.recordingRotationSizeLimit"),
+                            Some(SharedString::from(t!(
+                                "settings.recordingRotationSizeLimitDesc"
+                            ))),
                             self.number_input_box(
                                 "settings.number.recording-rotation-size",
                                 rotation_size_mib.to_string().as_str(),
@@ -233,24 +226,18 @@ impl NyaTermApp {
                 )
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingExistingFileBehavior"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingExistingFileBehaviorDesc"),
-                    )),
+                    t!("settings.recordingExistingFileBehavior"),
+                    Some(SharedString::from(t!(
+                        "settings.recordingExistingFileBehaviorDesc"
+                    ))),
                     self.settings_select_control(
                         "settings.recording.existing-file",
                         vec![
-                            NyaSelectOption::new(
-                                "unique",
-                                self.tr("settings.recordingExistingUnique"),
-                            ),
-                            NyaSelectOption::new(
-                                "append",
-                                self.tr("settings.recordingExistingAppend"),
-                            ),
+                            NyaSelectOption::new("unique", t!("settings.recordingExistingUnique")),
+                            NyaSelectOption::new("append", t!("settings.recordingExistingAppend")),
                             NyaSelectOption::new(
                                 "overwrite",
-                                self.tr("settings.recordingExistingOverwrite"),
+                                t!("settings.recordingExistingOverwrite"),
                             ),
                         ],
                         existing_value,
@@ -260,10 +247,10 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingIncludeBinaryTransfers"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingIncludeBinaryTransfersDesc"),
-                    )),
+                    t!("settings.recordingIncludeBinaryTransfers"),
+                    Some(SharedString::from(t!(
+                        "settings.recordingIncludeBinaryTransfersDesc"
+                    ))),
                     settings_switch(
                         palette,
                         "settings-recording-binary-transfer-payloads",
@@ -277,10 +264,8 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.recordingMemoryLimit"),
-                    Some(SharedString::from(
-                        self.tr("settings.recordingMemoryLimitDesc"),
-                    )),
+                    t!("settings.recordingMemoryLimit"),
+                    Some(SharedString::from(t!("settings.recordingMemoryLimitDesc"))),
                     self.number_input_box(
                         "settings.number.recording-memory-limit",
                         memory_mib.to_string().as_str(),

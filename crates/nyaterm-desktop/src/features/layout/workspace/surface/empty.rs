@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb, svg};
 use nyaterm_core::truncate_preview;
 
@@ -18,10 +20,10 @@ impl NyaTermApp {
         let open_chat = self.display_shortcut_for("view.openChat", "Ctrl+Alt+I");
         let show_commands = self.display_shortcut_for("view.showAllCommands", "Ctrl+Shift+P");
         let switch_terminal = self.display_shortcut_for("tab.quickSwitch", "Ctrl+Shift+S");
-        let temporary_ssh_label = self.tr("temporarySsh.title");
-        let open_chat_label = self.tr("app.openChat");
-        let show_commands_label = self.tr("app.showAllCommands");
-        let switch_terminal_label = self.tr("app.switchTerminal");
+        let temporary_ssh_label = t!("temporarySsh.title");
+        let open_chat_label = t!("app.openChat");
+        let show_commands_label = t!("app.showAllCommands");
+        let switch_terminal_label = t!("app.switchTerminal");
 
         let palette = self.theme_palette();
         let terminal_palette = self.terminal_theme_palette();
@@ -83,9 +85,7 @@ impl NyaTermApp {
                                     let field = this.text_input(
                                         "quick-command.search",
                                         &search,
-                                        TextInputSetup::placeholder(
-                                            this.tr("quickCommands.search"),
-                                        ),
+                                        TextInputSetup::placeholder(t!("quickCommands.search")),
                                         cx,
                                     );
                                     window.focus(&field.read(cx).focus_handle(), cx);
@@ -110,7 +110,7 @@ impl NyaTermApp {
         let name = self
             .session
             .start_pending_display_name()
-            .unwrap_or_else(|| self.tr("terminal.connecting").to_string());
+            .unwrap_or_else(|| t!("terminal.connecting").to_string());
 
         div()
             .flex_1()
@@ -174,7 +174,7 @@ impl NyaTermApp {
                             .text_size(px(13.))
                             .font_weight(FontWeight(600.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("terminal.connectionFailed")),
+                            .child(t!("terminal.connectionFailed")),
                     )
                     .child(
                         div()

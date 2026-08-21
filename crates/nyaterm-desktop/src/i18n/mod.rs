@@ -35,12 +35,6 @@ pub(crate) fn apply_locale(language: &str) {
     rust_i18n::set_locale(&normalize_locale(language));
 }
 
-/// Translate against an explicit language rather than the current global locale.
-pub(crate) fn text(language: &str, key: &'static str) -> Cow<'static, str> {
-    let locale = normalize_locale(language);
-    rust_i18n::t!(key, locale = locale.as_ref())
-}
-
 fn is_simplified_chinese(language: &str) -> bool {
     let normalized = language.to_ascii_lowercase();
     normalized == "zh" || normalized == "zh-cn" || normalized.starts_with("zh-hans")
@@ -49,11 +43,20 @@ fn is_simplified_chinese(language: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use std::path::Path;
 
     use regex::Regex;
     use serde_json::Value;
 
-    use super::{normalize_locale, text};
+    use super::{Cow, normalize_locale};
+
+    /// Translate against an explicit language instead of the process-wide locale,
+    /// so no test has to touch `rust_i18n::set_locale` and race the others.
+    fn text(language: &str, key: &'static str) -> Cow<'static, str> {
+        let locale = normalize_locale(language);
+        rust_i18n::t!(key, locale = locale.as_ref())
+    }
 
     const EN_JSON: &str = include_str!("../../locales/en.json");
     const ZH_CN_JSON: &str = include_str!("../../locales/zh-CN.json");
@@ -134,38 +137,49 @@ mod tests {
     }
 
     #[test]
-    fn connection_editor_static_translation_keys_exist_in_both_catalogs() {
-        let sources = [
-            include_str!("../features/pages/connections/editor/mod.rs"),
-            include_str!("../features/pages/connections/editor/connection/mod.rs"),
-            include_str!("../features/pages/connections/editor/connection/local.rs"),
-            include_str!("../features/pages/connections/editor/connection/rdp.rs"),
-            include_str!("../features/pages/connections/editor/connection/recording.rs"),
-            include_str!("../features/pages/connections/editor/connection/serial.rs"),
-            include_str!("../features/pages/connections/editor/connection/ssh.rs"),
-            include_str!("../features/pages/connections/editor/connection/telnet.rs"),
-            include_str!("../features/connections/connection_runtime/editor.rs"),
-            include_str!("../features/connections/connection_runtime/window.rs"),
-            include_str!("../features/connections/state/editor_logic.rs"),
-        ];
-        let key_pattern =
-            Regex::new(r#"(?:\btr|self\.tr|I18n)\(\s*"([^"]+)""#).expect("translation-key regex");
+    fn every_literal_translation_key_in_the_crate_exists_in_both_catalogs() {
+        // Walks the crate at test time rather than listing files, so a new module
+        // cannot quietly opt out. Only literal keys are visible here - the ones
+        // reached through `i18n_key()` and friends are out of reach for any
+        // source scan, and stay covered by the key-parity test above.
+        let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let key_pattern = Regex::new(r#"\bt!\(\s*"([^"]+)""#).expect("translation-key regex");
         let english = flatten(EN_JSON);
         let chinese = flatten(ZH_CN_JSON);
+
+        let mut pending = vec![source_root];
+        let mut scanned = 0usize;
         let mut missing = Vec::new();
-        for source in sources {
-            for captures in key_pattern.captures_iter(source) {
-                let key = captures.get(1).expect("key capture").as_str();
-                if !english.contains_key(key) || !chinese.contains_key(key) {
-                    missing.push(key.to_string());
+        while let Some(dir) = pending.pop() {
+            for entry in fs::read_dir(&dir).expect("crate sources must be readable") {
+                let path = entry.expect("directory entry").path();
+                if path.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                    continue;
+                }
+                let source = fs::read_to_string(&path).expect("source file must be UTF-8");
+                scanned += 1;
+                for captures in key_pattern.captures_iter(&source) {
+                    let key = captures.get(1).expect("key capture").as_str();
+                    if !english.contains_key(key) || !chinese.contains_key(key) {
+                        missing.push(format!("{key} ({})", path.display()));
+                    }
                 }
             }
         }
+
+        assert!(
+            scanned > 100,
+            "expected to scan the whole crate, saw {scanned} files"
+        );
         missing.sort();
         missing.dedup();
         assert!(
             missing.is_empty(),
-            "missing connection editor keys: {missing:?}"
+            "keys missing from a catalog: {missing:#?}"
         );
     }
 

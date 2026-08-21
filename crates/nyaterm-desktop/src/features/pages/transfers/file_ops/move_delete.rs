@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use crate::features::NyaTermApp;
 use crate::models::{
     TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
@@ -43,10 +45,9 @@ impl NyaTermApp {
         self.shell.set_status("remote move opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("fileExplorer.moveTo")
-                    .replace("{{name}}", &truncate_preview(&name, 48)),
+                t!("fileExplorer.moveTo").replace("{{name}}", &truncate_preview(&name, 48)),
                 384.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| app.transfer_move_dialog_content(cx),
                 |app, window, cx| app.submit_transfer_move(window, cx),
                 |app, cx| app.close_transfer_move_dialog(cx),
@@ -195,11 +196,10 @@ impl NyaTermApp {
         }
         let delete_count = paths.len();
         let title = if delete_count == 1 {
-            self.tr("fileExplorer.sureDelete")
+            t!("fileExplorer.sureDelete")
                 .replace("{{name}}", &remote_file_name(&paths[0].display_path))
         } else {
-            self.tr("fileExplorer.sureDeleteMultiple")
-                .replace("{{count}}", &delete_count.to_string())
+            t!("fileExplorer.sureDeleteMultiple").replace("{{count}}", &delete_count.to_string())
         };
         let preview = paths
             .iter()
@@ -208,16 +208,14 @@ impl NyaTermApp {
             .collect::<Vec<_>>()
             .join("\n");
         let remaining = delete_count.saturating_sub(6);
-        let mut detail = self.tr("fileExplorer.deleteConfirmHint").to_string();
+        let mut detail = t!("fileExplorer.deleteConfirmHint").to_string();
         if delete_count > 1 {
             detail.push_str("\n\n");
             detail.push_str(&preview);
             if remaining > 0 {
                 detail.push('\n');
                 detail.push_str(
-                    &self
-                        .tr("fileExplorer.moreItems")
-                        .replace("{{count}}", &remaining.to_string()),
+                    &t!("fileExplorer.moreItems").replace("{{count}}", &remaining.to_string()),
                 );
             }
         }
@@ -227,7 +225,7 @@ impl NyaTermApp {
             (
                 title,
                 detail,
-                self.tr("fileExplorer.delete").to_string(),
+                t!("fileExplorer.delete").to_string(),
                 true,
                 move |app, window, cx| {
                     for remote_path in &paths {

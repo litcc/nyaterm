@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_core::QuickCommandsConfig;
 use nyaterm_store::{StoreDomain, store_request};
@@ -150,7 +152,7 @@ impl NyaTermApp {
             let input = self.text_input(
                 "quick-command.ai-prompt",
                 &prompt,
-                TextInputSetup::placeholder(self.tr("ai.placeholder")),
+                TextInputSetup::placeholder(t!("ai.placeholder")),
                 cx,
             );
             window.focus(&input.read(cx).focus_handle(), cx);

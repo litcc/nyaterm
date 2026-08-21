@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba, svg};
 use nyaterm_ui::NyaTooltip;
 
@@ -33,7 +35,7 @@ impl NyaTermApp {
             viewport_w,
             viewport_h,
         );
-        let copy_label = self.tr("quickCommands.copyCommand");
+        let copy_label = t!("quickCommands.copyCommand");
         let copy_text = command.command.clone();
         let copy_button = div()
             .id(SharedString::from("quick-command-details-copy"))

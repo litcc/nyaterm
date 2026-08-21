@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use super::state::SendCommandBarViewState;
 use gpui::{Context, IntoElement, div, prelude::*, px};
 use nyaterm_transport::SessionKind;
@@ -19,8 +21,8 @@ impl NyaTermApp {
         let is_sending = state.is_sending;
         let is_serial = matches!(self.active_session_kind(), Some(SessionKind::Serial));
         let data_options = vec![
-            NyaSelectOption::new("text", self.tr("serialSend.text")),
-            NyaSelectOption::new("hex", self.tr("serialSend.hex")),
+            NyaSelectOption::new("text", t!("serialSend.text")),
+            NyaSelectOption::new("hex", t!("serialSend.hex")),
         ];
         let selected_data = match state.send.data_type {
             SendCommandDataType::Text => "text",
@@ -30,8 +32,8 @@ impl NyaTermApp {
         let (mode_options, selected_mode) = if state.send.data_type == SendCommandDataType::Hex {
             (
                 vec![
-                    NyaSelectOption::new("byte", self.tr("serialSend.byteByByte")),
-                    NyaSelectOption::new("packet", self.tr("serialSend.packet")),
+                    NyaSelectOption::new("byte", t!("serialSend.byteByByte")),
+                    NyaSelectOption::new("packet", t!("serialSend.packet")),
                 ],
                 match state.send.mode {
                     SendCommandMode::Packet => "packet",
@@ -41,8 +43,8 @@ impl NyaTermApp {
         } else {
             (
                 vec![
-                    NyaSelectOption::new("line", self.tr("serialSend.lineByLine")),
-                    NyaSelectOption::new("character", self.tr("serialSend.characterByCharacter")),
+                    NyaSelectOption::new("line", t!("serialSend.lineByLine")),
+                    NyaSelectOption::new("character", t!("serialSend.characterByCharacter")),
                 ],
                 match state.send.mode {
                     SendCommandMode::Character => "character",
@@ -52,18 +54,15 @@ impl NyaTermApp {
         };
         let mut target_options = vec![NyaSelectOption::new(
             "current",
-            self.tr("serialSend.currentSession"),
+            t!("serialSend.currentSession"),
         )];
         if !is_serial {
-            target_options.push(NyaSelectOption::new(
-                "all",
-                self.tr("serialSend.allSessions"),
-            ));
+            target_options.push(NyaSelectOption::new("all", t!("serialSend.allSessions")));
         }
         target_options.extend(state.group_targets.iter().map(|(group_id, name, count)| {
             NyaSelectOption::new(
                 format!("group:{group_id}"),
-                self.tr("serialSend.groupSession")
+                t!("serialSend.groupSession")
                     .replace("{{name}}", name)
                     .replace("{{count}}", &count.to_string()),
             )
@@ -80,11 +79,11 @@ impl NyaTermApp {
         {
             target_options.push(NyaSelectOption::new(
                 selected_target.clone(),
-                self.tr("network.group"),
+                t!("network.group"),
             ));
         }
         let line_ending_options = vec![
-            NyaSelectOption::new("none", self.tr("serialSend.noLineEnding")),
+            NyaSelectOption::new("none", t!("serialSend.noLineEnding")),
             NyaSelectOption::new("cr", "CR"),
             NyaSelectOption::new("lf", "LF"),
             NyaSelectOption::new("crlf", "CR+LF"),
@@ -105,7 +104,7 @@ impl NyaTermApp {
             .gap_1()
             .child(send_command_control_group(
                 palette,
-                self.tr("serialSend.dataType"),
+                t!("serialSend.dataType"),
                 self.bare_select_control(
                     "bottom-command-data-select",
                     data_options,
@@ -116,7 +115,7 @@ impl NyaTermApp {
             ))
             .child(send_command_control_group(
                 palette,
-                self.tr("serialSend.sendMode"),
+                t!("serialSend.sendMode"),
                 self.bare_select_control(
                     "bottom-command-mode-select",
                     mode_options,
@@ -127,7 +126,7 @@ impl NyaTermApp {
             ))
             .child(send_command_control_group(
                 palette,
-                self.tr("serialSend.target"),
+                t!("serialSend.target"),
                 self.bare_select_control(
                     "bottom-command-target-select",
                     target_options,
@@ -138,7 +137,7 @@ impl NyaTermApp {
             ))
             .child(send_command_control_group(
                 palette,
-                self.tr("serialSend.count"),
+                t!("serialSend.count"),
                 div().w(px(112.)).child(
                     self.number_input_box(
                         "send-command.count",
@@ -154,7 +153,7 @@ impl NyaTermApp {
             ))
             .child(send_command_control_group(
                 palette,
-                self.tr("serialSend.interval"),
+                t!("serialSend.interval"),
                 div().w(px(136.)).child(
                     self.number_input_box(
                         "send-command.interval",
@@ -163,7 +162,7 @@ impl NyaTermApp {
                             .range(0.0, 60.0)
                             .step(0.01)
                             .decimal_places(2)
-                            .suffix(self.tr("serialSend.seconds"))
+                            .suffix(t!("serialSend.seconds"))
                             .disabled(is_sending),
                         cx,
                     ),
@@ -172,7 +171,7 @@ impl NyaTermApp {
             .when(state.is_serial_text_line, |this| {
                 this.child(send_command_control_group(
                     palette,
-                    self.tr("serialSend.lineEnding"),
+                    t!("serialSend.lineEnding"),
                     self.bare_select_control(
                         "bottom-command-eol-select",
                         line_ending_options,

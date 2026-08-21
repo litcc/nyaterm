@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_core::{ProxyConfig, uuid};
 use nyaterm_store::{StoreDomain, store_request};
@@ -65,12 +67,12 @@ impl NyaTermApp {
         self.open_form_dialog(
             (
                 if editing {
-                    self.tr("network.editProxy").to_string()
+                    t!("network.editProxy").to_string()
                 } else {
-                    self.tr("network.newProxy").to_string()
+                    t!("network.newProxy").to_string()
                 },
                 520.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| app.network_proxy_editor_dialog_content(cx),
                 |app, _, cx| {
                     app.save_network_proxy_editor(cx);

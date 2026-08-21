@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, FontWeight, IntoElement, Window, div, prelude::*, px, rgb};
 use nyaterm_ui::{NyaButton, NyaDialogWindowExt as _};
 
@@ -9,7 +11,7 @@ impl NyaTermApp {
             return;
         }
         self.open_content_dialog(
-            format!("{} NyaTerm", self.tr("menu.about")),
+            format!("{} NyaTerm", t!("menu.about")),
             360.,
             |app, _, cx| app.about_dialog_content(cx),
             |_, _| {},
@@ -49,7 +51,7 @@ impl NyaTermApp {
                     .line_height(px(18.))
                     .text_center()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("about.description")),
+                    .child(t!("about.description")),
             )
             .child(
                 div()
@@ -59,22 +61,20 @@ impl NyaTermApp {
                     .justify_center()
                     .gap_3()
                     .child(
-                        NyaButton::new("about-website", self.tr("about.website")).on_click(
-                            cx.listener(|this, _, _, cx| {
+                        NyaButton::new("about-website", t!("about.website")).on_click(cx.listener(
+                            |this, _, _, cx| {
                                 this.open_external_url_for_ui("https://nyaterm.app", cx);
-                            }),
-                        ),
+                            },
+                        )),
                     )
-                    .child(
-                        NyaButton::new("about-issues", self.tr("about.issues")).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.open_external_url_for_ui(
-                                    "https://github.com/nyakang/nyaterm/issues",
-                                    cx,
-                                );
-                            }),
-                        ),
-                    ),
+                    .child(NyaButton::new("about-issues", t!("about.issues")).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.open_external_url_for_ui(
+                                "https://github.com/nyakang/nyaterm/issues",
+                                cx,
+                            );
+                        }),
+                    )),
             )
             .into_any_element()
     }

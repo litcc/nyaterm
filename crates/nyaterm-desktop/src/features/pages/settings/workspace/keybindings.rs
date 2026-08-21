@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{Context, FontWeight, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
@@ -23,7 +25,7 @@ impl NyaTermApp {
         let search_field = self.text_input(
             "settings.keybindings.search",
             &search,
-            TextInputSetup::placeholder(self.tr("settings.keybindingsSearch")),
+            TextInputSetup::placeholder(t!("settings.keybindingsSearch")),
             cx,
         );
         let mut groups = div().flex().flex_col().gap_3();
@@ -66,7 +68,7 @@ impl NyaTermApp {
                         this.child(small_button(
                             palette,
                             "keybindings-reset-all",
-                            self.tr("settings.keybindingsResetAll"),
+                            t!("settings.keybindingsResetAll"),
                             cx.listener(|this, _, _, cx| {
                                 this.reset_all_keybindings(cx);
                             }),
@@ -143,10 +145,10 @@ impl NyaTermApp {
         } else {
             None
         };
-        let custom_label = self.tr("settings.keybindingsCustom");
-        let recording_label = self.tr("settings.keybindingsRecording");
-        let reset_label = self.tr("settings.keybindingsReset");
-        let indexed_hint = self.tr("settings.keybindingsIndexedHint");
+        let custom_label = t!("settings.keybindingsCustom");
+        let recording_label = t!("settings.keybindingsRecording");
+        let reset_label = t!("settings.keybindingsReset");
+        let indexed_hint = t!("settings.keybindingsIndexedHint");
         let key_display = if is_recording {
             interaction
                 .pending_keys
@@ -257,7 +259,7 @@ impl NyaTermApp {
                         this.child(small_button(
                             palette,
                             format!("keybinding-save-{}", shortcut.id),
-                            self.tr("common.confirm"),
+                            t!("common.confirm"),
                             cx.listener(|this, _, _, cx| {
                                 this.confirm_keybinding_recording(cx);
                             }),
@@ -265,7 +267,7 @@ impl NyaTermApp {
                         .child(small_button(
                             palette,
                             format!("keybinding-cancel-{}", shortcut.id),
-                            self.tr("common.cancel"),
+                            t!("common.cancel"),
                             cx.listener(|this, _, _, cx| {
                                 this.cancel_keybinding_recording(cx);
                             }),
@@ -275,7 +277,7 @@ impl NyaTermApp {
                         this.child(small_button(
                             palette,
                             format!("keybinding-record-{}", shortcut.id),
-                            self.tr("common.edit"),
+                            t!("common.edit"),
                             cx.listener(move |this, _, window, cx| {
                                 this.start_keybinding_recording(shortcut_id.clone(), window, cx);
                             }),

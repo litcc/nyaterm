@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::prelude::*;
@@ -69,7 +71,7 @@ pub(super) fn network_group_editor_content(
     let name_input = app
         .text_input_field(
             "network.group-editor.name",
-            app.tr("network.groupName"),
+            t!("network.groupName"),
             &editor.name,
             TextInputSetup::default(),
             cx,
@@ -83,7 +85,7 @@ pub(super) fn network_group_editor_content(
             div()
                 .text_size(px(12.))
                 .text_color(rgb(palette.text_muted))
-                .child(app.tr("network.groupDialogDescription")),
+                .child(t!("network.groupDialogDescription")),
         )
         .child(name_input)
         .when_some(editor.error.clone(), |this, error| {

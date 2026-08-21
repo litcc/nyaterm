@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, ClipboardItem, Context, IntoElement as _, KeyDownEvent, Window};
 use nyaterm_core::SavedPassword;
 use nyaterm_ui::NyaDialogWindowExt as _;
@@ -64,16 +66,16 @@ impl NyaTermApp {
             .password_editor()
             .is_some_and(|editor| editor.id.is_some())
         {
-            self.tr("passwordManager.editTitle")
+            t!("passwordManager.editTitle")
         } else {
-            self.tr("passwordManager.newTitle")
+            t!("passwordManager.newTitle")
         }
         .to_string();
         self.open_guarded_form_dialog(
             (
                 title,
                 320.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| {
                     app.security
                         .password_editor()

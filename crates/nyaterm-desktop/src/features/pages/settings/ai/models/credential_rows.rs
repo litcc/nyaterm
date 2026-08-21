@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb,
 };
@@ -14,10 +16,10 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let credential_secret_drafts = self.ai.settings_credential_secret_drafts().clone();
-        let profile_name_label = self.tr("ai.profileName");
-        let base_url_label = self.tr("ai.baseUrl");
-        let delete_label = self.tr("common.delete");
-        let save_label = self.tr("common.save");
+        let profile_name_label = t!("ai.profileName");
+        let base_url_label = t!("ai.baseUrl");
+        let delete_label = t!("common.delete");
+        let save_label = t!("common.save");
 
         // Cloned up front so the fold can borrow `self` mutably: each row builds
         // three real inputs, and creating one needs the app.

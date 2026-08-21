@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, rgb};
 use nyaterm_ui::NyaSelectOption;
 
@@ -21,7 +23,7 @@ impl NyaTermApp {
         };
         let diagnostics_level = self.settings.summary().diagnostics_level.clone();
         let retention = self.settings.summary().diagnostics_retention_days;
-        let days_unit = self.tr("common.days");
+        let days_unit = t!("common.days");
         let header_status_mode =
             HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode);
         let header_status_visible = self.settings.summary().ui_header_status_visible;
@@ -45,8 +47,8 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.language"),
-                        Some(SharedString::from(self.tr("settings.languageDesc"))),
+                        t!("settings.language"),
+                        Some(SharedString::from(t!("settings.languageDesc"))),
                         self.settings_select_control(
                             "settings.general.language",
                             vec![
@@ -60,19 +62,16 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.headerStatus"),
-                        Some(SharedString::from(self.tr("settings.headerStatusDesc"))),
+                        t!("settings.headerStatus"),
+                        Some(SharedString::from(t!("settings.headerStatusDesc"))),
                         self.settings_select_control(
                             "settings.general.header-status",
                             std::iter::once(NyaSelectOption::new(
                                 "hidden",
-                                self.tr("headerStatus.hidden"),
+                                t!("headerStatus.hidden"),
                             ))
                             .chain(HeaderStatusMode::ALL.into_iter().map(|mode| {
-                                NyaSelectOption::new(
-                                    mode.persistence_id(),
-                                    self.tr(mode.i18n_key()),
-                                )
+                                NyaSelectOption::new(mode.persistence_id(), t!(mode.i18n_key()))
                             }))
                             .collect(),
                             header_status_value,
@@ -91,8 +90,8 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.startupRestore"),
-                        Some(SharedString::from(self.tr("settings.startupRestoreDesc"))),
+                        t!("settings.startupRestore"),
+                        Some(SharedString::from(t!("settings.startupRestoreDesc"))),
                         settings_switch(
                             palette,
                             "general-startup-restore",
@@ -111,10 +110,10 @@ impl NyaTermApp {
                                 .border_color(rgb(palette.border))
                                 .child(settings_form_row(
                                     palette,
-                                    self.tr("settings.startupRestoreWindowLayout"),
-                                    Some(SharedString::from(
-                                        self.tr("settings.startupRestoreWindowLayoutDesc"),
-                                    )),
+                                    t!("settings.startupRestoreWindowLayout"),
+                                    Some(SharedString::from(t!(
+                                        "settings.startupRestoreWindowLayoutDesc"
+                                    ))),
                                     settings_switch(
                                         palette,
                                         "general-startup-restore-window-layout",
@@ -128,8 +127,8 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.minimizeToTray"),
-                        Some(SharedString::from(self.tr("settings.minimizeToTrayDesc"))),
+                        t!("settings.minimizeToTray"),
+                        Some(SharedString::from(t!("settings.minimizeToTrayDesc"))),
                         settings_switch(
                             palette,
                             "general-minimize-to-tray",
@@ -141,8 +140,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.confirmOnClose"),
-                        Some(SharedString::from(self.tr("settings.confirmOnCloseDesc"))),
+                        t!("settings.confirmOnClose"),
+                        Some(SharedString::from(t!("settings.confirmOnCloseDesc"))),
                         settings_switch(
                             palette,
                             "general-confirm-close",
@@ -155,22 +154,22 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.diagnostics")),
-                Some(self.tr("settings.diagnosticsDesc")),
+                Some(t!("settings.diagnostics")),
+                Some(t!("settings.diagnosticsDesc")),
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.logLevel"),
-                        Some(SharedString::from(self.tr("settings.logLevelDesc"))),
+                        t!("settings.logLevel"),
+                        Some(SharedString::from(t!("settings.logLevelDesc"))),
                         self.settings_select_control(
                             "settings.general.diagnostics-level",
                             vec![
-                                NyaSelectOption::new("warn", self.tr("settings.logLevelWarn")),
-                                NyaSelectOption::new("info", self.tr("settings.logLevelInfo")),
-                                NyaSelectOption::new("debug", self.tr("settings.logLevelDebug")),
+                                NyaSelectOption::new("warn", t!("settings.logLevelWarn")),
+                                NyaSelectOption::new("info", t!("settings.logLevelInfo")),
+                                NyaSelectOption::new("debug", t!("settings.logLevelDebug")),
                             ],
                             diagnostics_level,
                             false,
@@ -179,8 +178,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.logRetention"),
-                        Some(SharedString::from(self.tr("settings.logRetentionDesc"))),
+                        t!("settings.logRetention"),
+                        Some(SharedString::from(t!("settings.logRetentionDesc"))),
                         self.settings_select_control(
                             "settings.general.diagnostics-retention",
                             [3_u32, 7, 14, 30]
@@ -199,12 +198,12 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.openLogs"),
-                        Some(SharedString::from(self.tr("settings.openLogsDesc"))),
+                        t!("settings.openLogs"),
+                        Some(SharedString::from(t!("settings.openLogsDesc"))),
                         small_button(
                             palette,
                             "general-open-logs",
-                            self.tr("settings.openLogs"),
+                            t!("settings.openLogs"),
                             cx.listener(|this, _, _, cx| {
                                 this.reveal_log_dir(cx);
                             }),
@@ -212,14 +211,12 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.exportDiagnostics"),
-                        Some(SharedString::from(
-                            self.tr("settings.exportDiagnosticsDesc"),
-                        )),
+                        t!("settings.exportDiagnostics"),
+                        Some(SharedString::from(t!("settings.exportDiagnosticsDesc"))),
                         small_button(
                             palette,
                             "general-export-diagnostics",
-                            self.tr("settings.exportDiagnostics"),
+                            t!("settings.exportDiagnostics"),
                             cx.listener(|this, _, _, cx| {
                                 this.prompt_diagnostics_export(cx);
                             }),

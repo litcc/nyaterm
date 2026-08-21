@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use crate::features::NyaTermApp;
 use crate::models::{
     TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
@@ -34,9 +36,9 @@ impl NyaTermApp {
             .set_status("remote symlink creation opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("fileExplorer.newSymlink").to_string(),
+                t!("fileExplorer.newSymlink").to_string(),
                 480.,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 |app, _, cx| app.transfer_new_symlink_dialog_content(cx),
                 |app, window, cx| app.submit_transfer_new_symlink(window, cx),
                 |app, cx| app.close_transfer_new_symlink_dialog(cx),

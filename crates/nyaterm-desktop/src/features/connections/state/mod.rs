@@ -1,3 +1,6 @@
+use rust_i18n::t;
+use std::borrow::Cow;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -623,7 +626,7 @@ impl ConnectionFeatureState {
     ///
     /// Called when the editor opens, so the entities live exactly as long as the
     /// draft they mirror and never leak between edits.
-    pub fn build_editor_fields(&mut self, language: &str, cx: &mut Context<NyaTermApp>) {
+    pub fn build_editor_fields(&mut self, cx: &mut Context<NyaTermApp>) {
         self.editor.fields.clear();
         self.editor.number_fields.clear();
         self.editor.field_subscriptions.clear();
@@ -635,9 +638,9 @@ impl ConnectionFeatureState {
         };
         for (field, value, masked, placeholder) in editor_field_seeds(draft) {
             let placeholder = match placeholder {
-                ConnectionEditorPlaceholder::Empty => "",
-                ConnectionEditorPlaceholder::I18n(key) => &crate::i18n::text(language, key),
-                ConnectionEditorPlaceholder::Literal(value) => value,
+                ConnectionEditorPlaceholder::Empty => Cow::Borrowed(""),
+                ConnectionEditorPlaceholder::I18n(key) => t!(key),
+                ConnectionEditorPlaceholder::Literal(value) => Cow::Borrowed(value),
             };
             if let Some(options) = connection_editor_number_options(field) {
                 let entity = cx.new(|cx| {

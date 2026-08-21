@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, IntoElement, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{SftpFileProperties, SftpFileType};
@@ -31,7 +33,7 @@ impl NyaTermApp {
             .text_input_box(
                 "transfer.properties.owner",
                 &state.owner_value,
-                TextInputSetup::placeholder(self.tr("fileExplorer.owner")),
+                TextInputSetup::placeholder(t!("fileExplorer.owner")),
                 cx,
             )
             .into_any_element();
@@ -39,7 +41,7 @@ impl NyaTermApp {
             .text_input_box(
                 "transfer.properties.group",
                 &state.group_value,
-                TextInputSetup::placeholder(self.tr("fileExplorer.group")),
+                TextInputSetup::placeholder(t!("fileExplorer.group")),
                 cx,
             )
             .into_any_element();
@@ -58,7 +60,7 @@ impl NyaTermApp {
             .max_h(px(560.))
             .overflow_y_scrollbar()
             .when_some(properties, |this, properties| {
-                this.child(properties_summary(palette, &state, &properties, self))
+                this.child(properties_summary(palette, &state, &properties))
                     .child(
                         div()
                             .mt_5()
@@ -67,7 +69,7 @@ impl NyaTermApp {
                             .border_color(rgb(palette.border))
                             .child(property_section_heading(
                                 palette,
-                                self.tr("fileExplorer.ownership"),
+                                t!("fileExplorer.ownership"),
                             )),
                     )
                     .child(
@@ -77,12 +79,12 @@ impl NyaTermApp {
                             .gap_3()
                             .child(property_input(
                                 palette,
-                                self.tr("fileExplorer.owner"),
+                                t!("fileExplorer.owner"),
                                 owner_input,
                             ))
                             .child(property_input(
                                 palette,
-                                self.tr("fileExplorer.group"),
+                                t!("fileExplorer.group"),
                                 group_input,
                             ))
                             .child(
@@ -93,7 +95,7 @@ impl NyaTermApp {
                                     .border_color(rgb(palette.border))
                                     .child(property_section_heading(
                                         palette,
-                                        self.tr("fileExplorer.permissions"),
+                                        t!("fileExplorer.permissions"),
                                     )),
                             )
                             .child(self.transfer_permission_grid(
@@ -104,14 +106,14 @@ impl NyaTermApp {
                             ))
                             .child(property_input(
                                 palette,
-                                self.tr("fileExplorer.octal"),
+                                t!("fileExplorer.octal"),
                                 mode_input,
                             ))
                             .when(entry.is_directory(), |this| {
                                 this.child(
                                     NyaCheckbox::new("transfer-properties-recursive")
                                         .checked(state.recursive)
-                                        .label(self.tr("fileExplorer.applyRecursively"))
+                                        .label(t!("fileExplorer.applyRecursively"))
                                         .disabled(state.saving)
                                         .on_click(move |_, _, cx| {
                                             let _ = app.update(cx, |app, cx| {
@@ -132,7 +134,7 @@ impl NyaTermApp {
                         .justify_center()
                         .text_xs()
                         .text_color(rgb(palette.text_muted))
-                        .child(self.tr("fileExplorer.loading")),
+                        .child(t!("fileExplorer.loading")),
                 )
             })
             .when_some(state.error, |this, error| {
@@ -154,7 +156,7 @@ impl NyaTermApp {
                         .mt_3()
                         .text_xs()
                         .text_color(rgb(palette.text_muted))
-                        .child(self.tr("common.saving")),
+                        .child(t!("common.saving")),
                 )
             })
             .into_any_element()
@@ -165,19 +167,18 @@ fn properties_summary(
     palette: ThemePalette,
     state: &TransferPropertiesState,
     properties: &SftpFileProperties,
-    app: &NyaTermApp,
 ) -> impl IntoElement {
     let entry = &state.entry;
     let entry_type_label = match entry.file_type {
-        SftpFileType::Directory => app.tr("fileExplorer.folder"),
-        SftpFileType::File => app.tr("fileExplorer.file"),
-        SftpFileType::Symlink => app.tr("fileExplorer.newSymlink"),
-        SftpFileType::Other => app.tr("fileExplorer.special"),
+        SftpFileType::Directory => t!("fileExplorer.folder"),
+        SftpFileType::File => t!("fileExplorer.file"),
+        SftpFileType::Symlink => t!("fileExplorer.newSymlink"),
+        SftpFileType::Other => t!("fileExplorer.special"),
     };
     div()
         .child(property_section_heading(
             palette,
-            app.tr("fileExplorer.general"),
+            t!("fileExplorer.general"),
         ))
         .child(
             div()
@@ -186,37 +187,37 @@ fn properties_summary(
                 .gap(px(10.))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.type"),
+                    t!("fileExplorer.type"),
                     entry_type_label,
                 ))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.location"),
+                    t!("fileExplorer.location"),
                     truncate_preview(&remote_parent_path(&entry.path), 76),
                 ))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.size"),
+                    t!("fileExplorer.size"),
                     format_file_size(properties.size.or(entry.size)),
                 ))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.mtime"),
+                    t!("fileExplorer.mtime"),
                     format_sftp_modified(properties.modified_at.or(entry.modified_at)),
                 ))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.atime"),
+                    t!("fileExplorer.atime"),
                     format_sftp_modified(properties.accessed_at),
                 ))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.owner"),
+                    t!("fileExplorer.owner"),
                     format_owner_group(&properties.owner, properties.uid),
                 ))
                 .child(property_row(
                     palette,
-                    app.tr("fileExplorer.group"),
+                    t!("fileExplorer.group"),
                     format_owner_group(&properties.group, properties.gid),
                 )),
         )

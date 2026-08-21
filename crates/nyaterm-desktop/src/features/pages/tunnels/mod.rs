@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, Window, div, prelude::*, px,
     rgb, svg,
@@ -30,24 +32,24 @@ impl NyaTermApp {
         let sections = tunnel_sections(
             self.tunnel_state.tunnels(),
             self.tunnel_state.tunnel_groups(),
-            self.tr("network.ungrouped"),
+            t!("network.ungrouped"),
         );
         let proxy_sections = proxy_sections(
             self.tunnel_state.proxies(),
             self.tunnel_state.proxy_groups(),
-            self.tr("network.ungrouped"),
+            t!("network.ungrouped"),
         );
         let mut tunnel_list = div().flex().flex_col().gap_2();
         if self.tunnel_state.tunnels().is_empty() && self.tunnel_state.tunnel_groups().is_empty() {
             let (title, description) = if self.connection_state.connections().is_empty() {
                 (
-                    self.tr("network.noConnections").to_string(),
-                    self.tr("network.noConnectionsHint").to_string(),
+                    t!("network.noConnections").to_string(),
+                    t!("network.noConnectionsHint").to_string(),
                 )
             } else {
                 (
-                    self.tr("network.noTunnels").to_string(),
-                    self.tr("network.tunnelEmptyHint").to_string(),
+                    t!("network.noTunnels").to_string(),
+                    t!("network.tunnelEmptyHint").to_string(),
                 )
             };
             tunnel_list = tunnel_list.child(network_empty_state(
@@ -68,8 +70,8 @@ impl NyaTermApp {
             proxy_list = proxy_list.child(network_empty_state(
                 palette,
                 "icons/network.svg",
-                self.tr("network.noProxyConfigs").to_string(),
-                self.tr("network.proxyEmptyHint").to_string(),
+                t!("network.noProxyConfigs").to_string(),
+                t!("network.proxyEmptyHint").to_string(),
             ));
         } else {
             for section in proxy_sections {
@@ -81,8 +83,8 @@ impl NyaTermApp {
         // scroll(p-3) > Tabs(grid-cols-2) > config row (label + New Group/New item) > grouped list.
         // Network create/edit/delete use modal dialogs (Tauri Dialog) over the panel.
         let config_label = match active_tab {
-            NetworkTab::Tunnels => self.tr("network.tunnelConfig").to_string(),
-            NetworkTab::Proxies => self.tr("network.proxyConfig").to_string(),
+            NetworkTab::Tunnels => t!("network.tunnelConfig").to_string(),
+            NetworkTab::Proxies => t!("network.proxyConfig").to_string(),
         };
         let has_connections = !self.connection_state.connections().is_empty();
 
@@ -105,8 +107,8 @@ impl NyaTermApp {
                         .child(
                             NyaTabs::new("network-tabs")
                                 .items([
-                                    NyaTabItem::new(self.tr("network.tunnels").to_string()),
-                                    NyaTabItem::new(self.tr("network.proxy").to_string()),
+                                    NyaTabItem::new(t!("network.tunnels").to_string()),
+                                    NyaTabItem::new(t!("network.proxy").to_string()),
                                 ])
                                 .selected_index(
                                     if self.connection_state.network_tab_is(NetworkTab::Tunnels) {
@@ -163,7 +165,7 @@ impl NyaTermApp {
                                                 this.child(network_create_button(
                                                     palette,
                                                     "network-tunnel-new",
-                                                    self.tr("network.newTunnel").to_string(),
+                                                    t!("network.newTunnel").to_string(),
                                                     has_connections,
                                                     cx.listener(|this, _, window, cx| {
                                                         this.open_network_tunnel_editor(
@@ -180,7 +182,7 @@ impl NyaTermApp {
                                                 this.child(network_create_button(
                                                     palette,
                                                     "network-proxy-new",
-                                                    self.tr("network.newProxy").to_string(),
+                                                    t!("network.newProxy").to_string(),
                                                     true,
                                                     cx.listener(|this, _, window, cx| {
                                                         this.open_network_proxy_editor(

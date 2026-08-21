@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, ParentElement as _, Styled as _, Window, div, rgb};
 use nyaterm_transport::{SftpFileEntry, SftpFileType};
 use nyaterm_ui::{NyaButton, NyaButtonVariant, NyaDialogWindowExt};
@@ -37,17 +39,11 @@ impl NyaTermApp {
         } else {
             state.entry.name.clone()
         };
-        let title = self.tr("fileExplorer.unknownFileTypeTitle").to_string();
-        let description = self
-            .tr("fileExplorer.unknownFileTypeDesc")
-            .replace("{{name}}", &name);
-        let cancel_label = self.tr("common.cancel").to_string();
-        let internal_label = self
-            .tr("fileExplorer.unknownFileTypeOpenInternal")
-            .to_string();
-        let external_label = self
-            .tr("fileExplorer.unknownFileTypeOpenExternal")
-            .to_string();
+        let title = t!("fileExplorer.unknownFileTypeTitle").to_string();
+        let description = t!("fileExplorer.unknownFileTypeDesc").replace("{{name}}", &name);
+        let cancel_label = t!("common.cancel").to_string();
+        let internal_label = t!("fileExplorer.unknownFileTypeOpenInternal").to_string();
+        let external_label = t!("fileExplorer.unknownFileTypeOpenExternal").to_string();
         let width = transfer_dialog_width(self.shell.viewport_size().0, 512.);
         let app = cx.weak_entity();
 

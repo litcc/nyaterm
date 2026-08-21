@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use crate::features::NyaTermApp;
 use crate::models::{
     TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
@@ -32,9 +34,9 @@ impl NyaTermApp {
             .set_status("remote folder creation opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("fileExplorer.newFolder").to_string(),
+                t!("fileExplorer.newFolder").to_string(),
                 500.,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 |app, _, cx| app.transfer_new_folder_dialog_content(cx),
                 |app, window, cx| app.submit_transfer_new_folder(window, cx),
                 |app, cx| app.close_transfer_new_folder_dialog(cx),
@@ -183,9 +185,9 @@ impl NyaTermApp {
             .set_status("remote file creation opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("fileExplorer.newFile").to_string(),
+                t!("fileExplorer.newFile").to_string(),
                 500.,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 |app, _, cx| app.transfer_new_file_dialog_content(cx),
                 |app, window, cx| app.submit_transfer_new_file(window, cx),
                 |app, cx| app.close_transfer_new_file_dialog(cx),

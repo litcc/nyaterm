@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, KeyDownEvent, SharedString,
     Window, div, prelude::*, px, rgb, rgba, svg,
@@ -25,8 +27,8 @@ impl NyaTermApp {
         let keyword_highlighting_enabled = self.settings.keyword_config().enabled;
         let expanded = self.settings.keyword_highlight_presentation().expanded_id;
         let builtin_ids = nyaterm_core::builtin_keyword_rule_ids();
-        let pattern_count_template = self.tr("settings.keywordHighlightPatternCount");
-        let untitled_rule_label = self.tr("settings.keywordHighlightNewRule");
+        let pattern_count_template = t!("settings.keywordHighlightPatternCount");
+        let untitled_rule_label = t!("settings.keywordHighlightNewRule");
 
         settings_form_section(
             palette,
@@ -38,9 +40,9 @@ impl NyaTermApp {
                 .gap_4()
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.keywordHighlightingExperimental"),
+                    t!("settings.keywordHighlightingExperimental"),
                     Some(SharedString::from(
-                        self.tr("settings.keywordHighlightingExperimentalDesc"),
+                        t!("settings.keywordHighlightingExperimentalDesc"),
                     )),
                     settings_switch(
                         palette,
@@ -58,9 +60,9 @@ impl NyaTermApp {
                             .gap_4()
                             .child(settings_form_row(
                                 palette,
-                                self.tr("settings.keywordHighlightWrappedLines"),
+                                t!("settings.keywordHighlightWrappedLines"),
                                 Some(SharedString::from(
-                                    self.tr("settings.keywordHighlightWrappedLinesDesc"),
+                                    t!("settings.keywordHighlightWrappedLinesDesc"),
                                 )),
                                 settings_switch_with_enabled(
                                     palette,
@@ -82,7 +84,7 @@ impl NyaTermApp {
                                             .text_size(px(12.))
                                             .font_weight(FontWeight(600.))
                                             .text_color(rgb(palette.text))
-                                            .child(self.tr(
+                                            .child(t!(
                                                 "settings.keywordHighlightBuiltinRules",
                                             )),
                                     )
@@ -90,7 +92,7 @@ impl NyaTermApp {
                                         div()
                                             .text_size(px(11.))
                                             .text_color(rgb(palette.text_muted))
-                                            .child(self.tr(
+                                            .child(t!(
                                                 "settings.keywordHighlightBuiltinNote",
                                             )),
                                     )
@@ -191,7 +193,7 @@ impl NyaTermApp {
                                                     .text_size(px(12.))
                                                     .font_weight(FontWeight(600.))
                                                     .text_color(rgb(palette.text))
-                                                    .child(self.tr(
+                                                    .child(t!(
                                                         "settings.keywordHighlightRules",
                                                     )),
                                             )
@@ -204,7 +206,7 @@ impl NyaTermApp {
                                                         palette,
                                                         "settings-keyword-highlights-import",
                                                         "icons/fe/upload.svg",
-                                                        self.tr(
+                                                        t!(
                                                             "settings.keywordHighlightImport",
                                                         ),
                                                         keyword_highlighting_enabled,
@@ -216,7 +218,7 @@ impl NyaTermApp {
                                                         palette,
                                                         "settings-keyword-highlights-add",
                                                         "icons/conn/add.svg",
-                                                        self.tr("common.add"),
+                                                        t!("common.add"),
                                                         keyword_highlighting_enabled,
                                                         cx.listener(|this, _, window, cx| {
                                                             this.add_keyword_highlight_rule(
@@ -243,7 +245,7 @@ impl NyaTermApp {
                                             div()
                                                 .text_size(px(12.))
                                                 .text_color(rgb(palette.text_dimmed))
-                                                .child(self.tr(
+                                                .child(t!(
                                                     "settings.keywordHighlightNoRules",
                                                 )),
                                         ),
@@ -508,7 +510,7 @@ impl NyaTermApp {
                                                 palette,
                                                 format!("settings-keyword-rule-delete-{}", rule.id),
                                                 "icons/fe/delete.svg",
-                                                self.tr("common.delete"),
+                                                t!("common.delete"),
                                                 keyword_highlighting_enabled,
                                                 cx.listener(move |this, _, _, cx| {
                                                     cx.stop_propagation();
@@ -563,7 +565,7 @@ impl NyaTermApp {
                                                 })
                                                 .child(settings_form_row(
                                                     palette,
-                                                    self.tr(
+                                                    t!(
                                                         "settings.keywordHighlightRuleName",
                                                     ),
                                                     None,
@@ -580,7 +582,7 @@ impl NyaTermApp {
                                                                 .text_color(rgb(
                                                                     palette.text_muted,
                                                                 ))
-                                                                .child(self.tr(
+                                                                .child(t!(
                                                                     "settings.keywordHighlightRulePatterns",
                                                                 )),
                                                         )
@@ -593,7 +595,7 @@ impl NyaTermApp {
                                                         .gap_2()
                                                         .child(settings_form_row(
                                                             palette,
-                                                            self.tr(
+                                                            t!(
                                                                 "settings.keywordHighlightDarkPalette",
                                                             ),
                                                             None,
@@ -663,7 +665,7 @@ impl NyaTermApp {
                                                         )
                                                         .child(settings_form_row(
                                                             palette,
-                                                            self.tr(
+                                                            t!(
                                                                 "settings.keywordHighlightLightPalette",
                                                             ),
                                                             None,

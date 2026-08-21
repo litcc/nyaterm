@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
@@ -18,7 +20,7 @@ impl NyaTermApp {
         // placeholder rather than standing a row of bullets in for it. The
         // reveal toggle now unmasks the box itself.
         let password_placeholder = if editor.has_password {
-            self.tr("passwordManager.passwordUnchanged")
+            t!("passwordManager.passwordUnchanged")
         } else {
             Cow::Borrowed("")
         };
@@ -34,7 +36,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "pw-name",
-                self.tr("passwordManager.nameLabel"),
+                t!("passwordManager.nameLabel"),
                 editor.name.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -47,7 +49,7 @@ impl NyaTermApp {
                     .child(div().min_w_0().flex_1().child(security_editor_field(
                         self,
                         "pw-value",
-                        self.tr("passwordManager.passwordLabel"),
+                        t!("passwordManager.passwordLabel"),
                         editor.password.clone(),
                         TextInputSetup {
                             placeholder: password_placeholder.into(),
@@ -66,7 +68,7 @@ impl NyaTermApp {
                                 "icons/eye.svg"
                             },
                         )
-                        .tooltip(self.tr(if editor.show_password {
+                        .tooltip(t!(if editor.show_password {
                             "passwordManager.hidePassword"
                         } else {
                             "passwordManager.showPassword"

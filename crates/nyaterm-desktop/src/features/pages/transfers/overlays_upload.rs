@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, InteractiveElement as _, IntoElement, MouseDownEvent,
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
@@ -89,7 +91,7 @@ impl NyaTermApp {
                         palette,
                         "transfer-browser-upload-menu-files",
                         "icons/fe/upload.svg",
-                        self.tr("fileExplorer.upload"),
+                        t!("fileExplorer.upload"),
                         cx.listener(|this, _, _, cx| {
                             this.close_transfer_browser_upload_menu(cx);
                             this.prompt_transfer_browser_upload_path(
@@ -102,7 +104,7 @@ impl NyaTermApp {
                         palette,
                         "transfer-browser-upload-menu-folder",
                         "icons/fe/upload-folder.svg",
-                        self.tr("fileExplorer.uploadFolder"),
+                        t!("fileExplorer.uploadFolder"),
                         cx.listener(|this, _, _, cx| {
                             this.close_transfer_browser_upload_menu(cx);
                             this.prompt_transfer_browser_upload_path(

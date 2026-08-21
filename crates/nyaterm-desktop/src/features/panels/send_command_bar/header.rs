@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use super::state::SendCommandBarViewState;
 use gpui::{Context, FontWeight, div, prelude::*, px, rgb};
 
@@ -20,7 +22,7 @@ impl NyaTermApp {
                     .text_size(px(11.))
                     .font_weight(FontWeight(500.))
                     .text_color(rgb(palette.text))
-                    .child(self.tr("serialSend.title")),
+                    .child(t!("serialSend.title")),
             )
             .child(
                 div()

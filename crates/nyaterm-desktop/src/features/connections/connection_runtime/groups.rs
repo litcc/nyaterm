@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_core::{Group, uuid};
 use nyaterm_store::{StoreDomain, store_request};
@@ -43,7 +45,7 @@ impl NyaTermApp {
             }
         }
         self.connection_state
-            .build_group_editor_field(self.tr("savedConnections.folderName").into(), cx);
+            .build_group_editor_field(t!("savedConnections.folderName").into(), cx);
         if let Some(field) = self.connection_state.group_editor_field() {
             let focus = field.read(cx).focus_handle();
             window.focus(&focus, cx);
@@ -102,7 +104,7 @@ impl NyaTermApp {
         };
         let name = editor.name.trim().to_string();
         if name.is_empty() {
-            let message = self.tr("savedConnections.folderNameRequired").to_string();
+            let message = t!("savedConnections.folderNameRequired").to_string();
             self.connection_state.set_group_editor_error(message);
             cx.notify();
             return;

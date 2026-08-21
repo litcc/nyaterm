@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, Window};
 
 use crate::features::ai::AiSettingsMutation;
@@ -114,7 +116,7 @@ impl NyaTermApp {
         let input = self.text_input(
             format!("ai.settings.manual-model.{group_key}"),
             &draft,
-            TextInputSetup::placeholder(self.tr("ai.manualModelPlaceholder")),
+            TextInputSetup::placeholder(t!("ai.manualModelPlaceholder")),
             cx,
         );
         self.ai.focus_settings_manual_model_edit(group_key);

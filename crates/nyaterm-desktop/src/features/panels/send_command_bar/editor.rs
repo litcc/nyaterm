@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use super::state::SendCommandBarViewState;
@@ -122,7 +124,7 @@ impl NyaTermApp {
                                         .text_size(px(10.))
                                         .font_weight(FontWeight(600.))
                                         .text_color(rgb(palette.text_dimmed))
-                                        .child(self.tr("serialSend.hexEditor")),
+                                        .child(t!("serialSend.hexEditor")),
                                 )
                                 .child(
                                     div()
@@ -133,7 +135,7 @@ impl NyaTermApp {
                                             rgb(palette.text_dimmed)
                                         })
                                         .child(if validation_error {
-                                            self.tr("serialSend.hexError")
+                                            t!("serialSend.hexError")
                                         } else {
                                             Cow::Borrowed("")
                                         }),
@@ -213,18 +215,16 @@ impl NyaTermApp {
                                         .text_size(px(10.))
                                         .font_weight(FontWeight(600.))
                                         .text_color(rgb(palette.text_dimmed))
-                                        .child(self.tr("serialSend.hexPreview")),
+                                        .child(t!("serialSend.hexPreview")),
                                 )
                                 .child(
                                     div()
                                         .text_size(px(10.))
                                         .text_color(rgb(palette.text_dimmed))
                                         .child(match byte_count {
-                                            Some(n) => self
-                                                .tr("serialSend.hexByteCount")
+                                            Some(n) => t!("serialSend.hexByteCount")
                                                 .replace("{{count}}", &n.to_string()),
-                                            None => self
-                                                .tr("serialSend.hexByteCount")
+                                            None => t!("serialSend.hexByteCount")
                                                 .replace("{{count}}", "0"),
                                         }),
                                 ),
@@ -262,8 +262,8 @@ impl NyaTermApp {
                 palette,
                 is_sending,
                 send_disabled,
-                self.tr("serialSend.send"),
-                self.tr("serialSend.stop"),
+                t!("serialSend.send"),
+                t!("serialSend.stop"),
                 cx.listener(|this, _, _, cx| {
                     if this.send_command.is_sending() {
                         this.stop_send_command(cx);

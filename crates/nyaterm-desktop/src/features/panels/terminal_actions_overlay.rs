@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -21,8 +23,7 @@ impl NyaTermApp {
         let buffer_tail = self.active_terminal_buffer_tail();
         let visible_lines = visible_text.lines().count();
         let buffer_chars = buffer_tail.chars().count();
-        let summary = self
-            .tr("terminalActions.summary")
+        let summary = t!("terminalActions.summary")
             .replace("{{lines}}", &visible_lines.to_string())
             .replace("{{chars}}", &buffer_chars.to_string());
         let visible_for_translate = visible_text.clone();
@@ -100,7 +101,7 @@ impl NyaTermApp {
                                             .text_sm()
                                             .font_weight(FontWeight(800.))
                                             .text_color(rgb(0xe5edf7))
-                                            .child(self.tr("terminalActions.title")),
+                                            .child(t!("terminalActions.title")),
                                     )
                                     .child(
                                         div()
@@ -111,7 +112,7 @@ impl NyaTermApp {
                             )
                             .child(small_button(palette,
                                 "terminal-actions-close",
-                                self.tr("common.close"),
+                                t!("common.close"),
                                 cx.listener(|this, _, window, cx| {
                                     this.close_terminal_actions(window, cx);
                                 }),
@@ -126,8 +127,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-copy-visible",
-                                self.tr("terminalCtx.copy"),
-                                self.tr("terminalActions.selectionScreen"),
+                                t!("terminalCtx.copy"),
+                                t!("terminalActions.selectionScreen"),
                                 cx.listener(|this, _, _, cx| {
                                     this.copy_terminal_selection_or_visible(cx);
                                 }),
@@ -135,8 +136,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-select-all",
-                                self.tr("terminalCtx.selectAll"),
-                                self.tr("terminalActions.visibleGrid"),
+                                t!("terminalCtx.selectAll"),
+                                t!("terminalActions.visibleGrid"),
                                 cx.listener(|this, _, _, cx| {
                                     this.select_all_terminal(cx);
                                 }),
@@ -144,8 +145,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-find",
-                                self.tr("terminalCtx.find"),
-                                self.tr("terminalActions.searchBuffer"),
+                                t!("terminalCtx.find"),
+                                t!("terminalActions.searchBuffer"),
                                 cx.listener(|this, _, window, cx| {
                                     this.open_terminal_search(window, cx);
                                 }),
@@ -153,8 +154,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-sync-groups",
-                                self.tr("syncGroup.title"),
-                                self.tr("terminalActions.broadcastInput"),
+                                t!("syncGroup.title"),
+                                t!("terminalActions.broadcastInput"),
                                 cx.listener(|this, _, window, cx| {
                                     this.terminal.close_actions();
                                     this.open_sync_groups(window, cx);
@@ -163,8 +164,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-paste",
-                                self.tr("terminalCtx.paste"),
-                                self.tr("terminalActions.clipboardText"),
+                                t!("terminalCtx.paste"),
+                                t!("terminalActions.clipboardText"),
                                 cx.listener(|this, _, window, cx| {
                                     this.terminal.close_actions();
                                     this.paste_from_clipboard(window, cx);
@@ -173,8 +174,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-clear-screen",
-                                self.tr("terminalCtx.clearScreen"),
-                                self.tr("terminalActions.shellClear"),
+                                t!("terminalCtx.clearScreen"),
+                                t!("terminalActions.shellClear"),
                                 cx.listener(|this, _, _, cx| {
                                     this.send_terminal_clear_screen(cx);
                                 }),
@@ -182,8 +183,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-clear-all",
-                                self.tr("terminalCtx.clearAll"),
-                                self.tr("terminalActions.dropBuffer"),
+                                t!("terminalCtx.clearAll"),
+                                t!("terminalActions.dropBuffer"),
                                 cx.listener(|this, _, _, cx| {
                                     this.terminal.close_actions();
                                     this.clear_terminal(cx);
@@ -192,8 +193,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-temporary-ssh-link",
-                                self.tr("terminalActions.tempSsh"),
-                                self.tr("terminalActions.pasteLink"),
+                                t!("terminalActions.tempSsh"),
+                                t!("terminalActions.pasteLink"),
                                 cx.listener(|this, _, window, cx| {
                                     this.terminal.close_actions();
                                     this.open_temporary_ssh_link_dialog(window, cx);
@@ -211,8 +212,8 @@ impl NyaTermApp {
                                     tab_action_button(
                                         palette,
                                         "terminal-actions-translate-visible",
-                                        self.tr("translation.title"),
-                                        self.tr("terminalActions.visibleScreen"),
+                                        t!("translation.title"),
+                                        t!("terminalActions.visibleScreen"),
                                         cx.listener(move |this, _, window, cx| {
                                             this.terminal.close_actions();
                                             if visible_for_translate.trim().is_empty() {
@@ -221,14 +222,14 @@ impl NyaTermApp {
                                                 let provider =
                                                     this.translation.provider().to_string();
                                                 let provider_label = match provider.as_str() {
-                                                    "google" => this.tr("translation.google"),
+                                                    "google" => t!("translation.google"),
                                                     "microsoft" => {
-                                                        this.tr("translation.microsoft")
+                                                        t!("translation.microsoft")
                                                     }
-                                                    "deepl" => this.tr("translation.deepl"),
-                                                    "baidu" => this.tr("translation.baidu"),
-                                                    "ali" => this.tr("translation.ali"),
-                                                    "youdao" => this.tr("translation.youdao"),
+                                                    "deepl" => t!("translation.deepl"),
+                                                    "baidu" => t!("translation.baidu"),
+                                                    "ali" => t!("translation.ali"),
+                                                    "youdao" => t!("translation.youdao"),
                                                     _ => Cow::Borrowed(provider.as_str()),
                                                 }
                                                 .to_string();
@@ -250,8 +251,8 @@ impl NyaTermApp {
                                     tab_action_button(
                                         palette,
                                         "terminal-actions-ai-visible",
-                                        self.tr("ai.title"),
-                                        self.tr("terminalActions.visibleScreen"),
+                                        t!("ai.title"),
+                                        t!("terminalActions.visibleScreen"),
                                         cx.listener(move |this, _, window, cx| {
                                             this.terminal.close_actions();
                                             if visible_for_ai.trim().is_empty() {
@@ -278,8 +279,8 @@ impl NyaTermApp {
                                     tab_action_button(
                                         palette,
                                         "terminal-actions-ai-buffer",
-                                        self.tr("terminalActions.aiBuffer"),
-                                        self.tr("terminalActions.bufferContext"),
+                                        t!("terminalActions.aiBuffer"),
+                                        t!("terminalActions.bufferContext"),
                                         cx.listener(move |this, _, window, cx| {
                                             this.terminal.close_actions();
                                             if buffer_for_ai.trim().is_empty() {
@@ -303,8 +304,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-command-send",
-                                self.tr("terminalActions.sendPanel"),
-                                self.tr("terminalActions.bottomSender"),
+                                t!("terminalActions.sendPanel"),
+                                t!("terminalActions.bottomSender"),
                                 cx.listener(|this, _, window, cx| {
                                     this.terminal.close_actions();
                                     this.set_bottom_panel_mode(BottomPanelMode::CommandSend);
@@ -322,8 +323,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-history-search",
-                                self.tr("suggestions.title"),
-                                self.tr("terminalActions.commandHistory"),
+                                t!("suggestions.title"),
+                                t!("terminalActions.commandHistory"),
                                 cx.listener(|this, _, window, cx| {
                                     this.terminal.close_actions();
                                     this.terminal.set_search_mode(TerminalSearchMode::History);
@@ -334,8 +335,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-quick-commands",
-                                self.tr("quickCommands.title"),
-                                self.tr("terminalActions.quickCommands"),
+                                t!("quickCommands.title"),
+                                t!("terminalActions.quickCommands"),
                                 cx.listener(|this, _, _, cx| {
                                     this.terminal.close_actions();
                                     this.set_bottom_panel_mode(BottomPanelMode::QuickCommands);
@@ -345,8 +346,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-recording",
-                                self.tr("terminalActions.recording"),
-                                self.tr("terminalActions.sessionLog"),
+                                t!("terminalActions.recording"),
+                                t!("terminalActions.sessionLog"),
                                 cx.listener(|this, _, _, cx| {
                                     this.terminal.close_actions();
                                     this.shell.set_right_focus(RightFocus::Recording);
@@ -356,8 +357,8 @@ impl NyaTermApp {
                             .child(tab_action_button(
                                 palette,
                                 "terminal-actions-session-info",
-                                self.tr("tabCtx.sessionInfo"),
-                                self.tr("terminalActions.sessionDetails"),
+                                t!("tabCtx.sessionInfo"),
+                                t!("terminalActions.sessionDetails"),
                                 cx.listener(|this, _, window, cx| {
                                     this.terminal.close_actions();
                                     this.open_active_session_info(window, cx);

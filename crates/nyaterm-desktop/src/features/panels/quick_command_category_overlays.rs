@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, Context, IntoElement as _, ParentElement as _, Styled as _, div,
     prelude::FluentBuilder as _, px, rgb,
@@ -47,10 +49,10 @@ impl NyaTermApp {
                         .map(|category| category.name.clone())
                 });
         let hint = match parent_name {
-            Some(parent_name) => self
-                .tr("quickCommands.newCategoryParentHint")
-                .replace("{{category}}", &parent_name),
-            None => self.tr("quickCommands.newCategoryRootHint").to_string(),
+            Some(parent_name) => {
+                t!("quickCommands.newCategoryParentHint").replace("{{category}}", &parent_name)
+            }
+            None => t!("quickCommands.newCategoryRootHint").to_string(),
         };
         self.quick_command_category_name_dialog_content(
             "quick-command.category-create",
@@ -77,7 +79,7 @@ impl NyaTermApp {
             .text_input_box(
                 input_id,
                 draft,
-                TextInputSetup::placeholder(self.tr("quickCommands.categoryName")),
+                TextInputSetup::placeholder(t!("quickCommands.categoryName")),
                 cx,
             )
             .into_any_element();

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, Context, IntoElement as _, ParentElement as _, Styled as _, div,
     prelude::FluentBuilder as _, px, rgb,
@@ -33,7 +35,7 @@ impl NyaTermApp {
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
                     .line_height(px(16.))
-                    .child(self.tr("temporarySsh.description")),
+                    .child(t!("temporarySsh.description")),
             )
             .child(
                 div()
@@ -44,9 +46,9 @@ impl NyaTermApp {
                     .child(div().w(px(128.)).child(self.form_select_control(
                         "temporary-link-protocol",
                         vec![
-                            NyaSelectOption::new("ssh", self.tr("temporarySsh.protocolSsh")),
-                            NyaSelectOption::new("telnet", self.tr("temporarySsh.protocolTelnet")),
-                            NyaSelectOption::new("serial", self.tr("temporarySsh.protocolSerial")),
+                            NyaSelectOption::new("ssh", t!("temporarySsh.protocolSsh")),
+                            NyaSelectOption::new("telnet", t!("temporarySsh.protocolTelnet")),
+                            NyaSelectOption::new("serial", t!("temporarySsh.protocolSerial")),
                         ],
                         Some(protocol.as_str().to_string()),
                         false,
@@ -55,9 +57,9 @@ impl NyaTermApp {
                     .child(div().min_w_0().flex_1().child(match protocol {
                         TemporaryLinkProtocol::Ssh | TemporaryLinkProtocol::Telnet => {
                             let placeholder = match protocol {
-                                TemporaryLinkProtocol::Ssh => self.tr("temporarySsh.placeholder"),
+                                TemporaryLinkProtocol::Ssh => t!("temporarySsh.placeholder"),
                                 TemporaryLinkProtocol::Telnet => {
-                                    self.tr("temporarySsh.telnetPlaceholder")
+                                    t!("temporarySsh.telnetPlaceholder")
                                 }
                                 TemporaryLinkProtocol::Serial => unreachable!(),
                             };
@@ -88,7 +90,7 @@ impl NyaTermApp {
                                     .items_center()
                                     .text_xs()
                                     .text_color(rgb(palette.text_dimmed))
-                                    .child(self.tr("temporarySsh.noSerialPortsFound"))
+                                    .child(t!("temporarySsh.noSerialPortsFound"))
                                     .into_any_element()
                             } else {
                                 self.form_select_control(
@@ -108,7 +110,7 @@ impl NyaTermApp {
                     self.text_input_box(
                         "temporary-ssh.baud-rate",
                         &serial_baud_rate,
-                        TextInputSetup::placeholder(self.tr("temporarySsh.baudRatePlaceholder")),
+                        TextInputSetup::placeholder(t!("temporarySsh.baudRatePlaceholder")),
                         cx,
                     )
                     .into_any_element(),
@@ -119,7 +121,7 @@ impl NyaTermApp {
                     div()
                         .text_size(px(12.))
                         .text_color(rgb(palette.danger))
-                        .child(self.tr(key)),
+                        .child(t!(key)),
                 )
             })
             .into_any_element()

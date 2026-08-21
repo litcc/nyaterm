@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div,
     prelude::*, px, rgb, rgba,
@@ -124,9 +126,9 @@ impl NyaTermApp {
                             .font_weight(FontWeight(700.))
                             .text_color(rgb(palette.text))
                             .child(if remote_inconsistent {
-                                self.tr("settings.syncRemoteIncompleteTitle")
+                                t!("settings.syncRemoteIncompleteTitle")
                             } else {
-                                self.tr("settings.syncConflictTitle")
+                                t!("settings.syncConflictTitle")
                             }),
                     )
                     .child(
@@ -144,18 +146,18 @@ impl NyaTermApp {
                     .gap_2()
                     .child(cloud_sync_conflict_stat(
                         palette,
-                        self.tr("settings.localSnapshot"),
+                        t!("settings.localSnapshot"),
                         local_hash,
                     ))
                     .child(cloud_sync_conflict_stat(
                         palette,
-                        self.tr("settings.remoteSnapshot"),
+                        t!("settings.remoteSnapshot"),
                         remote_revision,
                     ))
                     .when_some(recovery_candidate, |this, recovery_candidate| {
                         this.child(cloud_sync_conflict_stat(
                             palette,
-                            self.tr("settings.currentRemoteSnapshot"),
+                            t!("settings.currentRemoteSnapshot"),
                             recovery_candidate,
                         ))
                     }),
@@ -175,7 +177,7 @@ impl NyaTermApp {
                         small_button(
                             palette,
                             "cloud-conflict-recover-current",
-                            self.tr("settings.useCurrentRemoteSnapshot"),
+                            t!("settings.useCurrentRemoteSnapshot"),
                             cx.listener(move |this, _, window, cx| {
                                 this.prompt_cloud_sync_recover_current(provider_action, window, cx);
                             }),
@@ -185,7 +187,7 @@ impl NyaTermApp {
                         small_button(
                             palette,
                             "cloud-conflict-force-pull",
-                            self.tr("settings.downloadRemoteVersion"),
+                            t!("settings.downloadRemoteVersion"),
                             cx.listener(move |this, _, window, cx| {
                                 this.prompt_cloud_sync_force_pull(provider_action, window, cx);
                             }),
@@ -195,7 +197,7 @@ impl NyaTermApp {
                     .child(dialog_action_button(
                         palette,
                         "cloud-conflict-force-push",
-                        self.tr("settings.uploadLocalVersion"),
+                        t!("settings.uploadLocalVersion"),
                         false,
                         cx.listener(move |this, _, window, cx| {
                             this.prompt_cloud_sync_force_push(provider_action, window, cx);
@@ -229,15 +231,15 @@ impl NyaTermApp {
         let debounce_enabled = auto_sync_enabled && self.cloud_sync.settings().auto_push_on_change;
         let validation_key = cloud_sync_validation_key(&self.cloud_sync.pending_settings());
         let validation_message = (form_enabled && self.cloud_sync.settings().enabled)
-            .then(|| validation_key.map(|key| self.tr(key)))
+            .then(|| validation_key.map(|key| t!(key)))
             .flatten();
         let settings_dirty = self.settings_draft_dirty();
         let action_block_message = if !form_enabled {
-            Some(self.tr("settings.masterPasswordRequiredDesc"))
+            Some(t!("settings.masterPasswordRequiredDesc"))
         } else if settings_dirty {
-            Some(self.tr("settings.applySettingsFirst"))
+            Some(t!("settings.applySettingsFirst"))
         } else {
-            validation_key.map(|key| self.tr(key))
+            validation_key.map(|key| t!(key))
         };
         let prompt_busy = self.settings.snapshot_password_prompt_active()
             || self.settings.config_path_prompt_active();
@@ -253,7 +255,7 @@ impl NyaTermApp {
         let current_operation = if sync_running {
             self.cloud_sync.status().to_string()
         } else {
-            self.tr("settings.none").to_string()
+            t!("settings.none").to_string()
         };
         let provider_label = cloud_sync_provider_label(&active_cloud_provider).to_string();
         let last_checked = self
@@ -261,13 +263,13 @@ impl NyaTermApp {
             .state()
             .last_checked_at_ms
             .map(format_history_timestamp_ms)
-            .unwrap_or_else(|| self.tr("settings.never").to_string());
+            .unwrap_or_else(|| t!("settings.never").to_string());
         let last_synced = self
             .cloud_sync
             .state()
             .last_synced_at_ms
             .map(format_history_timestamp_ms)
-            .unwrap_or_else(|| self.tr("settings.never").to_string());
+            .unwrap_or_else(|| t!("settings.never").to_string());
         let webdav_password_value = self.cloud_sync.secret_draft().webdav_password.clone();
         let s3_access_key_value = self.cloud_sync.secret_draft().s3_access_key_id.clone();
         let s3_secret_key_value = self.cloud_sync.secret_draft().s3_secret_access_key.clone();
@@ -354,20 +356,20 @@ impl NyaTermApp {
             .gap_5()
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.localBackup")),
-                Some(self.tr("settings.localBackupDesc")),
+                Some(t!("settings.localBackup")),
+                Some(t!("settings.localBackupDesc")),
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.exportConfig"),
-                        Some(SharedString::from(self.tr("settings.exportConfigDesc"))),
+                        t!("settings.exportConfig"),
+                        Some(SharedString::from(t!("settings.exportConfigDesc"))),
                         cloud_sync_action_button(
                             palette,
                             "settings-local-backup-export",
-                            self.tr("settings.exportConfig"),
+                            t!("settings.exportConfig"),
                             !actions_busy,
                             cx.listener(|this, _, window, cx| {
                                 this.prompt_encrypted_portable_snapshot_export(window, cx);
@@ -376,12 +378,12 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.importConfig"),
-                        Some(SharedString::from(self.tr("settings.importConfigDesc"))),
+                        t!("settings.importConfig"),
+                        Some(SharedString::from(t!("settings.importConfigDesc"))),
                         cloud_sync_action_button(
                             palette,
                             "settings-local-backup-import",
-                            self.tr("settings.importConfig"),
+                            t!("settings.importConfig"),
                             !actions_busy,
                             cx.listener(|this, _, window, cx| {
                                 this.prompt_encrypted_portable_snapshot_import(window, cx);
@@ -391,16 +393,16 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.syncProviderConfig")),
-                Some(self.tr("settings.syncProviderConfigDesc")),
+                Some(t!("settings.syncProviderConfig")),
+                Some(t!("settings.syncProviderConfigDesc")),
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.enableCloudSync"),
-                        Some(SharedString::from(self.tr("settings.enableCloudSyncDesc"))),
+                        t!("settings.enableCloudSync"),
+                        Some(SharedString::from(t!("settings.enableCloudSyncDesc"))),
                         settings_switch_with_enabled(
                             palette,
                             "cloud-sync-enabled",
@@ -428,12 +430,12 @@ impl NyaTermApp {
                                         .min_w_0()
                                         .text_size(px(12.))
                                         .text_color(rgb(palette.text_muted))
-                                        .child(self.tr("settings.syncMasterPasswordMissingDesc")),
+                                        .child(t!("settings.syncMasterPasswordMissingDesc")),
                                 )
                                 .child(small_button(
                                     palette,
                                     "cloud-open-security",
-                                    self.tr("settings.openSecuritySettings"),
+                                    t!("settings.openSecuritySettings"),
                                     cx.listener(|this, _, _, cx| {
                                         this.shell.set_settings_active_tab(SettingsTab::Security);
                                         cx.notify();
@@ -457,17 +459,17 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.syncProvider"),
-                        Some(SharedString::from(self.tr("settings.syncProviderDesc"))),
+                        t!("settings.syncProvider"),
+                        Some(SharedString::from(t!("settings.syncProviderDesc"))),
                         self.cloud_sync_provider_select(&active_cloud_provider, form_enabled, cx),
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.deviceName"),
-                        Some(SharedString::from(self.tr("settings.deviceNameDesc"))),
+                        t!("settings.deviceName"),
+                        Some(SharedString::from(t!("settings.deviceNameDesc"))),
                         self.cloud_sync_input(
                             "cloud-sync-device-name",
-                            self.tr("settings.deviceName"),
+                            t!("settings.deviceName"),
                             self.cloud_sync.settings().device_name.clone(),
                             CloudSyncInputField::DeviceName,
                             cx,
@@ -475,11 +477,11 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.remoteNamespace"),
-                        Some(SharedString::from(self.tr("settings.remoteNamespaceDesc"))),
+                        t!("settings.remoteNamespace"),
+                        Some(SharedString::from(t!("settings.remoteNamespaceDesc"))),
                         self.cloud_sync_input(
                             "cloud-sync-remote-root",
-                            self.tr("settings.remoteNamespace"),
+                            t!("settings.remoteNamespace"),
                             self.cloud_sync.settings().remote_root.clone(),
                             CloudSyncInputField::RemoteRoot,
                             cx,
@@ -489,8 +491,8 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.autoSyncStrategy")),
-                Some(self.tr("settings.autoSyncStrategyDesc")),
+                Some(t!("settings.autoSyncStrategy")),
+                Some(t!("settings.autoSyncStrategyDesc")),
                 div()
                     .flex()
                     .flex_col()
@@ -511,10 +513,8 @@ impl NyaTermApp {
                     })
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.autoCheckOnStartup"),
-                        Some(SharedString::from(
-                            self.tr("settings.autoCheckOnStartupDesc"),
-                        )),
+                        t!("settings.autoCheckOnStartup"),
+                        Some(SharedString::from(t!("settings.autoCheckOnStartupDesc"))),
                         settings_switch_with_enabled(
                             palette,
                             "cloud-auto-check",
@@ -527,8 +527,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.autoPushOnChange"),
-                        Some(SharedString::from(self.tr("settings.autoPushOnChangeDesc"))),
+                        t!("settings.autoPushOnChange"),
+                        Some(SharedString::from(t!("settings.autoPushOnChangeDesc"))),
                         settings_switch_with_enabled(
                             palette,
                             "cloud-auto-push",
@@ -541,10 +541,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.autoPullRemoteChanges"),
-                        Some(SharedString::from(
-                            self.tr("settings.autoPullRemoteChangesDesc"),
-                        )),
+                        t!("settings.autoPullRemoteChanges"),
+                        Some(SharedString::from(t!("settings.autoPullRemoteChangesDesc"))),
                         settings_switch_with_enabled(
                             palette,
                             "cloud-auto-pull-remote-changes",
@@ -557,10 +555,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.syncDebounceSeconds"),
-                        Some(SharedString::from(
-                            self.tr("settings.syncDebounceSecondsDesc"),
-                        )),
+                        t!("settings.syncDebounceSeconds"),
+                        Some(SharedString::from(t!("settings.syncDebounceSecondsDesc"))),
                         self.number_input_box(
                             "cloud-sync.number.debounce",
                             self.cloud_sync
@@ -578,7 +574,7 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.manualSyncActions")),
+                Some(t!("settings.manualSyncActions")),
                 None,
                 div()
                     .flex()
@@ -591,27 +587,27 @@ impl NyaTermApp {
                             .gap_2()
                             .child(cloud_sync_status_item(
                                 palette,
-                                self.tr("settings.syncStatus"),
-                                self.tr(sync_state_key).to_string(),
+                                t!("settings.syncStatus"),
+                                t!(sync_state_key).to_string(),
                             ))
                             .child(cloud_sync_status_item(
                                 palette,
-                                self.tr("settings.syncProvider"),
+                                t!("settings.syncProvider"),
                                 provider_label,
                             ))
                             .child(cloud_sync_status_item(
                                 palette,
-                                self.tr("settings.lastSyncCheck"),
+                                t!("settings.lastSyncCheck"),
                                 last_checked,
                             ))
                             .child(cloud_sync_status_item(
                                 palette,
-                                self.tr("settings.lastSyncAt"),
+                                t!("settings.lastSyncAt"),
                                 last_synced,
                             ))
                             .child(cloud_sync_status_item(
                                 palette,
-                                self.tr("settings.currentOperation"),
+                                t!("settings.currentOperation"),
                                 current_operation,
                             )),
                     )
@@ -638,7 +634,7 @@ impl NyaTermApp {
                             .child(cloud_sync_action_button(
                                 palette,
                                 "settings-provider-cloud-sync-test",
-                                self.tr("settings.testConnection"),
+                                t!("settings.testConnection"),
                                 can_run_actions,
                                 cx.listener(|this, _, _, cx| {
                                     this.run_provider_cloud_sync_test(cx);
@@ -647,7 +643,7 @@ impl NyaTermApp {
                             .child(cloud_sync_action_button(
                                 palette,
                                 "settings-provider-cloud-sync-push",
-                                self.tr("settings.syncPushNow"),
+                                t!("settings.syncPushNow"),
                                 can_run_enabled_actions,
                                 cx.listener(|this, _, window, cx| {
                                     this.prompt_provider_cloud_sync_push(window, cx);
@@ -656,7 +652,7 @@ impl NyaTermApp {
                             .child(cloud_sync_action_button(
                                 palette,
                                 "settings-provider-cloud-sync-pull",
-                                self.tr("settings.syncPullNow"),
+                                t!("settings.syncPullNow"),
                                 can_run_enabled_actions,
                                 cx.listener(|this, _, window, cx| {
                                     this.prompt_provider_cloud_sync_pull(window, cx);
@@ -669,8 +665,8 @@ impl NyaTermApp {
             })
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.syncConflictSection")),
-                Some(self.tr("settings.syncConflictSectionDesc")),
+                Some(t!("settings.syncConflictSection")),
+                Some(t!("settings.syncConflictSectionDesc")),
                 if let Some(conflict) = cloud_conflict {
                     self.cloud_sync_conflict_banner(conflict, cx)
                         .into_any_element()
@@ -684,7 +680,7 @@ impl NyaTermApp {
                         .text_center()
                         .text_size(px(12.))
                         .text_color(rgb(palette.text_muted))
-                        .child(self.tr("settings.noSyncConflict"))
+                        .child(t!("settings.noSyncConflict"))
                         .into_any_element()
                 },
             ))

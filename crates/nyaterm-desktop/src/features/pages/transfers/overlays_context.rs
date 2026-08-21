@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::Context;
 use nyaterm_transport::SftpFileEntry;
 use nyaterm_ui::NyaMenuItem;
@@ -44,15 +46,15 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("fileExplorer.cmRefresh"))
+            NyaMenuItem::action(t!("fileExplorer.cmRefresh"))
                 .icon("icons/fe/refresh.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.refresh_transfer_browser(window, cx);
                 })),
             NyaMenuItem::submenu(
-                self.tr("fileExplorer.upload"),
+                t!("fileExplorer.upload"),
                 vec![
-                    NyaMenuItem::action(self.tr("fileExplorer.cmUpload"))
+                    NyaMenuItem::action(t!("fileExplorer.cmUpload"))
                         .icon("icons/fe/upload.svg")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.prompt_transfer_browser_upload_path(
@@ -60,7 +62,7 @@ impl NyaTermApp {
                                 cx,
                             );
                         })),
-                    NyaMenuItem::action(self.tr("fileExplorer.uploadFolder"))
+                    NyaMenuItem::action(t!("fileExplorer.uploadFolder"))
                         .icon("icons/fe/upload-folder.svg")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.prompt_transfer_browser_upload_path(
@@ -72,34 +74,34 @@ impl NyaTermApp {
             )
             .icon("icons/fe/upload.svg"),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("fileExplorer.newFile"))
+            NyaMenuItem::action(t!("fileExplorer.newFile"))
                 .icon("icons/fe/new-file.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_transfer_new_file_dialog(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("fileExplorer.newFolder"))
+            NyaMenuItem::action(t!("fileExplorer.newFolder"))
                 .icon("icons/fe/new-folder.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_transfer_new_folder_dialog(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("fileExplorer.newSymlink"))
+            NyaMenuItem::action(t!("fileExplorer.newSymlink"))
                 .icon("icons/conn/symlink.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_transfer_new_symlink_dialog(window, cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("fileExplorer.cmCopyDirPath"))
+            NyaMenuItem::action(t!("fileExplorer.cmCopyDirPath"))
                 .icon("icons/copy.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.copy_current_transfer_browser_path(cx);
                 })),
-            NyaMenuItem::action(self.tr("fileExplorer.cmTerminalDirPath"))
+            NyaMenuItem::action(t!("fileExplorer.cmTerminalDirPath"))
                 .icon("icons/send.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.send_current_transfer_browser_path_to_terminal(cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("fileExplorer.cmProperties"))
+            NyaMenuItem::action(t!("fileExplorer.cmProperties"))
                 .icon("icons/menu/info.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_current_transfer_browser_properties(window, cx);
@@ -112,12 +114,12 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("fileExplorer.goUp"))
+            NyaMenuItem::action(t!("fileExplorer.goUp"))
                 .icon("icons/fe/up.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_transfer_parent_directory(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("fileExplorer.cmRefresh"))
+            NyaMenuItem::action(t!("fileExplorer.cmRefresh"))
                 .icon("icons/fe/refresh.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.refresh_transfer_browser(window, cx);
@@ -135,15 +137,15 @@ impl NyaTermApp {
         let is_directory = entry.is_directory();
 
         let mut items = vec![
-            NyaMenuItem::action(self.tr("fileExplorer.cmRefresh"))
+            NyaMenuItem::action(t!("fileExplorer.cmRefresh"))
                 .icon("icons/fe/refresh.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.refresh_transfer_browser(window, cx);
                 })),
             NyaMenuItem::submenu(
-                self.tr("fileExplorer.upload"),
+                t!("fileExplorer.upload"),
                 vec![
-                    NyaMenuItem::action(self.tr("fileExplorer.cmUpload"))
+                    NyaMenuItem::action(t!("fileExplorer.cmUpload"))
                         .icon("icons/fe/upload.svg")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.prompt_transfer_browser_upload_path(
@@ -151,7 +153,7 @@ impl NyaTermApp {
                                 cx,
                             );
                         })),
-                    NyaMenuItem::action(self.tr("fileExplorer.uploadFolder"))
+                    NyaMenuItem::action(t!("fileExplorer.uploadFolder"))
                         .icon("icons/fe/upload-folder.svg")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.prompt_transfer_browser_upload_path(
@@ -162,13 +164,13 @@ impl NyaTermApp {
                 ],
             )
             .icon("icons/fe/upload.svg"),
-            NyaMenuItem::action(self.tr("fileExplorer.cmDownload"))
+            NyaMenuItem::action(t!("fileExplorer.cmDownload"))
                 .icon("icons/fe/download.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.start_selected_sftp_download_jobs(window, cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("fileExplorer.cmOpen"))
+            NyaMenuItem::action(t!("fileExplorer.cmOpen"))
                 .icon("icons/conn/folder.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_selected_transfer_default(window, cx);
@@ -176,7 +178,7 @@ impl NyaTermApp {
         ];
         if show_open_internal {
             items.push(
-                NyaMenuItem::action(self.tr("fileExplorer.cmOpenInternalEditor"))
+                NyaMenuItem::action(t!("fileExplorer.cmOpenInternalEditor"))
                     .icon("icons/net/edit.svg")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_selected_transfer_editor(window, cx);
@@ -185,7 +187,7 @@ impl NyaTermApp {
         }
         if show_open_external {
             items.push(
-                NyaMenuItem::action(self.tr("fileExplorer.cmOpenExternalEditor"))
+                NyaMenuItem::action(t!("fileExplorer.cmOpenExternalEditor"))
                     .icon("icons/net/edit.svg")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_selected_transfer_external(window, cx);
@@ -193,12 +195,12 @@ impl NyaTermApp {
             );
         }
         items.extend([
-            NyaMenuItem::action(self.tr("fileExplorer.cmRename"))
+            NyaMenuItem::action(t!("fileExplorer.cmRename"))
                 .icon("icons/session/rename.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_transfer_rename_dialog(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("fileExplorer.cmMove"))
+            NyaMenuItem::action(t!("fileExplorer.cmMove"))
                 .icon("icons/net/move.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     let Some(path) = this.transfer.browser_view().selected_remote_path.clone()
@@ -211,7 +213,7 @@ impl NyaTermApp {
         if is_directory {
             let favorite_path = entry.path.clone();
             items.push(
-                NyaMenuItem::action(self.tr("fileExplorer.addToFavorites"))
+                NyaMenuItem::action(t!("fileExplorer.addToFavorites"))
                     .icon("icons/fe/star.svg")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.add_transfer_browser_favorite_path(favorite_path.clone(), cx);
@@ -222,46 +224,46 @@ impl NyaTermApp {
         items.extend([
             NyaMenuItem::separator(),
             NyaMenuItem::submenu(
-                self.tr("common.copyToClipboard"),
+                t!("common.copyToClipboard"),
                 vec![
-                    NyaMenuItem::action(self.tr("fileExplorer.cmCopyPath")).on_click(cx.listener(
+                    NyaMenuItem::action(t!("fileExplorer.cmCopyPath")).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.copy_selected_transfer_path(TransferPathPart::Full, cx);
                         },
                     )),
-                    NyaMenuItem::action(self.tr("fileExplorer.cmCopyName")).on_click(cx.listener(
+                    NyaMenuItem::action(t!("fileExplorer.cmCopyName")).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.copy_selected_transfer_path(TransferPathPart::Name, cx);
                         },
                     )),
-                    NyaMenuItem::action(self.tr("fileExplorer.cmCopyDirPath")).on_click(
-                        cx.listener(|this, _, _, cx| {
+                    NyaMenuItem::action(t!("fileExplorer.cmCopyDirPath")).on_click(cx.listener(
+                        |this, _, _, cx| {
                             this.copy_selected_transfer_path(TransferPathPart::Directory, cx);
-                        }),
-                    ),
+                        },
+                    )),
                 ],
             )
             .icon("icons/copy.svg"),
             NyaMenuItem::submenu(
-                self.tr("fileExplorer.sendToTerminal"),
+                t!("fileExplorer.sendToTerminal"),
                 vec![
-                    NyaMenuItem::action(self.tr("fileExplorer.cmTerminalPath")).on_click(
-                        cx.listener(|this, _, _, cx| {
+                    NyaMenuItem::action(t!("fileExplorer.cmTerminalPath")).on_click(cx.listener(
+                        |this, _, _, cx| {
                             this.send_selected_transfer_path_to_terminal(
                                 TransferPathPart::Full,
                                 cx,
                             );
-                        }),
-                    ),
-                    NyaMenuItem::action(self.tr("fileExplorer.cmTerminalName")).on_click(
-                        cx.listener(|this, _, _, cx| {
+                        },
+                    )),
+                    NyaMenuItem::action(t!("fileExplorer.cmTerminalName")).on_click(cx.listener(
+                        |this, _, _, cx| {
                             this.send_selected_transfer_path_to_terminal(
                                 TransferPathPart::Name,
                                 cx,
                             );
-                        }),
-                    ),
-                    NyaMenuItem::action(self.tr("fileExplorer.cmTerminalDirPath")).on_click(
+                        },
+                    )),
+                    NyaMenuItem::action(t!("fileExplorer.cmTerminalDirPath")).on_click(
                         cx.listener(|this, _, _, cx| {
                             this.send_selected_transfer_path_to_terminal(
                                 TransferPathPart::Directory,
@@ -272,7 +274,7 @@ impl NyaTermApp {
                 ],
             )
             .icon("icons/send.svg"),
-            NyaMenuItem::action(self.tr("fileExplorer.cmProperties"))
+            NyaMenuItem::action(t!("fileExplorer.cmProperties"))
                 .icon("icons/menu/info.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_selected_transfer_properties(window, cx);
@@ -302,7 +304,7 @@ impl NyaTermApp {
         }
         items.push(NyaMenuItem::separator());
         items.push(
-            NyaMenuItem::action(self.tr("fileExplorer.cmDelete"))
+            NyaMenuItem::action(t!("fileExplorer.cmDelete"))
                 .icon("icons/net/delete.svg")
                 .danger()
                 .on_click(cx.listener(|this, _, window, cx| {

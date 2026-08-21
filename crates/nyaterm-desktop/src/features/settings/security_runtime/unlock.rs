@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, Context, KeyDownEvent, Window};
 use nyaterm_ui::NyaDialogWindowExt as _;
 
@@ -113,7 +115,7 @@ impl NyaTermApp {
                     }
                     Ok(false) => {
                         this.reset_text_input("security.unlock.password", "", cx);
-                        let error = this.tr("secretUnlock.wrongPassword").to_string();
+                        let error = t!("secretUnlock.wrongPassword").to_string();
                         this.security.reject_unlock(error, "unlock rejected");
                     }
                     Err(error) => {

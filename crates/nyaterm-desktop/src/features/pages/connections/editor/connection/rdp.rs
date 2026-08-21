@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, SharedString, div,
     prelude::{
@@ -68,15 +70,13 @@ pub(super) fn connection_editor_rdp_section(
     let ConnectionEditorSectionContext {
         palette,
         editor,
-        language,
         fields,
     } = section;
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     let auth_values = ["none".to_string(), "password".to_string()];
     let auth_tabs = NyaTabs::new("connection-rdp-auth-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.noAuthentication")),
-            NyaTabItem::new(tr("dialog.password")),
+            NyaTabItem::new(t!("dialog.noAuthentication")),
+            NyaTabItem::new(t!("dialog.password")),
         ])
         .selected_index(if editor.auth_mode == "none" { 0 } else { 1 })
         .on_select(cx.listener(move |this, index: &usize, _, cx| {
@@ -91,9 +91,9 @@ pub(super) fn connection_editor_rdp_section(
         }));
     let password_source_tabs = NyaTabs::new("connection-rdp-password-source-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.askWhenConnecting")),
-            NyaTabItem::new(tr("dialog.directPassword")),
-            NyaTabItem::new(tr("dialog.savedPassword")),
+            NyaTabItem::new(t!("dialog.askWhenConnecting")),
+            NyaTabItem::new(t!("dialog.directPassword")),
+            NyaTabItem::new(t!("dialog.savedPassword")),
         ])
         .selected_index(match editor.password_source {
             ConnectionEditorPasswordSource::Ask => 0,
@@ -110,10 +110,10 @@ pub(super) fn connection_editor_rdp_section(
         }));
     let advanced_tabs = NyaTabs::new("connection-rdp-advanced-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.rdpSecurity")),
-            NyaTabItem::new(tr("dialog.rdpDisplay")),
-            NyaTabItem::new(tr("dialog.rdpClipboard")),
-            NyaTabItem::new(tr("dialog.rdpReconnect")),
+            NyaTabItem::new(t!("dialog.rdpSecurity")),
+            NyaTabItem::new(t!("dialog.rdpDisplay")),
+            NyaTabItem::new(t!("dialog.rdpClipboard")),
+            NyaTabItem::new(t!("dialog.rdpReconnect")),
         ])
         .selected_index(match editor.rdp_advanced_tab {
             ConnectionEditorRdpTab::Security => 0,
@@ -141,14 +141,14 @@ pub(super) fn connection_editor_rdp_section(
                 .gap_3()
                 .child(div().min_w_0().flex_1().child(editor_field(
                     palette,
-                    required(tr("dialog.host")),
+                    required(t!("dialog.host")),
                     ConnectionEditorField::Host,
                     fields,
                     cx,
                 )))
                 .child(div().w(px(150.)).flex_none().child(editor_stepper_field(
                     palette,
-                    required(tr("dialog.port")),
+                    required(t!("dialog.port")),
                     ConnectionEditorField::Port,
                     fields,
                     cx,
@@ -156,14 +156,14 @@ pub(super) fn connection_editor_rdp_section(
         )
         .child(editor_field(
             palette,
-            required(tr("dialog.username")),
+            required(t!("dialog.username")),
             ConnectionEditorField::Username,
             fields,
             cx,
         ))
         .child(editor_field(
             palette,
-            tr("dialog.rdpDomain"),
+            t!("dialog.rdpDomain"),
             ConnectionEditorField::Domain,
             fields,
             cx,
@@ -178,7 +178,7 @@ pub(super) fn connection_editor_rdp_section(
                         .text_xs()
                         .font_weight(FontWeight(500.))
                         .text_color(rgb(palette.text_muted))
-                        .child(tr("dialog.authentication")),
+                        .child(t!("dialog.authentication")),
                 )
                 .child(auth_tabs)
                 .when(editor.auth_mode != "none", |this| {
@@ -188,7 +188,7 @@ pub(super) fn connection_editor_rdp_section(
                             |this| {
                                 this.child(editor_field(
                                     palette,
-                                    tr("dialog.password"),
+                                    t!("dialog.password"),
                                     ConnectionEditorField::Password,
                                     fields,
                                     cx,
@@ -205,7 +205,7 @@ pub(super) fn connection_editor_rdp_section(
                                         cx,
                                     },
                                     "connection-editor-rdp-saved-password",
-                                    tr("dialog.savedPassword"),
+                                    t!("dialog.savedPassword"),
                                     ConnectionEditorSelect::SavedPassword,
                                 ))
                             },
@@ -233,7 +233,7 @@ pub(super) fn connection_editor_rdp_section(
                         })
                         .text_color(rgb(palette.text_muted)),
                 )
-                .child(tr("dialog.advancedConfig"))
+                .child(t!("dialog.advancedConfig"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_connection_editor_flag(ConnectionEditorToggle::Advanced, cx);
                 })),
@@ -254,8 +254,8 @@ pub(super) fn connection_editor_rdp_section(
                                 .child(rdp_switch_row(
                                     palette,
                                     "connection-rdp-use-nla",
-                                    tr("dialog.rdpUseNla"),
-                                    tr("dialog.rdpUseNlaDesc"),
+                                    t!("dialog.rdpUseNla"),
+                                    t!("dialog.rdpUseNlaDesc"),
                                     editor.rdp_security.use_nla,
                                     cx.listener(|this, _, _, cx| {
                                         this.toggle_connection_editor_flag(
@@ -271,7 +271,7 @@ pub(super) fn connection_editor_rdp_section(
                                         cx,
                                     },
                                     "connection-editor-rdp-certificate-policy",
-                                    tr("dialog.rdpCertificatePolicy"),
+                                    t!("dialog.rdpCertificatePolicy"),
                                     ConnectionEditorSelect::RdpCertificatePolicy,
                                 ))
                         },
@@ -289,7 +289,7 @@ pub(super) fn connection_editor_rdp_section(
                                         cx,
                                     },
                                     "connection-editor-rdp-display-mode",
-                                    tr("dialog.rdpDisplayMode"),
+                                    t!("dialog.rdpDisplayMode"),
                                     ConnectionEditorSelect::RdpDisplayMode,
                                 ))
                                 .child(
@@ -299,7 +299,7 @@ pub(super) fn connection_editor_rdp_section(
                                         .child(div().min_w_0().flex_1().child(
                                             editor_stepper_field(
                                                 palette,
-                                                tr("dialog.rdpWidth"),
+                                                t!("dialog.rdpWidth"),
                                                 ConnectionEditorField::RdpDisplayWidth,
                                                 fields,
                                                 cx,
@@ -308,7 +308,7 @@ pub(super) fn connection_editor_rdp_section(
                                         .child(div().min_w_0().flex_1().child(
                                             editor_stepper_field(
                                                 palette,
-                                                tr("dialog.rdpHeight"),
+                                                t!("dialog.rdpHeight"),
                                                 ConnectionEditorField::RdpDisplayHeight,
                                                 fields,
                                                 cx,
@@ -327,7 +327,7 @@ pub(super) fn connection_editor_rdp_section(
                                     cx,
                                 },
                                 "connection-editor-rdp-clipboard-mode",
-                                tr("dialog.rdpClipboard"),
+                                t!("dialog.rdpClipboard"),
                                 ConnectionEditorSelect::RdpClipboardMode,
                             ))
                         },
@@ -341,8 +341,8 @@ pub(super) fn connection_editor_rdp_section(
                                 .child(rdp_switch_row(
                                     palette,
                                     "connection-rdp-auto-reconnect",
-                                    tr("dialog.rdpAutoReconnect"),
-                                    tr("dialog.rdpAutoReconnectDesc"),
+                                    t!("dialog.rdpAutoReconnect"),
+                                    t!("dialog.rdpAutoReconnectDesc"),
                                     editor.rdp_reconnect.enabled,
                                     cx.listener(|this, _, _, cx| {
                                         this.toggle_connection_editor_flag(
@@ -353,7 +353,7 @@ pub(super) fn connection_editor_rdp_section(
                                 ))
                                 .child(editor_stepper_field(
                                     palette,
-                                    tr("dialog.rdpReconnectAttempts"),
+                                    t!("dialog.rdpReconnectAttempts"),
                                     ConnectionEditorField::RdpReconnectAttempts,
                                     fields,
                                     cx,

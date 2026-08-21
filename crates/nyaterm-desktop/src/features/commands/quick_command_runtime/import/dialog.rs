@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, Context, IntoElement, PathPromptOptions, SharedString, Window};
 use nyaterm_core::export_quick_commands_json;
 use nyaterm_store::{StorageError, StoreDomain};
@@ -25,7 +27,7 @@ impl NyaTermApp {
         self.shell
             .set_status("select a quick command import source".to_string());
         self.open_content_dialog(
-            self.tr("quickCommands.importTitle").to_string(),
+            t!("quickCommands.importTitle").to_string(),
             380.,
             |app, _, cx| {
                 app.quick_command_import_dialog_content(cx)
@@ -121,7 +123,7 @@ impl NyaTermApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(SharedString::from(self.tr(kind.prompt_label_key()))),
+            prompt: Some(SharedString::from(t!(kind.prompt_label_key()))),
         };
         let receiver = cx.prompt_for_paths(options);
         let store = self.store_blocking_client();

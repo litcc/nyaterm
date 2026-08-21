@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, IntoElement, MouseButton, Window, WindowControlArea, div, prelude::*, px, rgb, svg,
 };
@@ -205,13 +207,13 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let select_label = self.tr("headerStatus.select");
+        let select_label = t!("headerStatus.select");
         let selected =
             HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode);
         let mut items = HeaderStatusMode::ALL
             .into_iter()
             .map(|mode| {
-                nyaterm_ui::NyaMenuItem::action(self.tr(mode.i18n_key()))
+                nyaterm_ui::NyaMenuItem::action(t!(mode.i18n_key()))
                     .icon(mode.icon_path())
                     .checked(selected == mode)
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -221,7 +223,7 @@ impl NyaTermApp {
             .collect::<Vec<_>>();
         items.extend([
             nyaterm_ui::NyaMenuItem::separator(),
-            nyaterm_ui::NyaMenuItem::action(self.tr("headerStatus.hide"))
+            nyaterm_ui::NyaMenuItem::action(t!("headerStatus.hide"))
                 .icon("icons/close.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.set_header_status_visible(false, cx);
@@ -318,10 +320,10 @@ impl NyaTermApp {
 
     fn gpu_header_label(&self) -> String {
         if self.session.active_ssh_config().is_none() {
-            return self.tr("panel.resourceMonitorNoSession").to_string();
+            return t!("panel.resourceMonitorNoSession").to_string();
         }
         if !self.settings.summary().ui_show_gpu_monitor {
-            return self.tr("panel.gpuMonitorDisabled").to_string();
+            return t!("panel.gpuMonitorDisabled").to_string();
         }
         let gpu = self.remote_ops.gpu_presentation();
         if let Some(overview) = gpu.data {
@@ -353,20 +355,20 @@ impl NyaTermApp {
             );
         }
         if gpu.pending {
-            self.tr("common.loading").to_string()
+            t!("common.loading").to_string()
         } else if gpu.consecutive_refresh_failures > 0 {
             gpu.status
         } else {
-            self.tr("common.loading").to_string()
+            t!("common.loading").to_string()
         }
     }
 
     fn npu_header_label(&self) -> String {
         if self.session.active_ssh_config().is_none() {
-            return self.tr("panel.resourceMonitorNoSession").to_string();
+            return t!("panel.resourceMonitorNoSession").to_string();
         }
         if !self.settings.summary().ui_show_ascend_npu_monitor {
-            return self.tr("panel.npuMonitorDisabled").to_string();
+            return t!("panel.npuMonitorDisabled").to_string();
         }
         let npu = self.remote_ops.npu_presentation();
         if let Some(overview) = npu.data {
@@ -398,11 +400,11 @@ impl NyaTermApp {
             );
         }
         if npu.pending {
-            self.tr("common.loading").to_string()
+            t!("common.loading").to_string()
         } else if npu.consecutive_refresh_failures > 0 {
             npu.status
         } else {
-            self.tr("common.loading").to_string()
+            t!("common.loading").to_string()
         }
     }
 
@@ -452,15 +454,15 @@ impl NyaTermApp {
 
     fn remote_stats_header_fallback(&self) -> String {
         if self.session.active_ssh_config().is_none() {
-            self.tr("panel.resourceMonitorNoSession").to_string()
+            t!("panel.resourceMonitorNoSession").to_string()
         } else if !self.settings.summary().ui_show_remote_stats {
-            self.tr("panel.resourceMonitorDisabled").to_string()
+            t!("panel.resourceMonitorDisabled").to_string()
         } else {
             let stats = self.remote_ops.stats_presentation();
             if stats.consecutive_refresh_failures > 0 && stats.data.is_none() {
-                self.tr("panel.resourceMonitorError").to_string()
+                t!("panel.resourceMonitorError").to_string()
             } else {
-                self.tr("common.loading").to_string()
+                t!("common.loading").to_string()
             }
         }
     }

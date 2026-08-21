@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::Context;
@@ -13,7 +15,7 @@ impl NyaTermApp {
     }
 
     pub(crate) fn title_menu_label(&self, menu: TitleMenu) -> Cow<'static, str> {
-        self.tr(menu.i18n_key())
+        t!(menu.i18n_key())
     }
 
     pub(crate) fn build_title_menu_items(
@@ -149,7 +151,7 @@ impl NyaTermApp {
 
     fn title_file_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("menu.newSession"))
+            NyaMenuItem::action(t!("menu.newSession"))
                 .icon("icons/conn/add.svg")
                 .shortcut(self.display_shortcut_for("tab.newSession", "Ctrl+Shift+N"))
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -158,13 +160,13 @@ impl NyaTermApp {
                     this.open_connection_editor(None, None, false, window, cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("settings.importConfig"))
+            NyaMenuItem::action(t!("settings.importConfig"))
                 .icon("icons/import.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.close_nya_dialog(cx);
                     this.open_connection_import_dialog(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.exportConfig"))
+            NyaMenuItem::action(t!("settings.exportConfig"))
                 .icon("icons/menu/export.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.close_nya_dialog(cx);
@@ -185,17 +187,17 @@ impl NyaTermApp {
         let header_status_visible = self.settings.summary().ui_header_status_visible;
         let panel_multi_open = self.settings.summary().ui_panel_multi_open;
         vec![
-            NyaMenuItem::submenu(self.tr("menu.theme"), self.title_theme_menu_items(cx))
+            NyaMenuItem::submenu(t!("menu.theme"), self.title_theme_menu_items(cx))
                 .icon("icons/menu/palette.svg"),
             NyaMenuItem::submenu(
-                self.tr("menu.terminalTheme"),
+                t!("menu.terminalTheme"),
                 self.title_terminal_theme_menu_items(current_theme, cx),
             )
             .icon("icons/conn/terminal.svg"),
-            NyaMenuItem::submenu(self.tr("menu.language"), self.title_language_menu_items(cx))
+            NyaMenuItem::submenu(t!("menu.language"), self.title_language_menu_items(cx))
                 .icon("icons/translation.svg"),
             NyaMenuItem::submenu(
-                self.tr("menu.headerStatus"),
+                t!("menu.headerStatus"),
                 self.title_header_status_menu_items(
                     current_header_status,
                     header_status_visible,
@@ -204,24 +206,24 @@ impl NyaTermApp {
             )
             .icon("icons/menu/info.svg"),
             NyaMenuItem::submenu(
-                self.tr("menu.panels"),
+                t!("menu.panels"),
                 self.title_panels_menu_items(panel_multi_open, cx),
             )
             .icon("icons/menu/sidebar.svg"),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("menu.zoomIn"))
+            NyaMenuItem::action(t!("menu.zoomIn"))
                 .icon("icons/menu/zoom-in.svg")
                 .shortcut(self.display_shortcut_for("view.zoomIn", "Ctrl+="))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.zoom_terminal_in(cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.zoomOut"))
+            NyaMenuItem::action(t!("menu.zoomOut"))
                 .icon("icons/menu/zoom-out.svg")
                 .shortcut(self.display_shortcut_for("view.zoomOut", "Ctrl+-"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.zoom_terminal_out(cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.resetZoom"))
+            NyaMenuItem::action(t!("menu.resetZoom"))
                 .icon("icons/menu/reset.svg")
                 .shortcut(self.display_shortcut_for("view.resetZoom", "Ctrl+0"))
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -232,7 +234,7 @@ impl NyaTermApp {
 
     fn title_terminal_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("menu.commandPalette"))
+            NyaMenuItem::action(t!("menu.commandPalette"))
                 .icon("icons/fe/search.svg")
                 .shortcut(self.display_shortcut_for("tab.quickSwitch", "Ctrl+Shift+S"))
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -240,53 +242,47 @@ impl NyaTermApp {
                 })),
             NyaMenuItem::separator(),
             NyaMenuItem::submenu(
-                self.tr("menu.terminalDisplay"),
+                t!("menu.terminalDisplay"),
                 self.title_terminal_display_menu_items(cx),
             )
             .icon("icons/eye.svg"),
-            NyaMenuItem::action(self.tr("settings.actionLinks"))
+            NyaMenuItem::action(t!("settings.actionLinks"))
                 .icon("icons/fe/search.svg")
                 .checked(self.settings.summary().terminal_action_links_enabled)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_terminal_action_links(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.terminalZoomEnabled"))
+            NyaMenuItem::action(t!("settings.terminalZoomEnabled"))
                 .icon("icons/menu/reset.svg")
                 .checked(self.settings.summary().interaction_terminal_zoom_enabled)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_terminal_zoom_enabled(cx);
                 })),
-            NyaMenuItem::submenu(
-                self.tr("menu.smartSplit"),
-                self.title_smart_split_menu_items(cx),
-            )
-            .icon("icons/menu/split.svg"),
+            NyaMenuItem::submenu(t!("menu.smartSplit"), self.title_smart_split_menu_items(cx))
+                .icon("icons/menu/split.svg"),
             NyaMenuItem::separator(),
-            NyaMenuItem::submenu(
-                self.tr("menu.syncInput"),
-                self.title_sync_input_menu_items(cx),
-            )
-            .icon("icons/sync.svg"),
+            NyaMenuItem::submenu(t!("menu.syncInput"), self.title_sync_input_menu_items(cx))
+                .icon("icons/sync.svg"),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("menu.broadcastToAll"))
+            NyaMenuItem::action(t!("menu.broadcastToAll"))
                 .icon("icons/menu/broadcast.svg")
                 .checked(self.sync_input.broadcast_to_all())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_broadcast_to_all(cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("menu.clearTerminal"))
+            NyaMenuItem::action(t!("menu.clearTerminal"))
                 .icon("icons/fe/delete.svg")
                 .shortcut(self.display_shortcut_for("terminal.clear", "Ctrl+L"))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.clear_terminal(cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.refitTerminals"))
+            NyaMenuItem::action(t!("menu.refitTerminals"))
                 .icon("icons/menu/fit.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.resize_all_known_terminal_surfaces_for_menu(cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.unsplit"))
+            NyaMenuItem::action(t!("menu.unsplit"))
                 .icon("icons/menu/fit.svg")
                 .disabled(self.shell.workspace_split().is_none())
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -297,15 +293,15 @@ impl NyaTermApp {
 
     fn title_help_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         let update_label = if self.update.is_pending() {
-            self.tr("updater.checking")
+            t!("updater.checking")
         } else if self.update.info().is_some_and(|info| info.available) {
-            self.tr("updater.newVersionAvailable")
+            t!("updater.newVersionAvailable")
         } else {
-            self.tr("menu.checkForUpdates")
+            t!("menu.checkForUpdates")
         };
 
         vec![
-            NyaMenuItem::action(self.tr("menu.documentation"))
+            NyaMenuItem::action(t!("menu.documentation"))
                 .icon("icons/menu/book.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.open_documentation(cx);
@@ -315,13 +311,13 @@ impl NyaTermApp {
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_update_dialog(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.viewLogs"))
+            NyaMenuItem::action(t!("menu.viewLogs"))
                 .icon("icons/menu/article.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.reveal_log_dir(cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(format!("{} NyaTerm", self.tr("menu.about")))
+            NyaMenuItem::action(format!("{} NyaTerm", t!("menu.about")))
                 .icon("icons/menu/info.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_about(window, cx);
@@ -351,7 +347,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> Vec<NyaMenuItem> {
         let mut items = vec![
-            NyaMenuItem::action(self.tr("settings.followUiTheme"))
+            NyaMenuItem::action(t!("settings.followUiTheme"))
                 .checked(current_theme.trim().is_empty())
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.set_terminal_theme(None, cx);
@@ -393,14 +389,14 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> Vec<NyaMenuItem> {
         let mut items = vec![
-            NyaMenuItem::action(self.tr("headerStatus.hidden"))
+            NyaMenuItem::action(t!("headerStatus.hidden"))
                 .checked(!visible)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.set_header_status_visible(false, cx);
                 })),
         ];
         items.extend(HeaderStatusMode::ALL.into_iter().map(|mode| {
-            NyaMenuItem::action(self.tr(mode.i18n_key()))
+            NyaMenuItem::action(t!(mode.i18n_key()))
                 .checked(visible && current == mode)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.set_header_status_mode(mode, cx);
@@ -415,33 +411,33 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("settings.panelMultiOpen"))
+            NyaMenuItem::action(t!("settings.panelMultiOpen"))
                 .checked(panel_multi_open)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_panel_multi_open(cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("settings.showRemoteStats"))
+            NyaMenuItem::action(t!("settings.showRemoteStats"))
                 .checked(self.settings.summary().ui_show_remote_stats)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_remote_stats_panel(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.showGpuMonitor"))
+            NyaMenuItem::action(t!("settings.showGpuMonitor"))
                 .checked(self.settings.summary().ui_show_gpu_monitor)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_gpu_monitor_panel(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.showAscendNpuMonitor"))
+            NyaMenuItem::action(t!("settings.showAscendNpuMonitor"))
                 .checked(self.settings.summary().ui_show_ascend_npu_monitor)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_ascend_npu_monitor_panel(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.showProcessManager"))
+            NyaMenuItem::action(t!("settings.showProcessManager"))
                 .checked(self.settings.summary().ui_show_process_manager)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_process_manager_panel(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.showDockerManager"))
+            NyaMenuItem::action(t!("settings.showDockerManager"))
                 .checked(self.settings.summary().ui_show_docker_manager)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_docker_manager_panel(cx);
@@ -451,17 +447,17 @@ impl NyaTermApp {
 
     fn title_terminal_display_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("settings.showWorkspacePadding"))
+            NyaMenuItem::action(t!("settings.showWorkspacePadding"))
                 .checked(self.settings.summary().terminal_show_workspace_padding)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_terminal_workspace_padding(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.showLineNumbers"))
+            NyaMenuItem::action(t!("settings.showLineNumbers"))
                 .checked(self.settings.summary().terminal_show_line_numbers)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_terminal_line_numbers(cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.showTimestamps"))
+            NyaMenuItem::action(t!("settings.showTimestamps"))
                 .checked(self.settings.summary().terminal_show_timestamps)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_terminal_timestamps(cx);
@@ -471,17 +467,17 @@ impl NyaTermApp {
 
     fn title_smart_split_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("menu.autoTile"))
+            NyaMenuItem::action(t!("menu.autoTile"))
                 .icon("icons/view-grid.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.apply_smart_split(SmartSplitMode::Auto, cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.tileHorizontally"))
+            NyaMenuItem::action(t!("menu.tileHorizontally"))
                 .icon("icons/menu/horizontal.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.apply_smart_split(SmartSplitMode::Horizontal, cx);
                 })),
-            NyaMenuItem::action(self.tr("menu.tileVertically"))
+            NyaMenuItem::action(t!("menu.tileVertically"))
                 .icon("icons/menu/vertical.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.apply_smart_split(SmartSplitMode::Vertical, cx);
@@ -491,7 +487,7 @@ impl NyaTermApp {
 
     fn title_sync_input_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
         vec![
-            NyaMenuItem::action(self.tr("menu.manageGroups"))
+            NyaMenuItem::action(t!("menu.manageGroups"))
                 .icon("icons/settings.svg")
                 .shortcut(self.display_shortcut_for("terminal.manageSyncGroups", "Ctrl+Shift+G"))
                 .on_click(cx.listener(|this, _, window, cx| {

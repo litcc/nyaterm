@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb, rgba, svg,
@@ -30,28 +32,28 @@ impl NyaTermApp {
                     .gap_5()
                     .child(appearance_settings_field(
                         palette,
-                        self.tr("settings.theme"),
-                        Some(SharedString::from(self.tr("settings.themeDesc"))),
+                        t!("settings.theme"),
+                        Some(SharedString::from(t!("settings.themeDesc"))),
                         self.appearance_theme_select(false, cx),
                     ))
                     .child(appearance_settings_field(
                         palette,
-                        self.tr("settings.terminalTheme"),
-                        Some(SharedString::from(self.tr("settings.terminalThemeDesc"))),
+                        t!("settings.terminalTheme"),
+                        Some(SharedString::from(t!("settings.terminalThemeDesc"))),
                         self.appearance_theme_select(true, cx),
                     ))
                     .child(appearance_settings_field(
                         palette,
-                        self.tr("settings.minimumContrastRatio"),
+                        t!("settings.minimumContrastRatio"),
                         Some(SharedString::from(
-                            self.tr("settings.minimumContrastRatioDesc"),
+                            t!("settings.minimumContrastRatioDesc"),
                         )),
                         self.appearance_contrast_select(cx),
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.panelMultiOpen"),
-                        Some(SharedString::from(self.tr("settings.panelMultiOpenDesc"))),
+                        t!("settings.panelMultiOpen"),
+                        Some(SharedString::from(t!("settings.panelMultiOpenDesc"))),
                         settings_switch(
                             palette,
                             "appearance-panel-multi-open",
@@ -64,8 +66,8 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.backgroundImage")),
-                Some(self.tr("settings.backgroundImageDesc")),
+                Some(t!("settings.backgroundImage")),
+                Some(t!("settings.backgroundImageDesc")),
                 {
                     let path_label = self
                         .settings
@@ -88,7 +90,7 @@ impl NyaTermApp {
                                 p.to_string()
                             }
                         })
-                        .unwrap_or_else(|| self.tr("settings.backgroundImageEmpty").to_string());
+                        .unwrap_or_else(|| t!("settings.backgroundImageEmpty").to_string());
                     let has_image = self.settings.summary().background_image_path.is_some();
                     div()
                         .flex()
@@ -124,7 +126,7 @@ impl NyaTermApp {
                                     palette,
                                     "appearance-wallpaper-browse",
                                     "icons/conn/folder.svg",
-                                    self.tr("settings.selectBackgroundImage"),
+                                    t!("settings.selectBackgroundImage"),
                                     cx.listener(|this, _, _, cx| {
                                         this.prompt_background_image(cx);
                                     }),
@@ -134,7 +136,7 @@ impl NyaTermApp {
                                         palette,
                                         "appearance-wallpaper-clear",
                                         "icons/fe/delete.svg",
-                                        self.tr("settings.removeBackgroundImage"),
+                                        t!("settings.removeBackgroundImage"),
                                         cx.listener(|this, _, _, cx| {
                                             this.clear_background_image(cx);
                                         }),
@@ -143,9 +145,9 @@ impl NyaTermApp {
                         )
                         .child(appearance_settings_field(
                             palette,
-                            self.tr("settings.backgroundImageFit"),
+                            t!("settings.backgroundImageFit"),
                             Some(SharedString::from(
-                                self.tr("settings.backgroundImageFitDesc"),
+                                t!("settings.backgroundImageFitDesc"),
                             )),
                             self.appearance_background_fit_select(has_image, cx),
                         ))
@@ -165,13 +167,13 @@ impl NyaTermApp {
                     .gap_5()
                     .child(appearance_settings_field(
                         palette,
-                        self.tr("settings.cursorStyle"),
+                        t!("settings.cursorStyle"),
                         None,
                         self.appearance_cursor_style_select(cx),
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.cursorBlink"),
+                        t!("settings.cursorBlink"),
                         None,
                         settings_switch(
                             palette,
@@ -193,16 +195,16 @@ impl NyaTermApp {
         let palette = self.theme_palette();
         let (title, desc, raw, fallback, mut options) = if terminal {
             (
-                self.tr("settings.terminalFontFamily"),
-                self.tr("settings.terminalFontFamilyDesc"),
+                t!("settings.terminalFontFamily"),
+                t!("settings.terminalFontFamilyDesc"),
                 self.settings.summary().terminal_font_family.clone(),
                 "JetBrains Mono",
                 self.settings.terminal_font_options().to_vec(),
             )
         } else {
             (
-                self.tr("settings.uiFontFamily"),
-                self.tr("settings.uiFontFamilyDesc"),
+                t!("settings.uiFontFamily"),
+                t!("settings.uiFontFamilyDesc"),
                 self.settings.summary().ui_font_family.clone(),
                 "Inter",
                 self.settings.ui_font_options().to_vec(),
@@ -230,12 +232,12 @@ impl NyaTermApp {
             palette,
             add_id,
             "icons/conn/add.svg",
-            self.tr("settings.addFallbackFont"),
+            t!("settings.addFallbackFont"),
             add_handler,
         );
-        let primary_label = self.tr("settings.fontPrimary");
-        let fallback_label = self.tr("settings.fontFallback");
-        let remove_label = self.tr("common.remove");
+        let primary_label = t!("settings.fontPrimary");
+        let fallback_label = t!("settings.fontFallback");
+        let remove_label = t!("common.remove");
 
         let mut content =
             div()
@@ -309,7 +311,7 @@ impl NyaTermApp {
             content = content
                 .child(appearance_settings_field(
                     palette,
-                    self.tr("settings.fontSize"),
+                    t!("settings.fontSize"),
                     None,
                     self.number_input_box(
                         "appearance.number.terminal-font-size",
@@ -320,25 +322,23 @@ impl NyaTermApp {
                 ))
                 .child(appearance_settings_field(
                     palette,
-                    self.tr("settings.terminalFontWeight"),
-                    Some(SharedString::from(
-                        self.tr("settings.terminalFontWeightDesc"),
-                    )),
+                    t!("settings.terminalFontWeight"),
+                    Some(SharedString::from(t!("settings.terminalFontWeightDesc"))),
                     self.appearance_font_weight_select(false, cx),
                 ))
                 .child(appearance_settings_field(
                     palette,
-                    self.tr("settings.terminalFontWeightBold"),
-                    Some(SharedString::from(
-                        self.tr("settings.terminalFontWeightBoldDesc"),
-                    )),
+                    t!("settings.terminalFontWeightBold"),
+                    Some(SharedString::from(t!(
+                        "settings.terminalFontWeightBoldDesc"
+                    ))),
                     self.appearance_font_weight_select(true, cx),
                 ));
         } else {
             let font_size_label = self.settings.summary().ui_font_size.to_string();
             content = content.child(appearance_settings_field(
                 palette,
-                self.tr("settings.uiFontSize"),
+                t!("settings.uiFontSize"),
                 None,
                 self.number_input_box(
                     "appearance.number.ui-font-size",
@@ -365,15 +365,14 @@ impl NyaTermApp {
             self.settings.summary().background_image_opacity
         };
         let label = if content {
-            self.tr("settings.backgroundContentOpacity")
+            t!("settings.backgroundContentOpacity")
         } else {
-            self.tr("settings.backgroundImageOpacity")
+            t!("settings.backgroundImageOpacity")
         };
         let desc = if content {
-            self.tr("settings.backgroundContentOpacityDesc")
-                .replace("{{value}}", "82%")
+            t!("settings.backgroundContentOpacityDesc").replace("{{value}}", "82%")
         } else {
-            self.tr("settings.backgroundImageOpacityDesc").to_string()
+            t!("settings.backgroundImageOpacityDesc").to_string()
         };
         let kind = if content { "content" } else { "image" };
 
@@ -485,7 +484,7 @@ impl NyaTermApp {
         if terminal {
             options.push(NyaSelectOption::new(
                 FOLLOW_UI_THEME_VALUE,
-                self.tr("settings.followUiTheme"),
+                t!("settings.followUiTheme"),
             ));
         }
         for theme_id in APPEARANCE_THEME_IDS {
@@ -517,11 +516,11 @@ impl NyaTermApp {
             _ => "1",
         };
         let label_for = |ratio: &str| match ratio {
-            "3" => self.tr("settings.minimumContrastRatio_3"),
-            "4.5" => self.tr("settings.minimumContrastRatio_4_5"),
-            "7" => self.tr("settings.minimumContrastRatio_7"),
-            "21" => self.tr("settings.minimumContrastRatio_21"),
-            _ => self.tr("settings.minimumContrastRatio_1"),
+            "3" => t!("settings.minimumContrastRatio_3"),
+            "4.5" => t!("settings.minimumContrastRatio_4_5"),
+            "7" => t!("settings.minimumContrastRatio_7"),
+            "21" => t!("settings.minimumContrastRatio_21"),
+            _ => t!("settings.minimumContrastRatio_1"),
         };
         let options = ["1", "3", "4.5", "7", "21"]
             .into_iter()
@@ -543,10 +542,10 @@ impl NyaTermApp {
             _ => "cover",
         };
         let label_for = |fit: &str| match fit {
-            "contain" => self.tr("settings.backgroundImageFit_contain"),
-            "stretch" => self.tr("settings.backgroundImageFit_stretch"),
-            "tile" => self.tr("settings.backgroundImageFit_tile"),
-            _ => self.tr("settings.backgroundImageFit_cover"),
+            "contain" => t!("settings.backgroundImageFit_contain"),
+            "stretch" => t!("settings.backgroundImageFit_stretch"),
+            "tile" => t!("settings.backgroundImageFit_tile"),
+            _ => t!("settings.backgroundImageFit_cover"),
         };
         let options = ["cover", "contain", "stretch", "tile"]
             .into_iter()
@@ -571,12 +570,12 @@ impl NyaTermApp {
             self.settings.summary().terminal_font_weight
         };
         let label_for = |weight| match weight {
-            300 => self.tr("settings.fontWeight_300"),
-            500 => self.tr("settings.fontWeight_500"),
-            600 => self.tr("settings.fontWeight_600"),
-            700 => self.tr("settings.fontWeight_700"),
-            800 => self.tr("settings.fontWeight_800"),
-            _ => self.tr("settings.fontWeight_400"),
+            300 => t!("settings.fontWeight_300"),
+            500 => t!("settings.fontWeight_500"),
+            600 => t!("settings.fontWeight_600"),
+            700 => t!("settings.fontWeight_700"),
+            800 => t!("settings.fontWeight_800"),
+            _ => t!("settings.fontWeight_400"),
         };
         let options = [300_u16, 400, 500, 600, 700, 800]
             .into_iter()
@@ -601,9 +600,9 @@ impl NyaTermApp {
             _ => "block",
         };
         let label_for = |style: &str| match style {
-            "underline" => self.tr("settings.cursorUnderline"),
-            "bar" => self.tr("settings.cursorBar"),
-            _ => self.tr("settings.cursorBlock"),
+            "underline" => t!("settings.cursorUnderline"),
+            "bar" => t!("settings.cursorBar"),
+            _ => t!("settings.cursorBlock"),
         };
         let options = ["block", "underline", "bar"]
             .into_iter()

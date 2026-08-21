@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -52,7 +54,7 @@ impl NyaTermApp {
                         .text_size(px(14.))
                         .font_weight(FontWeight(600.))
                         .text_color(rgb(palette.danger))
-                        .child(self.tr("remoteDesktop.connectionFailed")),
+                        .child(t!("remoteDesktop.connectionFailed")),
                 )
                 .child(
                     div()
@@ -70,7 +72,7 @@ impl NyaTermApp {
                         .child(small_button(
                             palette,
                             format!("rdp-retry-{session_id}"),
-                            self.tr("remoteDesktop.retry"),
+                            t!("remoteDesktop.retry"),
                             cx.listener(move |this, _, _, cx| {
                                 this.retry_rdp_runtime(&retry_id, cx);
                                 cx.notify();
@@ -79,7 +81,7 @@ impl NyaTermApp {
                         .child(small_button(
                             palette,
                             format!("rdp-close-{session_id}"),
-                            self.tr("remoteDesktop.close"),
+                            t!("remoteDesktop.close"),
                             cx.listener(move |this, _, _, cx| {
                                 this.close_session(close_id.clone(), cx);
                             }),
@@ -103,7 +105,7 @@ impl NyaTermApp {
                         .text_size(px(14.))
                         .font_weight(FontWeight(600.))
                         .text_color(rgb(palette.text))
-                        .child(self.tr("remoteDesktop.disconnected")),
+                        .child(t!("remoteDesktop.disconnected")),
                 )
                 .child(
                     div()
@@ -112,7 +114,7 @@ impl NyaTermApp {
                         .child(small_button(
                             palette,
                             format!("rdp-disconnected-retry-{session_id}"),
-                            self.tr("remoteDesktop.retry"),
+                            t!("remoteDesktop.retry"),
                             cx.listener(move |this, _, _, cx| {
                                 this.retry_rdp_runtime(&retry_id, cx);
                                 cx.notify();
@@ -121,7 +123,7 @@ impl NyaTermApp {
                         .child(small_button(
                             palette,
                             format!("rdp-disconnected-close-{session_id}"),
-                            self.tr("remoteDesktop.close"),
+                            t!("remoteDesktop.close"),
                             cx.listener(move |this, _, _, cx| {
                                 this.close_session(close_id.clone(), cx);
                             }),
@@ -132,14 +134,14 @@ impl NyaTermApp {
         let (Some(framebuffer), Some(texture)) = (session.framebuffer.as_ref(), session.texture)
         else {
             let detail = match session.state {
-                RdpSessionState::Connecting => self.tr("remoteDesktop.connecting"),
+                RdpSessionState::Connecting => t!("remoteDesktop.connecting"),
                 RdpSessionState::Disconnecting => {
                     Cow::Borrowed("Disconnecting Remote Desktop session...")
                 }
                 RdpSessionState::Disconnected => {
                     Cow::Borrowed("Remote Desktop session is disconnected.")
                 }
-                _ => self.tr("remoteDesktop.waitingFrame"),
+                _ => t!("remoteDesktop.waitingFrame"),
             };
             return self
                 .rdp_status_view("Remote Desktop", detail)
@@ -353,7 +355,7 @@ impl NyaTermApp {
                     .text_size(px(15.))
                     .font_weight(FontWeight(600.))
                     .text_color(rgb(palette.warning))
-                    .child(self.tr("remoteDesktop.certificateTitle")),
+                    .child(t!("remoteDesktop.certificateTitle")),
             )
             .child(
                 div()
@@ -378,7 +380,7 @@ impl NyaTermApp {
                     .child(small_button(
                         palette,
                         format!("rdp-cert-reject-{session_id}"),
-                        self.tr("remoteDesktop.reject"),
+                        t!("remoteDesktop.reject"),
                         cx.listener(move |this, _, _, cx| {
                             this.resolve_rdp_certificate(
                                 &reject_id,
@@ -391,7 +393,7 @@ impl NyaTermApp {
                     .child(small_button(
                         palette,
                         format!("rdp-cert-once-{session_id}"),
-                        self.tr("remoteDesktop.trustOnce"),
+                        t!("remoteDesktop.trustOnce"),
                         cx.listener(move |this, _, _, cx| {
                             this.resolve_rdp_certificate(
                                 &once_id,
@@ -404,7 +406,7 @@ impl NyaTermApp {
                     .child(small_button(
                         palette,
                         format!("rdp-cert-remember-{session_id}"),
-                        self.tr("remoteDesktop.trustAndRemember"),
+                        t!("remoteDesktop.trustAndRemember"),
                         cx.listener(move |this, _, _, cx| {
                             this.resolve_rdp_certificate(
                                 &remember_id,

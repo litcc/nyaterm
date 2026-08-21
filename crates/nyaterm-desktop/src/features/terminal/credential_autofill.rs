@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use nyaterm_ui::NyaScrollable;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -608,7 +610,7 @@ impl NyaTermApp {
             return div().into_any_element();
         };
 
-        let title = self.tr(match state.kind {
+        let title = t!(match state.kind {
             CredentialPromptKind::Password => "credentialAutofill.passwordTitle",
             CredentialPromptKind::Username => "credentialAutofill.usernameTitle",
         });
@@ -618,9 +620,9 @@ impl NyaTermApp {
         };
         let footer = format!(
             "↑↓ {} · Enter {} · Esc {}",
-            self.tr("credentialAutofill.select"),
-            self.tr("credentialAutofill.fill"),
-            self.tr("credentialAutofill.dismiss")
+            t!("credentialAutofill.select"),
+            t!("credentialAutofill.fill"),
+            t!("credentialAutofill.dismiss")
         );
 
         let mut list = div()

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
@@ -28,8 +30,7 @@ impl NyaTermApp {
         let input_entity = cx.entity();
         let draft_text = draft.text.clone();
         let normalized = normalize_paste_newlines(&draft_text);
-        let stats = self
-            .tr("terminal.multiLinePasteStats")
+        let stats = t!("terminal.multiLinePasteStats")
             .replace("{{lines}}", &normalized.split('\n').count().to_string())
             .replace("{{chars}}", &draft_text.chars().count().to_string());
         let can_send = !draft_text.is_empty();
@@ -57,7 +58,7 @@ impl NyaTermApp {
                 rgb(palette.text_muted)
             });
         if normalized.is_empty() {
-            preview = preview.child(self.tr("terminal.multiLinePasteTextPlaceholder"));
+            preview = preview.child(t!("terminal.multiLinePasteTextPlaceholder"));
         } else {
             let show_caret = selection.is_empty();
             let cursor = cursor.min(normalized.len());
@@ -134,7 +135,7 @@ impl NyaTermApp {
                             .text_sm()
                             .font_weight(FontWeight(800.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("terminal.multiLinePasteTitle")),
+                            .child(t!("terminal.multiLinePasteTitle")),
                     )
                     .child(
                         div()
@@ -186,7 +187,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "multi-line-paste-cancel",
-                                self.tr("common.cancel"),
+                                t!("common.cancel"),
                                 cx.listener(|this, _, _, cx| {
                                     this.close_multi_line_paste(cx);
                                 }),
@@ -195,7 +196,7 @@ impl NyaTermApp {
                                 dialog_action_button(
                                     palette,
                                     "multi-line-paste-direct",
-                                    self.tr("terminal.multiLinePasteDirect"),
+                                    t!("terminal.multiLinePasteDirect"),
                                     false,
                                     cx.listener(|this, _, _, cx| {
                                         this.direct_multi_line_paste(cx);
@@ -206,7 +207,7 @@ impl NyaTermApp {
                                 small_button(
                                     palette,
                                     "multi-line-paste-line",
-                                    self.tr("terminal.multiLinePasteSendLineByLine"),
+                                    t!("terminal.multiLinePasteSendLineByLine"),
                                     cx.listener(|this, _, _, cx| {
                                         this.send_multi_line_paste_by_line(cx);
                                     }),

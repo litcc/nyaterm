@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSelectOption;
 
@@ -59,17 +61,17 @@ impl NyaTermApp {
             && (!translation_settings.youdao_app_key.trim().is_empty()
                 || !secret_draft.youdao_app_key.is_empty());
 
-        let target_language_label = self.tr("settings.targetLanguage");
-        let target_language_desc = self.tr("settings.targetLanguageDesc");
-        let providers_label = self.tr("settings.translationProviders");
-        let providers_desc = self.tr("settings.translationProvidersDesc");
-        let no_key_label = self.tr("settings.noKeyRequired");
-        let configured_label = self.tr("settings.configured");
-        let not_configured_label = self.tr("settings.notConfigured");
-        let api_key_label = self.tr("settings.apiKey");
-        let app_id_label = self.tr("settings.appId");
-        let app_key_label = self.tr("settings.appKey");
-        let remove_label = self.tr("common.remove");
+        let target_language_label = t!("settings.targetLanguage");
+        let target_language_desc = t!("settings.targetLanguageDesc");
+        let providers_label = t!("settings.translationProviders");
+        let providers_desc = t!("settings.translationProvidersDesc");
+        let no_key_label = t!("settings.noKeyRequired");
+        let configured_label = t!("settings.configured");
+        let not_configured_label = t!("settings.notConfigured");
+        let api_key_label = t!("settings.apiKey");
+        let app_id_label = t!("settings.appId");
+        let app_key_label = t!("settings.appKey");
+        let remove_label = t!("common.remove");
 
         div()
             .flex()
@@ -102,7 +104,7 @@ impl NyaTermApp {
                     .gap_3()
                     .child(translation_provider_card(
                         palette,
-                        self.tr("translation.google"),
+                        t!("translation.google"),
                         no_key_label.clone(),
                         true,
                         true,
@@ -110,7 +112,7 @@ impl NyaTermApp {
                     ))
                     .child(translation_provider_card(
                         palette,
-                        self.tr("translation.microsoft"),
+                        t!("translation.microsoft"),
                         no_key_label,
                         true,
                         true,
@@ -118,7 +120,7 @@ impl NyaTermApp {
                     ))
                     .child(translation_provider_card(
                         palette,
-                        self.tr("translation.deepl"),
+                        t!("translation.deepl"),
                         if deepl_configured {
                             configured_label.clone()
                         } else {
@@ -148,7 +150,7 @@ impl NyaTermApp {
                     ))
                     .child(translation_provider_card(
                         palette,
-                        self.tr("translation.baidu"),
+                        t!("translation.baidu"),
                         if baidu_configured {
                             configured_label.clone()
                         } else {
@@ -191,7 +193,7 @@ impl NyaTermApp {
                     ))
                     .child(translation_provider_card(
                         palette,
-                        self.tr("translation.ali"),
+                        t!("translation.ali"),
                         if ali_configured {
                             configured_label.clone()
                         } else {
@@ -234,7 +236,7 @@ impl NyaTermApp {
                     ))
                     .child(translation_provider_card(
                         palette,
-                        self.tr("translation.youdao"),
+                        t!("translation.youdao"),
                         if youdao_configured {
                             configured_label
                         } else {

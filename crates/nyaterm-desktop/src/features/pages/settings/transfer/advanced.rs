@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
 use nyaterm_ui::NyaNumberInputOptions;
 
@@ -37,10 +39,10 @@ impl NyaTermApp {
                 .gap_3()
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.downloadConcurrentTasks"),
-                    Some(SharedString::from(
-                        self.tr("settings.downloadConcurrentTasksDesc"),
-                    )),
+                    t!("settings.downloadConcurrentTasks"),
+                    Some(SharedString::from(t!(
+                        "settings.downloadConcurrentTasksDesc"
+                    ))),
                     self.number_input_box(
                         "settings.number.transfer-download-threads",
                         self.settings
@@ -54,10 +56,8 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.uploadConcurrentTasks"),
-                    Some(SharedString::from(
-                        self.tr("settings.uploadConcurrentTasksDesc"),
-                    )),
+                    t!("settings.uploadConcurrentTasks"),
+                    Some(SharedString::from(t!("settings.uploadConcurrentTasksDesc"))),
                     self.number_input_box(
                         "settings.number.transfer-upload-threads",
                         self.settings
@@ -71,10 +71,8 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.maxTransferRetries"),
-                    Some(SharedString::from(
-                        self.tr("settings.maxTransferRetriesDesc"),
-                    )),
+                    t!("settings.maxTransferRetries"),
+                    Some(SharedString::from(t!("settings.maxTransferRetriesDesc"))),
                     self.number_input_box(
                         "settings.number.transfer-max-retries",
                         self.settings
@@ -88,10 +86,8 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.transferBufferSize"),
-                    Some(SharedString::from(
-                        self.tr("settings.transferBufferSizeDesc"),
-                    )),
+                    t!("settings.transferBufferSize"),
+                    Some(SharedString::from(t!("settings.transferBufferSizeDesc"))),
                     self.number_input_box(
                         "settings.number.transfer-buffer-size",
                         self.settings
@@ -105,10 +101,8 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.preserveTimestamps"),
-                    Some(SharedString::from(
-                        self.tr("settings.preserveTimestampsDesc"),
-                    )),
+                    t!("settings.preserveTimestamps"),
+                    Some(SharedString::from(t!("settings.preserveTimestampsDesc"))),
                     settings_switch(
                         palette,
                         "settings-transfer-preserve-timestamps",
@@ -120,10 +114,8 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.resumeBrokenTransfer"),
-                    Some(SharedString::from(
-                        self.tr("settings.resumeBrokenTransferDesc"),
-                    )),
+                    t!("settings.resumeBrokenTransfer"),
+                    Some(SharedString::from(t!("settings.resumeBrokenTransferDesc"))),
                     settings_switch(
                         palette,
                         "settings-transfer-resume-broken",
@@ -135,10 +127,10 @@ impl NyaTermApp {
                 ))
                 .child(settings_form_row(
                     palette,
-                    self.tr("settings.defaultFilePermissions"),
-                    Some(SharedString::from(
-                        self.tr("settings.defaultFilePermissionsDesc"),
-                    )),
+                    t!("settings.defaultFilePermissions"),
+                    Some(SharedString::from(t!(
+                        "settings.defaultFilePermissionsDesc"
+                    ))),
                     settings_input_control(260., permissions_input),
                 )),
         ))

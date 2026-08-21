@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, div, px, rgb};
 use nyaterm_ui::NyaCheckbox;
 
@@ -34,7 +36,7 @@ impl NyaTermApp {
             .text_input_box(
                 "transfer.new-folder.name",
                 &state.value,
-                TextInputSetup::placeholder(self.tr("fileExplorer.newFolderName")),
+                TextInputSetup::placeholder(t!("fileExplorer.newFolderName")),
                 cx,
             )
             .into_any_element();
@@ -46,13 +48,13 @@ impl NyaTermApp {
             .gap_4()
             .child(create_name_row(
                 palette,
-                self.tr("fileExplorer.newFolderName"),
+                t!("fileExplorer.newFolderName"),
                 name_invalid,
                 name_input,
             ))
             .child(create_permissions_row(
                 palette,
-                self.tr("fileExplorer.permissions"),
+                t!("fileExplorer.permissions"),
                 self.transfer_permission_grid(
                     palette,
                     state.mode,
@@ -63,7 +65,7 @@ impl NyaTermApp {
             .child(
                 NyaCheckbox::new("transfer-new-folder-open-after")
                     .checked(state.open_after_create)
-                    .label(self.tr("fileExplorer.openAfterCreateFolder"))
+                    .label(t!("fileExplorer.openAfterCreateFolder"))
                     .on_click(move |_, _, cx| {
                         let _ = app.update(cx, |app, cx| {
                             app.transfer.toggle_new_folder_open_after_create();
@@ -95,7 +97,7 @@ impl NyaTermApp {
             .text_input_box(
                 "transfer.new-file.name",
                 &state.value,
-                TextInputSetup::placeholder(self.tr("fileExplorer.newFileName")),
+                TextInputSetup::placeholder(t!("fileExplorer.newFileName")),
                 cx,
             )
             .into_any_element();
@@ -107,13 +109,13 @@ impl NyaTermApp {
             .gap_4()
             .child(create_name_row(
                 palette,
-                self.tr("fileExplorer.newFileName"),
+                t!("fileExplorer.newFileName"),
                 name_invalid,
                 name_input,
             ))
             .child(create_permissions_row(
                 palette,
-                self.tr("fileExplorer.permissions"),
+                t!("fileExplorer.permissions"),
                 self.transfer_permission_grid(
                     palette,
                     state.mode,
@@ -124,7 +126,7 @@ impl NyaTermApp {
             .child(
                 NyaCheckbox::new("transfer-new-file-open-after")
                     .checked(state.open_after_create)
-                    .label(self.tr("fileExplorer.openAfterCreateFile"))
+                    .label(t!("fileExplorer.openAfterCreateFile"))
                     .on_click(move |_, _, cx| {
                         let _ = app.update(cx, |app, cx| {
                             app.transfer.toggle_new_file_open_after_create();
@@ -156,7 +158,7 @@ impl NyaTermApp {
             .text_input_box(
                 "transfer.new-symlink.name",
                 &state.name,
-                TextInputSetup::placeholder(self.tr("fileExplorer.symlinkName")),
+                TextInputSetup::placeholder(t!("fileExplorer.symlinkName")),
                 cx,
             )
             .into_any_element();
@@ -175,13 +177,13 @@ impl NyaTermApp {
             .gap_4()
             .child(symlink_input_row(
                 palette,
-                self.tr("fileExplorer.symlinkName"),
+                t!("fileExplorer.symlinkName"),
                 name_invalid,
                 name_input,
             ))
             .child(symlink_input_row(
                 palette,
-                self.tr("fileExplorer.symlinkTarget"),
+                t!("fileExplorer.symlinkTarget"),
                 false,
                 target_input,
             ))
@@ -219,29 +221,29 @@ impl NyaTermApp {
             .flex()
             .flex_col()
             .gap_2()
-            .child(permission_header(palette, self.tr("fileExplorer.special")))
+            .child(permission_header(palette, t!("fileExplorer.special")))
             .child(
-                permission_row(palette, self.tr("fileExplorer.permUser"))
+                permission_row(palette, t!("fileExplorer.permUser"))
                     .child(toggle("transfer-perm-user-r", "", 0o400))
                     .child(toggle("transfer-perm-user-w", "", 0o200))
                     .child(toggle("transfer-perm-user-x", "", 0o100))
                     .child(toggle("transfer-perm-user-special", "UID", 0o4000)),
             )
             .child(
-                permission_row(palette, self.tr("fileExplorer.permGroup"))
+                permission_row(palette, t!("fileExplorer.permGroup"))
                     .child(toggle("transfer-perm-group-r", "", 0o040))
                     .child(toggle("transfer-perm-group-w", "", 0o020))
                     .child(toggle("transfer-perm-group-x", "", 0o010))
                     .child(toggle("transfer-perm-group-special", "GID", 0o2000)),
             )
             .child(
-                permission_row(palette, self.tr("fileExplorer.permOther"))
+                permission_row(palette, t!("fileExplorer.permOther"))
                     .child(toggle("transfer-perm-other-r", "", 0o004))
                     .child(toggle("transfer-perm-other-w", "", 0o002))
                     .child(toggle("transfer-perm-other-x", "", 0o001))
                     .child(toggle(
                         "transfer-perm-other-special",
-                        &self.tr("fileExplorer.permSticky"),
+                        &t!("fileExplorer.permSticky"),
                         0o1000,
                     )),
             )
@@ -253,7 +255,7 @@ impl NyaTermApp {
                     .justify_between()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("fileExplorer.octal"))
+                    .child(t!("fileExplorer.octal"))
                     .child(
                         div()
                             .font_family(gpui_code_font_family())

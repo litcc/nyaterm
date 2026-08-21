@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb, rgba, svg,
@@ -36,7 +38,7 @@ impl NyaTermApp {
         // entities the app has to create, and only the expanded row shows them.
         let mut editor_inputs = expanded_index.and_then(|index| {
             let engine = engines.get(index)?.clone();
-            let name_placeholder = self.tr("settings.engineName");
+            let name_placeholder = t!("settings.engineName");
             let name = self
                 .text_input_box(
                     format!("settings.search-engine.{index}.name"),
@@ -59,7 +61,7 @@ impl NyaTermApp {
             palette,
             "settings-search-engine-add",
             "icons/conn/add.svg",
-            self.tr("common.add"),
+            t!("common.add"),
             false,
             true,
             cx.listener(|this, _, window, cx| {
@@ -71,8 +73,8 @@ impl NyaTermApp {
 
         search_engine_settings_section(
             palette,
-            self.tr("settings.customEngines"),
-            self.tr("settings.engineUrlHint"),
+            t!("settings.customEngines"),
+            t!("settings.engineUrlHint"),
             add_action,
             div()
                 .flex()
@@ -92,7 +94,7 @@ impl NyaTermApp {
                             .justify_center()
                             .text_size(px(12.))
                             .text_color(rgb(palette.text_dimmed))
-                            .child(self.tr("settings.noCustomEngines")),
+                            .child(t!("settings.noCustomEngines")),
                     )
                 })
                 .when(!engines.is_empty(), |this| {
@@ -120,9 +122,9 @@ impl NyaTermApp {
                                     .icon
                                     .as_deref()
                                     .map(|icon| search_engine_icon(Some(icon), palette));
-                                let select_icon_label = self.tr("settings.selectIcon");
-                                let show_menu_label = self.tr("settings.showInSearchMenu");
-                                let actions_label = self.tr("settings.searchEngineActions");
+                                let select_icon_label = t!("settings.selectIcon");
+                                let show_menu_label = t!("settings.showInSearchMenu");
+                                let actions_label = t!("settings.searchEngineActions");
 
                                 div()
                                     .id(SharedString::from(format!(
@@ -205,7 +207,7 @@ impl NyaTermApp {
                                                             .text_color(rgb(palette.text))
                                                             .overflow_hidden()
                                                             .child(if engine.name.trim().is_empty() {
-                                                                self.tr("settings.engineName")
+                                                                t!("settings.engineName")
                                                                     .to_string()
                                                             } else {
                                                                 engine.name.clone()
@@ -227,7 +229,7 @@ impl NyaTermApp {
                                                                     .trim()
                                                                     .is_empty()
                                                                 {
-                                                                    self.tr("settings.engineUrl")
+                                                                    t!("settings.engineUrl")
                                                                         .to_string()
                                                                 } else {
                                                                     truncate_preview(
@@ -292,7 +294,7 @@ impl NyaTermApp {
                                             palette,
                                             index,
                                             engine.icon.as_deref(),
-                                            self.tr("common.remove"),
+                                            t!("common.remove"),
                                             cx,
                                         ))
                                     })
@@ -313,7 +315,7 @@ impl NyaTermApp {
                                                         "settings-search-engine-edit-{index}"
                                                     ),
                                                     "icons/net/edit.svg",
-                                                    self.tr("common.edit"),
+                                                    t!("common.edit"),
                                                     false,
                                                     true,
                                                     cx.listener(move |this, _, _, cx| {
@@ -326,7 +328,7 @@ impl NyaTermApp {
                                                         "settings-search-engine-test-{index}"
                                                     ),
                                                     "icons/fe/forward.svg",
-                                                    self.tr("settings.testSearchEngine"),
+                                                    t!("settings.testSearchEngine"),
                                                     false,
                                                     has_placeholder,
                                                     cx.listener(move |this, _, _, cx| {
@@ -340,7 +342,7 @@ impl NyaTermApp {
                                                         "settings-search-engine-delete-{index}"
                                                     ),
                                                     "icons/fe/delete.svg",
-                                                    self.tr("common.delete"),
+                                                    t!("common.delete"),
                                                     true,
                                                     true,
                                                     cx.listener(move |this, _, _, cx| {
@@ -372,7 +374,7 @@ impl NyaTermApp {
                                                                 .text_color(rgb(
                                                                     palette.text_muted,
                                                                 ))
-                                                                .child(self.tr(
+                                                                .child(t!(
                                                                     "settings.engineName",
                                                                 )),
                                                         )
@@ -390,7 +392,7 @@ impl NyaTermApp {
                                                                 .text_color(rgb(
                                                                     palette.text_muted,
                                                                 ))
-                                                                .child(self.tr(
+                                                                .child(t!(
                                                                     "settings.engineUrl",
                                                                 )),
                                                         )
@@ -406,11 +408,11 @@ impl NyaTermApp {
                                                                     },
                                                                 ))
                                                                 .child(if has_placeholder {
-                                                                    self.tr(
+                                                                    t!(
                                                                         "settings.engineUrlHint",
                                                                     )
                                                                 } else {
-                                                                    self.tr(
+                                                                    t!(
                                                                         "settings.engineUrlInvalid",
                                                                     )
                                                                 }),

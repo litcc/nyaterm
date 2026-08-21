@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, div,
     prelude::{ParentElement, Styled},
@@ -20,10 +22,8 @@ pub(super) fn connection_editor_serial_section(
     let ConnectionEditorSectionContext {
         palette,
         editor: _,
-        language,
         fields,
     } = section;
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     div()
         .flex()
         .flex_col()
@@ -40,7 +40,7 @@ pub(super) fn connection_editor_serial_section(
                         cx,
                     },
                     "connection-editor-serial-port",
-                    required(tr("dialog.serialPort")),
+                    required(t!("dialog.serialPort")),
                     ConnectionEditorSelect::SerialPort,
                 )))
                 .child(
@@ -52,7 +52,7 @@ pub(super) fn connection_editor_serial_section(
                         .gap_1()
                         .child(div().min_w_0().flex_1().child(editor_field(
                             palette,
-                            tr("dialog.baudRate"),
+                            t!("dialog.baudRate"),
                             ConnectionEditorField::BaudRate,
                             fields,
                             cx,
@@ -81,7 +81,7 @@ pub(super) fn connection_editor_serial_section(
                         cx,
                     },
                     "connection-editor-data-bits",
-                    tr("dialog.dataBits"),
+                    t!("dialog.dataBits"),
                     ConnectionEditorSelect::DataBits,
                 )))
                 .child(
@@ -95,7 +95,7 @@ pub(super) fn connection_editor_serial_section(
                                 cx,
                             },
                             "connection-editor-parity",
-                            tr("dialog.parity"),
+                            t!("dialog.parity"),
                             ConnectionEditorSelect::Parity,
                         )),
                 )
@@ -106,7 +106,7 @@ pub(super) fn connection_editor_serial_section(
                         cx,
                     },
                     "connection-editor-stop-bits",
-                    tr("dialog.stopBits"),
+                    t!("dialog.stopBits"),
                     ConnectionEditorSelect::StopBits,
                 )))
                 .child(
@@ -120,7 +120,7 @@ pub(super) fn connection_editor_serial_section(
                                 cx,
                             },
                             "connection-editor-serial-backspace",
-                            tr("dialog.backspaceMode"),
+                            t!("dialog.backspaceMode"),
                             ConnectionEditorSelect::Backspace,
                         )),
                 ),
@@ -132,7 +132,7 @@ pub(super) fn connection_editor_serial_section(
                 cx,
             },
             "connection-editor-serial-encoding",
-            tr("connection.encoding"),
+            t!("connection.encoding"),
             ConnectionEditorSelect::Encoding,
         ))
 }

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::RiskLevel;
 use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
@@ -49,7 +51,7 @@ impl NyaTermApp {
             ("critical", "ai.riskCritical"),
         ]
         .into_iter()
-        .map(|(value, label)| NyaSelectOption::new(value, self.tr(label)))
+        .map(|(value, label)| NyaSelectOption::new(value, t!(label)))
         .collect();
 
         div()
@@ -58,7 +60,7 @@ impl NyaTermApp {
             .gap_5()
             .child(settings_form_section(
                 palette,
-                Some(self.tr("ai.general")),
+                Some(t!("ai.general")),
                 None,
                 div()
                     .flex()
@@ -66,7 +68,7 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.enabled"),
+                        t!("ai.enabled"),
                         None,
                         settings_switch(
                             palette,
@@ -79,7 +81,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.redaction"),
+                        t!("ai.redaction"),
                         None,
                         settings_switch(
                             palette,
@@ -92,7 +94,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.allowSave"),
+                        t!("ai.allowSave"),
                         None,
                         settings_switch(
                             palette,
@@ -105,7 +107,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.recordHistory"),
+                        t!("ai.recordHistory"),
                         None,
                         settings_switch(
                             palette,
@@ -118,13 +120,13 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.requestUserAgent"),
-                        Some(SharedString::from(self.tr("ai.requestUserAgentDesc"))),
+                        t!("ai.requestUserAgent"),
+                        Some(SharedString::from(t!("ai.requestUserAgentDesc"))),
                         settings_input_control(
                             300.,
                             self.ai_input(
                                 "ai-request-user-agent",
-                                self.tr("ai.requestUserAgent"),
+                                t!("ai.requestUserAgent"),
                                 self.ai.settings_config().request_user_agent.clone(),
                                 AiInputField::RequestUserAgent,
                                 cx,
@@ -133,7 +135,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.contextLineLimit"),
+                        t!("ai.contextLineLimit"),
                         None,
                         self.number_input_box(
                             "ai.number.context-line-limit",
@@ -150,7 +152,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.timeoutMs"),
+                        t!("ai.timeoutMs"),
                         None,
                         self.number_input_box(
                             "ai.number.timeout-ms",
@@ -164,7 +166,7 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("ai.agentSettings")),
+                Some(t!("ai.agentSettings")),
                 None,
                 div()
                     .flex()
@@ -172,10 +174,8 @@ impl NyaTermApp {
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.smartAutoExecuteMaxRisk"),
-                        Some(SharedString::from(
-                            self.tr("ai.smartAutoExecuteMaxRiskDesc"),
-                        )),
+                        t!("ai.smartAutoExecuteMaxRisk"),
+                        Some(SharedString::from(t!("ai.smartAutoExecuteMaxRiskDesc"))),
                         self.select_control(
                             "ai-smart-risk",
                             risk_options,
@@ -186,7 +186,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.agentMaxSteps"),
+                        t!("ai.agentMaxSteps"),
                         None,
                         self.number_input_box(
                             "ai.number.agent-steps",
@@ -202,7 +202,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.agentStepTimeout"),
+                        t!("ai.agentStepTimeout"),
                         None,
                         self.number_input_box(
                             "ai.number.agent-step-timeout-ms",
@@ -220,7 +220,7 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("ai.terminalOutputLines"),
+                        t!("ai.terminalOutputLines"),
                         None,
                         self.number_input_box(
                             "ai.number.terminal-output-lines",
@@ -233,8 +233,8 @@ impl NyaTermApp {
                             cx,
                         ),
                     ))
-                    .child(ai_help_text(palette, self.tr("ai.agentMaxStepsDesc")))
-                    .child(ai_help_text(palette, self.tr("ai.terminalOutputLinesDesc"))),
+                    .child(ai_help_text(palette, t!("ai.agentMaxStepsDesc")))
+                    .child(ai_help_text(palette, t!("ai.terminalOutputLinesDesc"))),
             ))
     }
 }

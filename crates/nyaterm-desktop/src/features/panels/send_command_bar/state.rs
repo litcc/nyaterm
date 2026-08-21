@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use nyaterm_core::truncate_preview;
@@ -28,12 +30,12 @@ impl NyaTermApp {
         let active_kind = self.active_session_kind();
         let group_targets = self.send_command_group_target_options();
         let target_kind = match active_kind {
-            Some(SessionKind::Serial) => self.tr("serialSend.serialData"),
+            Some(SessionKind::Serial) => t!("serialSend.serialData"),
             Some(SessionKind::RawTcp) => Cow::Borrowed("Raw TCP"),
             Some(SessionKind::Telnet) => Cow::Borrowed("Telnet"),
-            Some(SessionKind::Ssh | SessionKind::LocalPty) => self.tr("serialSend.shellCommand"),
-            Some(SessionKind::Rdp | SessionKind::Vnc) => self.tr("serialSend.unavailable"),
-            None => self.tr("serialSend.unavailable"),
+            Some(SessionKind::Ssh | SessionKind::LocalPty) => t!("serialSend.shellCommand"),
+            Some(SessionKind::Rdp | SessionKind::Vnc) => t!("serialSend.unavailable"),
+            None => t!("serialSend.unavailable"),
         };
         let is_serial_text_line = matches!(active_kind, Some(SessionKind::Serial))
             && send.data_type == SendCommandDataType::Text
@@ -52,9 +54,9 @@ impl NyaTermApp {
             truncate_preview(&send.draft.replace('\n', "\\n"), 96)
         };
         let input_hint = if send.data_type == SendCommandDataType::Hex {
-            self.tr("serialSend.hexPlaceholder")
+            t!("serialSend.hexPlaceholder")
         } else {
-            self.tr("serialSend.textPlaceholder")
+            t!("serialSend.textPlaceholder")
         };
         let _ = (unit_count, byte_count);
         let is_sending = send.sending;
@@ -73,21 +75,17 @@ impl NyaTermApp {
         };
         let progress_label = if is_sending {
             if infinite_progress {
-                let round = self
-                    .tr("serialSend.shellProgressInfinite")
+                let round = t!("serialSend.shellProgressInfinite")
                     .replace("{{current}}", &send.round.max(1).to_string());
-                let units = self
-                    .tr("serialSend.shellProgressUnits")
+                let units = t!("serialSend.shellProgressUnits")
                     .replace("{{completed}}", &progress_completed.to_string())
                     .replace("{{total}}", "∞");
                 format!("{round} · {units}")
             } else {
-                let units = self
-                    .tr("serialSend.shellProgressUnits")
+                let units = t!("serialSend.shellProgressUnits")
                     .replace("{{completed}}", &progress_completed.to_string())
                     .replace("{{total}}", &send.total.to_string());
-                let round = self
-                    .tr("serialSend.shellProgressRound")
+                let round = t!("serialSend.shellProgressRound")
                     .replace("{{current}}", &send.round.max(1).to_string())
                     .replace("{{total}}", &send.rounds.max(1).to_string());
                 format!("{units} · {round}")

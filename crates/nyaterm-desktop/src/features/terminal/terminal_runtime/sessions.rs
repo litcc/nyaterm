@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::HashSet;
 use std::time::Duration;
 
@@ -343,9 +345,9 @@ impl NyaTermApp {
         };
         self.open_confirm_dialog_with_cancel(
             (
-                self.tr(title_key).to_string(),
-                self.tr(description_key).to_string(),
-                self.tr(action_key).to_string(),
+                t!(title_key).to_string(),
+                t!(description_key).to_string(),
+                t!(action_key).to_string(),
                 true,
                 |app, window, cx| app.confirm_close_all_sessions(window, cx),
                 |app, cx| app.cancel_close_all_sessions_confirm(cx),
@@ -448,10 +450,8 @@ impl NyaTermApp {
         close_ids.dedup();
         self.close_session_batch(close_ids, label);
         if skipped > 0 {
-            self.shell.set_status(format!(
-                "{} ({skipped})",
-                self.tr("tabCtx.lockedTabsSkipped")
-            ));
+            self.shell
+                .set_status(format!("{} ({skipped})", t!("tabCtx.lockedTabsSkipped")));
         }
     }
 

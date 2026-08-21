@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     ClickEvent, Context, FontWeight, IntoElement, MouseButton, ScrollDelta, ScrollWheelEvent,
     SharedString, div, point, prelude::*, px, rgb, rgba, svg,
@@ -502,7 +504,7 @@ impl NyaTermApp {
             let is_locked = self.tab_tree_is_locked(&session.id);
             let mut tooltip_lines = self.session.tab_tooltip_lines(&session.id);
             if is_locked {
-                tooltip_lines.push(self.tr("tabCtx.locked").to_string());
+                tooltip_lines.push(t!("tabCtx.locked").to_string());
             }
             let drag_payload = SessionTabDragPayload {
                 session_id: session.id.clone(),
@@ -530,7 +532,7 @@ impl NyaTermApp {
                 .iter()
                 .any(|id| self.terminal.session_has_unread(id));
             if has_unread && !is_active {
-                tooltip_lines.push(self.tr("tabCtx.unreadOutput").to_string());
+                tooltip_lines.push(t!("tabCtx.unreadOutput").to_string());
             }
             let sync_group = leaf_ids
                 .iter()
@@ -861,8 +863,8 @@ impl NyaTermApp {
         // Tauri TabBar trailing chrome: optional open-tabs overflow menu + new session menu.
         let open_tabs_menu = self.shell.open_tabs_menu_is_open();
         let new_session_menu = self.shell.new_session_menu_is_open();
-        let open_tabs_label = self.tr("terminal.openTabs").to_string();
-        let new_session_label = self.tr("terminal.newSession").to_string();
+        let open_tabs_label = t!("terminal.openTabs").to_string();
+        let new_session_label = t!("terminal.newSession").to_string();
         let tab_strip_has_overflow = self.shell.session_tab_strip_scroll().max_offset().x > px(0.);
         // Tauri shows Open Tabs only when the strip actually overflows.
         let show_open_tabs_menu = tab_strip_has_overflow || open_tabs_menu;

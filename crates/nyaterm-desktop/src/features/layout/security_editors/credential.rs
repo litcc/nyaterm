@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
@@ -18,7 +20,7 @@ impl NyaTermApp {
         // A stored secret is never shown, so the box says so in its
         // placeholder rather than standing a row of bullets in for it.
         let password_placeholder = if editor.has_password {
-            self.tr("credentialManager.passwordUnchanged")
+            t!("credentialManager.passwordUnchanged")
         } else {
             Cow::Borrowed("")
         };
@@ -40,12 +42,12 @@ impl NyaTermApp {
                     .items_center()
                     .justify_between()
                     .gap_2()
-                    .child(div().flex_1().child(self.tr("credentialManager.enabled")))
+                    .child(div().flex_1().child(t!("credentialManager.enabled")))
                     .child(
                         nyaterm_ui::NyaSwitch::new("security-cred-enabled")
                             .checked(editor.enabled)
                             .disabled(self.security.editor_busy())
-                            .tooltip(self.tr("credentialManager.enabled"))
+                            .tooltip(t!("credentialManager.enabled"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.toggle_security_credential_enabled(cx);
                             })),
@@ -54,7 +56,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "cred-name",
-                self.tr("credentialManager.nameLabel"),
+                t!("credentialManager.nameLabel"),
                 editor.name.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -62,7 +64,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "cred-user",
-                self.tr("credentialManager.usernameLabel"),
+                t!("credentialManager.usernameLabel"),
                 editor.username.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -75,7 +77,7 @@ impl NyaTermApp {
                     .child(div().min_w_0().flex_1().child(security_editor_field(
                         self,
                         "cred-pass",
-                        self.tr("credentialManager.passwordLabel"),
+                        t!("credentialManager.passwordLabel"),
                         editor.password.clone(),
                         TextInputSetup {
                             placeholder: password_placeholder.into(),
@@ -94,7 +96,7 @@ impl NyaTermApp {
                                 "icons/eye.svg"
                             },
                         )
-                        .tooltip(self.tr(if editor.show_password {
+                        .tooltip(t!(if editor.show_password {
                             "passwordManager.hidePassword"
                         } else {
                             "passwordManager.showPassword"
@@ -108,7 +110,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "cred-user-re",
-                self.tr("credentialManager.promptRegexLabel"),
+                t!("credentialManager.promptRegexLabel"),
                 editor.username_prompt_regex.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -118,13 +120,13 @@ impl NyaTermApp {
                     div()
                         .text_size(px(10.))
                         .text_color(rgb(palette.danger))
-                        .child(self.tr("credentialManager.invalidRegex")),
+                        .child(t!("credentialManager.invalidRegex")),
                 )
             })
             .child(security_editor_field(
                 self,
                 "cred-pass-re",
-                self.tr("credentialManager.passwordRegexPlaceholder"),
+                t!("credentialManager.passwordRegexPlaceholder"),
                 editor.password_prompt_regex.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -134,7 +136,7 @@ impl NyaTermApp {
                     div()
                         .text_size(px(10.))
                         .text_color(rgb(palette.danger))
-                        .child(self.tr("credentialManager.invalidRegex")),
+                        .child(t!("credentialManager.invalidRegex")),
                 )
             })
             .when_some(editor.error.clone(), |this, error| {

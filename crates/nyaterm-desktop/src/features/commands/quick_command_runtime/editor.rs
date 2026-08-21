@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent};
 use nyaterm_core::{QuickCommand, QuickCommandCategory, uuid};
 use nyaterm_store::{StoreDomain, store_request};
@@ -104,8 +106,8 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn save_quick_command_editor(&mut self, cx: &mut Context<Self>) {
-        let label_required = self.tr("quickCommands.errorLabelRequired").to_string();
-        let command_required = self.tr("quickCommands.errorCommandRequired").to_string();
+        let label_required = t!("quickCommands.errorLabelRequired").to_string();
+        let command_required = t!("quickCommands.errorCommandRequired").to_string();
         let categories = self.commands.quick_command_categories().to_vec();
         let Some(editor) = self.commands.quick_editor_snapshot() else {
             return;

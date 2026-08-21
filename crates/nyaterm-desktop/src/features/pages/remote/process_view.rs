@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -30,7 +32,7 @@ impl NyaTermApp {
             .search_input_box(
                 "remote.process.filter",
                 &process_state.search_draft.clone(),
-                TextInputSetup::placeholder(self.tr("processManager.search")),
+                TextInputSetup::placeholder(t!("processManager.search")),
                 cx,
             )
             .into_any_element();
@@ -38,18 +40,18 @@ impl NyaTermApp {
             return div()
                 .size_full()
                 .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(self.tr("processManager.noSession"), palette));
+                .child(empty_panel(t!("processManager.noSession"), palette));
         }
         if !process_state.snapshot_loaded {
             let message = if process_state.pending || !process_state.status.contains("failed") {
-                self.tr("common.loading")
+                t!("common.loading")
             } else if process_state
                 .status
                 .contains(PROCESS_LIST_UNSUPPORTED_ERROR)
             {
-                self.tr("processManager.unsupported")
+                t!("processManager.unsupported")
             } else {
-                self.tr("processManager.error")
+                t!("processManager.error")
             };
             return div()
                 .size_full()
@@ -58,22 +60,22 @@ impl NyaTermApp {
         }
         let menu_bg = self.shell_surface_color(palette.surface);
         let table_labels = ProcessTableLabels {
-            more: self.tr("common.more"),
-            copy_pid: self.tr("processManager.copyPid"),
-            copy_command: self.tr("processManager.copyCommand"),
-            signal_term: self.tr("processManager.signalTerm"),
-            signal_hup: self.tr("processManager.signalHup"),
-            signal_stop: self.tr("processManager.signalStop"),
-            signal_cont: self.tr("processManager.signalCont"),
-            signal_kill: self.tr("processManager.signalKill"),
+            more: t!("common.more"),
+            copy_pid: t!("processManager.copyPid"),
+            copy_command: t!("processManager.copyCommand"),
+            signal_term: t!("processManager.signalTerm"),
+            signal_hup: t!("processManager.signalHup"),
+            signal_stop: t!("processManager.signalStop"),
+            signal_cont: t!("processManager.signalCont"),
+            signal_kill: t!("processManager.signalKill"),
         };
         let detail_labels = ProcessDetailLabels {
-            cpu: self.tr("processManager.sortCpu"),
-            memory: self.tr("resourceMonitor.memory"),
+            cpu: t!("processManager.sortCpu"),
+            memory: t!("resourceMonitor.memory"),
             rss: Cow::Borrowed("RSS"),
-            elapsed: self.tr("processManager.elapsed"),
-            copy_command: self.tr("processManager.copyCommand"),
-            apply_nice: self.tr("processManager.applyNice"),
+            elapsed: t!("processManager.elapsed"),
+            copy_command: t!("processManager.copyCommand"),
+            apply_nice: t!("processManager.applyNice"),
         };
         // Responsive mode first so hidden columns do not keep invalid sort keys.
         let mode = process_display_mode(self.shell.right_panel_width());
@@ -146,7 +148,7 @@ impl NyaTermApp {
         let mut rows = div().flex().flex_col();
         if filtered_processes.is_empty() {
             rows = rows.child(empty_panel(
-                self.tr("processManager.noMatches"),
+                t!("processManager.noMatches"),
                 self.theme_palette(),
             ));
         } else {
@@ -320,7 +322,7 @@ impl NyaTermApp {
                                 .child(process_sort_button(
                                     palette,
                                     "process-sort-command",
-                                    self.tr("processManager.process"),
+                                    t!("processManager.process"),
                                     process_state.sort_key == RemoteProcessSortKey::Command,
                                     process_state.sort_direction,
                                     false,
@@ -331,7 +333,7 @@ impl NyaTermApp {
                                 .child(process_sort_button(
                                     palette,
                                     "process-sort-pid",
-                                    self.tr("processManager.sortPid"),
+                                    t!("processManager.sortPid"),
                                     process_state.sort_key == RemoteProcessSortKey::Pid,
                                     process_state.sort_direction,
                                     true,
@@ -342,7 +344,7 @@ impl NyaTermApp {
                                 .child(process_sort_button(
                                     palette,
                                     "process-sort-cpu",
-                                    self.tr("processManager.sortCpu"),
+                                    t!("processManager.sortCpu"),
                                     process_state.sort_key == RemoteProcessSortKey::Cpu,
                                     process_state.sort_direction,
                                     true,
@@ -359,7 +361,7 @@ impl NyaTermApp {
                                         this.child(process_sort_button(
                                             palette,
                                             "process-sort-memory",
-                                            self.tr("processManager.sortMemory"),
+                                            t!("processManager.sortMemory"),
                                             process_state.sort_key == RemoteProcessSortKey::Memory,
                                             process_state.sort_direction,
                                             true,
@@ -376,7 +378,7 @@ impl NyaTermApp {
                                     this.child(process_sort_button(
                                         palette,
                                         "process-sort-user",
-                                        self.tr("processManager.user"),
+                                        t!("processManager.user"),
                                         process_state.sort_key == RemoteProcessSortKey::User,
                                         process_state.sort_direction,
                                         false,

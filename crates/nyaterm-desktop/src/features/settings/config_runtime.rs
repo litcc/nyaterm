@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, AppContext, Context, FontWeight, KeyDownEvent, PathPromptOptions, SharedString,
     Window, div, prelude::*, rgb,
@@ -75,8 +77,8 @@ impl NyaTermApp {
             .set_store_message("awaiting .nya master password");
 
         let title = match kind {
-            SnapshotPasswordPromptKind::Export => self.tr("runtimePrompt.snapshotExport"),
-            SnapshotPasswordPromptKind::Import => self.tr("runtimePrompt.snapshotImport"),
+            SnapshotPasswordPromptKind::Export => t!("runtimePrompt.snapshotExport"),
+            SnapshotPasswordPromptKind::Import => t!("runtimePrompt.snapshotImport"),
             SnapshotPasswordPromptKind::CloudForcePush
             | SnapshotPasswordPromptKind::CloudForcePull
             | SnapshotPasswordPromptKind::CloudProviderPush
@@ -85,14 +87,14 @@ impl NyaTermApp {
             | SnapshotPasswordPromptKind::CloudProviderForcePull
             | SnapshotPasswordPromptKind::CloudRecoverCurrent
             | SnapshotPasswordPromptKind::CloudProviderRecoverCurrent => {
-                self.tr("runtimePrompt.cloudPush")
+                t!("runtimePrompt.cloudPush")
             }
         };
         self.open_form_dialog(
             (
                 title.to_string(),
                 448.,
-                self.tr("runtimePrompt.submit").to_string(),
+                t!("runtimePrompt.submit").to_string(),
                 |app, _, cx| app.local_snapshot_password_dialog_content(cx),
                 |app, _, cx| app.submit_local_snapshot_password_dialog(cx),
                 |app, cx| app.cancel_snapshot_password_prompt(cx),
@@ -124,7 +126,7 @@ impl NyaTermApp {
             return div().into_any_element();
         };
         let palette = self.theme_palette();
-        let description = self.tr("runtimePrompt.localSnapshotDescription");
+        let description = t!("runtimePrompt.localSnapshotDescription");
         let password_input = self.text_input_box(
             "snapshot-password.value",
             &prompt.value,

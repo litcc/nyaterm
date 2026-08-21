@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, MouseButton, SharedString, Window, div,
     prelude::*, px, rgb, rgba, svg,
@@ -21,9 +23,9 @@ impl NyaTermApp {
         }
         self.open_confirm_dialog(
             (
-                self.tr("ai.clearHistoryTitle").to_string(),
-                self.tr("ai.clearHistoryDesc").to_string(),
-                self.tr("ai.clearHistory").to_string(),
+                t!("ai.clearHistoryTitle").to_string(),
+                t!("ai.clearHistoryDesc").to_string(),
+                t!("ai.clearHistory").to_string(),
                 true,
                 |app, _, cx| app.confirm_ai_clear_history(cx),
             ),
@@ -49,9 +51,9 @@ impl NyaTermApp {
         self.ai.request_agent_auto_confirm();
         self.open_confirm_dialog(
             (
-                self.tr("ai.autoExecutionConfirmTitle").to_string(),
-                self.tr("ai.autoExecutionConfirmDesc").to_string(),
-                self.tr("ai.enableAutoExecution").to_string(),
+                t!("ai.autoExecutionConfirmTitle").to_string(),
+                t!("ai.autoExecutionConfirmDesc").to_string(),
+                t!("ai.enableAutoExecution").to_string(),
                 true,
                 |app, _, cx| app.confirm_ai_auto_execution(cx),
             ),
@@ -105,28 +107,28 @@ impl NyaTermApp {
                     .text_size(px(11.))
                     .font_weight(FontWeight(700.))
                     .text_color(rgb(palette.text))
-                    .child(self.tr("ai.agentCommandExecutionMode")),
+                    .child(t!("ai.agentCommandExecutionMode")),
             )
             .child(self.ai_execution_mode_item(
                 "ai-exec-confirm",
-                self.tr("ai.executionModeConfirmEach"),
-                self.tr("ai.executionModeConfirmEachDesc"),
+                t!("ai.executionModeConfirmEach"),
+                t!("ai.executionModeConfirmEachDesc"),
                 AgentCommandExecutionMode::ConfirmEach,
                 current == AgentCommandExecutionMode::ConfirmEach,
                 cx,
             ))
             .child(self.ai_execution_mode_item(
                 "ai-exec-smart",
-                self.tr("ai.executionModeSmart"),
-                self.tr("ai.executionModeSmartDesc"),
+                t!("ai.executionModeSmart"),
+                t!("ai.executionModeSmartDesc"),
                 AgentCommandExecutionMode::Smart,
                 current == AgentCommandExecutionMode::Smart,
                 cx,
             ))
             .child(self.ai_execution_mode_item(
                 "ai-exec-auto",
-                self.tr("ai.executionModeAuto"),
-                self.tr("ai.executionModeAutoDesc"),
+                t!("ai.executionModeAuto"),
+                t!("ai.executionModeAutoDesc"),
                 AgentCommandExecutionMode::Auto,
                 current == AgentCommandExecutionMode::Auto,
                 cx,
@@ -139,7 +141,7 @@ impl NyaTermApp {
                     .text_size(px(11.))
                     .font_weight(FontWeight(700.))
                     .text_color(rgb(palette.text))
-                    .child(self.tr("ai.executionMethod")),
+                    .child(t!("ai.executionMethod")),
             )
             .child(self.ai_background_execution_item(cx))
     }
@@ -204,13 +206,13 @@ impl NyaTermApp {
                             .text_size(px(12.))
                             .font_weight(FontWeight(600.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("ai.backgroundAgentExecution")),
+                            .child(t!("ai.backgroundAgentExecution")),
                     )
                     .child(
                         div()
                             .text_size(px(10.))
                             .text_color(rgb(palette.text_muted))
-                            .child(self.tr("ai.backgroundAgentExecutionDesc")),
+                            .child(t!("ai.backgroundAgentExecutionDesc")),
                     ),
             )
     }
@@ -484,7 +486,7 @@ impl NyaTermApp {
                             .text_size(px(11.))
                             .font_weight(FontWeight(700.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("ai.history")),
+                            .child(t!("ai.history")),
                     )
                     .child(
                         div()
@@ -512,7 +514,7 @@ impl NyaTermApp {
                                 }
                                 this.open_ai_clear_history_confirm(window, cx);
                             }))
-                            .child(self.tr("ai.clearHistory")),
+                            .child(t!("ai.clearHistory")),
                     ),
             )
             .child(

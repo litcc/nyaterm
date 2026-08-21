@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{ClipboardItem, Context, Window};
@@ -39,57 +41,54 @@ impl NyaTermApp {
             .unwrap_or_else(|| "unknown endpoint".to_string());
 
         let mut details = vec![
-            (self.tr("sessionInfo.name"), name),
+            (t!("sessionInfo.name"), name),
             (
-                self.tr("sessionInfo.kind"),
+                t!("sessionInfo.kind"),
                 session_kind_label(session.kind).to_string(),
             ),
-            (self.tr("sessionInfo.sessionId"), session_id.to_string()),
+            (t!("sessionInfo.sessionId"), session_id.to_string()),
             (
-                self.tr("sessionInfo.size"),
+                t!("sessionInfo.size"),
                 format!("{} x {}", session.cols, session.rows),
             ),
-            (self.tr("sessionInfo.endpoint"), endpoint),
+            (t!("sessionInfo.endpoint"), endpoint),
             (
-                self.tr("sessionInfo.aiProfile"),
+                t!("sessionInfo.aiProfile"),
                 format!("{:?}", metadata.ai_execution_profile),
             ),
         ];
         if let Some(cwd) = self.session.cwd(session_id) {
-            details.push((self.tr("sessionInfo.cwd"), cwd.to_string()));
+            details.push((t!("sessionInfo.cwd"), cwd.to_string()));
         }
 
         match &metadata.launch_config {
             SessionLaunchConfig::Local(config) => {
                 details.push((
-                    self.tr("sessionInfo.launch"),
-                    self.tr("sessionInfo.localShell").to_string(),
+                    t!("sessionInfo.launch"),
+                    t!("sessionInfo.localShell").to_string(),
                 ));
                 if let Some(shell) = config
                     .shell_path
                     .as_deref()
                     .filter(|value| !value.trim().is_empty())
                 {
-                    details.push((self.tr("sessionInfo.shell"), shell.to_string()));
+                    details.push((t!("sessionInfo.shell"), shell.to_string()));
                 }
                 if let Some(dir) = config.working_dir.as_ref() {
-                    details.push((self.tr("sessionInfo.workingDir"), dir.display().to_string()));
+                    details.push((t!("sessionInfo.workingDir"), dir.display().to_string()));
                 }
             }
             SessionLaunchConfig::Ssh(config) => {
-                details.push((
-                    self.tr("sessionInfo.launch"),
-                    self.tr("sessionInfo.ssh").to_string(),
-                ));
-                details.push((self.tr("sessionInfo.host"), config.host.clone()));
-                details.push((self.tr("sessionInfo.port"), config.port.to_string()));
-                details.push((self.tr("sessionInfo.username"), config.username.clone()));
+                details.push((t!("sessionInfo.launch"), t!("sessionInfo.ssh").to_string()));
+                details.push((t!("sessionInfo.host"), config.host.clone()));
+                details.push((t!("sessionInfo.port"), config.port.to_string()));
+                details.push((t!("sessionInfo.username"), config.username.clone()));
                 if let Some(address) = self.session.ssh_address(session_id) {
-                    details.push((self.tr("sessionInfo.sshAddress"), address));
+                    details.push((t!("sessionInfo.sshAddress"), address));
                 }
                 if let Some(proxy_jump) = config.proxy_jump.as_ref() {
                     details.push((
-                        self.tr("sessionInfo.proxyJump"),
+                        t!("sessionInfo.proxyJump"),
                         format!(
                             "{}@{}:{}",
                             proxy_jump.username, proxy_jump.host, proxy_jump.port
@@ -99,34 +98,34 @@ impl NyaTermApp {
             }
             SessionLaunchConfig::Telnet(config) => {
                 details.push((
-                    self.tr("sessionInfo.launch"),
-                    self.tr("sessionInfo.telnet").to_string(),
+                    t!("sessionInfo.launch"),
+                    t!("sessionInfo.telnet").to_string(),
                 ));
-                details.push((self.tr("sessionInfo.host"), config.host.clone()));
-                details.push((self.tr("sessionInfo.port"), config.port.to_string()));
+                details.push((t!("sessionInfo.host"), config.host.clone()));
+                details.push((t!("sessionInfo.port"), config.port.to_string()));
             }
             SessionLaunchConfig::Serial(config) => {
                 details.push((
-                    self.tr("sessionInfo.launch"),
-                    self.tr("sessionInfo.serial").to_string(),
+                    t!("sessionInfo.launch"),
+                    t!("sessionInfo.serial").to_string(),
                 ));
-                details.push((self.tr("sessionInfo.port"), config.port_name.clone()));
-                details.push((self.tr("sessionInfo.baud"), config.baud_rate.to_string()));
+                details.push((t!("sessionInfo.port"), config.port_name.clone()));
+                details.push((t!("sessionInfo.baud"), config.baud_rate.to_string()));
                 details.push((
-                    self.tr("sessionInfo.frame"),
+                    t!("sessionInfo.frame"),
                     format!("{}{}{}", config.data_bits, config.parity, config.stop_bits),
                 ));
             }
             SessionLaunchConfig::Rdp(config) => {
-                details.push((self.tr("sessionInfo.launch"), "RDP".to_string()));
-                details.push((self.tr("sessionInfo.host"), config.host.clone()));
-                details.push((self.tr("sessionInfo.port"), config.port.to_string()));
-                details.push((self.tr("sessionInfo.username"), config.username.clone()));
+                details.push((t!("sessionInfo.launch"), "RDP".to_string()));
+                details.push((t!("sessionInfo.host"), config.host.clone()));
+                details.push((t!("sessionInfo.port"), config.port.to_string()));
+                details.push((t!("sessionInfo.username"), config.username.clone()));
             }
             SessionLaunchConfig::Vnc(config) => {
-                details.push((self.tr("sessionInfo.launch"), "VNC".to_string()));
-                details.push((self.tr("sessionInfo.host"), config.host.clone()));
-                details.push((self.tr("sessionInfo.port"), config.port.to_string()));
+                details.push((t!("sessionInfo.launch"), "VNC".to_string()));
+                details.push((t!("sessionInfo.host"), config.host.clone()));
+                details.push((t!("sessionInfo.port"), config.port.to_string()));
             }
         }
 
@@ -497,7 +496,7 @@ impl NyaTermApp {
             self.session.set_tab_locked(&id, locked);
         }
         self.shell.set_status(
-            self.tr(if locked {
+            t!(if locked {
                 "tabCtx.locked"
             } else {
                 "tabCtx.unlockTab"
@@ -519,7 +518,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn notify_locked_tab_close_blocked(&mut self, cx: &mut Context<Self>) {
         self.shell
-            .set_status(self.tr("tabCtx.lockedCloseBlocked").to_string());
+            .set_status(t!("tabCtx.lockedCloseBlocked").to_string());
         cx.notify();
     }
 }

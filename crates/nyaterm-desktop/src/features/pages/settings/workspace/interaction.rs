@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
@@ -63,16 +65,16 @@ impl NyaTermApp {
             .gap_3()
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.interactionClipboardMouse")),
-                Some(self.tr("settings.interactionClipboardMouseDesc")),
+                Some(t!("settings.interactionClipboardMouse")),
+                Some(t!("settings.interactionClipboardMouseDesc")),
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.copyOnSelect"),
-                        Some(SharedString::from(self.tr("settings.copyOnSelectDesc"))),
+                        t!("settings.copyOnSelect"),
+                        Some(SharedString::from(t!("settings.copyOnSelectDesc"))),
                         settings_switch(
                             palette,
                             "interaction-copy-select",
@@ -84,10 +86,10 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.allowOsc52ClipboardWrite"),
-                        Some(SharedString::from(
-                            self.tr("settings.allowOsc52ClipboardWriteDesc"),
-                        )),
+                        t!("settings.allowOsc52ClipboardWrite"),
+                        Some(SharedString::from(t!(
+                            "settings.allowOsc52ClipboardWriteDesc"
+                        ))),
                         settings_switch(
                             palette,
                             "interaction-osc52-clipboard",
@@ -101,8 +103,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.rightClickPaste"),
-                        Some(SharedString::from(self.tr("settings.rightClickPasteDesc"))),
+                        t!("settings.rightClickPaste"),
+                        Some(SharedString::from(t!("settings.rightClickPasteDesc"))),
                         settings_switch(
                             palette,
                             "interaction-right-paste",
@@ -115,14 +117,12 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.terminalZoomEnabled")),
-                Some(self.tr("settings.terminalZoomEnabledDesc")),
+                Some(t!("settings.terminalZoomEnabled")),
+                Some(t!("settings.terminalZoomEnabledDesc")),
                 settings_form_row(
                     palette,
-                    self.tr("settings.terminalZoomEnabled"),
-                    Some(SharedString::from(
-                        self.tr("settings.terminalZoomEnabledDesc"),
-                    )),
+                    t!("settings.terminalZoomEnabled"),
+                    Some(SharedString::from(t!("settings.terminalZoomEnabledDesc"))),
                     settings_switch(
                         palette,
                         "interaction-terminal-zoom",
@@ -135,18 +135,16 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.interactionCommandInput")),
-                Some(self.tr("settings.interactionCommandInputDesc")),
+                Some(t!("settings.interactionCommandInput")),
+                Some(t!("settings.interactionCommandInputDesc")),
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.commandSuggestions"),
-                        Some(SharedString::from(
-                            self.tr("settings.commandSuggestionsDesc"),
-                        )),
+                        t!("settings.commandSuggestions"),
+                        Some(SharedString::from(t!("settings.commandSuggestionsDesc"))),
                         settings_switch(
                             palette,
                             "interaction-cmd-suggestions",
@@ -159,10 +157,10 @@ impl NyaTermApp {
                     .when(suggestions_enabled, |this| {
                         this.child(settings_form_row(
                             palette,
-                            self.tr("settings.commandSuggestionsMinChars"),
-                            Some(SharedString::from(
-                                self.tr("settings.commandSuggestionsMinCharsDesc"),
-                            )),
+                            t!("settings.commandSuggestionsMinChars"),
+                            Some(SharedString::from(t!(
+                                "settings.commandSuggestionsMinCharsDesc"
+                            ))),
                             self.number_input_box(
                                 "settings.number.command-suggestion-min-chars",
                                 min_chars.to_string().as_str(),
@@ -174,10 +172,10 @@ impl NyaTermApp {
                         ))
                         .child(settings_form_row(
                             palette,
-                            self.tr("settings.commandSuggestionsMaxChars"),
-                            Some(SharedString::from(
-                                self.tr("settings.commandSuggestionsMaxCharsDesc"),
-                            )),
+                            t!("settings.commandSuggestionsMaxChars"),
+                            Some(SharedString::from(t!(
+                                "settings.commandSuggestionsMaxCharsDesc"
+                            ))),
                             self.number_input_box(
                                 "settings.number.command-suggestion-max-chars",
                                 max_chars.to_string().as_str(),
@@ -195,17 +193,17 @@ impl NyaTermApp {
                             .gap_2()
                             .child(settings_field_meta(
                                 palette,
-                                self.tr("settings.wordSeparators"),
-                                self.tr("settings.wordSeparatorsDesc"),
+                                t!("settings.wordSeparators"),
+                                t!("settings.wordSeparatorsDesc"),
                             ))
                             .child(div().w_full().max_w(px(640.)).child(word_separators_input)),
                     )
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.duplicateSessionCommandDelay"),
-                        Some(SharedString::from(
-                            self.tr("settings.duplicateSessionCommandDelayDesc"),
-                        )),
+                        t!("settings.duplicateSessionCommandDelay"),
+                        Some(SharedString::from(t!(
+                            "settings.duplicateSessionCommandDelayDesc"
+                        ))),
                         self.number_input_box(
                             "settings.number.duplicate-session-command-delay",
                             delay_ms.to_string().as_str(),
@@ -218,8 +216,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.altAsMeta"),
-                        Some(SharedString::from(self.tr("settings.altAsMetaDesc"))),
+                        t!("settings.altAsMeta"),
+                        Some(SharedString::from(t!("settings.altAsMetaDesc"))),
                         settings_switch(
                             palette,
                             "interaction-alt-meta",
@@ -231,10 +229,8 @@ impl NyaTermApp {
                     ))
                     .child(settings_form_row(
                         palette,
-                        self.tr("settings.macImeCompatibility"),
-                        Some(SharedString::from(
-                            self.tr("settings.macImeCompatibilityDesc"),
-                        )),
+                        t!("settings.macImeCompatibility"),
+                        Some(SharedString::from(t!("settings.macImeCompatibilityDesc"))),
                         settings_switch(
                             palette,
                             "interaction-mac-ime",
@@ -247,16 +243,16 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.tabMouseActions")),
-                Some(self.tr("settings.tabMouseActionsDesc")),
+                Some(t!("settings.tabMouseActions")),
+                Some(t!("settings.tabMouseActionsDesc")),
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .child(self.tab_mouse_action_settings_field(
                         TabMouseActionPresentation {
-                            label: self.tr("settings.tabDoubleClickAction"),
-                            description: self.tr("settings.tabDoubleClickActionDesc"),
+                            label: t!("settings.tabDoubleClickAction"),
+                            description: t!("settings.tabDoubleClickActionDesc"),
                             id: "settings.interaction.tab-double",
                             current: &double_action,
                         },
@@ -264,8 +260,8 @@ impl NyaTermApp {
                     ))
                     .child(self.tab_mouse_action_settings_field(
                         TabMouseActionPresentation {
-                            label: self.tr("settings.tabMiddleClickAction"),
-                            description: self.tr("settings.tabMiddleClickActionDesc"),
+                            label: t!("settings.tabMiddleClickAction"),
+                            description: t!("settings.tabMiddleClickActionDesc"),
                             id: "settings.interaction.tab-middle",
                             current: &middle_action,
                         },
@@ -273,8 +269,8 @@ impl NyaTermApp {
                     ))
                     .child(self.tab_mouse_action_settings_field(
                         TabMouseActionPresentation {
-                            label: self.tr("settings.tabRightClickAction"),
-                            description: self.tr("settings.tabRightClickActionDesc"),
+                            label: t!("settings.tabRightClickAction"),
+                            description: t!("settings.tabRightClickActionDesc"),
                             id: "settings.interaction.tab-right",
                             current: &right_action,
                         },
@@ -283,12 +279,12 @@ impl NyaTermApp {
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("settings.interactionEncoding")),
-                Some(self.tr("settings.interactionEncodingDesc")),
+                Some(t!("settings.interactionEncoding")),
+                Some(t!("settings.interactionEncodingDesc")),
                 self.settings_select_field(
                     "settings.interaction.default-encoding",
-                    self.tr("settings.defaultEncoding"),
-                    Some(SharedString::from(self.tr("settings.defaultEncodingDesc"))),
+                    t!("settings.defaultEncoding"),
+                    Some(SharedString::from(t!("settings.defaultEncodingDesc"))),
                     vec![
                         NyaSelectOption::new("UTF-8", "UTF-8"),
                         NyaSelectOption::new("GBK", "GBK"),
@@ -314,7 +310,7 @@ impl NyaTermApp {
         let selected = normalized_tab_mouse_action(current).to_string();
         let options = TAB_MOUSE_ACTIONS
             .iter()
-            .map(|action| NyaSelectOption::new(*action, self.tr(tab_mouse_action_i18n_key(action))))
+            .map(|action| NyaSelectOption::new(*action, t!(tab_mouse_action_i18n_key(action))))
             .collect();
 
         self.settings_select_field(

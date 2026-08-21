@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::HashMap;
 
 use gpui::{Context, KeyDownEvent, Window};
@@ -51,7 +53,7 @@ impl NyaTermApp {
         let field = self.text_input(
             "quick-switch.query",
             "",
-            TextInputSetup::placeholder(self.tr("sessionQuickSwitcher.searchPlaceholder")),
+            TextInputSetup::placeholder(t!("sessionQuickSwitcher.searchPlaceholder")),
             cx,
         );
         self.shell.set_status("quick switch opened".to_string());
@@ -117,7 +119,7 @@ impl NyaTermApp {
                         title,
                         subtitle: format!(
                             "{} - {}",
-                            self.tr("sessionQuickSwitcher.connecting"),
+                            t!("sessionQuickSwitcher.connecting"),
                             session_kind_label(pending.kind)
                         ),
                         active: self.session.start_request_is_active(request_id),
@@ -154,7 +156,7 @@ impl NyaTermApp {
                                 title,
                                 subtitle: format!(
                                     "{} - {}",
-                                    self.tr("terminal.connectionFailed"),
+                                    t!("terminal.connectionFailed"),
                                     session_kind_label(pending.kind)
                                 ),
                                 active: self.session.start_request_is_active(request_id),

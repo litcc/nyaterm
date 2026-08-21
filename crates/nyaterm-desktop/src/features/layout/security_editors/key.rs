@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 use nyaterm_ui::{NyaScrollable, NyaTabItem, NyaTabs};
 
@@ -44,14 +46,14 @@ impl NyaTermApp {
                         div()
                             .text_size(px(11.))
                             .text_color(rgb(palette.text_muted))
-                            .child(self.tr("settings.privateKey")),
+                            .child(t!("settings.privateKey")),
                     )
                     .child(
                         nyaterm_ui::NyaIconButton::new(
                             "security-private-key-copy",
                             "icons/copy.svg",
                         )
-                        .tooltip(self.tr("common.copyToClipboard"))
+                        .tooltip(t!("common.copyToClipboard"))
                         .disabled(loading)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.copy_security_private_key(cx);
@@ -74,7 +76,7 @@ impl NyaTermApp {
                     .text_color(rgb(palette.text_muted))
                     .when_else(
                         loading,
-                        |this| this.child(self.tr("common.loading").to_string()),
+                        |this| this.child(t!("common.loading").to_string()),
                         |this| {
                             if let Some(error) = error {
                                 this.child(error)
@@ -106,7 +108,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "key-name",
-                self.tr("securityAuth.nameLabel"),
+                t!("securityAuth.nameLabel"),
                 editor.name.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -125,17 +127,15 @@ impl NyaTermApp {
                                 div()
                                     .text_size(px(10.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(self.tr("securityAuth.privateKey")),
+                                    .child(t!("securityAuth.privateKey")),
                             )
                             .child(
                                 div().w(px(160.)).child(
                                     NyaTabs::new("security-key-material-mode")
                                         .items([
-                                            NyaTabItem::new(
-                                                self.tr("settings.keyInputContentMode"),
-                                            )
-                                            .disabled(self.security.editor_busy()),
-                                            NyaTabItem::new(self.tr("settings.keyInputFileMode"))
+                                            NyaTabItem::new(t!("settings.keyInputContentMode"))
+                                                .disabled(self.security.editor_busy()),
+                                            NyaTabItem::new(t!("settings.keyInputFileMode"))
                                                 .disabled(self.security.editor_busy()),
                                         ])
                                         .selected_index(usize::from(!editor.key_content_mode))
@@ -153,10 +153,10 @@ impl NyaTermApp {
                         this.child(security_editor_field(
                             self,
                             "key-data",
-                            self.tr("settings.keyInputContentMode"),
+                            t!("settings.keyInputContentMode"),
                             editor.key_data.clone(),
                             TextInputSetup {
-                                placeholder: self.tr("settings.keyContentPlaceholder").into(),
+                                placeholder: t!("settings.keyContentPlaceholder").into(),
                                 masked: false,
                                 multi_line: true,
                                 code: false,
@@ -175,15 +175,15 @@ impl NyaTermApp {
                                     "key-path",
                                     "",
                                     editor.key_file_path.clone(),
-                                    TextInputSetup::placeholder(
-                                        self.tr("settings.keyFilePathPlaceholder"),
-                                    ),
+                                    TextInputSetup::placeholder(t!(
+                                        "settings.keyFilePathPlaceholder"
+                                    )),
                                     cx,
                                 )))
                                 .child(small_button(
                                     palette,
                                     "security-key-browse",
-                                    self.tr("securityAuth.browse"),
+                                    t!("securityAuth.browse"),
                                     cx.listener(|this, _, window, cx| {
                                         this.pick_security_key_file(false, window, cx);
                                     }),
@@ -195,7 +195,7 @@ impl NyaTermApp {
                 this.child(small_button(
                     palette,
                     "security-key-add-cert",
-                    self.tr("settings.addCertificate"),
+                    t!("settings.addCertificate"),
                     cx.listener(|this, _, _, cx| this.toggle_security_key_certificate(cx)),
                 ))
             })
@@ -214,20 +214,16 @@ impl NyaTermApp {
                                     div()
                                         .text_size(px(10.))
                                         .text_color(rgb(palette.text_muted))
-                                        .child(self.tr("securityAuth.certificate")),
+                                        .child(t!("securityAuth.certificate")),
                                 )
                                 .child(
                                     div().w(px(160.)).child(
                                         NyaTabs::new("security-cert-material-mode")
                                             .items([
-                                                NyaTabItem::new(
-                                                    self.tr("settings.keyInputContentMode"),
-                                                )
-                                                .disabled(self.security.editor_busy()),
-                                                NyaTabItem::new(
-                                                    self.tr("settings.keyInputFileMode"),
-                                                )
-                                                .disabled(self.security.editor_busy()),
+                                                NyaTabItem::new(t!("settings.keyInputContentMode"))
+                                                    .disabled(self.security.editor_busy()),
+                                                NyaTabItem::new(t!("settings.keyInputFileMode"))
+                                                    .disabled(self.security.editor_busy()),
                                             ])
                                             .selected_index(usize::from(!editor.cert_content_mode))
                                             .on_select(cx.listener(|this, index, _, cx| {
@@ -244,10 +240,10 @@ impl NyaTermApp {
                             this.child(security_editor_field(
                                 self,
                                 "key-cert-data",
-                                self.tr("settings.keyInputContentMode"),
+                                t!("settings.keyInputContentMode"),
                                 editor.cert_data.clone(),
                                 TextInputSetup {
-                                    placeholder: self.tr("settings.certContentPlaceholder").into(),
+                                    placeholder: t!("settings.certContentPlaceholder").into(),
                                     masked: false,
                                     multi_line: true,
                                     code: false,
@@ -266,15 +262,15 @@ impl NyaTermApp {
                                         "key-cert-path",
                                         "",
                                         editor.cert_file_path.clone(),
-                                        TextInputSetup::placeholder(
-                                            self.tr("settings.certFilePathPlaceholder"),
-                                        ),
+                                        TextInputSetup::placeholder(t!(
+                                            "settings.certFilePathPlaceholder"
+                                        )),
                                         cx,
                                     )))
                                     .child(small_button(
                                         palette,
                                         "security-cert-browse",
-                                        self.tr("securityAuth.browse"),
+                                        t!("securityAuth.browse"),
                                         cx.listener(|this, _, window, cx| {
                                             this.pick_security_key_file(true, window, cx);
                                         }),
@@ -291,7 +287,7 @@ impl NyaTermApp {
                     .child(div().min_w_0().flex_1().child(security_editor_field(
                         self,
                         "key-passphrase",
-                        self.tr("securityAuth.passphrase"),
+                        t!("securityAuth.passphrase"),
                         editor.passphrase.clone(),
                         TextInputSetup {
                             placeholder: "".into(),
@@ -310,7 +306,7 @@ impl NyaTermApp {
                                 "icons/eye.svg"
                             },
                         )
-                        .tooltip(self.tr(if editor.show_passphrase {
+                        .tooltip(t!(if editor.show_passphrase {
                             "settings.hidePassphrase"
                         } else {
                             "settings.showPassphrase"

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
@@ -17,7 +19,7 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let query = self.ai.settings_model_query().to_string();
-        let query_placeholder = self.tr("ai.searchModels");
+        let query_placeholder = t!("ai.searchModels");
         let search_field = self.text_input(
             "ai.settings.model-search",
             &query,
@@ -47,9 +49,9 @@ impl NyaTermApp {
             .iter()
             .any(|model| model.enabled);
         let refresh_label = if self.ai.discovery_is_pending() {
-            self.tr("common.loading")
+            t!("common.loading")
         } else {
-            self.tr("ai.refreshModels")
+            t!("ai.refreshModels")
         };
 
         let model_groups = self.ai_model_groups(palette, cx);
@@ -61,7 +63,7 @@ impl NyaTermApp {
             .gap_5()
             .child(settings_form_section(
                 palette,
-                Some(self.tr("ai.modelList")),
+                Some(t!("ai.modelList")),
                 None,
                 div()
                     .flex()
@@ -120,21 +122,17 @@ impl NyaTermApp {
                     .when(enabled_credentials == 0, |this| {
                         this.child(ai_models_hint(
                             palette,
-                            self.tr("ai.manualModelNoProvider"),
+                            t!("ai.manualModelNoProvider"),
                             false,
                         ))
                     })
                     .when(!has_enabled_model, |this| {
-                        this.child(ai_models_hint(
-                            palette,
-                            self.tr("ai.enableOneModelHint"),
-                            true,
-                        ))
+                        this.child(ai_models_hint(palette, t!("ai.enableOneModelHint"), true))
                     }),
             ))
             .child(settings_form_section(
                 palette,
-                Some(self.tr("ai.apiKeys")),
+                Some(t!("ai.apiKeys")),
                 None,
                 div()
                     .flex()
@@ -143,7 +141,7 @@ impl NyaTermApp {
                     .child(div().flex().justify_end().child(small_button(
                         palette,
                         "ai-cred-add",
-                        self.tr("common.add"),
+                        t!("common.add"),
                         cx.listener(|this, _, window, cx| {
                             this.add_ai_credential(window, cx);
                         }),

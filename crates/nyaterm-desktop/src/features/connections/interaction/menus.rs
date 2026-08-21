@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_core::SavedConnection;
 
@@ -92,15 +94,14 @@ impl NyaTermApp {
             return;
         }
         let label = group.name.clone();
-        let description = self
-            .tr("savedConnections.openAllConnectionsConfirm")
+        let description = t!("savedConnections.openAllConnectionsConfirm")
             .replace("{{name}}", &label)
             .replace("{{count}}", &connection_count.to_string());
         self.open_confirm_dialog(
             (
-                self.tr("savedConnections.openAllConnections").to_string(),
+                t!("savedConnections.openAllConnections").to_string(),
                 description,
-                self.tr("savedConnections.openAllConnections").to_string(),
+                t!("savedConnections.openAllConnections").to_string(),
                 false,
                 move |app, window, cx| {
                     app.start_group_connections(group_id.clone(), window, cx);

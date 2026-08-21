@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::rc::Rc;
 
 use gpui::{
@@ -116,7 +118,7 @@ impl NyaTermApp {
         C: Fn(&mut NyaTermApp, &mut Context<NyaTermApp>) + 'static,
     {
         let (title, width, action_label, render, on_submit, on_cancel) = spec;
-        let cancel_label = self.tr("common.cancel").to_string();
+        let cancel_label = t!("common.cancel").to_string();
         let app = cx.entity();
         let content = cx
             .new(|cx| AppDialogContent::new(app.clone(), Rc::new(render) as Rc<FormRenderer>, cx));
@@ -156,7 +158,7 @@ impl NyaTermApp {
         B: Fn(&NyaTermApp) -> bool + 'static,
     {
         let (title, width, action_label, render, on_submit, on_cancel, busy) = spec;
-        let cancel_label = self.tr("common.cancel").to_string();
+        let cancel_label = t!("common.cancel").to_string();
         let app = cx.entity();
         let content = cx
             .new(|cx| AppDialogContent::new(app.clone(), Rc::new(render) as Rc<FormRenderer>, cx));
@@ -235,7 +237,7 @@ impl NyaTermApp {
         C: Fn(&mut NyaTermApp, &mut Context<NyaTermApp>) + 'static,
     {
         let (title, message, action_label, danger, on_confirm, on_cancel) = spec;
-        let cancel_label = self.tr("common.cancel").to_string();
+        let cancel_label = t!("common.cancel").to_string();
         let app = cx.weak_entity();
         let on_confirm = Rc::new(on_confirm) as Rc<ConfirmHandler>;
         let on_cancel = Rc::new(on_cancel) as Rc<AppDialogHandler>;

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::{HashMap, HashSet};
 
 use gpui::prelude::*;
@@ -90,7 +92,7 @@ pub(in crate::features::pages::tunnels) fn tunnel_section(
                 .py_2()
                 .text_size(px(11.))
                 .text_color(rgb(palette.text_muted))
-                .child(app.tr("network.groupEmpty")),
+                .child(t!("network.groupEmpty")),
         );
     } else {
         for (index, tunnel) in section.tunnels.into_iter().enumerate() {
@@ -106,11 +108,11 @@ pub(in crate::features::pages::tunnels) fn tunnel_section(
                         .find(|connection| connection.id == id)
                         .map(|connection| connection.name.clone())
                 })
-                .unwrap_or_else(|| app.tr("network.connectionMissing").to_string());
+                .unwrap_or_else(|| t!("network.connectionMissing").to_string());
             let mode_label = match tunnel.tunnel_type.as_str() {
-                "remote" => app.tr("network.remoteTunnel"),
-                "dynamic" => app.tr("network.dynamicTunnel"),
-                _ => app.tr("network.localTunnel"),
+                "remote" => t!("network.remoteTunnel"),
+                "dynamic" => t!("network.dynamicTunnel"),
+                _ => t!("network.localTunnel"),
             };
             let tunnel_for_open = tunnel.clone();
             let tunnel_id_for_close = tunnel.id.clone();
@@ -135,16 +137,16 @@ pub(in crate::features::pages::tunnels) fn tunnel_section(
                             connection_label,
                             open_info,
                             pending,
-                            open_status_label: app.tr("network.tunnelOpen"),
-                            closed_status_label: app.tr("network.tunnelClosed"),
+                            open_status_label: t!("network.tunnelOpen"),
+                            closed_status_label: t!("network.tunnelClosed"),
                             mode_label,
                             menu: NetworkItemMenuConfig {
                                 palette,
                                 id: format!("network-tunnel-actions-{}", tunnel.id),
-                                more_label: app.tr("common.more"),
-                                edit_label: app.tr("common.edit"),
-                                move_label: app.tr("network.moveToGroup"),
-                                delete_label: app.tr("common.delete"),
+                                more_label: t!("common.more"),
+                                edit_label: t!("common.edit"),
+                                move_label: t!("network.moveToGroup"),
+                                delete_label: t!("common.delete"),
                                 can_move: !app.tunnel_state.tunnel_groups().is_empty(),
                             },
                         },
@@ -184,7 +186,6 @@ pub(in crate::features::pages::tunnels) fn tunnel_section(
                             tunnel.id.clone(),
                             current_group_id,
                             app.tunnel_state.tunnel_groups(),
-                            app,
                             cx,
                         ))
                     }),
@@ -267,10 +268,10 @@ pub(in crate::features::pages::tunnels) fn tunnel_section(
                         NetworkItemMenuConfig {
                             palette,
                             id: format!("tunnel-group-actions-{}", group.id),
-                            more_label: app.tr("common.more"),
-                            edit_label: app.tr("network.renameGroup"),
-                            move_label: app.tr("network.moveToGroup"),
-                            delete_label: app.tr("network.deleteGroup"),
+                            more_label: t!("common.more"),
+                            edit_label: t!("network.renameGroup"),
+                            move_label: t!("network.moveToGroup"),
+                            delete_label: t!("network.deleteGroup"),
                             can_move: false,
                         },
                         cx.listener(move |this, _, window, cx| {
@@ -303,7 +304,6 @@ fn tunnel_move_picker(
     tunnel_id: String,
     current_group_id: Option<String>,
     groups: &[TunnelGroup],
-    app: &NyaTermApp,
     cx: &mut Context<NyaTermApp>,
 ) -> gpui::Div {
     let mut targets = div().flex().flex_wrap().items_center().gap_2();
@@ -318,8 +318,8 @@ fn tunnel_move_picker(
                 .bg(rgb(palette.hover))
                 .child(format!(
                     "{} · {}",
-                    app.tr("network.ungrouped"),
-                    app.tr("network.current")
+                    t!("network.ungrouped"),
+                    t!("network.current")
                 )),
         );
     } else {
@@ -327,7 +327,7 @@ fn tunnel_move_picker(
         targets = targets.child(small_button(
             palette,
             format!("network-tunnel-move-{tunnel_id}-ungrouped"),
-            app.tr("network.ungrouped"),
+            t!("network.ungrouped"),
             cx.listener(move |this, _, _, cx| {
                 this.move_tunnel_to_group(target_id.clone(), None, cx);
             }),
@@ -337,7 +337,7 @@ fn tunnel_move_picker(
     for group in groups {
         if current_group_id.as_deref() == Some(group.id.as_str()) {
             targets = targets.child(status_pill(
-                app.tr("network.current"),
+                t!("network.current"),
                 rgb(palette.success),
                 rgb(palette.hover),
             ));
@@ -353,7 +353,7 @@ fn tunnel_move_picker(
             targets = targets.child(small_button(
                 palette,
                 format!("network-tunnel-move-{tunnel_id}-{}", group.id),
-                app.tr("network.moveHere"),
+                t!("network.moveHere"),
                 cx.listener(move |this, _, _, cx| {
                     this.move_tunnel_to_group(target_id.clone(), Some(group_id.clone()), cx);
                 }),
@@ -382,7 +382,7 @@ fn tunnel_move_picker(
                 .text_xs()
                 .font_weight(FontWeight(700.))
                 .text_color(rgb(palette.text))
-                .child(app.tr("network.moveToGroup")),
+                .child(t!("network.moveToGroup")),
         )
         .child(targets)
 }

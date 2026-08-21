@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, Window};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -87,8 +89,8 @@ impl NyaTermApp {
     ) {
         let value = self.ai.settings_action_value(kind, &action_id, field);
         let setup = match field {
-            AiActionEditorField::Name => TextInputSetup::placeholder(self.tr("ai.actionName")),
-            AiActionEditorField::Prompt => TextInputSetup::multi_line(self.tr("ai.actionPrompt")),
+            AiActionEditorField::Name => TextInputSetup::placeholder(t!("ai.actionName")),
+            AiActionEditorField::Prompt => TextInputSetup::multi_line(t!("ai.actionPrompt")),
         };
         let input_id = Self::ai_action_text_input_id(kind, &action_id, field);
         let input = self.text_input(input_id, &value, setup, cx);
@@ -126,7 +128,7 @@ impl NyaTermApp {
         let input = self.text_input(
             input_id,
             "Custom AI action",
-            TextInputSetup::placeholder(self.tr("ai.actionName")),
+            TextInputSetup::placeholder(t!("ai.actionName")),
             cx,
         );
         window.focus(&input.read(cx).focus_handle(), cx);

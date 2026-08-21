@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -80,9 +82,9 @@ impl NyaTermApp {
         } = model;
         let palette = self.theme_palette();
         let active_session_id = self.session.active_id_owned();
-        let no_sessions_label = self.tr("panel.noActiveSessions").to_string();
-        let no_matches_label = self.tr("activeSessions.noMatches").to_string();
-        let search_placeholder = self.tr("recording.searchPlaceholder").to_string();
+        let no_sessions_label = t!("panel.noActiveSessions").to_string();
+        let no_matches_label = t!("activeSessions.noMatches").to_string();
+        let search_placeholder = t!("recording.searchPlaceholder").to_string();
         let search_draft = self.recording.search_draft().to_string();
         let search_field = self.text_input(
             "recording.search",
@@ -203,7 +205,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let recording_label = self.tr("recording.recording").to_string();
+        let recording_label = t!("recording.recording").to_string();
         let session_name = display_name;
         let session_id = session.id.clone();
         let start_session_id = session.id.clone();
@@ -376,9 +378,9 @@ impl NyaTermApp {
                             rgb(palette.text_muted)
                         },
                         if session_is_recording {
-                            self.tr("recording.stop").to_string()
+                            t!("recording.stop").to_string()
                         } else {
-                            self.tr("recording.start").to_string()
+                            t!("recording.start").to_string()
                         },
                         !is_busy,
                         cx.listener(move |this, _, _, cx| {
@@ -407,7 +409,7 @@ impl NyaTermApp {
                         } else {
                             rgb(palette.text_muted)
                         },
-                        self.tr("recording.saveTranscript").to_string(),
+                        t!("recording.saveTranscript").to_string(),
                         !is_busy,
                         cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();

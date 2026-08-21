@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use nyaterm_ui::NyaScrollable;
 use std::collections::{HashMap, HashSet};
 
@@ -162,7 +164,7 @@ impl NyaTermApp {
                     .text_size(px(10.))
                     .font_weight(FontWeight(700.))
                     .text_color(rgb(palette.text_dimmed))
-                    .child(self.tr("terminal.openTabs")),
+                    .child(t!("terminal.openTabs")),
             )
             .child(div().mx_2().my_1().h(px(1.)).bg(rgb(palette.border)));
 
@@ -173,7 +175,7 @@ impl NyaTermApp {
                     .py_2()
                     .text_size(px(12.))
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("sessionQuickSwitcher.noSessions")),
+                    .child(t!("sessionQuickSwitcher.noSessions")),
             );
         } else {
             for (index, session) in sessions.into_iter().enumerate() {
@@ -323,7 +325,7 @@ impl NyaTermApp {
                                 ),
                         )
                         .when(is_locked, |this| {
-                            let locked_label = self.tr("tabCtx.locked").to_string();
+                            let locked_label = t!("tabCtx.locked").to_string();
                             this.child(
                                 div()
                                     .id(SharedString::from(format!(
@@ -358,12 +360,12 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let hover_bg = self.shell_surface_color(palette.hover);
-        let new_session_label = self.tr("terminal.newSession");
-        let all_sessions_label = self.tr("terminal.allSessions");
-        let shell_sessions_label = self.tr("terminal.shellSessions");
-        let no_shell_sessions_label = self.tr("terminal.noShellSessions");
-        let recent_sessions_label = self.tr("terminal.recentSessions");
-        let no_recent_sessions_label = self.tr("terminal.noRecentSessions");
+        let new_session_label = t!("terminal.newSession");
+        let all_sessions_label = t!("terminal.allSessions");
+        let shell_sessions_label = t!("terminal.shellSessions");
+        let no_shell_sessions_label = t!("terminal.noShellSessions");
+        let recent_sessions_label = t!("terminal.recentSessions");
+        let no_recent_sessions_label = t!("terminal.noRecentSessions");
         let all_sessions_open = self.shell.new_session_all_sessions_is_open();
         // Tauri TabBar new-session: shell sessions + recent by last_used.
         let mut shell: Vec<_> = self
@@ -625,7 +627,7 @@ impl NyaTermApp {
             parent_group_id.as_deref(),
         );
         let has_groups = !groups.is_empty();
-        let no_saved_sessions_label = self.tr("terminal.noSavedSessions");
+        let no_saved_sessions_label = t!("terminal.noSavedSessions");
         let right = NEW_SESSION_MENU_WIDTH + depth as f32 * NEW_SESSION_SUBMENU_WIDTH;
         let mut menu = div()
             .id(SharedString::from(format!(

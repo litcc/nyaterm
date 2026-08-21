@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, FontWeight, InteractiveElement as _, IntoElement, MouseDownEvent,
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
@@ -22,7 +24,7 @@ impl NyaTermApp {
                 x: event.position.x,
                 y: event.position.y + px(18.),
             },
-            self.tr("fileExplorer.favorites").to_string(),
+            t!("fileExplorer.favorites").to_string(),
         );
         cx.notify();
     }
@@ -176,13 +178,13 @@ impl NyaTermApp {
                                 .text_xs()
                                 .font_weight(FontWeight(800.))
                                 .text_color(rgb(palette.text))
-                                .child(self.tr("fileExplorer.favorites")),
+                                .child(t!("fileExplorer.favorites")),
                         ),
                     )
                     .child(favorite_menu_button(
                         palette,
                         "transfer-browser-favorite-menu-add-current",
-                        self.tr("fileExplorer.addCurrentDirToFavorites"),
+                        t!("fileExplorer.addCurrentDirToFavorites"),
                         cx.listener(|this, _, _, cx| {
                             this.add_current_transfer_browser_favorite(cx);
                         }),
@@ -206,7 +208,7 @@ impl NyaTermApp {
                                         .py_2()
                                         .text_xs()
                                         .text_color(rgb(palette.text_muted))
-                                        .child(self.tr("fileExplorer.noFavorites")),
+                                        .child(t!("fileExplorer.noFavorites")),
                                 )
                             })
                             .when(!self.transfer.browser_view().favorites.is_empty(), |this| {

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -619,9 +621,7 @@ impl NyaTermApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(SharedString::from(
-                self.tr("settings.selectBackgroundImage"),
-            )),
+            prompt: Some(SharedString::from(t!("settings.selectBackgroundImage"))),
         };
         let receiver = cx.prompt_for_paths(options);
         self.shell

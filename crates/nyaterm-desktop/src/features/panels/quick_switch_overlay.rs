@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, StatefulInteractiveElement as _,
     div, prelude::*, px, rgb, rgba, svg,
@@ -25,7 +27,7 @@ impl NyaTermApp {
         let query_input = self.text_input(
             "quick-switch.query",
             state.query(),
-            TextInputSetup::placeholder(self.tr("sessionQuickSwitcher.searchPlaceholder")),
+            TextInputSetup::placeholder(t!("sessionQuickSwitcher.searchPlaceholder")),
             cx,
         );
         let query_focus = query_input.read(cx).focus_handle();
@@ -49,9 +51,9 @@ impl NyaTermApp {
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
                     .child(if self.quick_switch_items().is_empty() {
-                        self.tr("sessionQuickSwitcher.noSessions")
+                        t!("sessionQuickSwitcher.noSessions")
                     } else {
-                        self.tr("sessionQuickSwitcher.noMatches")
+                        t!("sessionQuickSwitcher.noMatches")
                     }),
             );
         } else {
@@ -62,7 +64,7 @@ impl NyaTermApp {
                     QuickSwitchItem::Session { active, .. } => {
                         if *active {
                             status_pill(
-                                self.tr("sessionQuickSwitcher.active"),
+                                t!("sessionQuickSwitcher.active"),
                                 rgb(palette.primary),
                                 rgba((palette.primary << 8) | 0x1a),
                             )
@@ -72,7 +74,7 @@ impl NyaTermApp {
                         }
                     }
                     QuickSwitchItem::Connection { .. } => status_pill(
-                        self.tr("sessionQuickSwitcher.saved"),
+                        t!("sessionQuickSwitcher.saved"),
                         rgb(palette.text_muted),
                         self.shell_surface_color(palette.hover),
                     )
@@ -80,7 +82,7 @@ impl NyaTermApp {
                     QuickSwitchItem::Pending { active, .. } => {
                         if *active {
                             status_pill(
-                                self.tr("sessionQuickSwitcher.active"),
+                                t!("sessionQuickSwitcher.active"),
                                 rgb(palette.primary),
                                 rgba((palette.primary << 8) | 0x1a),
                             )
@@ -226,8 +228,8 @@ impl NyaTermApp {
                             .child(div().text_xs().text_color(rgb(palette.text_muted)).child(
                                 format!(
                                     "Enter {} / Esc {}",
-                                    self.tr("sessionQuickSwitcher.open"),
-                                    self.tr("sessionQuickSwitcher.close")
+                                    t!("sessionQuickSwitcher.open"),
+                                    t!("sessionQuickSwitcher.close")
                                 ),
                             ))
                             .child(
@@ -244,7 +246,7 @@ impl NyaTermApp {
                                         .text_xs()
                                         .cursor_pointer()
                                         .hover(|this| this.bg(rgb(palette.primary_hover)))
-                                        .child(self.tr("sessionQuickSwitcher.newSsh"))
+                                        .child(t!("sessionQuickSwitcher.newSsh"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.forget_text_inputs("quick-switch.query");
                                             this.update_quick_switch_state(cx, |store| {

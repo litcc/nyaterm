@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{RemoteFilePath, SftpAttributeUpdate, SftpFileEntry, SftpFileType};
@@ -103,14 +105,13 @@ impl NyaTermApp {
         let Some(state) = self.transfer.properties_dialog() else {
             return;
         };
-        let title = self
-            .tr("fileExplorer.propertiesOf")
+        let title = t!("fileExplorer.propertiesOf")
             .replace("{{name}}", &truncate_preview(&state.entry.name, 42));
         self.open_form_dialog(
             (
                 title,
                 460.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| app.transfer_properties_dialog_content(cx),
                 |app, window, cx| app.submit_transfer_properties(window, cx),
                 |app, cx| app.close_transfer_properties(cx),

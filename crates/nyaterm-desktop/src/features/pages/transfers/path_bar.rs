@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     ClipboardItem, Context, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, SharedString,
     StatefulInteractiveElement as _, Window, div, prelude::*, px, rgb, svg,
@@ -44,7 +46,7 @@ impl NyaTermApp {
             let field = self.text_input(
                 "transfer.browser.path",
                 &self.transfer.browser_view().path_draft.clone(),
-                TextInputSetup::placeholder(self.tr("fileExplorer.editPath")),
+                TextInputSetup::placeholder(t!("fileExplorer.editPath")),
                 cx,
             );
             let focus = field.read(cx).focus_handle();
@@ -135,12 +137,11 @@ impl NyaTermApp {
                                 all_segments: breadcrumbs.clone(),
                                 visible_segments: visible_breadcrumbs.clone(),
                                 overflow_segments: overflow_breadcrumbs.clone(),
-                                overflow_label: self
-                                    .tr("fileExplorer.breadcrumbOverflow")
-                                    .to_string(),
-                                show_child_directories_label: self
-                                    .tr("fileExplorer.showChildDirectories")
-                                    .to_string(),
+                                overflow_label: t!("fileExplorer.breadcrumbOverflow").to_string(),
+                                show_child_directories_label: t!(
+                                    "fileExplorer.showChildDirectories"
+                                )
+                                .to_string(),
                             },
                             cx,
                         ))
@@ -167,7 +168,7 @@ impl NyaTermApp {
                                     .text_color(rgb(palette.text))
                             })
                             .tooltip({
-                                let label = self.tr("fileExplorer.favorites").to_string();
+                                let label = t!("fileExplorer.favorites").to_string();
                                 move |window, cx| {
                                     nyaterm_ui::NyaTooltip::new(label.clone()).build(window, cx)
                                 }
@@ -342,7 +343,7 @@ impl NyaTermApp {
                     .py_2()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("fileExplorer.loadingChildDirectories"))
+                    .child(t!("fileExplorer.loadingChildDirectories"))
                     .into_any_element(),
                 TransferBrowserChildrenMenuStatus::Error(error) => div()
                     .px_2()
@@ -354,7 +355,7 @@ impl NyaTermApp {
                         div()
                             .text_xs()
                             .text_color(rgb(palette.danger))
-                            .child(self.tr("fileExplorer.childDirectoriesFailed")),
+                            .child(t!("fileExplorer.childDirectoriesFailed")),
                     )
                     .child(
                         div()
@@ -377,7 +378,7 @@ impl NyaTermApp {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.retry_transfer_browser_children_menu(cx);
                             }))
-                            .child(self.tr("common.retry")),
+                            .child(t!("common.retry")),
                     )
                     .into_any_element(),
                 TransferBrowserChildrenMenuStatus::Ready(entries) if entries.is_empty() => div()
@@ -385,7 +386,7 @@ impl NyaTermApp {
                     .py_2()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("fileExplorer.noChildDirectories"))
+                    .child(t!("fileExplorer.noChildDirectories"))
                     .into_any_element(),
                 TransferBrowserChildrenMenuStatus::Ready(entries) => {
                     let segments = entries
@@ -469,7 +470,7 @@ impl NyaTermApp {
         let field = self.text_input(
             "transfer.browser.path",
             &self.transfer.browser_view().path_draft.clone(),
-            TextInputSetup::placeholder(self.tr("fileExplorer.editPath")),
+            TextInputSetup::placeholder(t!("fileExplorer.editPath")),
             cx,
         );
         window.focus(&field.read(cx).focus_handle(), cx);

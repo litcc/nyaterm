@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, ParentElement as _, SharedString, Styled as _,
     div, prelude::*, px, rgb, rgba,
@@ -19,7 +21,7 @@ impl NyaTermApp {
         self.text_input_box(
             "session.rename",
             &rename_draft,
-            TextInputSetup::placeholder(self.tr("tabCtx.renamePlaceholder")),
+            TextInputSetup::placeholder(t!("tabCtx.renamePlaceholder")),
             cx,
         )
         .into_any_element()
@@ -94,7 +96,7 @@ impl NyaTermApp {
                             .text_sm()
                             .font_weight(FontWeight(800.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("tabCtx.setColor")),
+                            .child(t!("tabCtx.setColor")),
                     )
                     .child(swatches)
                     .child(
@@ -102,7 +104,7 @@ impl NyaTermApp {
                             .mt_3()
                             .text_xs()
                             .text_color(rgb(palette.text_muted))
-                            .child(self.tr("tabCtx.colorHint")),
+                            .child(t!("tabCtx.colorHint")),
                     )
                     .child(
                         div()
@@ -114,7 +116,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "tab-color-reset",
-                                self.tr("tabCtx.resetColor"),
+                                t!("tabCtx.resetColor"),
                                 cx.listener(|this, _, _, cx| {
                                     this.set_active_session_tab_color(None, cx);
                                 }),
@@ -122,7 +124,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "tab-color-cancel",
-                                self.tr("common.cancel"),
+                                t!("common.cancel"),
                                 cx.listener(|this, _, _, cx| {
                                     this.close_tab_color_picker(cx);
                                 }),
@@ -139,9 +141,9 @@ impl NyaTermApp {
         let details = self.active_session_info_details().unwrap_or_default();
         let title = details
             .iter()
-            .find(|(label, _)| *label == self.tr("sessionInfo.name"))
+            .find(|(label, _)| *label == t!("sessionInfo.name"))
             .map(|(_, value)| value.clone())
-            .unwrap_or_else(|| self.tr("tabCtx.sessionInfo").to_string());
+            .unwrap_or_else(|| t!("tabCtx.sessionInfo").to_string());
         let mut rows = div().mt_4().flex().flex_col().gap_2();
         if details.is_empty() {
             rows = rows.child(
@@ -153,7 +155,7 @@ impl NyaTermApp {
                     .p_3()
                     .text_sm()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("tabCtx.noSessionDetails")),
+                    .child(t!("tabCtx.noSessionDetails")),
             );
         } else {
             for (label, value) in details {
@@ -214,7 +216,7 @@ impl NyaTermApp {
                                             .text_sm()
                                             .font_weight(FontWeight(800.))
                                             .text_color(rgb(palette.text))
-                                            .child(self.tr("tabCtx.sessionInfo")),
+                                            .child(t!("tabCtx.sessionInfo")),
                                     )
                                     .child(
                                         div()
@@ -236,7 +238,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "session-info-copy",
-                                self.tr("common.copyToClipboard"),
+                                t!("common.copyToClipboard"),
                                 cx.listener(|this, _, _, cx| {
                                     this.copy_active_session_info(cx);
                                 }),
@@ -244,7 +246,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "session-info-close",
-                                self.tr("common.close"),
+                                t!("common.close"),
                                 cx.listener(|this, _, _, cx| {
                                     this.close_active_session_info(cx);
                                 }),
@@ -263,7 +265,7 @@ impl NyaTermApp {
             .text_input_box(
                 "session.startup-command",
                 &command_draft,
-                TextInputSetup::placeholder(self.tr("tabCtx.commandRequired")),
+                TextInputSetup::placeholder(t!("tabCtx.commandRequired")),
                 cx,
             )
             .into_any_element();
@@ -279,7 +281,7 @@ impl NyaTermApp {
                     .text_xs()
                     .font_weight(FontWeight(600.))
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("tabCtx.commandInput")),
+                    .child(t!("tabCtx.commandInput")),
             )
             .child(command_input)
             .child(
@@ -287,7 +289,7 @@ impl NyaTermApp {
                     .text_xs()
                     .font_weight(FontWeight(600.))
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("tabCtx.commandDelay")),
+                    .child(t!("tabCtx.commandDelay")),
             )
             .child(
                 div()
@@ -330,7 +332,7 @@ impl NyaTermApp {
                     div()
                         .text_size(px(12.))
                         .text_color(rgb(palette.danger))
-                        .child(self.tr("tabCtx.commandRequired")),
+                        .child(t!("tabCtx.commandRequired")),
                 )
             })
             .into_any_element()

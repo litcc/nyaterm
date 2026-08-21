@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, div, prelude::*, px, rgb, svg};
 
 use super::connection_import_overlay::{import_docs_link, import_source_card};
@@ -30,7 +32,7 @@ impl NyaTermApp {
                 div()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("quickCommands.importSelectSource")),
+                    .child(t!("quickCommands.importSelectSource")),
             )
             .child(
                 div()
@@ -43,8 +45,8 @@ impl NyaTermApp {
                         palette,
                         "quick-command-import-windterm-card",
                         "color/brand/windterm.png",
-                        self.tr("quickCommands.importWindTerm"),
-                        self.tr("quickCommands.importWindTermHint"),
+                        t!("quickCommands.importWindTerm"),
+                        t!("quickCommands.importWindTermHint"),
                         cx.listener(|this, _, window, cx| {
                             this.select_quick_command_import_source(
                                 QuickCommandImportPathPromptKind::WindTermQuickbar,
@@ -57,8 +59,8 @@ impl NyaTermApp {
                         palette,
                         "quick-command-import-xshell-card",
                         "color/brand/xshell.png",
-                        self.tr("quickCommands.importXshell"),
-                        self.tr("quickCommands.importXshellHint"),
+                        t!("quickCommands.importXshell"),
+                        t!("quickCommands.importXshellHint"),
                         cx.listener(|this, _, window, cx| {
                             this.select_quick_command_import_source(
                                 QuickCommandImportPathPromptKind::XshellXts,
@@ -71,8 +73,8 @@ impl NyaTermApp {
                         palette,
                         "quick-command-import-json-card",
                         "icons/file/data-object.svg",
-                        self.tr("quickCommands.importNyaTermJson"),
-                        self.tr("quickCommands.importNyaTermJsonHint"),
+                        t!("quickCommands.importNyaTermJson"),
+                        t!("quickCommands.importNyaTermJsonHint"),
                         cx.listener(|this, _, window, cx| {
                             this.select_quick_command_import_source(
                                 QuickCommandImportPathPromptKind::NyatermJson,
@@ -108,13 +110,13 @@ impl NyaTermApp {
                                     .text_size(px(11.))
                                     .line_height(px(16.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(self.tr("quickCommands.importMergeHint")),
+                                    .child(t!("quickCommands.importMergeHint")),
                             ),
                     )
                     .child(import_docs_link(
                         palette,
                         "quick-command-import-docs",
-                        self.tr("quickCommands.importDocs"),
+                        t!("quickCommands.importDocs"),
                         cx.listener(move |this, _, _, cx| {
                             this.open_external_url_for_ui(docs_url, cx);
                         }),

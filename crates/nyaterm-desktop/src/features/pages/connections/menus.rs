@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::Context;
 use nyaterm_core::SavedConnection;
 use nyaterm_ui::{NyaDialogWindowExt as _, NyaMenuItem};
@@ -15,7 +17,7 @@ impl NyaTermApp {
     ) -> Vec<NyaMenuItem> {
         let ungrouped_ids = move_ids.clone();
         let mut items = vec![
-            NyaMenuItem::action(self.tr("savedConnections.ungroupedConnections"))
+            NyaMenuItem::action(t!("savedConnections.ungroupedConnections"))
                 .icon("icons/conn/connect.svg")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.move_connections_into_group(ungrouped_ids.clone(), None, cx);
@@ -55,15 +57,15 @@ impl NyaTermApp {
         let connect_label = if targets_selection {
             format!(
                 "{} ({selected_count})",
-                self.tr("savedConnections.connectSelected")
+                t!("savedConnections.connectSelected")
             )
         } else {
-            self.tr("savedConnections.connect").to_string()
+            t!("savedConnections.connect").to_string()
         };
         let copy_label = if targets_selection {
-            self.tr("savedConnections.copySelected")
+            t!("savedConnections.copySelected")
         } else {
-            self.tr("savedConnections.copy")
+            t!("savedConnections.copy")
         };
         let move_ids = if targets_selection {
             selected
@@ -93,7 +95,7 @@ impl NyaTermApp {
                         this.start_saved_connection(connection_for_connect.clone(), window, cx);
                     }
                 })),
-            NyaMenuItem::action(self.tr("savedConnections.edit"))
+            NyaMenuItem::action(t!("savedConnections.edit"))
                 .icon("icons/net/edit.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_connection_editor(
@@ -105,7 +107,7 @@ impl NyaTermApp {
                     );
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("savedConnections.rename"))
+            NyaMenuItem::action(t!("savedConnections.rename"))
                 .icon("icons/session/rename.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.rename_connection(connection_for_rename.clone(), window, cx);
@@ -119,10 +121,10 @@ impl NyaTermApp {
                         this.copy_connection_by_id(connection_for_copy.clone(), cx);
                     }
                 })),
-            NyaMenuItem::submenu(self.tr("savedConnections.moveToGroup"), move_items)
+            NyaMenuItem::submenu(t!("savedConnections.moveToGroup"), move_items)
                 .icon("icons/net/move.svg"),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("savedConnections.delete"))
+            NyaMenuItem::action(t!("savedConnections.delete"))
                 .icon("icons/net/delete.svg")
                 .danger()
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -155,7 +157,7 @@ impl NyaTermApp {
             .len();
 
         let mut items = vec![
-            NyaMenuItem::action(self.tr("savedConnections.newConnection"))
+            NyaMenuItem::action(t!("savedConnections.newConnection"))
                 .icon("icons/conn/add.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_connection_editor(
@@ -166,7 +168,7 @@ impl NyaTermApp {
                         cx,
                     );
                 })),
-            NyaMenuItem::action(self.tr("savedConnections.newFolder"))
+            NyaMenuItem::action(t!("savedConnections.newFolder"))
                 .icon("icons/fe/new-folder.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_connection_group_editor(
@@ -180,7 +182,7 @@ impl NyaTermApp {
         if total_in_group > 0 {
             items.extend([
                 NyaMenuItem::separator(),
-                NyaMenuItem::action(self.tr("savedConnections.openAllConnections"))
+                NyaMenuItem::action(t!("savedConnections.openAllConnections"))
                     .icon("icons/fe/forward.svg")
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_connection_group_open_confirm(group_id_open.clone(), window, cx);
@@ -189,7 +191,7 @@ impl NyaTermApp {
         }
         items.extend([
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("savedConnections.renameFolder"))
+            NyaMenuItem::action(t!("savedConnections.renameFolder"))
                 .icon("icons/session/rename.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_connection_group_editor(
@@ -199,7 +201,7 @@ impl NyaTermApp {
                         cx,
                     );
                 })),
-            NyaMenuItem::action(self.tr("savedConnections.deleteFolder"))
+            NyaMenuItem::action(t!("savedConnections.deleteFolder"))
                 .icon("icons/net/delete.svg")
                 .danger()
                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -222,10 +224,10 @@ impl NyaTermApp {
         let connect_label = if selected_count > 1 {
             format!(
                 "{} ({selected_count})",
-                self.tr("savedConnections.connectSelected")
+                t!("savedConnections.connectSelected")
             )
         } else {
-            self.tr("savedConnections.connect").to_string()
+            t!("savedConnections.connect").to_string()
         };
         let move_items = self.connection_move_to_group_menu_items(move_ids, cx);
 
@@ -235,14 +237,14 @@ impl NyaTermApp {
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.start_selected_saved_connections(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("savedConnections.copySelected"))
+            NyaMenuItem::action(t!("savedConnections.copySelected"))
                 .icon("icons/copy.svg")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.copy_selected_connections(cx);
                 })),
-            NyaMenuItem::submenu(self.tr("savedConnections.moveToGroup"), move_items)
+            NyaMenuItem::submenu(t!("savedConnections.moveToGroup"), move_items)
                 .icon("icons/net/move.svg"),
-            NyaMenuItem::action(self.tr("savedConnections.delete"))
+            NyaMenuItem::action(t!("savedConnections.delete"))
                 .icon("icons/net/delete.svg")
                 .danger()
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -293,18 +295,18 @@ impl NyaTermApp {
             items
         };
         items.extend([
-            NyaMenuItem::action(self.tr("savedConnections.newConnection"))
+            NyaMenuItem::action(t!("savedConnections.newConnection"))
                 .icon("icons/conn/add.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_connection_editor(None, None, false, window, cx);
                 })),
-            NyaMenuItem::action(self.tr("savedConnections.newFolder"))
+            NyaMenuItem::action(t!("savedConnections.newFolder"))
                 .icon("icons/fe/new-folder.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_connection_group_editor(None, None, window, cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("settings.importConfig"))
+            NyaMenuItem::action(t!("settings.importConfig"))
                 .icon("icons/import.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.close_nya_dialog(cx);
@@ -320,13 +322,13 @@ impl NyaTermApp {
     ) -> Vec<NyaMenuItem> {
         let selected = self.connection_state.selected_connections();
         let mut items = vec![
-            NyaMenuItem::action(self.tr("settings.exportConfig"))
+            NyaMenuItem::action(t!("settings.exportConfig"))
                 .icon("icons/menu/export.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.close_nya_dialog(cx);
                     this.prompt_encrypted_portable_snapshot_export(window, cx);
                 })),
-            NyaMenuItem::action(self.tr("settings.importConfig"))
+            NyaMenuItem::action(t!("settings.importConfig"))
                 .icon("icons/import.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     window.close_nya_dialog(cx);
@@ -340,7 +342,7 @@ impl NyaTermApp {
         if !self.connection_state.connections().is_empty() {
             items.extend([
                 NyaMenuItem::separator(),
-                NyaMenuItem::action(self.tr("savedConnections.clearAll"))
+                NyaMenuItem::action(t!("savedConnections.clearAll"))
                     .icon("icons/transfer/clear-all.svg")
                     .danger()
                     .on_click(cx.listener(|this, _, window, cx| {

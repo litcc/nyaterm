@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb, svg};
 
 use crate::features::NyaTermApp;
@@ -56,7 +58,7 @@ impl NyaTermApp {
                     div()
                         .text_size(px(12.))
                         .text_color(rgb(palette.text_muted))
-                        .child(self.tr("ai.goToSettingsToEnable")),
+                        .child(t!("ai.goToSettingsToEnable")),
                 )
                 .into_any_element();
         }
@@ -90,10 +92,10 @@ impl NyaTermApp {
                         .text_size(px(13.))
                         .font_weight(FontWeight(700.))
                         .text_color(rgb(palette.text))
-                        .child(self.tr("ai.setupTitle")),
+                        .child(t!("ai.setupTitle")),
                 )
-                .child(self.ai_setup_step("1", self.tr("ai.setupStep1")))
-                .child(self.ai_setup_step("2", self.tr("ai.setupStep2")))
+                .child(self.ai_setup_step("1", t!("ai.setupStep1")))
+                .child(self.ai_setup_step("2", t!("ai.setupStep2")))
                 .child(
                     div()
                         .id(SharedString::from("ai-empty-open-settings-setup"))
@@ -114,7 +116,7 @@ impl NyaTermApp {
                             this.shell.set_settings_active_tab(SettingsTab::AiGeneral);
                             this.open_page(NavItem::Settings, cx);
                         }))
-                        .child(self.tr("ai.setupAction")),
+                        .child(t!("ai.setupAction")),
                 )
                 .into_any_element();
         }
@@ -136,7 +138,7 @@ impl NyaTermApp {
                 div()
                     .text_size(px(12.))
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("ai.empty")),
+                    .child(t!("ai.empty")),
             )
             .into_any_element()
     }

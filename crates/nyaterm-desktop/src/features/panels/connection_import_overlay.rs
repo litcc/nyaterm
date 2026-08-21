@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb, rgba, svg,
@@ -37,7 +39,7 @@ impl NyaTermApp {
                 div()
                     .text_xs()
                     .text_color(rgb(palette.text_muted))
-                    .child(self.tr("savedConnections.importSelectSource")),
+                    .child(t!("savedConnections.importSelectSource")),
             )
             .child(
                 div()
@@ -197,13 +199,13 @@ impl NyaTermApp {
                                     .text_size(px(11.))
                                     .line_height(px(16.))
                                     .text_color(rgb(palette.text_muted))
-                                    .child(self.tr("savedConnections.importMergeHint")),
+                                    .child(t!("savedConnections.importMergeHint")),
                             ),
                     )
                     .child(import_docs_link(
                         palette,
                         "connection-import-docs",
-                        self.tr("savedConnections.importDocs"),
+                        t!("savedConnections.importDocs"),
                         cx.listener(move |this, _, _, cx| {
                             this.open_external_url_for_ui(docs_url, cx);
                         }),

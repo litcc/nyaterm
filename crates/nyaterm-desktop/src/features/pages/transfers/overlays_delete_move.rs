@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AnyElement, Context, IntoElement, ParentElement as _, div};
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
@@ -22,7 +24,7 @@ impl NyaTermApp {
             .text_input_box(
                 "transfer.move.path",
                 &state.value,
-                TextInputSetup::placeholder(self.tr("fileExplorer.location")),
+                TextInputSetup::placeholder(t!("fileExplorer.location")),
                 cx,
             )
             .into_any_element();

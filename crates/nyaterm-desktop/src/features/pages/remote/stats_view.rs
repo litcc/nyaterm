@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -33,18 +35,15 @@ impl NyaTermApp {
             return div()
                 .size_full()
                 .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(
-                    self.tr("panel.resourceMonitorNoSession"),
-                    palette,
-                ));
+                .child(empty_panel(t!("panel.resourceMonitorNoSession"), palette));
         }
         let Some(stats) = stats_state.data else {
             let message = if stats_state.pending {
-                self.tr("common.loading")
+                t!("common.loading")
             } else if stats_state.status.contains("failed") {
-                self.tr("panel.resourceMonitorError")
+                t!("panel.resourceMonitorError")
             } else {
-                self.tr("common.loading")
+                t!("common.loading")
             };
             return div()
                 .size_full()
@@ -58,21 +57,21 @@ impl NyaTermApp {
         } else {
             0.
         };
-        let system_label = self.tr("resourceMonitor.system").to_string();
-        let hostname_label = self.tr("resourceMonitor.hostname").to_string();
-        let arch_label = self.tr("resourceMonitor.arch").to_string();
-        let os_label = self.tr("resourceMonitor.os").to_string();
-        let uptime_label = self.tr("resourceMonitor.uptime").to_string();
-        let cpu_label = self.tr("resourceMonitor.cpu").to_string();
-        let cpu_average_label = self.tr("resourceMonitor.cpuAvgUsage").to_string();
-        let load_1_label = self.tr("resourceMonitor.Load1").to_string();
-        let load_5_label = self.tr("resourceMonitor.Load5").to_string();
-        let load_15_label = self.tr("resourceMonitor.Load15").to_string();
-        let memory_label = self.tr("resourceMonitor.memory").to_string();
-        let available_label = self.tr("resourceMonitor.available").to_string();
-        let cached_label = self.tr("resourceMonitor.cached").to_string();
-        let network_label = self.tr("resourceMonitor.network").to_string();
-        let disk_label = self.tr("resourceMonitor.disk").to_string();
+        let system_label = t!("resourceMonitor.system").to_string();
+        let hostname_label = t!("resourceMonitor.hostname").to_string();
+        let arch_label = t!("resourceMonitor.arch").to_string();
+        let os_label = t!("resourceMonitor.os").to_string();
+        let uptime_label = t!("resourceMonitor.uptime").to_string();
+        let cpu_label = t!("resourceMonitor.cpu").to_string();
+        let cpu_average_label = t!("resourceMonitor.cpuAvgUsage").to_string();
+        let load_1_label = t!("resourceMonitor.Load1").to_string();
+        let load_5_label = t!("resourceMonitor.Load5").to_string();
+        let load_15_label = t!("resourceMonitor.Load15").to_string();
+        let memory_label = t!("resourceMonitor.memory").to_string();
+        let available_label = t!("resourceMonitor.available").to_string();
+        let cached_label = t!("resourceMonitor.cached").to_string();
+        let network_label = t!("resourceMonitor.network").to_string();
+        let disk_label = t!("resourceMonitor.disk").to_string();
 
         let mut network_rows = div().flex().flex_col();
         if stats.networks.is_empty() {
@@ -352,7 +351,7 @@ impl NyaTermApp {
             .search_input_box(
                 "remote.gpu.filter",
                 &gpu_state.search_draft.clone(),
-                TextInputSetup::placeholder(self.tr("gpuMonitor.search")),
+                TextInputSetup::placeholder(t!("gpuMonitor.search")),
                 cx,
             )
             .into_any_element();
@@ -360,21 +359,21 @@ impl NyaTermApp {
             return div()
                 .size_full()
                 .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(self.tr("gpuMonitor.noSession"), palette));
+                .child(empty_panel(t!("gpuMonitor.noSession"), palette));
         }
         let content = match gpu_state.data.as_ref() {
             Some(overview) if overview.available && !overview.gpus.is_empty() => {
                 rich_gpu_panel(self, palette, overview, &gpu_state, gpu_search_input, cx)
             }
             Some(overview) if !overview.available => {
-                empty_panel(self.tr("gpuMonitor.unavailable"), palette).into_any_element()
+                empty_panel(t!("gpuMonitor.unavailable"), palette).into_any_element()
             }
-            Some(_) => empty_panel(self.tr("gpuMonitor.noGpus"), palette).into_any_element(),
+            Some(_) => empty_panel(t!("gpuMonitor.noGpus"), palette).into_any_element(),
             None => {
                 let message = if gpu_state.pending || !gpu_state.status.contains("failed") {
-                    self.tr("common.loading")
+                    t!("common.loading")
                 } else {
-                    self.tr("gpuMonitor.error")
+                    t!("gpuMonitor.error")
                 };
                 empty_panel(message, palette).into_any_element()
             }
@@ -393,7 +392,7 @@ impl NyaTermApp {
             .search_input_box(
                 "remote.npu.filter",
                 &npu_state.search_draft.clone(),
-                TextInputSetup::placeholder(self.tr("ascendNpuMonitor.search")),
+                TextInputSetup::placeholder(t!("ascendNpuMonitor.search")),
                 cx,
             )
             .into_any_element();
@@ -401,21 +400,21 @@ impl NyaTermApp {
             return div()
                 .size_full()
                 .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(self.tr("ascendNpuMonitor.noSession"), palette));
+                .child(empty_panel(t!("ascendNpuMonitor.noSession"), palette));
         }
         let content = match npu_state.data.as_ref() {
             Some(overview) if overview.available && !overview.npus.is_empty() => {
                 rich_npu_panel(self, palette, overview, &npu_state, npu_search_input, cx)
             }
             Some(overview) if !overview.available => {
-                empty_panel(self.tr("ascendNpuMonitor.unavailable"), palette).into_any_element()
+                empty_panel(t!("ascendNpuMonitor.unavailable"), palette).into_any_element()
             }
-            Some(_) => empty_panel(self.tr("ascendNpuMonitor.noNpus"), palette).into_any_element(),
+            Some(_) => empty_panel(t!("ascendNpuMonitor.noNpus"), palette).into_any_element(),
             None => {
                 let message = if npu_state.pending || !npu_state.status.contains("failed") {
-                    self.tr("common.loading")
+                    t!("common.loading")
                 } else {
-                    self.tr("ascendNpuMonitor.error")
+                    t!("ascendNpuMonitor.error")
                 };
                 empty_panel(message, palette).into_any_element()
             }
@@ -485,7 +484,6 @@ fn rich_gpu_panel(
             gpu,
             state.expanded_devices.contains(&key),
             key,
-            app,
             cx,
         ));
     }
@@ -501,13 +499,13 @@ fn rich_gpu_panel(
         .child(accelerator_summary_grid(
             palette,
             vec![
-                (&app.tr("gpuMonitor.gpus"), summary.count.to_string()),
+                (&t!("gpuMonitor.gpus"), summary.count.to_string()),
                 (
-                    &app.tr("gpuMonitor.maxUtilization"),
+                    &t!("gpuMonitor.maxUtilization"),
                     format_percent(summary.max_utilization),
                 ),
                 (
-                    &app.tr("gpuMonitor.memory"),
+                    &t!("gpuMonitor.memory"),
                     format!(
                         "{} / {}",
                         format_memory_mb(summary.memory_used_mb),
@@ -515,7 +513,7 @@ fn rich_gpu_panel(
                     ),
                 ),
                 (
-                    &app.tr("gpuMonitor.maxTemperature"),
+                    &t!("gpuMonitor.maxTemperature"),
                     format_temperature(summary.max_temperature),
                 ),
             ],
@@ -527,15 +525,15 @@ fn rich_gpu_panel(
             total_processes,
             visible_processes
                 .into_iter()
-                .map(|process| gpu_process_row(palette, &process, app))
+                .map(|process| gpu_process_row(palette, &process))
                 .collect(),
             pad_top,
             pad_bottom,
             list_height,
             if normalized_query.is_empty() {
-                app.tr("gpuMonitor.noProcesses")
+                t!("gpuMonitor.noProcesses")
             } else {
-                app.tr("gpuMonitor.noMatches")
+                t!("gpuMonitor.noMatches")
             },
             cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
                 handle_accelerator_process_scroll(
@@ -584,7 +582,6 @@ fn rich_npu_panel(
             npu,
             state.expanded_devices.contains(&key),
             key,
-            app,
             cx,
         ));
     }
@@ -600,13 +597,13 @@ fn rich_npu_panel(
         .child(accelerator_summary_grid(
             palette,
             vec![
-                (&app.tr("ascendNpuMonitor.npus"), summary.count.to_string()),
+                (&t!("ascendNpuMonitor.npus"), summary.count.to_string()),
                 (
-                    &app.tr("ascendNpuMonitor.maxAicore"),
+                    &t!("ascendNpuMonitor.maxAicore"),
                     format_optional_percent(summary.max_aicore),
                 ),
                 (
-                    &app.tr("ascendNpuMonitor.memory"),
+                    &t!("ascendNpuMonitor.memory"),
                     format!(
                         "{} / {}",
                         format_memory_mb(summary.memory_used_mb),
@@ -614,7 +611,7 @@ fn rich_npu_panel(
                     ),
                 ),
                 (
-                    &app.tr("ascendNpuMonitor.maxTemperature"),
+                    &t!("ascendNpuMonitor.maxTemperature"),
                     format_temperature(summary.max_temperature),
                 ),
             ],
@@ -626,15 +623,15 @@ fn rich_npu_panel(
             total_processes,
             visible_processes
                 .into_iter()
-                .map(|process| npu_process_row(palette, &process, app))
+                .map(|process| npu_process_row(palette, &process))
                 .collect(),
             pad_top,
             pad_bottom,
             list_height,
             if normalized_query.is_empty() {
-                app.tr("ascendNpuMonitor.noProcesses")
+                t!("ascendNpuMonitor.noProcesses")
             } else {
-                app.tr("ascendNpuMonitor.noMatches")
+                t!("ascendNpuMonitor.noMatches")
             },
             cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
                 handle_accelerator_process_scroll(
@@ -691,7 +688,6 @@ fn gpu_card(
     gpu: &RemoteGpu,
     expanded: bool,
     key: String,
-    app: &mut NyaTermApp,
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let gpu_utilization = gpu.utilization_gpu_percent.unwrap_or(0.);
@@ -732,7 +728,7 @@ fn gpu_card(
                             .text_color(rgb(palette.text))
                             .child(truncate_preview(
                                 if gpu.name.trim().is_empty() {
-                                    app.tr("gpuMonitor.unknownGpu")
+                                    t!("gpuMonitor.unknownGpu")
                                 } else {
                                     Cow::Borrowed(gpu.name.as_str())
                                 }
@@ -765,13 +761,13 @@ fn gpu_card(
             .gap_2()
             .child(accelerator_metric_bar(
                 palette,
-                app.tr("gpuMonitor.gpuUtilization"),
+                t!("gpuMonitor.gpuUtilization"),
                 gpu_utilization,
                 format_percent(gpu_utilization),
             ))
             .child(accelerator_metric_bar(
                 palette,
-                app.tr("gpuMonitor.memoryUtilization"),
+                t!("gpuMonitor.memoryUtilization"),
                 memory_percent,
                 format!(
                     "{} / {}",
@@ -780,7 +776,7 @@ fn gpu_card(
                 ),
             )),
         if expanded {
-            gpu_details(palette, gpu, app).into_any_element()
+            gpu_details(palette, gpu).into_any_element()
         } else {
             div().into_any_element()
         },
@@ -792,7 +788,6 @@ fn npu_card(
     npu: &RemoteNpu,
     expanded: bool,
     key: String,
-    app: &mut NyaTermApp,
     cx: &mut Context<NyaTermApp>,
 ) -> impl IntoElement {
     let aicore_utilization = npu.utilization_aicore_percent.unwrap_or(0.);
@@ -833,7 +828,7 @@ fn npu_card(
                             .text_color(rgb(palette.text))
                             .child(truncate_preview(
                                 if npu.name.trim().is_empty() {
-                                    app.tr("ascendNpuMonitor.unknownNpu")
+                                    t!("ascendNpuMonitor.unknownNpu")
                                 } else {
                                     Cow::Borrowed(npu.name.as_str())
                                 }
@@ -866,13 +861,13 @@ fn npu_card(
             .gap_2()
             .child(accelerator_metric_bar(
                 palette,
-                app.tr("ascendNpuMonitor.aicoreUtilization"),
+                t!("ascendNpuMonitor.aicoreUtilization"),
                 aicore_utilization,
                 format_optional_percent(npu.utilization_aicore_percent),
             ))
             .child(accelerator_metric_bar(
                 palette,
-                app.tr("ascendNpuMonitor.memoryUtilization"),
+                t!("ascendNpuMonitor.memoryUtilization"),
                 memory_percent,
                 if npu.memory_total_mb > 0 {
                     format!(
@@ -885,7 +880,7 @@ fn npu_card(
                 },
             )),
         if expanded {
-            npu_details(palette, npu, app).into_any_element()
+            npu_details(palette, npu).into_any_element()
         } else {
             div().into_any_element()
         },
@@ -1010,16 +1005,12 @@ fn accelerator_metric_bar(
         )
 }
 
-fn gpu_details(
-    palette: crate::theme::ThemePalette,
-    gpu: &RemoteGpu,
-    app: &mut NyaTermApp,
-) -> gpui::Div {
+fn gpu_details(palette: crate::theme::ThemePalette, gpu: &RemoteGpu) -> gpui::Div {
     accelerator_detail_grid(
         palette,
         vec![
             (
-                &app.tr("gpuMonitor.uuid"),
+                &t!("gpuMonitor.uuid"),
                 if gpu.uuid.trim().is_empty() {
                     "-".to_string()
                 } else {
@@ -1027,35 +1018,31 @@ fn gpu_details(
                 },
             ),
             (
-                &app.tr("gpuMonitor.temperature"),
+                &t!("gpuMonitor.temperature"),
                 format_temperature(gpu.temperature_c),
             ),
             (
-                &app.tr("gpuMonitor.power"),
+                &t!("gpuMonitor.power"),
                 format_power(gpu.power_draw_w, gpu.power_limit_w),
             ),
             (
-                &app.tr("gpuMonitor.fan"),
+                &t!("gpuMonitor.fan"),
                 format_optional_percent(gpu.fan_speed_percent),
             ),
             (
-                &app.tr("gpuMonitor.memoryFree"),
+                &t!("gpuMonitor.memoryFree"),
                 format_memory_mb(gpu.memory_free_mb),
             ),
         ],
     )
 }
 
-fn npu_details(
-    palette: crate::theme::ThemePalette,
-    npu: &RemoteNpu,
-    app: &mut NyaTermApp,
-) -> gpui::Div {
+fn npu_details(palette: crate::theme::ThemePalette, npu: &RemoteNpu) -> gpui::Div {
     accelerator_detail_grid(
         palette,
         vec![
             (
-                &app.tr("ascendNpuMonitor.device"),
+                &t!("ascendNpuMonitor.device"),
                 if npu.device_key.trim().is_empty() {
                     "-".to_string()
                 } else {
@@ -1063,7 +1050,7 @@ fn npu_details(
                 },
             ),
             (
-                &app.tr("ascendNpuMonitor.busId"),
+                &t!("ascendNpuMonitor.busId"),
                 if npu.bus_id.trim().is_empty() {
                     "-".to_string()
                 } else {
@@ -1071,21 +1058,21 @@ fn npu_details(
                 },
             ),
             (
-                &app.tr("ascendNpuMonitor.physicalId"),
+                &t!("ascendNpuMonitor.physicalId"),
                 npu.physical_id
                     .map(|value| value.to_string())
                     .unwrap_or_else(|| "-".to_string()),
             ),
             (
-                &app.tr("ascendNpuMonitor.temperature"),
+                &t!("ascendNpuMonitor.temperature"),
                 format_temperature(npu.temperature_c),
             ),
             (
-                &app.tr("ascendNpuMonitor.power"),
+                &t!("ascendNpuMonitor.power"),
                 format_watts(npu.power_draw_w),
             ),
             (
-                &app.tr("ascendNpuMonitor.memoryFree"),
+                &t!("ascendNpuMonitor.memoryFree"),
                 if npu.memory_total_mb > 0 {
                     format_memory_mb(npu.memory_free_mb)
                 } else {
@@ -1185,11 +1172,7 @@ fn accelerator_process_section(
     )
 }
 
-fn gpu_process_row(
-    palette: crate::theme::ThemePalette,
-    process: &RemoteGpuProcess,
-    app: &mut NyaTermApp,
-) -> gpui::Div {
+fn gpu_process_row(palette: crate::theme::ThemePalette, process: &RemoteGpuProcess) -> gpui::Div {
     accelerator_process_row(
         palette,
         if process.process_name.trim().is_empty() {
@@ -1199,9 +1182,9 @@ fn gpu_process_row(
         },
         format!(
             "{} {}   {} {}",
-            app.tr("gpuMonitor.pid"),
+            t!("gpuMonitor.pid"),
             process.pid,
-            app.tr("gpuMonitor.gpu"),
+            t!("gpuMonitor.gpu"),
             process
                 .gpu_index
                 .map(|value| value.to_string())
@@ -1211,11 +1194,7 @@ fn gpu_process_row(
     )
 }
 
-fn npu_process_row(
-    palette: crate::theme::ThemePalette,
-    process: &RemoteNpuProcess,
-    app: &mut NyaTermApp,
-) -> gpui::Div {
+fn npu_process_row(palette: crate::theme::ThemePalette, process: &RemoteNpuProcess) -> gpui::Div {
     accelerator_process_row(
         palette,
         if process.process_name.trim().is_empty() {
@@ -1225,9 +1204,9 @@ fn npu_process_row(
         },
         format!(
             "{} {}   {} {}:{}",
-            app.tr("ascendNpuMonitor.pid"),
+            t!("ascendNpuMonitor.pid"),
             process.pid,
-            app.tr("ascendNpuMonitor.npu"),
+            t!("ascendNpuMonitor.npu"),
             process.npu_index,
             process.chip_id
         ),

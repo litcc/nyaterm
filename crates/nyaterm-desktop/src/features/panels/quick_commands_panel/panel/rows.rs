@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, AppContext as _, ClickEvent, Context, FontWeight, IntoElement, SharedString, div,
     prelude::*, px, relative, rgb, rgba,
@@ -56,9 +58,9 @@ impl NyaTermApp {
                 "execute"
             };
             let badge_label = if execution_mode == "append" {
-                self.tr("quickCommands.appendOnlyBadge")
+                t!("quickCommands.appendOnlyBadge")
             } else {
-                self.tr("quickCommands.executeImmediately")
+                t!("quickCommands.executeImmediately")
             };
             let badge_mode = QuickCommandCardExecutionMode {
                 append: execution_mode == "append",
@@ -462,7 +464,7 @@ impl NyaTermApp {
         let all_command_id = command_id.clone();
         let delete_command_id = command_id;
         let mut items = vec![
-            NyaMenuItem::action(self.tr("quickCommands.edit"))
+            NyaMenuItem::action(t!("quickCommands.edit"))
                 .icon("icons/net/edit.svg")
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.open_edit_quick_command_editor(edit_command_id.clone(), window, cx);
@@ -470,7 +472,7 @@ impl NyaTermApp {
         ];
         if self.session.live_session_count() > 1 {
             items.push(
-                NyaMenuItem::action(self.tr("quickCommands.sendToAll"))
+                NyaMenuItem::action(t!("quickCommands.sendToAll"))
                     .icon("icons/menu/broadcast.svg")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.send_quick_command_to_all_by_id(all_command_id.clone(), cx);
@@ -479,7 +481,7 @@ impl NyaTermApp {
         }
         items.extend([
             NyaMenuItem::separator(),
-            NyaMenuItem::action(self.tr("common.delete"))
+            NyaMenuItem::action(t!("common.delete"))
                 .icon("icons/net/delete.svg")
                 .danger()
                 .on_click(cx.listener(move |this, _, window, cx| {

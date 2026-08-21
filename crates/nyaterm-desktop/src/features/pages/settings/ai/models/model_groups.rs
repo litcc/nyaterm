@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px,
     rgb,
@@ -74,11 +76,11 @@ impl NyaTermApp {
 
         let collapsed = self.ai.settings_model_collapsed_groups().clone();
         let manual_drafts = self.ai.settings_manual_model_drafts().clone();
-        let manual_placeholder = self.tr("ai.manualModelPlaceholder");
-        let manual_badge = self.tr("ai.manualModelBadge");
-        let custom_provider = self.tr("ai.customProvider");
-        let add_label = self.tr("common.add");
-        let delete_label = self.tr("common.delete");
+        let manual_placeholder = t!("ai.manualModelPlaceholder");
+        let manual_badge = t!("ai.manualModelBadge");
+        let custom_provider = t!("ai.customProvider");
+        let add_label = t!("common.add");
+        let delete_label = t!("common.delete");
 
         if groups.is_empty() {
             return div()
@@ -90,7 +92,7 @@ impl NyaTermApp {
                 .text_center()
                 .text_size(px(11.))
                 .text_color(rgb(palette.text_muted))
-                .child(self.tr("ai.noModels"))
+                .child(t!("ai.noModels"))
                 .into_any_element();
         }
 

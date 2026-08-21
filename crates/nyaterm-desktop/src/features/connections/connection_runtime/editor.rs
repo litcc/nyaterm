@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, PathPromptOptions, SharedString, Window};
 use nyaterm_core::{
     Group, RdpClipboardSettings, RdpDisplaySettings, RdpReconnectSettings, RdpSecuritySettings,
@@ -33,79 +35,77 @@ impl NyaTermApp {
         use nyaterm_transport::{SshAlgorithmListKind, SshAlgorithmValidationError};
 
         let algorithm_kind = |kind: SshAlgorithmListKind| match kind {
-            SshAlgorithmListKind::KeyExchange => self.tr("dialog.algorithmKex"),
-            SshAlgorithmListKind::Cipher => self.tr("dialog.algorithmCiphers"),
-            SshAlgorithmListKind::Mac => self.tr("dialog.algorithmMacs"),
-            SshAlgorithmListKind::HostKey => self.tr("dialog.algorithmHostKeys"),
+            SshAlgorithmListKind::KeyExchange => t!("dialog.algorithmKex"),
+            SshAlgorithmListKind::Cipher => t!("dialog.algorithmCiphers"),
+            SshAlgorithmListKind::Mac => t!("dialog.algorithmMacs"),
+            SshAlgorithmListKind::HostKey => t!("dialog.algorithmHostKeys"),
         };
         match error {
-            ConnectionEditorValidationError::HostRequired => self.tr("dialog.hostRequired").into(),
-            ConnectionEditorValidationError::PortInvalid => self.tr("dialog.portInvalid").into(),
+            ConnectionEditorValidationError::HostRequired => t!("dialog.hostRequired").into(),
+            ConnectionEditorValidationError::PortInvalid => t!("dialog.portInvalid").into(),
             ConnectionEditorValidationError::UsernameRequired => {
-                self.tr("dialog.usernameRequired").into()
+                t!("dialog.usernameRequired").into()
             }
             ConnectionEditorValidationError::ShellPathRequired => {
-                self.tr("dialog.shellPathRequired").into()
+                t!("dialog.shellPathRequired").into()
             }
             ConnectionEditorValidationError::SerialPortRequired => {
-                self.tr("dialog.serialPortRequired").into()
+                t!("dialog.serialPortRequired").into()
             }
-            ConnectionEditorValidationError::BaudRateInvalid => self
-                .tr("dialog.baudRateInvalid")
+            ConnectionEditorValidationError::BaudRateInvalid => t!("dialog.baudRateInvalid")
                 .replace("{{min}}", "1")
                 .replace("{{max}}", "4000000"),
             ConnectionEditorValidationError::RdpDisplayWidthInvalid => {
-                self.tr("dialog.rdpDisplayWidthInvalid").into()
+                t!("dialog.rdpDisplayWidthInvalid").into()
             }
             ConnectionEditorValidationError::RdpDisplayHeightInvalid => {
-                self.tr("dialog.rdpDisplayHeightInvalid").into()
+                t!("dialog.rdpDisplayHeightInvalid").into()
             }
             ConnectionEditorValidationError::RdpReconnectAttemptsInvalid => {
-                self.tr("dialog.rdpReconnectAttemptsInvalid").into()
+                t!("dialog.rdpReconnectAttemptsInvalid").into()
             }
             ConnectionEditorValidationError::VncReconnectAttemptsInvalid => {
                 "VNC reconnect attempts must be between 0 and 20".to_string()
             }
             ConnectionEditorValidationError::PostLoginCommandRequired => {
-                self.tr("dialog.postLoginCommandRequired").into()
+                t!("dialog.postLoginCommandRequired").into()
             }
-            ConnectionEditorValidationError::PostLoginDelayInvalid => self
-                .tr("dialog.postLoginDelayInvalid")
-                .replace("{{min}}", "0")
-                .replace("{{max}}", "60000"),
-            ConnectionEditorValidationError::SftpShellDetectionTimeoutInvalid => self
-                .tr("dialog.sftpShellDetectionTimeoutInvalid")
-                .replace("{{min}}", "100")
-                .replace("{{max}}", "60000"),
+            ConnectionEditorValidationError::PostLoginDelayInvalid => {
+                t!("dialog.postLoginDelayInvalid")
+                    .replace("{{min}}", "0")
+                    .replace("{{max}}", "60000")
+            }
+            ConnectionEditorValidationError::SftpShellDetectionTimeoutInvalid => {
+                t!("dialog.sftpShellDetectionTimeoutInvalid")
+                    .replace("{{min}}", "100")
+                    .replace("{{max}}", "60000")
+            }
             ConnectionEditorValidationError::SshAgentEndpoint(error) => match error {
                 nyaterm_core::SshAgentEndpointValidationError::Empty => {
-                    self.tr("dialog.sshAgentEndpointEmpty").into()
+                    t!("dialog.sshAgentEndpointEmpty").into()
                 }
                 nyaterm_core::SshAgentEndpointValidationError::Invalid => {
-                    self.tr("dialog.sshAgentEndpointInvalid").into()
+                    t!("dialog.sshAgentEndpointInvalid").into()
                 }
                 nyaterm_core::SshAgentEndpointValidationError::TooLong => {
-                    self.tr("dialog.sshAgentEndpointTooLong").into()
+                    t!("dialog.sshAgentEndpointTooLong").into()
                 }
                 nyaterm_core::SshAgentEndpointValidationError::DuplicateEndpoint => {
-                    self.tr("dialog.sshAgentEndpointDuplicate").into()
+                    t!("dialog.sshAgentEndpointDuplicate").into()
                 }
                 nyaterm_core::SshAgentEndpointValidationError::TooManyEndpoints
                 | nyaterm_core::SshAgentEndpointValidationError::TooManyIdentities
                 | nyaterm_core::SshAgentEndpointValidationError::InvalidFingerprint
                 | nyaterm_core::SshAgentEndpointValidationError::DuplicateFingerprint => {
-                    self.tr("dialog.sshAgentEndpointInvalid").into()
+                    t!("dialog.sshAgentEndpointInvalid").into()
                 }
             },
             ConnectionEditorValidationError::SshAlgorithms(
                 SshAlgorithmValidationError::EmptyList { kind },
-            ) => self
-                .tr("dialog.algorithmListRequired")
-                .replace("{{category}}", &algorithm_kind(*kind)),
+            ) => t!("dialog.algorithmListRequired").replace("{{category}}", &algorithm_kind(*kind)),
             ConnectionEditorValidationError::SshAlgorithms(
                 SshAlgorithmValidationError::Unsupported { kind, algorithm },
-            ) => self
-                .tr("dialog.algorithmUnsupportedError")
+            ) => t!("dialog.algorithmUnsupportedError")
                 .replace("{{algorithm}}", algorithm)
                 .replace("{{category}}", &algorithm_kind(*kind)),
         }
@@ -129,7 +129,7 @@ impl NyaTermApp {
                 .cloned()
             else {
                 self.shell
-                    .set_status(self.tr("dialog.connectionNotFound").to_string());
+                    .set_status(t!("dialog.connectionNotFound").to_string());
                 cx.notify();
                 return;
             };
@@ -238,10 +238,9 @@ impl NyaTermApp {
 
         self.connection_state.begin_editor(editor);
         // Fields mirror the draft, so they are rebuilt with it.
-        let language = self.settings.summary().language.clone();
-        self.connection_state.build_editor_fields(&language, cx);
+        self.connection_state.build_editor_fields(cx);
         self.shell
-            .set_status(self.tr("dialog.connectionEditorOpened").to_string());
+            .set_status(t!("dialog.connectionEditorOpened").to_string());
         if !self.open_connection_editor_window(cx) {
             // Land on the name and select it, so an edit can start by typing.
             match self
@@ -267,7 +266,7 @@ impl NyaTermApp {
         self.connection_state.close_editor();
         self.connection_state.clear_editor_fields();
         self.shell
-            .set_status(self.tr("dialog.connectionEditorClosed").to_string());
+            .set_status(t!("dialog.connectionEditorClosed").to_string());
         cx.notify();
     }
 
@@ -530,7 +529,7 @@ impl NyaTermApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let required_message = self.tr("dialog.groupNameRequired").to_string();
+        let required_message = t!("dialog.groupNameRequired").to_string();
         if self
             .connection_state
             .commit_editor_new_group(required_message)
@@ -554,16 +553,14 @@ impl NyaTermApp {
             self.connection_state.sync_editor_fields_from_draft(cx);
             let kind_label = match kind {
                 ConnectionKindTab::Ssh => "SSH",
-                ConnectionKindTab::Local => &self.tr("dialog.localTerminal"),
+                ConnectionKindTab::Local => &t!("dialog.localTerminal"),
                 ConnectionKindTab::Telnet => "Telnet",
-                ConnectionKindTab::Serial => &self.tr("dialog.serial"),
+                ConnectionKindTab::Serial => &t!("dialog.serial"),
                 ConnectionKindTab::Rdp => "RDP",
                 ConnectionKindTab::Vnc => "VNC",
             };
-            self.shell.set_status(
-                self.tr("dialog.connectionTypeChanged")
-                    .replace("{{type}}", kind_label),
-            );
+            self.shell
+                .set_status(t!("dialog.connectionTypeChanged").replace("{{type}}", kind_label));
         }
         cx.notify();
     }
@@ -577,14 +574,14 @@ impl NyaTermApp {
             directories: false,
             multiple: false,
             prompt: Some(SharedString::from(
-                self.tr("dialog.selectShellExecutable").to_string(),
+                t!("dialog.selectShellExecutable").to_string(),
             )),
         };
-        let selected_status = self.tr("dialog.shellPathSelected").to_string();
-        let cancelled_status = self.tr("dialog.shellPathSelectionCancelled").to_string();
+        let selected_status = t!("dialog.shellPathSelected").to_string();
+        let cancelled_status = t!("dialog.shellPathSelectionCancelled").to_string();
         let receiver = cx.prompt_for_paths(options);
         self.shell
-            .set_status(self.tr("dialog.selectingShellExecutable").to_string());
+            .set_status(t!("dialog.selectingShellExecutable").to_string());
         cx.spawn(async move |this, cx| {
             let selected = match receiver.await {
                 Ok(Ok(Some(paths))) => paths.into_iter().next(),
@@ -615,16 +612,14 @@ impl NyaTermApp {
             directories: true,
             multiple: false,
             prompt: Some(SharedString::from(
-                self.tr("dialog.selectWorkingDirectory").to_string(),
+                t!("dialog.selectWorkingDirectory").to_string(),
             )),
         };
-        let selected_status = self.tr("dialog.workingDirectorySelected").to_string();
-        let cancelled_status = self
-            .tr("dialog.workingDirectorySelectionCancelled")
-            .to_string();
+        let selected_status = t!("dialog.workingDirectorySelected").to_string();
+        let cancelled_status = t!("dialog.workingDirectorySelectionCancelled").to_string();
         let receiver = cx.prompt_for_paths(options);
         self.shell
-            .set_status(self.tr("dialog.selectingWorkingDirectory").to_string());
+            .set_status(t!("dialog.selectingWorkingDirectory").to_string());
         cx.spawn(async move |this, cx| {
             let selected = match receiver.await {
                 Ok(Ok(Some(paths))) => paths.into_iter().next(),
@@ -726,9 +721,9 @@ impl NyaTermApp {
         {
             self.open_confirm_dialog(
                 (
-                    self.tr("dialog.sshAgentAllowAllConfirmTitle").to_string(),
-                    self.tr("dialog.sshAgentAllowAllConfirmMessage").to_string(),
-                    self.tr("dialog.sshAgentAllowAllConfirmAction").to_string(),
+                    t!("dialog.sshAgentAllowAllConfirmTitle").to_string(),
+                    t!("dialog.sshAgentAllowAllConfirmMessage").to_string(),
+                    t!("dialog.sshAgentAllowAllConfirmAction").to_string(),
                     true,
                     |this: &mut NyaTermApp, window, cx| {
                         this.connection_state.confirm_editor_agent_allow_all();
@@ -796,7 +791,7 @@ impl NyaTermApp {
                     this.connection_state
                         .finish_editor_save(saved.id.clone(), saved.group_id.clone());
                     this.shell
-                        .set_status(this.tr("dialog.connectionSaved").to_string());
+                        .set_status(t!("dialog.connectionSaved").to_string());
                     if connect_after_save {
                         this.continue_saved_connection_start(saved, Default::default(), cx);
                     } else {
@@ -804,9 +799,8 @@ impl NyaTermApp {
                     }
                 }
                 Err(error) => {
-                    let message = this
-                        .tr("dialog.connectionSaveFailed")
-                        .replace("{{error}}", &error.to_string());
+                    let message =
+                        t!("dialog.connectionSaveFailed").replace("{{error}}", &error.to_string());
                     this.set_connection_editor_error(message, cx);
                 }
             },

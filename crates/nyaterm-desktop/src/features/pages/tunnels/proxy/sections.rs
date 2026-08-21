@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::{HashMap, HashSet};
 
 use gpui::prelude::*;
@@ -87,7 +89,7 @@ pub(in crate::features::pages::tunnels) fn proxy_section(
                 .py_2()
                 .text_size(px(11.))
                 .text_color(rgb(palette.text_muted))
-                .child(app.tr("network.groupEmpty")),
+                .child(t!("network.groupEmpty")),
         );
     } else {
         for (index, proxy) in section.proxies.into_iter().enumerate() {
@@ -108,7 +110,6 @@ pub(in crate::features::pages::tunnels) fn proxy_section(
                             proxy.id.clone(),
                             proxy.group_id.clone(),
                             app.tunnel_state.proxy_groups(),
-                            app,
                             cx,
                         ))
                     }),
@@ -191,10 +192,10 @@ pub(in crate::features::pages::tunnels) fn proxy_section(
                         NetworkItemMenuConfig {
                             palette,
                             id: format!("proxy-group-actions-{}", group.id),
-                            more_label: app.tr("common.more"),
-                            edit_label: app.tr("network.renameGroup"),
-                            move_label: app.tr("network.moveToGroup"),
-                            delete_label: app.tr("network.deleteGroup"),
+                            more_label: t!("common.more"),
+                            edit_label: t!("network.renameGroup"),
+                            move_label: t!("network.moveToGroup"),
+                            delete_label: t!("network.deleteGroup"),
                             can_move: false,
                         },
                         cx.listener(move |this, _, window, cx| {

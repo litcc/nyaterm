@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
     WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
@@ -48,7 +50,7 @@ impl Render for TransferExternalSyncWindow {
                 app.theme_palette(),
                 app.gpui_ui_font().font(),
                 app.settings.summary().ui_font_size.clamp(12, 24) as f32,
-                app.tr("fileExplorer.fileModified").to_string(),
+                t!("fileExplorer.fileModified").to_string(),
             )
         });
         window.set_window_title(&title);
@@ -180,7 +182,7 @@ fn open_transfer_external_sync_window_now_from_app(
         return;
     }
 
-    let title = app.read(cx).tr("fileExplorer.fileModified").to_string();
+    let title = t!("fileExplorer.fileModified").to_string();
     let bounds = Bounds::centered(None, size(px(440.), px(240.)), cx);
     let close_app = app.clone();
     let close_prompt_id = prompt_id.clone();

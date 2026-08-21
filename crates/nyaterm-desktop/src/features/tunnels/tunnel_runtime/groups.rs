@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_store::{StoreDomain, store_request};
 
@@ -51,12 +53,12 @@ impl NyaTermApp {
         self.open_form_dialog(
             (
                 if editing {
-                    self.tr("network.renameGroup").to_string()
+                    t!("network.renameGroup").to_string()
                 } else {
-                    self.tr("network.newGroup").to_string()
+                    t!("network.newGroup").to_string()
                 },
                 420.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| app.network_group_editor_dialog_content(cx),
                 |app, _, cx| {
                     app.save_network_group_editor(cx);
@@ -213,15 +215,14 @@ impl NyaTermApp {
     ) {
         self.shell
             .set_status("network group delete confirmation opened".to_string());
-        let description = self
-            .tr("network.deleteGroupConfirm")
+        let description = t!("network.deleteGroupConfirm")
             .replace("{{name}}", &label)
             .replace("{{count}}", &item_count.to_string());
         self.open_confirm_dialog(
             (
-                self.tr("network.deleteGroup").to_string(),
+                t!("network.deleteGroup").to_string(),
                 description,
-                self.tr("common.delete").to_string(),
+                t!("common.delete").to_string(),
                 true,
                 move |app, _, cx| {
                     match tab {

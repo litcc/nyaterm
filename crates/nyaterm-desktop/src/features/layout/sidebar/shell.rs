@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, IntoElement, div, prelude::*, px, rgb};
 
 use crate::features::NyaTermApp;
@@ -59,7 +61,7 @@ impl NyaTermApp {
             }
             NavItem::Stats => crate::features::inspector::disabled_inspector_panel(
                 palette,
-                self.tr("panel.resourceMonitorDisabled"),
+                t!("panel.resourceMonitorDisabled"),
             )
             .into_any_element(),
             NavItem::GpuMonitor if self.settings.summary().ui_show_gpu_monitor => {
@@ -67,7 +69,7 @@ impl NyaTermApp {
             }
             NavItem::GpuMonitor => crate::features::inspector::disabled_inspector_panel(
                 palette,
-                self.tr("panel.gpuMonitorDisabled"),
+                t!("panel.gpuMonitorDisabled"),
             )
             .into_any_element(),
             NavItem::AscendNpuMonitor if self.settings.summary().ui_show_ascend_npu_monitor => {
@@ -75,7 +77,7 @@ impl NyaTermApp {
             }
             NavItem::AscendNpuMonitor => crate::features::inspector::disabled_inspector_panel(
                 palette,
-                self.tr("panel.npuMonitorDisabled"),
+                t!("panel.npuMonitorDisabled"),
             )
             .into_any_element(),
             NavItem::Processes if self.settings.summary().ui_show_process_manager => {
@@ -83,7 +85,7 @@ impl NyaTermApp {
             }
             NavItem::Processes => crate::features::inspector::disabled_inspector_panel(
                 palette,
-                self.tr("processManager.disabled"),
+                t!("processManager.disabled"),
             )
             .into_any_element(),
             NavItem::Docker if self.settings.summary().ui_show_docker_manager => {
@@ -91,7 +93,7 @@ impl NyaTermApp {
             }
             NavItem::Docker => crate::features::inspector::disabled_inspector_panel(
                 palette,
-                self.tr("dockerManager.disabled"),
+                t!("dockerManager.disabled"),
             )
             .into_any_element(),
             NavItem::Recording => {

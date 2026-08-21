@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{AppContext, ClipboardItem, Context, IntoElement as _, KeyDownEvent, Window};
 use nyaterm_core::{SavedCredential, validate_prompt_regex};
 use nyaterm_ui::NyaDialogWindowExt as _;
@@ -71,16 +73,16 @@ impl NyaTermApp {
             .credential_editor()
             .is_some_and(|editor| editor.id.is_some())
         {
-            self.tr("credentialManager.editTitle")
+            t!("credentialManager.editTitle")
         } else {
-            self.tr("credentialManager.newTitle")
+            t!("credentialManager.newTitle")
         }
         .to_string();
         self.open_guarded_form_dialog(
             (
                 title,
                 640.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| {
                     app.security
                         .credential_editor()
@@ -448,8 +450,7 @@ impl NyaTermApp {
             && !username.is_empty()
         {
             cx.write_to_clipboard(ClipboardItem::new_string(username));
-            self.security
-                .set_status(self.tr("common.copied").to_string());
+            self.security.set_status(t!("common.copied").to_string());
             cx.notify();
         }
     }
@@ -463,8 +464,7 @@ impl NyaTermApp {
             && !value.is_empty()
         {
             cx.write_to_clipboard(ClipboardItem::new_string(value.to_string()));
-            self.security
-                .set_status(self.tr("common.copied").to_string());
+            self.security.set_status(t!("common.copied").to_string());
             cx.notify();
         }
     }
@@ -506,10 +506,10 @@ impl NyaTermApp {
                 let status = match result {
                     Ok(catalog) => {
                         this.security.replace_catalog_state(catalog);
-                        this.tr("credentialManager.reorderSuccess").to_string()
+                        t!("credentialManager.reorderSuccess").to_string()
                     }
                     Err(error) => {
-                        format!("{}: {error}", this.tr("credentialManager.reorderFailed"))
+                        format!("{}: {error}", t!("credentialManager.reorderFailed"))
                     }
                 };
                 this.security.set_status(status);

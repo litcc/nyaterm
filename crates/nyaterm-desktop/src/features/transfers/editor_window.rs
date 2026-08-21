@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::collections::{HashMap, HashSet};
 
 use gpui::{
@@ -183,7 +185,7 @@ fn open_remote_file_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut
         return;
     }
 
-    let title = app.read(cx).tr("fileEditor.title").to_string();
+    let title = t!("fileEditor.title").to_string();
     let bounds = Bounds::centered(None, size(px(980.), px(720.)), cx);
     let close_app = app.clone();
     let view_app = app.clone();

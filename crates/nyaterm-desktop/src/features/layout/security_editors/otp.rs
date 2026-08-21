@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -22,7 +24,7 @@ impl NyaTermApp {
         // A stored secret is never shown, so the box says so in its
         // placeholder rather than standing a row of bullets in for it.
         let secret_placeholder = if editor.has_secret {
-            self.tr("otpManager.secretUnchanged")
+            t!("otpManager.secretUnchanged")
         } else {
             Cow::Borrowed("")
         };
@@ -85,7 +87,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "otp-issuer",
-                self.tr("otpManager.issuerLabel"),
+                t!("otpManager.issuerLabel"),
                 editor.issuer.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -93,7 +95,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "otp-username",
-                self.tr("otpManager.usernameLabel"),
+                t!("otpManager.usernameLabel"),
                 editor.username.clone(),
                 TextInputSetup::default(),
                 cx,
@@ -101,7 +103,7 @@ impl NyaTermApp {
             .child(security_editor_field(
                 self,
                 "otp-secret",
-                self.tr("otpManager.secretLabel"),
+                t!("otpManager.secretLabel"),
                 editor.secret.clone(),
                 TextInputSetup {
                     placeholder: secret_placeholder.into(),
@@ -119,7 +121,7 @@ impl NyaTermApp {
                     .child(security_number_editor_field(
                         self,
                         "otp-digits",
-                        self.tr("otpManager.digits"),
+                        t!("otpManager.digits"),
                         editor.digits.clone(),
                         NyaNumberInputOptions::default().range(4.0, 10.0).step(1.0),
                         cx,
@@ -127,7 +129,7 @@ impl NyaTermApp {
                     .child(security_number_editor_field(
                         self,
                         "otp-period",
-                        self.tr("otpManager.period"),
+                        t!("otpManager.period"),
                         editor.period.clone(),
                         NyaNumberInputOptions::default()
                             .range(1.0, 3600.0)
@@ -137,7 +139,7 @@ impl NyaTermApp {
                     .child(security_number_editor_field(
                         self,
                         "otp-counter",
-                        self.tr("otpManager.counter"),
+                        t!("otpManager.counter"),
                         editor.counter.clone(),
                         NyaNumberInputOptions::default()
                             .range(0.0, i64::MAX as f64)

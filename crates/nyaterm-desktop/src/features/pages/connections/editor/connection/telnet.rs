@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, SharedString, div,
     prelude::{
@@ -85,15 +87,13 @@ pub(super) fn connection_editor_telnet_section(
     let ConnectionEditorSectionContext {
         palette,
         editor,
-        language,
         fields,
     } = section;
-    let tr = |key: &'static str| crate::i18n::text(language, key);
     let auth_values = vec!["none".to_string(), "password".to_string()];
     let auth_tabs = NyaTabs::new("connection-telnet-auth-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.noAuthentication")),
-            NyaTabItem::new(tr("dialog.password")),
+            NyaTabItem::new(t!("dialog.noAuthentication")),
+            NyaTabItem::new(t!("dialog.password")),
         ])
         .selected_index(if editor.auth_mode == "none" { 0 } else { 1 })
         .on_select(cx.listener(move |this, index: &usize, _, cx| {
@@ -108,9 +108,9 @@ pub(super) fn connection_editor_telnet_section(
         }));
     let password_source_tabs = NyaTabs::new("connection-telnet-password-source-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.askWhenConnecting")),
-            NyaTabItem::new(tr("dialog.directPassword")),
-            NyaTabItem::new(tr("dialog.savedPassword")),
+            NyaTabItem::new(t!("dialog.askWhenConnecting")),
+            NyaTabItem::new(t!("dialog.directPassword")),
+            NyaTabItem::new(t!("dialog.savedPassword")),
         ])
         .selected_index(match editor.password_source {
             ConnectionEditorPasswordSource::Ask => 0,
@@ -127,8 +127,8 @@ pub(super) fn connection_editor_telnet_section(
         }));
     let tabs = NyaTabs::new("connection-telnet-tabs")
         .items([
-            NyaTabItem::new(tr("dialog.telnetInputSettings")),
-            NyaTabItem::new(tr("dialog.telnetCompatibility")),
+            NyaTabItem::new(t!("dialog.telnetInputSettings")),
+            NyaTabItem::new(t!("dialog.telnetCompatibility")),
         ])
         .selected_index(
             if editor.telnet_advanced_tab == ConnectionEditorTelnetTab::Input {
@@ -155,14 +155,14 @@ pub(super) fn connection_editor_telnet_section(
                 .gap_3()
                 .child(div().min_w_0().flex_1().child(editor_field(
                     palette,
-                    required(tr("dialog.host")),
+                    required(t!("dialog.host")),
                     ConnectionEditorField::Host,
                     fields,
                     cx,
                 )))
                 .child(div().w(px(150.)).flex_none().child(editor_stepper_field(
                     palette,
-                    required(tr("dialog.port")),
+                    required(t!("dialog.port")),
                     ConnectionEditorField::Port,
                     fields,
                     cx,
@@ -170,7 +170,7 @@ pub(super) fn connection_editor_telnet_section(
         )
         .child(editor_field(
             palette,
-            tr("dialog.username"),
+            t!("dialog.username"),
             ConnectionEditorField::Username,
             fields,
             cx,
@@ -184,7 +184,7 @@ pub(super) fn connection_editor_telnet_section(
                     div()
                         .text_xs()
                         .text_color(rgb(palette.text_muted))
-                        .child(tr("dialog.authentication")),
+                        .child(t!("dialog.authentication")),
                 )
                 .child(auth_tabs)
                 .when(editor.auth_mode != "none", |this| {
@@ -194,7 +194,7 @@ pub(super) fn connection_editor_telnet_section(
                             |this| {
                                 this.child(editor_field(
                                     palette,
-                                    tr("dialog.password"),
+                                    t!("dialog.password"),
                                     ConnectionEditorField::Password,
                                     fields,
                                     cx,
@@ -211,7 +211,7 @@ pub(super) fn connection_editor_telnet_section(
                                         cx,
                                     },
                                     "connection-editor-telnet-saved-password",
-                                    tr("dialog.savedPassword"),
+                                    t!("dialog.savedPassword"),
                                     ConnectionEditorSelect::SavedPassword,
                                 ))
                             },
@@ -242,7 +242,7 @@ pub(super) fn connection_editor_telnet_section(
                         })
                         .text_color(rgb(palette.text_muted)),
                 )
-                .child(tr("dialog.advancedConfig")),
+                .child(t!("dialog.advancedConfig")),
         )
         .when(editor.advanced_open, |this| {
             this.child(tabs)
@@ -263,7 +263,7 @@ pub(super) fn connection_editor_telnet_section(
                                     div()
                                         .text_xs()
                                         .font_weight(FontWeight(600.))
-                                        .child(tr("dialog.telnetInputBehavior")),
+                                        .child(t!("dialog.telnetInputBehavior")),
                                 )
                                 .child(
                                     div()
@@ -277,7 +277,7 @@ pub(super) fn connection_editor_telnet_section(
                                                 cx,
                                             },
                                             "connection-editor-telnet-backspace",
-                                            tr("dialog.backspaceMode"),
+                                            t!("dialog.backspaceMode"),
                                             ConnectionEditorSelect::Backspace,
                                         ))
                                         .child(connection_editor_select(
@@ -287,7 +287,7 @@ pub(super) fn connection_editor_telnet_section(
                                                 cx,
                                             },
                                             "connection-editor-telnet-enter-mode",
-                                            tr("dialog.telnetEnterMode"),
+                                            t!("dialog.telnetEnterMode"),
                                             ConnectionEditorSelect::TelnetEnterMode,
                                         ))
                                         .child(connection_editor_select(
@@ -297,7 +297,7 @@ pub(super) fn connection_editor_telnet_section(
                                                 cx,
                                             },
                                             "connection-editor-telnet-encoding",
-                                            tr("connection.encoding"),
+                                            t!("connection.encoding"),
                                             ConnectionEditorSelect::Encoding,
                                         )),
                                 ),
@@ -321,13 +321,13 @@ pub(super) fn connection_editor_telnet_section(
                                     div()
                                         .text_size(px(10.))
                                         .text_color(rgb(palette.text_muted))
-                                        .child(tr("dialog.telnetRawTcpCliDesc")),
+                                        .child(t!("dialog.telnetRawTcpCliDesc")),
                                 )
                                 .child(telnet_switch_row(
                                     palette,
                                     "connection-telnet-raw-tcp",
-                                    tr("dialog.telnetRawTcpCli"),
-                                    tr("dialog.telnetRawTcpCliLongDesc"),
+                                    t!("dialog.telnetRawTcpCli"),
+                                    t!("dialog.telnetRawTcpCliLongDesc"),
                                     editor.raw_tcp_cli,
                                     true,
                                     cx.listener(|this, _, _, cx| {
@@ -345,8 +345,8 @@ pub(super) fn connection_editor_telnet_section(
                                         .child(telnet_switch_row(
                                             palette,
                                             "connection-telnet-local-echo",
-                                            tr("dialog.telnetLocalEcho"),
-                                            tr("dialog.telnetLocalEchoDesc"),
+                                            t!("dialog.telnetLocalEcho"),
+                                            t!("dialog.telnetLocalEchoDesc"),
                                             editor.local_echo,
                                             true,
                                             cx.listener(|this, _, _, cx| {
@@ -359,8 +359,8 @@ pub(super) fn connection_editor_telnet_section(
                                         .child(telnet_switch_row(
                                             palette,
                                             "connection-telnet-local-line-edit",
-                                            tr("dialog.telnetLocalLineEdit"),
-                                            tr("dialog.telnetLocalLineEditDesc"),
+                                            t!("dialog.telnetLocalLineEdit"),
+                                            t!("dialog.telnetLocalLineEditDesc"),
                                             editor.local_line_edit,
                                             true,
                                             cx.listener(|this, _, _, cx| {
@@ -373,8 +373,8 @@ pub(super) fn connection_editor_telnet_section(
                                         .child(telnet_switch_row(
                                             palette,
                                             "connection-telnet-force-character",
-                                            tr("dialog.telnetForceCharAtATime"),
-                                            tr("dialog.telnetForceCharAtATimeDesc"),
+                                            t!("dialog.telnetForceCharAtATime"),
+                                            t!("dialog.telnetForceCharAtATimeDesc"),
                                             editor.force_character_at_a_time,
                                             true,
                                             cx.listener(|this, _, _, cx| {
@@ -387,8 +387,8 @@ pub(super) fn connection_editor_telnet_section(
                                         .child(telnet_switch_row(
                                             palette,
                                             "connection-telnet-send-naws",
-                                            tr("dialog.telnetSendNaws"),
-                                            tr("dialog.telnetSendNawsDesc"),
+                                            t!("dialog.telnetSendNaws"),
+                                            t!("dialog.telnetSendNawsDesc"),
                                             editor.send_naws,
                                             !editor.raw_tcp_cli,
                                             cx.listener(|this, _, _, cx| {
@@ -401,8 +401,8 @@ pub(super) fn connection_editor_telnet_section(
                                         .child(telnet_switch_row(
                                             palette,
                                             "connection-telnet-send-sga",
-                                            tr("dialog.telnetSendSga"),
-                                            tr("dialog.telnetSendSgaDesc"),
+                                            t!("dialog.telnetSendSga"),
+                                            t!("dialog.telnetSendSgaDesc"),
                                             editor.send_sga,
                                             !editor.raw_tcp_cli,
                                             cx.listener(|this, _, _, cx| {
@@ -424,7 +424,7 @@ pub(super) fn connection_editor_telnet_section(
                                                 .text_xs()
                                                 .font_weight(FontWeight(600.))
                                                 .text_color(rgb(palette.text))
-                                                .child(tr("dialog.telnetAutoLogin")),
+                                                .child(t!("dialog.telnetAutoLogin")),
                                         )
                                         .child(
                                             div()
@@ -434,8 +434,8 @@ pub(super) fn connection_editor_telnet_section(
                                                 .child(telnet_switch_row(
                                                     palette,
                                                     "connection-telnet-auto-login-enabled",
-                                                    tr("dialog.enabled"),
-                                                    tr("dialog.telnetAutoLoginDesc"),
+                                                    t!("dialog.enabled"),
+                                                    t!("dialog.telnetAutoLoginDesc"),
                                                     editor.telnet_auto_login_enabled,
                                                     true,
                                                     cx.listener(|this, _, _, cx| {
@@ -448,8 +448,8 @@ pub(super) fn connection_editor_telnet_section(
                                                 .child(telnet_switch_row(
                                                     palette,
                                                     "connection-telnet-auto-login-wake",
-                                                    tr("dialog.telnetAutoLoginWakeEnter"),
-                                                    tr("dialog.telnetAutoLoginWakeEnterDesc"),
+                                                    t!("dialog.telnetAutoLoginWakeEnter"),
+                                                    t!("dialog.telnetAutoLoginWakeEnterDesc"),
                                                     editor.telnet_auto_login_send_wake_enter,
                                                     editor.telnet_auto_login_enabled,
                                                     cx.listener(|this, _, _, cx| {
@@ -467,14 +467,14 @@ pub(super) fn connection_editor_telnet_section(
                                                 .gap_2()
                                                 .child(editor_stepper_field(
                                                     palette,
-                                                    tr("dialog.telnetAutoLoginTimeout"),
+                                                    t!("dialog.telnetAutoLoginTimeout"),
                                                     ConnectionEditorField::TelnetAutoLoginTimeout,
                                                     fields,
                                                     cx,
                                                 ))
                                                 .child(editor_stepper_field(
                                                     palette,
-                                                    tr("dialog.telnetAutoLoginMaxRetries"),
+                                                    t!("dialog.telnetAutoLoginMaxRetries"),
                                                     ConnectionEditorField::TelnetAutoLoginMaxRetries,
                                                     fields,
                                                     cx,
@@ -482,28 +482,28 @@ pub(super) fn connection_editor_telnet_section(
                                         )
                                         .child(editor_field(
                                             palette,
-                                            tr("dialog.telnetAutoLoginUsernamePrompt"),
+                                            t!("dialog.telnetAutoLoginUsernamePrompt"),
                                             ConnectionEditorField::TelnetAutoLoginUsernamePrompt,
                                             fields,
                                             cx,
                                         ))
                                         .child(editor_field(
                                             palette,
-                                            tr("dialog.telnetAutoLoginPasswordPrompt"),
+                                            t!("dialog.telnetAutoLoginPasswordPrompt"),
                                             ConnectionEditorField::TelnetAutoLoginPasswordPrompt,
                                             fields,
                                             cx,
                                         ))
                                         .child(editor_field(
                                             palette,
-                                            tr("dialog.telnetAutoLoginSuccessPrompt"),
+                                            t!("dialog.telnetAutoLoginSuccessPrompt"),
                                             ConnectionEditorField::TelnetAutoLoginSuccessPrompt,
                                             fields,
                                             cx,
                                         ))
                                         .child(editor_field(
                                             palette,
-                                            tr("dialog.telnetAutoLoginFailurePrompt"),
+                                            t!("dialog.telnetAutoLoginFailurePrompt"),
                                             ConnectionEditorField::TelnetAutoLoginFailurePrompt,
                                             fields,
                                             cx,

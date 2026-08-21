@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb,
@@ -42,10 +44,10 @@ impl NyaTermApp {
                 div().px_3().pt_3().pb_0().flex().flex_col().child(
                     NyaTabs::new("security-auth-tabs")
                         .items([
-                            NyaTabItem::new(self.tr(SecurityAuthTab::Keys.i18n_key())),
-                            NyaTabItem::new(self.tr(SecurityAuthTab::Passwords.i18n_key())),
-                            NyaTabItem::new(self.tr(SecurityAuthTab::Otp.i18n_key())),
-                            NyaTabItem::new(self.tr(SecurityAuthTab::Credentials.i18n_key())),
+                            NyaTabItem::new(t!(SecurityAuthTab::Keys.i18n_key())),
+                            NyaTabItem::new(t!(SecurityAuthTab::Passwords.i18n_key())),
+                            NyaTabItem::new(t!(SecurityAuthTab::Otp.i18n_key())),
+                            NyaTabItem::new(t!(SecurityAuthTab::Credentials.i18n_key())),
                         ])
                         .selected_index(match active_tab {
                             SecurityAuthTab::Keys => 0,

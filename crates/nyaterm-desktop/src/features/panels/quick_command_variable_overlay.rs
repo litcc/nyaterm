@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
@@ -137,7 +139,7 @@ impl NyaTermApp {
                                     .text_sm()
                                     .font_weight(FontWeight(800.))
                                     .text_color(rgb(palette.text))
-                                    .child(self.tr("quickCommands.fillVariables")),
+                                    .child(t!("quickCommands.fillVariables")),
                             ),
                     )
                     .child(
@@ -157,7 +159,7 @@ impl NyaTermApp {
                                         div()
                                             .text_size(px(10.))
                                             .text_color(rgb(palette.text_muted))
-                                            .child(self.tr("quickCommands.preview")),
+                                            .child(t!("quickCommands.preview")),
                                     )
                                     .child(
                                         // The resolved command in full: this is the last
@@ -171,7 +173,7 @@ impl NyaTermApp {
                                             .line_height(px(18.))
                                             .text_color(rgb(palette.text_muted))
                                             .child(if preview.trim().is_empty() {
-                                                self.tr("quickCommands.emptyCommand").to_string()
+                                                t!("quickCommands.emptyCommand").to_string()
                                             } else {
                                                 preview
                                             }),
@@ -191,7 +193,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "quick-command-variable-cancel",
-                                self.tr("common.cancel"),
+                                t!("common.cancel"),
                                 cx.listener(|this, _, _, cx| {
                                     this.cancel_quick_command_variable_prompt(cx);
                                 }),
@@ -200,9 +202,9 @@ impl NyaTermApp {
                                 palette,
                                 "quick-command-variable-submit",
                                 if prompt.execute {
-                                    self.tr("quickCommands.run")
+                                    t!("quickCommands.run")
                                 } else {
-                                    self.tr("quickCommands.appendOnly")
+                                    t!("quickCommands.appendOnly")
                                 },
                                 false,
                                 cx.listener(|this, _, _, cx| {

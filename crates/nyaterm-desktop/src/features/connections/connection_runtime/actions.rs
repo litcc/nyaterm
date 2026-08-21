@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_core::{SavedConnection, SessionsConfig};
 use nyaterm_store::{StoreDomain, store_request};
@@ -31,9 +33,9 @@ impl NyaTermApp {
             .set_status("confirm clearing all saved connections".to_string());
         self.open_confirm_dialog(
             (
-                self.tr("savedConnections.clearAll").to_string(),
-                self.tr("savedConnections.clearAllConfirm").to_string(),
-                self.tr("savedConnections.clearAll").to_string(),
+                t!("savedConnections.clearAll").to_string(),
+                t!("savedConnections.clearAllConfirm").to_string(),
+                t!("savedConnections.clearAll").to_string(),
                 true,
                 |app, _, cx| {
                     app.confirm_connections_clear_all(cx);
@@ -58,7 +60,7 @@ impl NyaTermApp {
                     this.connection_state
                         .replace_loaded(sessions.connections, sessions.groups);
                     this.shell
-                        .set_status(this.tr("savedConnections.clearAllSuccess").to_string());
+                        .set_status(t!("savedConnections.clearAllSuccess").to_string());
                     this.settings
                         .update_store_status(this.shell.status().to_string(), true);
                     cx.notify();
@@ -97,10 +99,9 @@ impl NyaTermApp {
             .set_status("confirm connection delete".to_string());
         self.open_confirm_dialog(
             (
-                self.tr("savedConnections.delete").to_string(),
-                self.tr("savedConnections.deleteConfirm")
-                    .replace("{{name}}", &label),
-                self.tr("savedConnections.delete").to_string(),
+                t!("savedConnections.delete").to_string(),
+                t!("savedConnections.deleteConfirm").replace("{{name}}", &label),
+                t!("savedConnections.delete").to_string(),
                 true,
                 move |app, _, cx| {
                     app.confirm_connection_delete(connection_id.clone(), label.clone(), cx);
@@ -123,10 +124,10 @@ impl NyaTermApp {
             .set_status("confirm selected connections delete".to_string());
         self.open_confirm_dialog(
             (
-                self.tr("savedConnections.deleteSelected").to_string(),
-                self.tr("savedConnections.deleteSelectedConfirm")
+                t!("savedConnections.deleteSelected").to_string(),
+                t!("savedConnections.deleteSelectedConfirm")
                     .replace("{{count}}", &count.to_string()),
-                self.tr("savedConnections.delete").to_string(),
+                t!("savedConnections.delete").to_string(),
                 true,
                 move |app, _, cx| {
                     app.confirm_selected_connections_delete(selected.clone(), cx);
@@ -203,16 +204,15 @@ impl NyaTermApp {
         let label = group.name.clone();
         self.shell
             .set_status("confirm connection group delete".to_string());
-        let message = self
-            .tr("savedConnections.deleteFolderConfirm")
+        let message = t!("savedConnections.deleteFolderConfirm")
             .replace("{{name}}", &label)
             .replace("{{count}}", &connection_count.to_string())
             .replace("{{childCount}}", &child_group_count.to_string());
         self.open_confirm_dialog(
             (
-                self.tr("savedConnections.deleteFolder").to_string(),
+                t!("savedConnections.deleteFolder").to_string(),
                 message,
-                self.tr("savedConnections.deleteFolder").to_string(),
+                t!("savedConnections.deleteFolder").to_string(),
                 true,
                 move |app, _, cx| {
                     app.confirm_connection_group_delete(group_id.clone(), label.clone(), cx);

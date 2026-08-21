@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -368,7 +370,7 @@ impl NyaTermApp {
             return;
         };
         let Some(config) = self.transfer_editor_ssh_config(tab.session_id.as_deref()) else {
-            let error = self.tr("fileEditor.sourceSessionUnavailable").to_string();
+            let error = t!("fileEditor.sourceSessionUnavailable").to_string();
             if let Some(tab) = self.transfer.active_editor_tab_mut() {
                 tab.error = Some(error.clone());
             }

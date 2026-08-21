@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
     svg,
@@ -60,7 +62,7 @@ impl NyaTermApp {
                             .overflow_hidden()
                             .text_xs()
                             .text_color(rgb(palette.text))
-                            .child(self.tr(if unlocked {
+                            .child(t!(if unlocked {
                                 "secretUnlock.unlockedTitle"
                             } else {
                                 "secretUnlock.lockedTitle"
@@ -73,7 +75,7 @@ impl NyaTermApp {
                     .text_xs()
                     .font_weight(FontWeight(600.))
                     .text_color(rgb(palette.primary))
-                    .child(self.tr(if unlocked {
+                    .child(t!(if unlocked {
                         "secretUnlock.lockAction"
                     } else {
                         "secretUnlock.unlockAction"
@@ -128,13 +130,13 @@ impl NyaTermApp {
                             .text_xs()
                             .font_weight(FontWeight(800.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("secretUnlock.unlockTitle")),
+                            .child(t!("secretUnlock.unlockTitle")),
                     )
                     .child(
                         div()
                             .text_size(px(10.))
                             .text_color(rgb(palette.text_muted))
-                            .child(self.tr("secretUnlock.unlockDescription")),
+                            .child(t!("secretUnlock.unlockDescription")),
                     )
                     .child(
                         div()
@@ -182,7 +184,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "security-unlock-cancel",
-                                self.tr("common.cancel"),
+                                t!("common.cancel"),
                                 cx.listener(|this, _, _, cx| {
                                     this.cancel_security_unlock_prompt(cx);
                                 }),
@@ -190,7 +192,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "security-unlock-submit",
-                                self.tr("secretUnlock.unlock"),
+                                t!("secretUnlock.unlock"),
                                 cx.listener(|this, _, window, cx| {
                                     this.submit_security_unlock(window, cx);
                                 }),
@@ -225,13 +227,13 @@ impl NyaTermApp {
                             .text_xs()
                             .font_weight(FontWeight(800.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("settings.masterPasswordRequired")),
+                            .child(t!("settings.masterPasswordRequired")),
                     )
                     .child(
                         div()
                             .text_size(px(10.))
                             .text_color(rgb(palette.text_muted))
-                            .child(self.tr("settings.masterPasswordRequiredDesc")),
+                            .child(t!("settings.masterPasswordRequiredDesc")),
                     )
                     .child(
                         div()
@@ -241,7 +243,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "security-master-required-cancel",
-                                self.tr("common.cancel"),
+                                t!("common.cancel"),
                                 cx.listener(|this, _, _, cx| {
                                     this.close_security_master_required_prompt(cx);
                                 }),
@@ -249,7 +251,7 @@ impl NyaTermApp {
                             .child(small_button(
                                 palette,
                                 "security-master-required-settings",
-                                self.tr("settings.security"),
+                                t!("settings.security"),
                                 cx.listener(|this, _, _, cx| {
                                     this.open_security_settings_from_prompt(cx);
                                 }),

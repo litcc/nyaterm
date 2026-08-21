@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_core::TunnelConfig;
 use nyaterm_store::{StoreDomain, store_request};
@@ -149,15 +151,14 @@ impl NyaTermApp {
         self.shell
             .set_status("network delete confirmation opened".to_string());
         let type_label = match tab {
-            NetworkTab::Tunnels => self.tr("network.tunnelConfig"),
-            NetworkTab::Proxies => self.tr("network.proxyConfig"),
+            NetworkTab::Tunnels => t!("network.tunnelConfig"),
+            NetworkTab::Proxies => t!("network.proxyConfig"),
         };
         self.open_confirm_dialog(
             (
-                format!("{} {type_label}", self.tr("common.delete")),
-                self.tr("common.deletingConfirm")
-                    .replace("{{name}}", &label),
-                self.tr("common.delete").to_string(),
+                format!("{} {type_label}", t!("common.delete")),
+                t!("common.deletingConfirm").replace("{{name}}", &label),
+                t!("common.delete").to_string(),
                 true,
                 move |app, _, cx| {
                     match tab {

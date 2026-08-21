@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 use nyaterm_core::{TunnelConfig, uuid};
 use nyaterm_store::{StoreDomain, store_request};
@@ -93,12 +95,12 @@ impl NyaTermApp {
         self.open_form_dialog(
             (
                 if editing {
-                    self.tr("network.editTunnel").to_string()
+                    t!("network.editTunnel").to_string()
                 } else {
-                    self.tr("network.newTunnel").to_string()
+                    t!("network.newTunnel").to_string()
                 },
                 640.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| app.network_tunnel_editor_dialog_content(cx),
                 |app, _, cx| {
                     app.save_network_tunnel_editor(cx);

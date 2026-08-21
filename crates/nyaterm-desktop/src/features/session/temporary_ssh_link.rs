@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::sync::Arc;
 
 use gpui::{Context, Window};
@@ -27,9 +29,9 @@ impl NyaTermApp {
         self.shell.set_status("temporary link opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("temporarySsh.title").to_string(),
+                t!("temporarySsh.title").to_string(),
                 480.,
-                self.tr("temporarySsh.connect").to_string(),
+                t!("temporarySsh.connect").to_string(),
                 |app, _, cx| app.temporary_ssh_link_dialog_content(cx),
                 |app, window, cx| app.submit_temporary_ssh_link_dialog(window, cx),
                 |app, cx| app.close_temporary_ssh_link_dialog(cx),

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, relative, rgb, svg,
 };
@@ -17,9 +19,7 @@ impl NyaTermApp {
             .session
             .display_name(session_id)
             .unwrap_or_else(|| short_id(session_id).to_string());
-        let detail = self
-            .tr("savedConnections.connecting")
-            .replace("{{name}}", &name);
+        let detail = t!("savedConnections.connecting").replace("{{name}}", &name);
         div()
             .size_full()
             .flex()
@@ -47,7 +47,7 @@ impl NyaTermApp {
                             .text_size(px(13.))
                             .font_weight(FontWeight(600.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("tabCtx.reconnecting")),
+                            .child(t!("tabCtx.reconnecting")),
                     )
                     .child(
                         div()
@@ -93,7 +93,7 @@ impl NyaTermApp {
                             .text_size(px(13.))
                             .font_weight(FontWeight(600.))
                             .text_color(rgb(palette.text))
-                            .child(self.tr("terminal.connectionFailed")),
+                            .child(t!("terminal.connectionFailed")),
                     )
                     .child(
                         div()
@@ -106,7 +106,7 @@ impl NyaTermApp {
             .child(small_button(
                 palette,
                 format!("workspace-reconnect-{session_id}"),
-                self.tr("tabCtx.reconnect"),
+                t!("tabCtx.reconnect"),
                 cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
                     this.reconnect_session(reconnect_session_id.clone(), window, cx);

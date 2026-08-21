@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -499,9 +501,7 @@ impl NyaTermApp {
     ) {
         self.transfer.set_browser_external_drop_hover(false);
         if paths.is_empty() {
-            let status = self
-                .tr("fileExplorer.externalDropPathsRequired")
-                .to_string();
+            let status = t!("fileExplorer.externalDropPathsRequired").to_string();
             self.shell.set_status(status.clone());
             self.transfer.set_browser_status(status);
             cx.notify();

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AnyElement, Context, IntoElement, KeyDownEvent, ListHorizontalSizingBehavior, MouseButton,
     MouseDownEvent, SharedString, div, prelude::*, px, rgb, rgba, svg, uniform_list,
@@ -36,12 +38,12 @@ impl NyaTermApp {
         if availability != TransferBrowserAvailability::Browsable {
             let (title, description) = match availability {
                 TransferBrowserAvailability::UnsupportedSession => (
-                    self.tr("fileExplorer.unsupportedSession"),
-                    Some(self.tr("fileExplorer.unsupportedSessionDesc")),
+                    t!("fileExplorer.unsupportedSession"),
+                    Some(t!("fileExplorer.unsupportedSessionDesc")),
                 ),
                 TransferBrowserAvailability::NoSession
                 | TransferBrowserAvailability::DisconnectedSsh => {
-                    (self.tr("fileExplorer.connectToSession"), None)
+                    (t!("fileExplorer.connectToSession"), None)
                 }
                 TransferBrowserAvailability::Browsable => unreachable!(),
             };
@@ -136,7 +138,7 @@ impl NyaTermApp {
             let field = self.text_input(
                 "transfer.browser.search",
                 &self.transfer.browser_view().search.clone(),
-                TextInputSetup::placeholder(self.tr("fileExplorer.searchPlaceholder")),
+                TextInputSetup::placeholder(t!("fileExplorer.searchPlaceholder")),
                 cx,
             );
             div()
@@ -180,7 +182,7 @@ impl NyaTermApp {
                         .py_8()
                         .text_size(px(12.))
                         .text_color(rgb(palette.text_dimmed))
-                        .child(self.tr("fileExplorer.loading")),
+                        .child(t!("fileExplorer.loading")),
                 )
                 .into_any_element()
         } else if self.transfer.browser_view().entries.is_empty() {
@@ -217,7 +219,7 @@ impl NyaTermApp {
                                     div()
                                         .text_size(px(12.))
                                         .text_color(rgb(palette.text_muted))
-                                        .child(self.tr("fileExplorer.emptyDirectory"))
+                                        .child(t!("fileExplorer.emptyDirectory"))
                                 },
                             ),
                     )
@@ -236,13 +238,13 @@ impl NyaTermApp {
                         .py_8()
                         .text_size(px(11.))
                         .text_color(rgb(palette.text_dimmed))
-                        .child(self.tr("fileExplorer.noSearchResults")),
+                        .child(t!("fileExplorer.noSearchResults")),
                 )
                 .into_any_element()
         } else {
             let parent_count = usize::from(has_parent_entry);
             let total_entries = visible_entries.len() + parent_count;
-            let name_placeholder = self.tr("fileExplorer.name");
+            let name_placeholder = t!("fileExplorer.name");
             let mut list = uniform_list(
                 "transfer-browser-rows",
                 total_entries,
@@ -347,7 +349,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-browser-new-file",
                             "icons/fe/new-file.svg",
-                            self.tr("fileExplorer.newFile"),
+                            t!("fileExplorer.newFile"),
                             cx.listener(|this, _, window, cx| {
                                 this.open_transfer_new_file_dialog(window, cx);
                             }),
@@ -356,7 +358,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-browser-new-folder",
                             "icons/fe/new-folder.svg",
-                            self.tr("fileExplorer.newFolder"),
+                            t!("fileExplorer.newFolder"),
                             cx.listener(|this, _, window, cx| {
                                 this.open_transfer_new_folder_dialog(window, cx);
                             }),
@@ -364,14 +366,14 @@ impl NyaTermApp {
                         .child(transfer_toolbar_divider(palette))
                         .child(compact_transfer_upload_menu_button(
                             palette,
-                            self.tr("fileExplorer.upload"),
+                            t!("fileExplorer.upload"),
                             cx,
                         ))
                         .child(compact_transfer_toolbar_button_enabled(
                             palette,
                             "transfer-browser-download-selected",
                             "icons/fe/download.svg",
-                            self.tr("fileExplorer.downloadSelected"),
+                            t!("fileExplorer.downloadSelected"),
                             footer_stats.selected_item_count > 0,
                             cx.listener(|this, _, window, cx| {
                                 this.start_selected_sftp_download_jobs(window, cx);
@@ -381,7 +383,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-browser-delete-selected",
                             "icons/fe/delete.svg",
-                            self.tr("fileExplorer.delete"),
+                            t!("fileExplorer.delete"),
                             footer_stats.selected_item_count > 0,
                             cx.listener(|this, _, window, cx| {
                                 this.open_selected_transfer_delete_dialog(window, cx);
@@ -392,7 +394,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-browser-go-up",
                             "icons/fe/up.svg",
-                            self.tr("fileExplorer.goUp"),
+                            t!("fileExplorer.goUp"),
                             cx.listener(|this, _, window, cx| {
                                 this.open_transfer_parent_directory(window, cx);
                             }),
@@ -401,7 +403,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-browser-refresh",
                             "icons/fe/refresh.svg",
-                            self.tr("fileExplorer.refresh"),
+                            t!("fileExplorer.refresh"),
                             cx.listener(|this, _, window, cx| {
                                 this.refresh_transfer_browser(window, cx);
                             }),
@@ -411,7 +413,7 @@ impl NyaTermApp {
                             palette,
                             "transfer-browser-expand-search",
                             "icons/fe/search.svg",
-                            self.tr("fileExplorer.search"),
+                            t!("fileExplorer.search"),
                             search_active || search_expanded,
                             cx.listener(|this, _, window, cx| {
                                 this.focus_transfer_browser_search(None, window, cx);
@@ -422,9 +424,9 @@ impl NyaTermApp {
                             "transfer-browser-toggle-hidden-files",
                             "icons/eye.svg",
                             if show_hidden_files {
-                                self.tr("fileExplorer.hideHiddenFiles")
+                                t!("fileExplorer.hideHiddenFiles")
                             } else {
-                                self.tr("fileExplorer.showHiddenFiles")
+                                t!("fileExplorer.showHiddenFiles")
                             },
                             show_hidden_files,
                             cx.listener(|this, _, _, cx| {
@@ -530,7 +532,7 @@ impl NyaTermApp {
                                             .child(sort_header_cell(
                                                 palette,
                                                 TransferBrowserSortColumn::Name,
-                                                self.tr("fileExplorer.name"),
+                                                t!("fileExplorer.name"),
                                                 column_widths.name,
                                                 sort_header_state,
                                                 cx,
@@ -538,7 +540,7 @@ impl NyaTermApp {
                                             .child(sort_header_cell(
                                                 palette,
                                                 TransferBrowserSortColumn::Modified,
-                                                self.tr("fileExplorer.mtime"),
+                                                t!("fileExplorer.mtime"),
                                                 column_widths.modified,
                                                 sort_header_state,
                                                 cx,
@@ -546,7 +548,7 @@ impl NyaTermApp {
                                             .child(sort_header_cell(
                                                 palette,
                                                 TransferBrowserSortColumn::Size,
-                                                self.tr("fileExplorer.size"),
+                                                t!("fileExplorer.size"),
                                                 column_widths.size,
                                                 sort_header_state,
                                                 cx,
@@ -554,7 +556,7 @@ impl NyaTermApp {
                                             .child(sort_header_cell(
                                                 palette,
                                                 TransferBrowserSortColumn::Permissions,
-                                                self.tr("fileExplorer.permissions"),
+                                                t!("fileExplorer.permissions"),
                                                 column_widths.permissions,
                                                 sort_header_state,
                                                 cx,
@@ -562,7 +564,7 @@ impl NyaTermApp {
                                             .child(sort_header_cell(
                                                 palette,
                                                 TransferBrowserSortColumn::Owner,
-                                                self.tr("fileExplorer.owner"),
+                                                t!("fileExplorer.owner"),
                                                 column_widths.owner,
                                                 sort_header_state,
                                                 cx,
@@ -570,7 +572,7 @@ impl NyaTermApp {
                                             .child(sort_header_cell(
                                                 palette,
                                                 TransferBrowserSortColumn::Group,
-                                                self.tr("fileExplorer.group"),
+                                                t!("fileExplorer.group"),
                                                 column_widths.group,
                                                 sort_header_state,
                                                 cx,
@@ -642,7 +644,7 @@ impl NyaTermApp {
                                     && footer_stats.total_item_count > 0,
                                 |this| {
                                     this.child(if footer_stats.selected_item_count > 0 {
-                                        self.tr("fileExplorer.selectedItems")
+                                        t!("fileExplorer.selectedItems")
                                             .replace(
                                                 "{{selected}}",
                                                 &footer_stats.selected_item_count.to_string(),
@@ -652,7 +654,7 @@ impl NyaTermApp {
                                                 &footer_stats.total_item_count.to_string(),
                                             )
                                     } else {
-                                        self.tr("fileExplorer.totalItems").replace(
+                                        t!("fileExplorer.totalItems").replace(
                                             "{{count}}",
                                             &footer_stats.total_item_count.to_string(),
                                         )
@@ -671,9 +673,9 @@ impl NyaTermApp {
                                 "transfer-browser-footer-sync-cwd",
                                 "icons/fe/folder-sync.svg",
                                 if cwd_tracking_available {
-                                    self.tr("fileExplorer.syncTerminalPath")
+                                    t!("fileExplorer.syncTerminalPath")
                                 } else {
-                                    self.tr("fileExplorer.cwdTrackingUnavailable")
+                                    t!("fileExplorer.cwdTrackingUnavailable")
                                 },
                                 cwd_tracking_available,
                                 cx.listener(|this, _, window, cx| {
@@ -685,9 +687,9 @@ impl NyaTermApp {
                                 "transfer-browser-footer-auto-sync",
                                 "icons/fe/sync.svg",
                                 if cwd_tracking_available {
-                                    self.tr("fileExplorer.autoSyncTerminalPath")
+                                    t!("fileExplorer.autoSyncTerminalPath")
                                 } else {
-                                    self.tr("fileExplorer.cwdTrackingUnavailable")
+                                    t!("fileExplorer.cwdTrackingUnavailable")
                                 },
                                 auto_sync_cwd,
                                 cwd_tracking_available,
@@ -699,7 +701,7 @@ impl NyaTermApp {
                                 palette,
                                 "transfer-browser-footer-send-path",
                                 "icons/fe/send-path.svg",
-                                self.tr("fileExplorer.sendToTerminal"),
+                                t!("fileExplorer.sendToTerminal"),
                                 true,
                                 cx.listener(|this, _, _, cx| {
                                     this.send_current_transfer_browser_path_to_terminal(cx);
@@ -738,13 +740,13 @@ impl NyaTermApp {
                                         .text_sm()
                                         .font_weight(gpui::FontWeight(700.))
                                         .text_color(rgb(palette.text))
-                                        .child(self.tr("fileExplorer.externalDropOverlayTitle")),
+                                        .child(t!("fileExplorer.externalDropOverlayTitle")),
                                 )
                                 .child(
                                     div()
                                         .text_xs()
                                         .text_color(rgb(palette.text_muted))
-                                        .child(self.tr("fileExplorer.externalDropOverlayHint")),
+                                        .child(t!("fileExplorer.externalDropOverlayHint")),
                                 ),
                         ),
                 )

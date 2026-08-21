@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 
@@ -17,19 +19,16 @@ impl NyaTermApp {
         let mut body = security_auth_body_base("security-keys-body");
         body = body.child(security_tab_toolbar(
             palette,
-            self.tr("securityAuth.keyManagement"),
+            t!("securityAuth.keyManagement"),
             "security-add-key",
-            self.tr("securityAuth.addKey"),
+            t!("securityAuth.addKey"),
             self.security.key_editor().is_none(),
             cx.listener(|this, _, window, cx| {
                 this.open_security_key_editor(None, window, cx);
             }),
         ));
         if self.security.ssh_keys().is_empty() {
-            body = body.child(empty_panel(
-                self.tr("securityAuth.noKeys"),
-                self.theme_palette(),
-            ));
+            body = body.child(empty_panel(t!("securityAuth.noKeys"), self.theme_palette()));
         } else {
             let entries = self.security.ssh_keys().to_vec();
             let entry_count = entries.len();
@@ -77,7 +76,7 @@ impl NyaTermApp {
                                         format!("security-key-view-{key_id}"),
                                         "icons/private-key.svg",
                                     )
-                                    .tooltip(self.tr("settings.viewPrivateKey"))
+                                    .tooltip(t!("settings.viewPrivateKey"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.view_security_private_key(
@@ -93,7 +92,7 @@ impl NyaTermApp {
                                         format!("security-key-edit-{key_id}"),
                                         "icons/edit.svg",
                                     )
-                                    .tooltip(self.tr("common.edit"))
+                                    .tooltip(t!("common.edit"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.open_security_key_editor(
@@ -109,7 +108,7 @@ impl NyaTermApp {
                                         format!("security-key-del-{key_id}"),
                                         "icons/delete.svg",
                                     )
-                                    .tooltip(self.tr("common.delete"))
+                                    .tooltip(t!("common.delete"))
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             this.request_delete_security_key(

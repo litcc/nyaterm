@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{
     AppContext, ClipboardItem, Context, IntoElement as _, KeyDownEvent, PathPromptOptions,
     SharedString, Window,
@@ -25,7 +27,7 @@ impl NyaTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let scanning_status = self.tr("otpManager.scanningQr").to_string();
+        let scanning_status = t!("otpManager.scanningQr").to_string();
         let Some(request_id) = self.security.begin_otp_qr_import(scanning_status) else {
             return;
         };
@@ -33,7 +35,7 @@ impl NyaTermApp {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(SharedString::from(self.tr("otpManager.selectQrImage"))),
+            prompt: Some(SharedString::from(t!("otpManager.selectQrImage"))),
         };
         let receiver = cx.prompt_for_paths(options);
         cx.spawn_in(window, async move |this, cx| {
@@ -56,11 +58,11 @@ impl NyaTermApp {
                 match result {
                     Ok(Some(decoded)) => editor = Some(decoded),
                     Ok(None) => {
-                        let status = this.tr("common.cancel").to_string();
+                        let status = t!("common.cancel").to_string();
                         this.security.set_status(status);
                     }
                     Err(error) => {
-                        let status = format!("{}: {error}", this.tr("otpManager.qrImportFailed"));
+                        let status = format!("{}: {error}", t!("otpManager.qrImportFailed"));
                         this.security.set_status(status.clone());
                         this.shell.set_status(status);
                     }
@@ -211,16 +213,16 @@ impl NyaTermApp {
             .otp_editor()
             .is_some_and(|editor| editor.id.is_some())
         {
-            self.tr("otpManager.editTitle")
+            t!("otpManager.editTitle")
         } else {
-            self.tr("otpManager.newTitle")
+            t!("otpManager.newTitle")
         }
         .to_string();
         self.open_guarded_form_dialog(
             (
                 title,
                 560.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| {
                     app.security
                         .otp_editor()
@@ -562,7 +564,7 @@ impl NyaTermApp {
                             this.focus_terminal_input(window, cx);
                         } else {
                             this.security
-                                .set_status(this.tr("otpManager.sendToTerminalFailed").to_string());
+                                .set_status(t!("otpManager.sendToTerminalFailed").to_string());
                             cx.notify();
                         }
                     });
@@ -591,7 +593,7 @@ impl NyaTermApp {
     ) {
         if !self.security_otp_can_send_to_terminal() {
             self.security
-                .set_status(self.tr("otpManager.noActiveTerminal").to_string());
+                .set_status(t!("otpManager.noActiveTerminal").to_string());
             cx.notify();
             return;
         }

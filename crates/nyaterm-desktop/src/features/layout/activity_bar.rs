@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -29,8 +31,8 @@ impl NyaTermApp {
         let margin = 8.;
         let menu_x = f32::from(menu.x).clamp(margin, (viewport_w - menu_w - margin).max(margin));
         let menu_y = f32::from(menu.y).clamp(margin, (viewport_h - 70. - margin).max(margin));
-        let move_to_label = self.tr("activityBar.moveTo");
-        let show_labels_label = self.tr("activityBar.showLabel");
+        let move_to_label = t!("activityBar.moveTo");
+        let show_labels_label = t!("activityBar.showLabel");
 
         let mut zone_buttons = div().flex().flex_col().gap_1();
         for zone in ActivityBarZone::all() {
@@ -54,7 +56,7 @@ impl NyaTermApp {
                         this.cursor_pointer()
                             .hover(|this| this.bg(rgb(palette.hover)))
                     })
-                    .child(self.tr(zone.i18n_key()))
+                    .child(t!(zone.i18n_key()))
                     .when(!selected, |this| {
                         this.on_click(cx.listener(move |this, _, _, cx| {
                             this.move_activity_entry(id.clone(), target, None, cx);
@@ -279,7 +281,7 @@ impl NyaTermApp {
         let icon_path = entry.icon_path();
         let tooltip = entry
             .i18n_key()
-            .map(|key| self.tr(key))
+            .map(|key| t!(key))
             .unwrap_or_else(|| Cow::Borrowed(entry.label()))
             .to_string();
         let palette = self.theme_palette();

@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use std::borrow::Cow;
 
 use gpui::{
@@ -23,15 +25,11 @@ impl NyaTermApp {
         let terminal_actions = self.ai_action_editor(
             palette,
             AiActionListKind::Terminal,
-            self.tr("ai.terminalActions"),
+            t!("ai.terminalActions"),
             cx,
         );
-        let file_actions = self.ai_action_editor(
-            palette,
-            AiActionListKind::File,
-            self.tr("ai.fileActions"),
-            cx,
-        );
+        let file_actions =
+            self.ai_action_editor(palette, AiActionListKind::File, t!("ai.fileActions"), cx);
 
         div()
             .flex()
@@ -39,12 +37,12 @@ impl NyaTermApp {
             .gap_5()
             .child(settings_form_section(
                 palette,
-                Some(self.tr("ai.rules")),
+                Some(t!("ai.rules")),
                 None,
                 settings_form_row(
                     palette,
-                    format!("{} (MB)", self.tr("ai.maxAiFileSize")),
-                    Some(SharedString::from(self.tr("ai.maxAiFileSizeDesc"))),
+                    format!("{} (MB)", t!("ai.maxAiFileSize")),
+                    Some(SharedString::from(t!("ai.maxAiFileSizeDesc"))),
                     self.number_input_box(
                         "ai.number.file-size-mb",
                         file_size_mb.to_string().as_str(),
@@ -68,10 +66,10 @@ impl NyaTermApp {
             AiActionListKind::Terminal => self.ai.settings_config().terminal_ai_actions.clone(),
             AiActionListKind::File => self.ai.settings_config().file_ai_actions.clone(),
         };
-        let add_label = self.tr("common.add");
-        let delete_label = self.tr("common.delete");
-        let name_placeholder = self.tr("ai.actionName");
-        let prompt_placeholder = self.tr("ai.actionPrompt");
+        let add_label = t!("common.add");
+        let delete_label = t!("common.delete");
+        let name_placeholder = t!("ai.actionName");
+        let prompt_placeholder = t!("ai.actionPrompt");
 
         settings_form_section(
             palette,

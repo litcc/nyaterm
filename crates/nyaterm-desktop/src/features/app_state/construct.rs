@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use crate::models::{
     ActivityBarLayoutState, BottomPanelMode, NavItem, PanelSide, SessionEventBridge,
     TerminalFramePipeline,
@@ -155,8 +157,7 @@ impl NyaTermApp {
             store.set_loaded_open_tabs(open_tabs);
         });
 
-        let connections_filter_placeholder =
-            crate::i18n::text(&settings.language, "savedConnections.filter");
+        let connections_filter_placeholder = t!("savedConnections.filter");
         let command_store = store_blocking.clone();
 
         let app_entity = cx.entity();

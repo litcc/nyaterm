@@ -1,3 +1,5 @@
+use rust_i18n::t;
+
 use gpui::{Context, Window};
 
 use crate::features::NyaTermApp;
@@ -23,9 +25,9 @@ impl NyaTermApp {
         self.shell.set_status("rename tab opened".to_string());
         self.open_form_dialog(
             (
-                self.tr("tabCtx.renameTitle").to_string(),
+                t!("tabCtx.renameTitle").to_string(),
                 320.,
-                self.tr("common.save").to_string(),
+                t!("common.save").to_string(),
                 |app, _, cx| app.rename_session_dialog_content(cx),
                 |app, _, cx| app.submit_rename_session(cx),
                 |app, cx| app.close_rename_session(cx),
@@ -117,17 +119,16 @@ impl NyaTermApp {
         self.session.dialogs.open_startup_command(action, delay_ms);
         self.forget_text_inputs("session.startup-command");
         self.shell.set_status(action.status_opened().to_string());
-        let title = self
-            .tr(match action {
-                StartupCommandAction::Duplicate => "tabCtx.runCommandTitle",
-                StartupCommandAction::Multiplex => "tabCtx.multiplexSshWithCommand",
-            })
-            .to_string();
+        let title = t!(match action {
+            StartupCommandAction::Duplicate => "tabCtx.runCommandTitle",
+            StartupCommandAction::Multiplex => "tabCtx.multiplexSshWithCommand",
+        })
+        .to_string();
         self.open_form_dialog(
             (
                 title,
                 448.,
-                self.tr("common.confirm").to_string(),
+                t!("common.confirm").to_string(),
                 |app, _, cx| app.startup_command_dialog_content(cx),
                 |app, window, cx| app.submit_startup_command_dialog(window, cx),
                 |app, cx| app.close_startup_command_dialog(cx),
