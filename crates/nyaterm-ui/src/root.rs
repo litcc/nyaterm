@@ -567,4 +567,80 @@ mod tests {
         assert!(cx.debug_bounds("nya-dialog-action-button").is_some());
         assert!(cx.debug_bounds("nya-dialog-cancel-button").is_none());
     }
+
+    /// Geometry of the dialog card's own close button.
+    ///
+    /// `gpui-component` paints it as an absolutely positioned overlay inset from
+    /// the card's top-right corner, and gives it no debug selector, so derive it
+    /// from the title and content it sits beside.
+    fn dialog_close_button_center(
+        cx: &mut VisualTestContext,
+        width: f32,
+    ) -> gpui::Point<gpui::Pixels> {
+        let content = cx
+            .debug_bounds("focus-dialog-content")
+            .expect("dialog content should render");
+        let title = cx
+            .debug_bounds("focus-dialog-title")
+            .expect("dialog title should render");
+        // Card padding is 16px, plus the card's 1px border above the title.
+        let card_left = content.origin.x - px(16.);
+        let card_top = title.origin.y - px(17.);
+        // The button is inset by `max(padding - 10, 8)` and is 20px across.
+        point(card_left + px(width) - px(18.), card_top + px(18.))
+    }
+
+    fn open_focus_dialog(cx: &mut VisualTestContext) {
+        cx.update(|window, cx| {
+            window.open_nya_dialog(cx, |dialog, _, _| {
+                dialog
+                    .width(400.)
+                    .title(
+                        div()
+                            .debug_selector(|| "focus-dialog-title".to_string())
+                            .child("Delete"),
+                    )
+                    .confirm(NyaDialogFooter::new("Cancel", "Delete").danger())
+                    .content(
+                        div()
+                            .debug_selector(|| "focus-dialog-content".to_string())
+                            .h(px(60.))
+                            .child("Delete this?"),
+                    )
+            });
+        });
+        draw(cx);
+        draw(cx);
+    }
+
+    /// The dialog card's close button dismisses the dialog.
+    ///
+    /// It does so by dispatching `Cancel`, which GPUI routes along the focused
+    /// element's dispatch path, so this only holds while the dialog owns focus.
+    #[gpui::test]
+    fn nya_dialog_close_button_dismisses_the_dialog(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| RootContentFixture);
+            nya_root(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        draw(cx);
+
+        open_focus_dialog(cx);
+        cx.update(|window, cx| assert!(window.has_active_nya_dialog(cx)));
+
+        let close = dialog_close_button_center(cx, 400.);
+        cx.simulate_click(close, Modifiers::default());
+        cx.run_until_parked();
+        draw(cx);
+
+        cx.update(|window, cx| {
+            assert!(
+                !window.has_active_nya_dialog(cx),
+                "the close button should dismiss the dialog"
+            );
+        });
+    }
 }
