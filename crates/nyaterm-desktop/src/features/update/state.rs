@@ -1,6 +1,6 @@
 //! Authoritative transient state for native update checks.
 
-use std::sync::mpsc;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use nyaterm_core::NativeUpdateInfo;
 
@@ -14,11 +14,11 @@ impl UpdateJobResult {
     }
 }
 
-const UPDATE_EVENT_DRAIN_LIMIT: usize = 4;
-
 pub(in crate::features) struct UpdateFeatureState {
-    tx: mpsc::Sender<UpdateJobResult>,
-    rx: mpsc::Receiver<UpdateJobResult>,
+    tx: UnboundedSender<UpdateJobResult>,
+    /// Taken once by `NyaTermApp::start_update_event_drain`, which owns delivery
+    /// from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<UpdateJobResult>>,
     status: String,
     info: Option<NativeUpdateInfo>,
     pending: bool,
@@ -26,10 +26,10 @@ pub(in crate::features) struct UpdateFeatureState {
 
 impl UpdateFeatureState {
     pub(in crate::features) fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             tx,
-            rx,
+            rx: Some(rx),
             status: format!("Current version {}", env!("CARGO_PKG_VERSION")),
             info: None,
             pending: false,
@@ -48,7 +48,7 @@ impl UpdateFeatureState {
         self.pending
     }
 
-    pub(super) fn begin_check(&mut self) -> Option<mpsc::Sender<UpdateJobResult>> {
+    pub(super) fn begin_check(&mut self) -> Option<UnboundedSender<UpdateJobResult>> {
         if self.pending {
             self.status = "update check already running".to_string();
             return None;
@@ -59,36 +59,36 @@ impl UpdateFeatureState {
         Some(self.tx.clone())
     }
 
-    pub(super) fn drain_events(&mut self) -> bool {
+    pub(super) fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<UpdateJobResult>> {
+        self.rx.take()
+    }
+
+    /// Apply one job result, reporting whether the UI needs a repaint.
+    pub(super) fn apply_event(&mut self, event: UpdateJobResult) -> bool {
         if !self.pending {
+            // No check is outstanding, so this can only be a late duplicate.
+            // Dropping it keeps a stale status off a check that already settled.
             return false;
         }
-        let mut dirty = false;
-        for _ in 0..UPDATE_EVENT_DRAIN_LIMIT {
-            let Ok(event) = self.rx.try_recv() else {
-                break;
-            };
-            dirty = true;
-            self.pending = false;
-            match event.result {
-                Ok(info) => {
-                    self.status = if info.available {
-                        format!(
-                            "update available: {} -> {}",
-                            info.current_version, info.latest_version
-                        )
-                    } else {
-                        format!("NyaTerm is up to date ({})", info.current_version)
-                    };
-                    self.info = Some(info);
-                }
-                Err(error) => {
-                    self.status = format!("update check failed: {error}");
-                    self.info = None;
-                }
+        self.pending = false;
+        match event.result {
+            Ok(info) => {
+                self.status = if info.available {
+                    format!(
+                        "update available: {} -> {}",
+                        info.current_version, info.latest_version
+                    )
+                } else {
+                    format!("NyaTerm is up to date ({})", info.current_version)
+                };
+                self.info = Some(info);
+            }
+            Err(error) => {
+                self.status = format!("update check failed: {error}");
+                self.info = None;
             }
         }
-        dirty
+        true
     }
 }
 
@@ -98,10 +98,17 @@ mod tests {
 
     #[test]
     fn update_state_owns_job_channel_and_initial_status() {
-        let state = UpdateFeatureState::new();
+        let mut state = UpdateFeatureState::new();
 
         assert!(state.status().contains(env!("CARGO_PKG_VERSION")));
-        assert!(state.rx.try_recv().is_err());
+        assert!(
+            state
+                .take_event_receiver()
+                .expect("a fresh state still holds its receiver")
+                .try_recv()
+                .is_err(),
+            "the job channel starts empty"
+        );
         assert!(state.info().is_none());
         assert!(!state.is_pending());
     }
@@ -118,15 +125,30 @@ mod tests {
     }
 
     #[test]
-    fn update_event_drain_completes_failed_job() {
+    fn update_event_completes_failed_job() {
         let mut state = UpdateFeatureState::new();
-        let tx = state.begin_check().expect("first check should start");
-        tx.send(UpdateJobResult::new(Err("offline".to_string())))
+        let mut rx = state
+            .take_event_receiver()
             .expect("state should retain its event receiver");
+        let tx = state.begin_check().expect("first check should start");
+        tx.unbounded_send(UpdateJobResult::new(Err("offline".to_string())))
+            .expect("the drain receiver is still alive");
+        let event = rx.try_recv().expect("the job result should be queued");
 
-        assert!(state.drain_events());
+        assert!(state.apply_event(event));
         assert!(!state.is_pending());
         assert_eq!(state.status(), "update check failed: offline");
         assert!(state.info().is_none());
+    }
+
+    #[test]
+    fn update_event_arriving_without_an_outstanding_check_is_dropped() {
+        let mut state = UpdateFeatureState::new();
+
+        assert!(
+            !state.apply_event(UpdateJobResult::new(Err("stale".to_string()))),
+            "a result with no check outstanding must not rewrite the status"
+        );
+        assert!(state.status().contains(env!("CARGO_PKG_VERSION")));
     }
 }

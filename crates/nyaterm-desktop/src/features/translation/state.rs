@@ -1,6 +1,6 @@
 //! Authoritative transient state for translation settings and jobs.
 
-use std::sync::mpsc;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use nyaterm_core::{TranslateResult, TranslationSettings};
 
@@ -11,7 +11,7 @@ pub(super) struct TranslateJobResult {
 }
 
 pub(super) struct TranslateJobRequest {
-    tx: mpsc::Sender<TranslateJobResult>,
+    tx: UnboundedSender<TranslateJobResult>,
     provider: String,
     target_language_snapshot: String,
     text: String,
@@ -28,7 +28,7 @@ impl TranslateJobRequest {
     pub(super) fn into_parts(
         self,
     ) -> (
-        mpsc::Sender<TranslateJobResult>,
+        UnboundedSender<TranslateJobResult>,
         String,
         String,
         String,
@@ -44,12 +44,12 @@ impl TranslateJobRequest {
     }
 }
 
-const TRANSLATE_EVENT_DRAIN_LIMIT: usize = 8;
-
 pub(in crate::features) struct TranslationFeatureState {
     dialog: Option<TranslationDialogState>,
-    tx: mpsc::Sender<TranslateJobResult>,
-    rx: mpsc::Receiver<TranslateJobResult>,
+    tx: UnboundedSender<TranslateJobResult>,
+    /// Taken once by `NyaTermApp::start_translation_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<TranslateJobResult>>,
     provider: String,
     settings: TranslationSettings,
     secret_draft: TranslationSecretDraft,
@@ -86,11 +86,11 @@ impl TranslationPersistenceCompletion {
 
 impl TranslationFeatureState {
     pub(in crate::features) fn new(settings: TranslationSettings) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             dialog: None,
             tx,
-            rx,
+            rx: Some(rx),
             provider: "google".to_string(),
             settings,
             secret_draft: TranslationSecretDraft::default(),
@@ -338,32 +338,32 @@ impl TranslationFeatureState {
         self.dialog.take().is_some()
     }
 
-    pub(super) fn drain_events(&mut self) -> bool {
+    pub(super) fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<TranslateJobResult>> {
+        self.rx.take()
+    }
+
+    /// Apply one job result, reporting whether the UI needs a repaint.
+    pub(super) fn apply_event(&mut self, event: TranslateJobResult) -> bool {
         if !self.pending {
+            // No run is outstanding, so this can only be a late duplicate.
+            // Dropping it keeps a stale status off a run that already settled.
             return false;
         }
-        let mut dirty = false;
-        for _ in 0..TRANSLATE_EVENT_DRAIN_LIMIT {
-            let Ok(event) = self.rx.try_recv() else {
-                break;
-            };
-            dirty = true;
-            self.pending = false;
-            match event.result {
-                Ok(result) => {
-                    self.status = format!(
-                        "translated {} character(s) from {}",
-                        result.original.chars().count(),
-                        result.detected_language
-                    );
-                    self.result = Some(result);
-                }
-                Err(error) => {
-                    self.status = format!("translation failed: {error}");
-                }
+        self.pending = false;
+        match event.result {
+            Ok(result) => {
+                self.status = format!(
+                    "translated {} character(s) from {}",
+                    result.original.chars().count(),
+                    result.detected_language
+                );
+                self.result = Some(result);
+            }
+            Err(error) => {
+                self.status = format!("translation failed: {error}");
             }
         }
-        dirty
+        true
     }
 }
 
@@ -382,10 +382,17 @@ mod tests {
             ..TranslationSettings::default()
         };
 
-        let state = TranslationFeatureState::new(settings.clone());
+        let mut state = TranslationFeatureState::new(settings.clone());
 
         assert_eq!(state.settings(), &settings);
-        assert!(state.rx.try_recv().is_err());
+        assert!(
+            state
+                .take_event_receiver()
+                .expect("a fresh state still holds its receiver")
+                .try_recv()
+                .is_err(),
+            "the job channel starts empty"
+        );
         assert!(!state.is_pending());
         assert!(!state.dialog_is_open());
     }
@@ -522,19 +529,23 @@ mod tests {
             "google".to_string(),
             "Google".to_string()
         ));
+        let mut rx = state
+            .take_event_receiver()
+            .expect("state should retain its event receiver");
         let request = state.begin_run().expect("dialog input should start");
         request
             .into_parts()
             .0
-            .send(TranslateJobResult::new(Ok(TranslateResult {
+            .unbounded_send(TranslateJobResult::new(Ok(TranslateResult {
                 original: "hello".to_string(),
                 translated: "你好".to_string(),
                 detected_language: "en".to_string(),
                 provider: "google".to_string(),
             })))
-            .expect("state should retain its event receiver");
+            .expect("the drain receiver is still alive");
+        let event = rx.try_recv().expect("the job result should be queued");
 
-        assert!(state.drain_events());
+        assert!(state.apply_event(event));
         assert!(!state.is_pending());
         assert_eq!(state.result_snapshot().unwrap().translated, "你好");
         assert_eq!(state.status(), "translated 5 character(s) from en");

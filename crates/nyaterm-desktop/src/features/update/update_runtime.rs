@@ -1,5 +1,6 @@
 use rust_i18n::t;
 
+use futures::StreamExt as _;
 use gpui::{Context, IntoElement, Window};
 use nyaterm_ui::NyaDialogWindowExt as _;
 
@@ -45,16 +46,36 @@ impl NyaTermApp {
         };
         std::thread::spawn(move || {
             let result = check_native_update();
-            let _ = tx.send(UpdateJobResult::new(result));
+            let _ = tx.unbounded_send(UpdateJobResult::new(result));
         });
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_update_events(&mut self) -> bool {
-        let dirty = self.update.drain_events();
-        if dirty {
-            self.shell.set_status(self.update.status().to_string());
-        }
-        dirty
+    /// Deliver update-check results as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `rx.try_recv`, which meant a result waited for the next tick and forced
+    /// `runtime_quiet_tick_allowed` to carry an `update` term to keep that wait
+    /// short.
+    pub(in crate::features) fn start_update_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.update.take_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.update.apply_event(event) {
+                            this.shell.set_status(this.update.status().to_string());
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 }

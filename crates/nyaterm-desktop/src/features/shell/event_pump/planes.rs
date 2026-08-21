@@ -117,8 +117,7 @@ impl NyaTermApp {
         );
         drain_stage!(
             remote,
-            self.drain_tunnel_events()
-                | self.drain_process_events()
+            self.drain_process_events()
                 | self.drain_stats_events(cx)
                 | self.drain_gpu_events()
                 | self.drain_npu_events()
@@ -126,10 +125,7 @@ impl NyaTermApp {
         );
         drain_stage!(
             maintenance,
-            self.drain_translate_events()
-                | self.drain_update_events()
-                | self.drain_command_persistence_events()
-                | self.drain_github_gist_auth_events(cx)
+            self.drain_command_persistence_events() | self.drain_github_gist_auth_events(cx)
         );
 
         dirty
@@ -193,7 +189,6 @@ impl NyaTermApp {
         if calm_tick
             && !remote_panels_need_poll
             && self.transfer.transfer_jobs_are_empty()
-            && !self.tunnel_state.has_pending()
             && !self.recording.has_pending_auto_start()
             && !self.shell.runtime.open_tabs_persist_dirty
             && !self.shell.runtime.window_layout_persist_dirty

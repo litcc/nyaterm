@@ -1,5 +1,6 @@
 use rust_i18n::t;
 
+use futures::StreamExt as _;
 use gpui::{ClipboardItem, Context, IntoElement, SharedString, Window, div, prelude::*, px, rgb};
 use nyaterm_core::TranslationSettings;
 use nyaterm_store::{StoreDomain, store_request};
@@ -26,7 +27,7 @@ impl NyaTermApp {
         let (tx, provider, target_language, text, settings) = request.into_parts();
         std::thread::spawn(move || {
             let result = translate_text(&provider, &text, &target_language, &settings);
-            let _ = tx.send(TranslateJobResult::new(result));
+            let _ = tx.unbounded_send(TranslateJobResult::new(result));
         });
         cx.notify();
     }
@@ -319,11 +320,31 @@ impl NyaTermApp {
             .into_any_element()
     }
 
-    pub(in crate::features) fn drain_translate_events(&mut self) -> bool {
-        let dirty = self.translation.drain_events();
-        if dirty {
-            self.shell.set_status(self.translation.status().to_string());
-        }
-        dirty
+    /// Deliver translation results as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `rx.try_recv`, which meant a result waited for the next tick and forced
+    /// `runtime_quiet_tick_allowed` to carry a `translation` term to keep that
+    /// wait short.
+    pub(in crate::features) fn start_translation_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.translation.take_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.translation.apply_event(event) {
+                            this.shell.set_status(this.translation.status().to_string());
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 }

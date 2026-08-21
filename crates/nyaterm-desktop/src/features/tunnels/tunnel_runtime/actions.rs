@@ -1,5 +1,6 @@
 use rust_i18n::t;
 
+use futures::StreamExt as _;
 use gpui::{Context, Window};
 use nyaterm_core::TunnelConfig;
 use nyaterm_store::{StoreDomain, store_request};
@@ -11,8 +12,6 @@ use crate::features::{
     runtime_jobs::TunnelJobResult,
 };
 use crate::models::NetworkTab;
-
-const TUNNEL_EVENT_DRAIN_LIMIT: usize = 32;
 
 impl NyaTermApp {
     pub(in crate::features) fn open_network_move_picker(
@@ -367,7 +366,7 @@ impl NyaTermApp {
                 .open(config)
                 .map(TunnelJobOutput::Opened)
                 .map_err(|error| error.to_string());
-            let _ = tunnel_tx.send(TunnelJobResult {
+            let _ = tunnel_tx.unbounded_send(TunnelJobResult {
                 tunnel_id: tunnel.id,
                 result,
             });
@@ -407,39 +406,54 @@ impl NyaTermApp {
                 .close(&tunnel_id)
                 .map(|_| TunnelJobOutput::Closed)
                 .map_err(|error| error.to_string());
-            let _ = tunnel_tx.send(TunnelJobResult { tunnel_id, result });
+            let _ = tunnel_tx.unbounded_send(TunnelJobResult { tunnel_id, result });
         });
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_tunnel_events(&mut self) -> bool {
-        if !self.tunnel_state.has_pending() {
-            return false;
-        }
-        let mut dirty = false;
-        for _ in 0..TUNNEL_EVENT_DRAIN_LIMIT {
-            let Ok(event) = self.tunnel_state.try_recv_job() else {
-                break;
-            };
-            dirty = true;
-            self.tunnel_state.finish_job(&event.tunnel_id);
-            match event.result {
-                Ok(TunnelJobOutput::Opened(info)) => {
-                    self.shell.set_status(format!(
-                        "tunnel {} open on {}:{}",
-                        event.tunnel_id, info.bind_host, info.listen_port
-                    ));
-                }
-                Ok(TunnelJobOutput::Closed) => {
-                    self.shell
-                        .set_status(format!("tunnel {} closed", event.tunnel_id));
-                }
-                Err(error) => {
-                    self.shell
-                        .set_status(format!("tunnel {} failed: {error}", event.tunnel_id));
+    /// Deliver tunnel open/close results as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `try_recv_job`, which meant a result waited for the next tick and forced
+    /// `runtime_quiet_tick_allowed` to carry a `tunnel_state` term to keep that
+    /// wait short.
+    pub(in crate::features) fn start_tunnel_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.tunnel_state.take_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        this.apply_tunnel_event(event);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             }
+        })
+        .detach();
+    }
+
+    fn apply_tunnel_event(&mut self, event: TunnelJobResult) {
+        self.tunnel_state.finish_job(&event.tunnel_id);
+        match event.result {
+            Ok(TunnelJobOutput::Opened(info)) => {
+                self.shell.set_status(format!(
+                    "tunnel {} open on {}:{}",
+                    event.tunnel_id, info.bind_host, info.listen_port
+                ));
+            }
+            Ok(TunnelJobOutput::Closed) => {
+                self.shell
+                    .set_status(format!("tunnel {} closed", event.tunnel_id));
+            }
+            Err(error) => {
+                self.shell
+                    .set_status(format!("tunnel {} failed: {error}", event.tunnel_id));
+            }
         }
-        dirty
     }
 }

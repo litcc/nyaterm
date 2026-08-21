@@ -1,4 +1,6 @@
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
+
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use nyaterm_core::{ProxyConfig, ProxyGroup, TunnelConfig, TunnelGroup, uuid};
 use nyaterm_transport::{SshTunnelInfo, SshTunnelManager};
@@ -8,8 +10,10 @@ use crate::features::runtime_jobs::TunnelJobResult;
 pub(in crate::features) struct TunnelFeatureState {
     catalog: TunnelCatalogState,
     manager: Arc<SshTunnelManager>,
-    tx: mpsc::Sender<TunnelJobResult>,
-    rx: mpsc::Receiver<TunnelJobResult>,
+    tx: UnboundedSender<TunnelJobResult>,
+    /// Taken once by `NyaTermApp::start_tunnel_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<TunnelJobResult>>,
     pending: Vec<String>,
 }
 
@@ -70,17 +74,17 @@ impl TunnelCatalogState {
 
 impl TunnelFeatureState {
     pub(in crate::features) fn new(catalog: TunnelCatalogState) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             catalog,
             manager: Arc::new(SshTunnelManager::new()),
             tx,
-            rx,
+            rx: Some(rx),
             pending: Vec::new(),
         }
     }
 
-    pub(in crate::features) fn job_sender(&self) -> mpsc::Sender<TunnelJobResult> {
+    pub(in crate::features) fn job_sender(&self) -> UnboundedSender<TunnelJobResult> {
         self.tx.clone()
     }
 
@@ -347,10 +351,6 @@ impl TunnelFeatureState {
         self.pending.iter().any(|id| id == tunnel_id)
     }
 
-    pub(in crate::features) fn has_pending(&self) -> bool {
-        !self.pending.is_empty()
-    }
-
     pub(in crate::features) fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -367,8 +367,10 @@ impl TunnelFeatureState {
         self.pending.retain(|id| id != tunnel_id);
     }
 
-    pub(in crate::features) fn try_recv_job(&self) -> Result<TunnelJobResult, mpsc::TryRecvError> {
-        self.rx.try_recv()
+    pub(in crate::features) fn take_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<TunnelJobResult>> {
+        self.rx.take()
     }
 }
 
@@ -391,23 +393,23 @@ mod tests {
         assert!(tunnels.begin_job("tunnel-1".to_string()));
         assert!(!tunnels.begin_job("tunnel-1".to_string()));
 
-        assert!(tunnels.has_pending());
         assert!(tunnels.is_pending("tunnel-1"));
         assert_eq!(tunnels.pending_count(), 1);
 
+        let mut rx = tunnels
+            .take_event_receiver()
+            .expect("tunnel events should be owned by the state");
         tunnels
             .job_sender()
-            .send(TunnelJobResult {
+            .unbounded_send(TunnelJobResult {
                 tunnel_id: "tunnel-1".to_string(),
                 result: Err("failed".to_string()),
             })
             .expect("tunnel event channel should stay connected");
-        let event = tunnels
-            .try_recv_job()
-            .expect("tunnel event should be owned by the state");
+        let event = rx.try_recv().expect("the tunnel event should be queued");
         tunnels.finish_job(&event.tunnel_id);
 
-        assert!(!tunnels.has_pending());
+        assert_eq!(tunnels.pending_count(), 0);
         assert!(!tunnels.is_pending("tunnel-1"));
     }
 

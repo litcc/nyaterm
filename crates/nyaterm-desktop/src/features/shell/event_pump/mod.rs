@@ -466,7 +466,6 @@ impl NyaTermApp {
             && !self.session.prompt_has_pending_or_active_prompt()
             && !self.terminal.action_link_hover_is_pending()
             && !self.recording.has_pending_auto_start()
-            && !self.tunnel_state.has_pending()
             && self.transfer.transfer_jobs_are_empty()
             && self.commands.persistence_is_idle()
             && !self.shell.runtime.open_tabs_persist_dirty
@@ -474,8 +473,6 @@ impl NyaTermApp {
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
             && !self.remote_ops.has_pending_job()
-            && !self.translation.is_pending()
-            && !self.update.is_pending()
             && !self.cloud_sync.github_auth().pending
             && !self.terminal.history_search_is_pending()
             && !self.ai.chat_focus_is_pending()
