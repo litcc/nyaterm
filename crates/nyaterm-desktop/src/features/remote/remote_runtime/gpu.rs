@@ -1,9 +1,8 @@
+use futures::StreamExt as _;
 use gpui::{Context, Window};
 use nyaterm_transport::{RemoteGpuOverview, RemoteGpuService, RemoteNpuOverview, RemoteNpuService};
 
 use crate::features::{NyaTermApp, runtime_jobs::GpuJobResult, runtime_jobs::NpuJobResult};
-
-const ACCELERATOR_EVENT_DRAIN_LIMIT: usize = 8;
 
 impl NyaTermApp {
     pub(in crate::features) fn apply_gpu_search(&mut self, text: String, cx: &mut Context<Self>) {
@@ -84,7 +83,7 @@ impl NyaTermApp {
             let result = RemoteGpuService::new(config)
                 .overview()
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.send(GpuJobResult {
+            let _ = ticket.tx.unbounded_send(GpuJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -93,41 +92,65 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_gpu_events(&mut self) -> bool {
-        let mut dirty = false;
-        for _ in 0..ACCELERATOR_EVENT_DRAIN_LIMIT {
-            let Some(event) = self.remote_ops.next_gpu_event() else {
-                break;
-            };
-            if !self
-                .remote_ops
-                .complete_gpu_event(event.job_id, &event.session_id)
-            {
-                continue;
-            }
-            dirty = true;
-            if self.session.active_id() != Some(event.session_id.as_str()) {
-                continue;
-            }
-            match event.result {
-                Ok(overview) => {
-                    self.remote_ops.reset_gpu_refresh_failures();
-                    self.remote_ops
-                        .set_gpu_status(gpu_overview_status(&overview));
-                    self.shell
-                        .set_status(self.remote_ops.gpu_status().to_string());
-                    self.remote_ops.apply_gpu(&event.session_id, overview);
+    /// Deliver GPU job replies as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `next_gpu_event`, which meant a reply waited for the next tick and
+    /// forced `runtime_quiet_tick_allowed` to carry a `remote_ops` term to keep
+    /// that wait short.
+    pub(in crate::features) fn start_gpu_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.remote_ops.take_gpu_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.apply_gpu_event(event) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
                 }
-                Err(error) => {
-                    self.remote_ops.record_gpu_refresh_failure();
-                    self.remote_ops
-                        .set_gpu_status(format!("GPU refresh failed: {error}"));
-                    self.shell
-                        .set_status(self.remote_ops.gpu_status().to_string());
-                }
+            }
+        })
+        .detach();
+    }
+
+    /// Apply one reply, reporting whether the UI needs a repaint.
+    fn apply_gpu_event(&mut self, event: GpuJobResult) -> bool {
+        if !self
+            .remote_ops
+            .complete_gpu_event(event.job_id, &event.session_id)
+        {
+            // A superseded job's reply; the pane has already moved on.
+            return false;
+        }
+        if self.session.active_id() != Some(event.session_id.as_str()) {
+            // Another session is active now, but completing the job is
+            // itself a state change worth painting.
+            return true;
+        }
+        match event.result {
+            Ok(overview) => {
+                self.remote_ops.reset_gpu_refresh_failures();
+                self.remote_ops
+                    .set_gpu_status(gpu_overview_status(&overview));
+                self.shell
+                    .set_status(self.remote_ops.gpu_status().to_string());
+                self.remote_ops.apply_gpu(&event.session_id, overview);
+            }
+            Err(error) => {
+                self.remote_ops.record_gpu_refresh_failure();
+                self.remote_ops
+                    .set_gpu_status(format!("GPU refresh failed: {error}"));
+                self.shell
+                    .set_status(self.remote_ops.gpu_status().to_string());
             }
         }
-        dirty
+        true
     }
 
     pub(in crate::features) fn refresh_npu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -180,7 +203,7 @@ impl NyaTermApp {
             let result = RemoteNpuService::new(config)
                 .overview()
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.send(NpuJobResult {
+            let _ = ticket.tx.unbounded_send(NpuJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -189,41 +212,65 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_npu_events(&mut self) -> bool {
-        let mut dirty = false;
-        for _ in 0..ACCELERATOR_EVENT_DRAIN_LIMIT {
-            let Some(event) = self.remote_ops.next_npu_event() else {
-                break;
-            };
-            if !self
-                .remote_ops
-                .complete_npu_event(event.job_id, &event.session_id)
-            {
-                continue;
-            }
-            dirty = true;
-            if self.session.active_id() != Some(event.session_id.as_str()) {
-                continue;
-            }
-            match event.result {
-                Ok(overview) => {
-                    self.remote_ops.reset_npu_refresh_failures();
-                    self.remote_ops
-                        .set_npu_status(npu_overview_status(&overview));
-                    self.shell
-                        .set_status(self.remote_ops.npu_status().to_string());
-                    self.remote_ops.apply_npu(&event.session_id, overview);
+    /// Deliver NPU job replies as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `next_npu_event`, which meant a reply waited for the next tick and
+    /// forced `runtime_quiet_tick_allowed` to carry a `remote_ops` term to keep
+    /// that wait short.
+    pub(in crate::features) fn start_npu_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.remote_ops.take_npu_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.apply_npu_event(event) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
                 }
-                Err(error) => {
-                    self.remote_ops.record_npu_refresh_failure();
-                    self.remote_ops
-                        .set_npu_status(format!("NPU refresh failed: {error}"));
-                    self.shell
-                        .set_status(self.remote_ops.npu_status().to_string());
-                }
+            }
+        })
+        .detach();
+    }
+
+    /// Apply one reply, reporting whether the UI needs a repaint.
+    fn apply_npu_event(&mut self, event: NpuJobResult) -> bool {
+        if !self
+            .remote_ops
+            .complete_npu_event(event.job_id, &event.session_id)
+        {
+            // A superseded job's reply; the pane has already moved on.
+            return false;
+        }
+        if self.session.active_id() != Some(event.session_id.as_str()) {
+            // Another session is active now, but completing the job is
+            // itself a state change worth painting.
+            return true;
+        }
+        match event.result {
+            Ok(overview) => {
+                self.remote_ops.reset_npu_refresh_failures();
+                self.remote_ops
+                    .set_npu_status(npu_overview_status(&overview));
+                self.shell
+                    .set_status(self.remote_ops.npu_status().to_string());
+                self.remote_ops.apply_npu(&event.session_id, overview);
+            }
+            Err(error) => {
+                self.remote_ops.record_npu_refresh_failure();
+                self.remote_ops
+                    .set_npu_status(format!("NPU refresh failed: {error}"));
+                self.shell
+                    .set_status(self.remote_ops.npu_status().to_string());
             }
         }
-        dirty
+        true
     }
 }
 

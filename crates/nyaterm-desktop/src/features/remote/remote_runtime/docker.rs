@@ -1,3 +1,4 @@
+use futures::StreamExt as _;
 use rust_i18n::t;
 
 use gpui::{Context, Window};
@@ -11,8 +12,6 @@ use crate::models::{DockerConfirmAction, DockerConfirmState, NavItem};
 use super::helpers::{
     DOCKER_SHELL_SELECTOR, docker_compose_terminal_base, docker_overview_status, shell_quote,
 };
-
-const DOCKER_EVENT_DRAIN_LIMIT: usize = 16;
 
 impl NyaTermApp {
     pub(in crate::features) fn refresh_docker(
@@ -49,7 +48,7 @@ impl NyaTermApp {
                 .overview()
                 .map(DockerJobOutput::Overview)
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -102,7 +101,7 @@ impl NyaTermApp {
                 })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -151,7 +150,7 @@ impl NyaTermApp {
                     details,
                 })
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -299,7 +298,7 @@ impl NyaTermApp {
                     services,
                 })
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -362,7 +361,7 @@ impl NyaTermApp {
                 })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -426,7 +425,7 @@ impl NyaTermApp {
                 })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -541,7 +540,7 @@ impl NyaTermApp {
                 Ok(DockerJobOutput::RefreshedAfterAction { label, overview })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.send(DockerJobResult {
+            let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -566,112 +565,133 @@ impl NyaTermApp {
         );
     }
 
-    pub(in crate::features) fn drain_docker_events(&mut self) -> bool {
-        let mut dirty = false;
-        for _ in 0..DOCKER_EVENT_DRAIN_LIMIT {
-            let Some(event) = self.remote_ops.next_docker_event() else {
-                break;
-            };
-            if !self
-                .remote_ops
-                .complete_docker_event(event.job_id, &event.session_id)
-            {
-                continue;
+    /// Deliver Docker job replies as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `next_docker_event`, which meant a reply waited for the next tick and
+    /// forced `runtime_quiet_tick_allowed` to carry a `remote_ops` term to keep
+    /// that wait short.
+    pub(in crate::features) fn start_docker_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.remote_ops.take_docker_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.apply_docker_event(event) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
             }
-            dirty = true;
-            if self.session.active_id() != Some(event.session_id.as_str()) {
-                continue;
+        })
+        .detach();
+    }
+
+    /// Apply one reply, reporting whether the UI needs a repaint.
+    fn apply_docker_event(&mut self, event: DockerJobResult) -> bool {
+        if !self
+            .remote_ops
+            .complete_docker_event(event.job_id, &event.session_id)
+        {
+            // A superseded job's reply; the pane has already moved on.
+            return false;
+        }
+        if self.session.active_id() != Some(event.session_id.as_str()) {
+            // Another session is active now, but completing the job is
+            // itself a state change worth painting.
+            return true;
+        }
+        let was_overview_refresh = self.remote_ops.docker_status() == "loading Docker overview";
+        match event.result {
+            Ok(DockerJobOutput::Overview(overview)) => {
+                self.remote_ops.reset_docker_refresh_failures();
+                self.remote_ops
+                    .set_docker_status(docker_overview_status(&overview));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+                self.remote_ops.apply_docker_overview(overview);
             }
-            let was_overview_refresh = self.remote_ops.docker_status() == "loading Docker overview";
-            match event.result {
-                Ok(DockerJobOutput::Overview(overview)) => {
-                    self.remote_ops.reset_docker_refresh_failures();
+            Ok(DockerJobOutput::Details {
+                container_id,
+                details,
+            }) => {
+                self.remote_ops
+                    .set_docker_status(format!("loaded details for {}", compact_id(&container_id)));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+                self.remote_ops.apply_docker_details(container_id, details);
+            }
+            Ok(DockerJobOutput::ComposeServices {
+                key,
+                project_name,
+                services,
+            }) => {
+                self.remote_ops.set_docker_status(format!(
+                    "loaded {} service(s) for {project_name}",
+                    services.len()
+                ));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+                self.remote_ops.set_compose_services(key, services);
+            }
+            Ok(DockerJobOutput::ComposeServiceAction {
+                key,
+                service_name,
+                action,
+                overview,
+                services,
+            }) => {
+                self.remote_ops
+                    .set_docker_status(format!("compose {action} {service_name}"));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+                self.remote_ops.apply_docker_overview(overview);
+                self.remote_ops.set_compose_services(key, services);
+            }
+            Ok(DockerJobOutput::ComposeProjectAction {
+                key,
+                project_name,
+                action,
+                overview,
+                services,
+                service_error,
+            }) => {
+                self.remote_ops
+                    .set_docker_status(format!("compose {action} {project_name}"));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+                self.remote_ops.apply_docker_overview(overview);
+                if let Some(services) = services {
+                    self.remote_ops.set_compose_services(key.clone(), services);
+                } else if let Some(error) = service_error {
                     self.remote_ops
-                        .set_docker_status(docker_overview_status(&overview));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                    self.remote_ops.apply_docker_overview(overview);
+                        .set_compose_service_error(key.clone(), error);
                 }
-                Ok(DockerJobOutput::Details {
-                    container_id,
-                    details,
-                }) => {
-                    self.remote_ops.set_docker_status(format!(
-                        "loaded details for {}",
-                        compact_id(&container_id)
-                    ));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                    self.remote_ops.apply_docker_details(container_id, details);
+            }
+            Ok(DockerJobOutput::RefreshedAfterAction { label, overview }) => {
+                let container_count = overview.containers.len();
+                self.remote_ops.apply_docker_overview(overview);
+                self.remote_ops.set_docker_status(format!(
+                    "{label} completed · {container_count} container(s)"
+                ));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+            }
+            Err(error) => {
+                if was_overview_refresh && self.remote_ops.record_docker_refresh_failure() >= 3 {
+                    self.remote_ops.clear_docker_overview();
                 }
-                Ok(DockerJobOutput::ComposeServices {
-                    key,
-                    project_name,
-                    services,
-                }) => {
-                    self.remote_ops.set_docker_status(format!(
-                        "loaded {} service(s) for {project_name}",
-                        services.len()
-                    ));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                    self.remote_ops.set_compose_services(key, services);
-                }
-                Ok(DockerJobOutput::ComposeServiceAction {
-                    key,
-                    service_name,
-                    action,
-                    overview,
-                    services,
-                }) => {
-                    self.remote_ops
-                        .set_docker_status(format!("compose {action} {service_name}"));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                    self.remote_ops.apply_docker_overview(overview);
-                    self.remote_ops.set_compose_services(key, services);
-                }
-                Ok(DockerJobOutput::ComposeProjectAction {
-                    key,
-                    project_name,
-                    action,
-                    overview,
-                    services,
-                    service_error,
-                }) => {
-                    self.remote_ops
-                        .set_docker_status(format!("compose {action} {project_name}"));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                    self.remote_ops.apply_docker_overview(overview);
-                    if let Some(services) = services {
-                        self.remote_ops.set_compose_services(key.clone(), services);
-                    } else if let Some(error) = service_error {
-                        self.remote_ops
-                            .set_compose_service_error(key.clone(), error);
-                    }
-                }
-                Ok(DockerJobOutput::RefreshedAfterAction { label, overview }) => {
-                    let container_count = overview.containers.len();
-                    self.remote_ops.apply_docker_overview(overview);
-                    self.remote_ops.set_docker_status(format!(
-                        "{label} completed · {container_count} container(s)"
-                    ));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                }
-                Err(error) => {
-                    if was_overview_refresh && self.remote_ops.record_docker_refresh_failure() >= 3
-                    {
-                        self.remote_ops.clear_docker_overview();
-                    }
-                    self.remote_ops
-                        .set_docker_status(format!("Docker operation failed: {error}"));
-                    self.shell
-                        .set_status(self.remote_ops.docker_status().to_string());
-                }
+                self.remote_ops
+                    .set_docker_status(format!("Docker operation failed: {error}"));
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
             }
         }
-        dirty
+        true
     }
 }

@@ -6,7 +6,9 @@
 //! visible instead of spreading fifty-five prefixed fields across `NyaTermApp`.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
+
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::time::Instant;
 
 use nyaterm_transport::{
@@ -24,12 +26,14 @@ use crate::models::{DockerTab, RemoteProcessSortDirection, RemoteProcessSortKey}
 
 pub(in crate::features) struct RemoteJobTicket<Event> {
     pub job_id: u64,
-    pub tx: mpsc::Sender<Event>,
+    pub tx: UnboundedSender<Event>,
 }
 
 struct RemoteJobState<Event> {
-    tx: mpsc::Sender<Event>,
-    rx: mpsc::Receiver<Event>,
+    tx: UnboundedSender<Event>,
+    /// Taken once when the pane's drain task starts, which owns delivery from
+    /// then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<Event>>,
     pending: bool,
     job_id: u64,
     session_id: Option<String>,
@@ -39,10 +43,10 @@ struct RemoteJobState<Event> {
 
 impl<Event> RemoteJobState<Event> {
     fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             tx,
-            rx,
+            rx: Some(rx),
             pending: false,
             job_id: 0,
             session_id: None,
@@ -81,8 +85,8 @@ impl<Event> RemoteJobState<Event> {
         self.last_refresh_at = Some(Instant::now());
     }
 
-    fn try_recv(&self) -> Option<Event> {
-        self.rx.try_recv().ok()
+    fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<Event>> {
+        self.rx.take()
     }
 
     fn complete_if_matches(&mut self, job_id: u64, session_id: &str) -> bool {
@@ -461,14 +465,6 @@ impl RemoteOpsFeatureState {
         self.npu.status = status.into();
     }
 
-    pub(in crate::features) fn has_pending_job(&self) -> bool {
-        self.docker.is_pending()
-            || self.process.is_pending()
-            || self.stats.is_pending()
-            || self.gpu.is_pending()
-            || self.npu.is_pending()
-    }
-
     pub(in crate::features) fn loaded_process_count(&self) -> Option<usize> {
         (self.process.snapshot_loaded && !self.process.items.is_empty())
             .then_some(self.process.items.len())
@@ -735,8 +731,10 @@ impl RemoteOpsFeatureState {
         self.docker.mark_refresh_started();
     }
 
-    pub(in crate::features) fn next_docker_event(&self) -> Option<DockerJobResult> {
-        self.docker.next_event()
+    pub(in crate::features) fn take_docker_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<DockerJobResult>> {
+        self.docker.take_event_receiver()
     }
 
     pub(in crate::features) fn complete_docker_event(
@@ -821,8 +819,10 @@ impl RemoteOpsFeatureState {
         self.process.mark_refresh_started();
     }
 
-    pub(in crate::features) fn next_process_event(&self) -> Option<ProcessJobResult> {
-        self.process.next_event()
+    pub(in crate::features) fn take_process_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<ProcessJobResult>> {
+        self.process.take_event_receiver()
     }
 
     pub(in crate::features) fn complete_process_event(
@@ -864,8 +864,10 @@ impl RemoteOpsFeatureState {
         self.stats.mark_refresh_started();
     }
 
-    pub(in crate::features) fn next_stats_event(&self) -> Option<StatsJobResult> {
-        self.stats.next_event()
+    pub(in crate::features) fn take_stats_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<StatsJobResult>> {
+        self.stats.take_event_receiver()
     }
 
     pub(in crate::features) fn complete_stats_event(
@@ -911,8 +913,10 @@ impl RemoteOpsFeatureState {
         self.gpu.mark_refresh_started();
     }
 
-    pub(in crate::features) fn next_gpu_event(&self) -> Option<GpuJobResult> {
-        self.gpu.next_event()
+    pub(in crate::features) fn take_gpu_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<GpuJobResult>> {
+        self.gpu.take_event_receiver()
     }
 
     pub(in crate::features) fn complete_gpu_event(
@@ -985,8 +989,10 @@ impl RemoteOpsFeatureState {
         self.npu.mark_refresh_started();
     }
 
-    pub(in crate::features) fn next_npu_event(&self) -> Option<NpuJobResult> {
-        self.npu.next_event()
+    pub(in crate::features) fn take_npu_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<NpuJobResult>> {
+        self.npu.take_event_receiver()
     }
 
     pub(in crate::features) fn complete_npu_event(
@@ -1062,8 +1068,8 @@ impl DockerPaneState {
         self.job.mark_refresh_started();
     }
 
-    pub(super) fn next_event(&self) -> Option<DockerJobResult> {
-        self.job.try_recv()
+    pub(super) fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<DockerJobResult>> {
+        self.job.take_event_receiver()
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
@@ -1318,8 +1324,8 @@ impl ProcessPaneState {
         self.job.mark_refresh_started();
     }
 
-    pub(super) fn next_event(&self) -> Option<ProcessJobResult> {
-        self.job.try_recv()
+    pub(super) fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<ProcessJobResult>> {
+        self.job.take_event_receiver()
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
@@ -1541,8 +1547,8 @@ impl StatsPaneState {
         self.job.mark_refresh_started();
     }
 
-    pub(super) fn next_event(&self) -> Option<StatsJobResult> {
-        self.job.try_recv()
+    pub(super) fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<StatsJobResult>> {
+        self.job.take_event_receiver()
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
@@ -1652,8 +1658,8 @@ impl<Data, Event> AcceleratorPaneState<Data, Event> {
         self.job.mark_refresh_started();
     }
 
-    fn next_event(&self) -> Option<Event> {
-        self.job.try_recv()
+    fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<Event>> {
+        self.job.take_event_receiver()
     }
 
     fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
@@ -1795,12 +1801,18 @@ mod tests {
     #[test]
     fn remote_job_state_matches_job_and_session_before_completion() {
         let mut state = RemoteJobState::<u8>::new();
+        let mut rx = state
+            .take_event_receiver()
+            .expect("the state holds its receiver until the drain starts");
         let first = state.begin("session-a".to_string());
-        first.tx.send(7).expect("receiver should stay owned");
+        first
+            .tx
+            .unbounded_send(7)
+            .expect("receiver should stay owned");
 
         let second = state.begin("session-b".to_string());
 
-        assert_eq!(state.try_recv(), Some(7));
+        assert_eq!(rx.try_recv().ok(), Some(7));
         assert!(!state.complete_if_matches(first.job_id, "session-a"));
         assert!(state.is_pending_for("session-b"));
         assert!(!state.complete_if_matches(second.job_id, "session-a"));

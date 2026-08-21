@@ -1,3 +1,4 @@
+use futures::StreamExt as _;
 use rust_i18n::t;
 
 use gpui::{ClipboardItem, Context, Window};
@@ -6,8 +7,6 @@ use nyaterm_transport::SshProcessService;
 use crate::features::NyaTermApp;
 use crate::features::runtime_jobs::{ProcessJobOutput, ProcessJobResult};
 use crate::models::{DockerTab, RemoteProcessSortKey};
-
-const PROCESS_EVENT_DRAIN_LIMIT: usize = 8;
 
 impl NyaTermApp {
     pub(in crate::features) fn set_docker_tab(&mut self, tab: DockerTab, cx: &mut Context<Self>) {
@@ -181,7 +180,7 @@ impl NyaTermApp {
                 .list_processes()
                 .map(ProcessJobOutput::Listed)
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.send(ProcessJobResult {
+            let _ = ticket.tx.unbounded_send(ProcessJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -233,7 +232,7 @@ impl NyaTermApp {
                 })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.send(ProcessJobResult {
+            let _ = ticket.tx.unbounded_send(ProcessJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -285,7 +284,7 @@ impl NyaTermApp {
                 })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.send(ProcessJobResult {
+            let _ = ticket.tx.unbounded_send(ProcessJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
                 result,
@@ -294,71 +293,93 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn drain_process_events(&mut self) -> bool {
-        let mut dirty = false;
-        for _ in 0..PROCESS_EVENT_DRAIN_LIMIT {
-            let Some(event) = self.remote_ops.next_process_event() else {
-                break;
-            };
-            if !self
-                .remote_ops
-                .complete_process_event(event.job_id, &event.session_id)
-            {
-                continue;
-            }
-            dirty = true;
-            if self.session.active_id() != Some(event.session_id.as_str()) {
-                continue;
-            }
-            let was_list_refresh = self.remote_ops.process_status() == "listing remote processes";
-            match event.result {
-                Ok(ProcessJobOutput::Listed(processes)) => {
-                    self.remote_ops.reset_process_refresh_failures();
-                    self.remote_ops.set_process_status(format!(
-                        "loaded {} remote process(es)",
-                        processes.len()
-                    ));
-                    self.shell
-                        .set_status(self.remote_ops.process_status().to_string());
-                    self.remote_ops.apply_processes(processes);
-                }
-                Ok(ProcessJobOutput::Signalled {
-                    pid,
-                    signal,
-                    processes,
-                }) => {
-                    self.remote_ops
-                        .set_process_status(format!("sent {signal} to pid {pid}"));
-                    self.shell
-                        .set_status(self.remote_ops.process_status().to_string());
-                    self.remote_ops.apply_processes(processes);
-                }
-                Ok(ProcessJobOutput::Reniced {
-                    pid,
-                    nice,
-                    processes,
-                }) => {
-                    self.remote_ops
-                        .set_process_status(format!("reniced pid {pid} to {nice}"));
-                    self.shell
-                        .set_status(self.remote_ops.process_status().to_string());
-                    self.remote_ops.apply_processes(processes);
-                }
-                Err(error) => {
-                    if was_list_refresh {
-                        let terminal =
-                            error.contains(nyaterm_transport::PROCESS_LIST_UNSUPPORTED_ERROR);
-                        if self.remote_ops.record_process_refresh_failure(terminal) >= 3 {
-                            self.remote_ops.clear_process_data();
+    /// Deliver remote process job replies as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `next_process_event`, which meant a reply waited for the next tick and
+    /// forced `runtime_quiet_tick_allowed` to carry a `remote_ops` term to keep
+    /// that wait short.
+    pub(in crate::features) fn start_process_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.remote_ops.take_process_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.apply_process_event(event) {
+                            cx.notify();
                         }
-                    }
-                    self.remote_ops
-                        .set_process_status(format!("process operation failed: {error}"));
-                    self.shell
-                        .set_status(self.remote_ops.process_status().to_string());
+                    })
+                    .is_err()
+                {
+                    break;
                 }
+            }
+        })
+        .detach();
+    }
+
+    /// Apply one reply, reporting whether the UI needs a repaint.
+    fn apply_process_event(&mut self, event: ProcessJobResult) -> bool {
+        if !self
+            .remote_ops
+            .complete_process_event(event.job_id, &event.session_id)
+        {
+            // A superseded job's reply; the pane has already moved on.
+            return false;
+        }
+        if self.session.active_id() != Some(event.session_id.as_str()) {
+            // Another session is active now, but completing the job is
+            // itself a state change worth painting.
+            return true;
+        }
+        let was_list_refresh = self.remote_ops.process_status() == "listing remote processes";
+        match event.result {
+            Ok(ProcessJobOutput::Listed(processes)) => {
+                self.remote_ops.reset_process_refresh_failures();
+                self.remote_ops
+                    .set_process_status(format!("loaded {} remote process(es)", processes.len()));
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
+                self.remote_ops.apply_processes(processes);
+            }
+            Ok(ProcessJobOutput::Signalled {
+                pid,
+                signal,
+                processes,
+            }) => {
+                self.remote_ops
+                    .set_process_status(format!("sent {signal} to pid {pid}"));
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
+                self.remote_ops.apply_processes(processes);
+            }
+            Ok(ProcessJobOutput::Reniced {
+                pid,
+                nice,
+                processes,
+            }) => {
+                self.remote_ops
+                    .set_process_status(format!("reniced pid {pid} to {nice}"));
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
+                self.remote_ops.apply_processes(processes);
+            }
+            Err(error) => {
+                if was_list_refresh {
+                    let terminal =
+                        error.contains(nyaterm_transport::PROCESS_LIST_UNSUPPORTED_ERROR);
+                    if self.remote_ops.record_process_refresh_failure(terminal) >= 3 {
+                        self.remote_ops.clear_process_data();
+                    }
+                }
+                self.remote_ops
+                    .set_process_status(format!("process operation failed: {error}"));
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
             }
         }
-        dirty
+        true
     }
 }

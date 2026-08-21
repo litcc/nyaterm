@@ -471,7 +471,6 @@ impl NyaTermApp {
             && !self.shell.runtime.window_layout_persist_dirty
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
-            && !self.remote_ops.has_pending_job()
             && !self.terminal.history_search_is_pending()
             && !self.ai.chat_focus_is_pending()
             && !self.transfer.rename_focus_is_pending()

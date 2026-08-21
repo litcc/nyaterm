@@ -115,14 +115,6 @@ impl NyaTermApp {
                 | self.drain_ai_chat_events(cx)
                 | self.drive_ai_agent_loop(cx)
         );
-        drain_stage!(
-            remote,
-            self.drain_process_events()
-                | self.drain_stats_events(cx)
-                | self.drain_gpu_events()
-                | self.drain_npu_events()
-                | self.drain_docker_events()
-        );
 
         dirty
     }
