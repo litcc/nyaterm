@@ -655,11 +655,10 @@ impl NyaTermApp {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
 
     use gpui::{AppContext as _, TestAppContext};
-    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode};
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
     use nyaterm_transport::LocalSessionConfig;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -673,20 +672,14 @@ mod tests {
 
     const SESSION_ID: &str = "event-pump-session";
 
-    /// Windows clock granularity is coarse enough (~15ms) that a wall-clock
-    /// timestamp alone collides between tests started in the same tick, and two
-    /// apps sharing a directory fight over the same redb file. Keep a counter.
-    static TEST_DIR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
     fn unique_test_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time after epoch")
-            .as_nanos();
-        let sequence = TEST_DIR_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        // A uuid rather than a clock reading: these tests run in parallel and
+        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
+        // which would share one config dir and so one settings database.
         std::env::temp_dir().join(format!(
-            "nyaterm-event-pump-{}-{nanos}-{sequence}",
-            std::process::id()
+            "nyaterm-event-pump-{}-{}",
+            std::process::id(),
+            uuid()
         ))
     }
 

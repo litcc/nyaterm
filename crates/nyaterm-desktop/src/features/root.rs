@@ -865,13 +865,13 @@ impl Render for NyaTermApp {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant};
 
     use gpui::{
         AppContext as _, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
         VisualTestContext, div,
     };
-    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode};
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
     use nyaterm_transport::LocalSessionConfig;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -893,13 +893,10 @@ mod tests {
     }
 
     fn root_render_benchmark_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time after unix epoch")
-            .as_nanos();
         std::env::temp_dir().join(format!(
-            "nyaterm-root-render-benchmark-{}-{nanos}",
-            std::process::id()
+            "nyaterm-root-render-benchmark-{}-{}",
+            std::process::id(),
+            uuid()
         ))
     }
 

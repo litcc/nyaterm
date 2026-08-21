@@ -509,10 +509,9 @@ impl NyaTermApp {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use gpui::{AppContext as _, TestAppContext};
-    use nyaterm_core::{AppRuntime, RuntimeMode};
+    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
     use nyaterm_ui::NyaMenuItem;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -520,11 +519,14 @@ mod tests {
     use crate::models::TitleMenu;
 
     fn unique_test_dir() -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("nyaterm-title-menu-{}-{nanos}", std::process::id()))
+        // A uuid rather than a clock reading: these tests run in parallel and
+        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
+        // which would share one config dir and so one settings database.
+        std::env::temp_dir().join(format!(
+            "nyaterm-title-menu-{}-{}",
+            std::process::id(),
+            uuid()
+        ))
     }
 
     fn menu_app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {

@@ -44,10 +44,9 @@ use gpui::{AppContext as _, TestAppContext};
 use nyaterm_core::{
     AiExecutionProfile, AppRuntime, ConnectionRecordingSettings, ConnectionType, Group,
     RecordingMode, RecordingRotationPolicy, RuntimeMode, SavedConnection, SshAgentEndpoint,
-    SshAgentForwardingPolicy, SshProfile, SshTerminalType,
+    SshAgentForwardingPolicy, SshProfile, SshTerminalType, uuid,
 };
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn search_expansion_opens_matches_and_restores_the_prior_tree() {
@@ -1612,11 +1611,10 @@ fn seed_cached_connections(cx: &mut TestAppContext, app: &gpui::Entity<NyaTermAp
 }
 
 fn unique_test_dir(label: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time after epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("nyaterm-{label}-{}-{nanos}", std::process::id()))
+    // A uuid rather than a clock reading: these tests run in parallel and
+    // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat, which
+    // would share one config dir and so one settings database.
+    std::env::temp_dir().join(format!("nyaterm-{label}-{}-{}", std::process::id(), uuid()))
 }
 
 fn saved_connection(
