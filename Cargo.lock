@@ -5685,6 +5685,7 @@ dependencies = [
  "gpui",
  "gpui-base",
  "gpui-component",
+ "rust-i18n",
 ]
 
 [[package]]

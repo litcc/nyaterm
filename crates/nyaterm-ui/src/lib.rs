@@ -52,3 +52,21 @@ pub use widgets::{
     NyaHorizontalScrollbar, NyaScrollArea, NyaUniformListScrollbar, capability_line, empty_panel,
     mode_button, section_header, session_info_row, small_button, status_pill, svg_icon_button,
 };
+
+#[cfg(test)]
+mod tests {
+    /// NyaTerm localises `gpui-component`'s own widget strings by setting one
+    /// process-wide locale, which only works because both crates read the same
+    /// `rust_i18n` global and `gpui-component` ships the locales NyaTerm offers.
+    /// This pins the whole chain without mutating the global, which parallel tests
+    /// would race.
+    #[test]
+    fn gpui_component_shares_the_rust_i18n_locale_and_ships_simplified_chinese() {
+        assert_eq!(&*gpui_component::locale(), &*rust_i18n::locale());
+
+        let english = gpui_component::_rust_i18n_try_translate("en", "Calendar.month.January");
+        let chinese = gpui_component::_rust_i18n_try_translate("zh-CN", "Calendar.month.January");
+        assert_eq!(english.as_deref(), Some("January"));
+        assert_eq!(chinese.as_deref(), Some("一月"));
+    }
+}
