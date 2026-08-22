@@ -5,8 +5,7 @@ use gpui::{Context, Window};
 use crate::features::shell::event_pump::helpers::{
     RUNTIME_TICK_SLOW_THRESHOLD, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
     TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
-    runtime_idle_plane_allowed, runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
-    terminal_render_work_pressure_active, window_geometry_churn_active,
+    runtime_idle_plane_allowed, runtime_ui_notify_allowed, window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, terminal::full_shell_paint_count, terminal::terminal_surface_paint_count,
@@ -292,27 +291,10 @@ impl NyaTermApp {
     ) -> RuntimeVisualPlaneResult {
         let visual_stage_started_at = Instant::now();
         let mut dirty = false;
-        let now = Instant::now();
-        let output_pressure = self.runtime_output_pressure_active()
-            || connect_settle_active(self.shell.runtime.connect_settle_until, now);
-        // Cursor blink is owned by `shell::cursor_blink`'s own timer, not by this
-        // plane: at the quiet cadence a tick-driven toggle stretched the visible
-        // half-period to roughly twice its setting.
-        let render_work_pressure =
-            terminal_render_work_pressure_active(output_pressure, self.session.start_has_pending());
-        // Large-output protection recovery accounting.
-        // Under pressure only touch views that already need recovery accounting.
-        let visible_session_ids = self.visible_terminal_session_ids();
-        let performance_session_ids = terminal_performance_tick_session_ids(&visible_session_ids);
-        let surface_paint_sessions = self.terminal.tick_session_performance(
-            performance_session_ids.iter().map(String::as_str),
-            render_work_pressure,
-            now,
-        );
-        for session_id in surface_paint_sessions {
-            self.notify_terminal_surface_only(Some(session_id.as_str()), cx);
-        }
-        // Drop overlay only while a platform drag is active.
+        // Cursor blink is owned by `shell::cursor_blink` and recovery accounting by
+        // `shell::terminal_recovery`, each on its own deadline. What is left here is
+        // the drop-hover clear, which polls `has_active_drag` on purpose: it is how a
+        // drag that ends *without* a drop on our element gets noticed.
         if !cx.has_active_drag() && self.terminal.clear_terminal_file_drop_hover() {
             dirty = true;
         }

@@ -25,6 +25,17 @@ use crate::models::{HeaderStatusMode, NavItem};
 mod bridge;
 mod helpers;
 
+/// The pressure input recovery accounting is measured against, shared so the recovery
+/// clock computes it exactly as the visual plane did.
+pub(in crate::features) fn terminal_performance_pressure(
+    app: &NyaTermApp,
+    now: std::time::Instant,
+) -> bool {
+    let output_pressure = app.runtime_output_pressure_active()
+        || connect_settle_active(app.shell.runtime.connect_settle_until, now);
+    helpers::terminal_render_work_pressure_active(output_pressure, app.session.start_has_pending())
+}
+
 pub(super) use helpers::PENDING_SESSION_STATUS_INTERVAL;
 mod planes;
 mod session_events;
@@ -134,6 +145,9 @@ impl NyaTermApp {
         // snapshot, so this cycle sees every change to what the blink clock depends
         // on. Cheap: one bool once the clock is already running.
         self.ensure_cursor_blink_clock(cx);
+        // Entering degraded rendering is a consequence of output being applied, so
+        // this cycle is where recovery accounting starts needing to run.
+        self.ensure_terminal_recovery_clock(cx);
 
         let notified = self.notify_after_runtime_data_plane_drain(
             session_dirty || frames_dirty || sideband_dirty,
@@ -575,7 +589,7 @@ impl NyaTermApp {
         self.visible_terminal_performance_recovery_due()
     }
 
-    fn visible_terminal_performance_recovery_due(&self) -> bool {
+    pub(in crate::features) fn visible_terminal_performance_recovery_due(&self) -> bool {
         self.terminal
             .visible_performance_recovery_due(self.visible_terminal_session_ids())
     }

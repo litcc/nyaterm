@@ -349,7 +349,7 @@ pub(super) fn terminal_input_idle_remaining_delay(
         .filter(|delay| !delay.is_zero())
 }
 
-pub(super) fn terminal_render_work_pressure_active(
+pub(in crate::features::shell::event_pump) fn terminal_render_work_pressure_active(
     runtime_output_pressure: bool,
     pending_session_start: bool,
 ) -> bool {
@@ -358,16 +358,6 @@ pub(super) fn terminal_render_work_pressure_active(
 
 pub(super) fn runtime_idle_plane_allowed(runtime_output_pressure: bool) -> bool {
     !runtime_output_pressure
-}
-
-pub(super) fn terminal_performance_tick_session_ids(visible_session_ids: &[&str]) -> Vec<String> {
-    let mut ids = Vec::with_capacity(visible_session_ids.len());
-    for session_id in visible_session_ids {
-        if !session_id.is_empty() && !ids.iter().any(|id| id == session_id) {
-            ids.push((*session_id).to_string());
-        }
-    }
-    ids
 }
 
 pub(super) fn session_event_drain_should_yield(
@@ -430,9 +420,9 @@ mod tests {
         session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
         terminal_frame_apply_should_defer, terminal_frame_backlog_active_from_counts,
         terminal_input_idle_remaining_delay, terminal_log_plain_text,
-        terminal_output_dropped_marker, terminal_performance_tick_session_ids,
-        terminal_render_work_pressure_active, terminal_user_scroll_frame_apply_pending,
-        viewport_change_terminal_session_ids, window_geometry_churn_active,
+        terminal_output_dropped_marker, terminal_render_work_pressure_active,
+        terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
+        window_geometry_churn_active,
     };
 
     #[test]
@@ -918,15 +908,6 @@ mod tests {
     fn runtime_idle_plane_waits_for_output_calm() {
         assert!(runtime_idle_plane_allowed(false));
         assert!(!runtime_idle_plane_allowed(true));
-    }
-
-    #[test]
-    fn terminal_performance_ticks_only_visible_sessions() {
-        assert_eq!(
-            terminal_performance_tick_session_ids(&["a", "b", "a", ""]),
-            vec!["a".to_string(), "b".to_string()]
-        );
-        assert!(terminal_performance_tick_session_ids(&[]).is_empty());
     }
 
     #[test]
