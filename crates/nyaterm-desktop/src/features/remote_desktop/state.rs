@@ -27,6 +27,8 @@ pub(in crate::features) struct RemoteDesktopFeatureState {
     /// `NyaTermApp::start_remote_desktop_event_drain`.
     wake: EventWake,
     wake_rx: Option<UnboundedReceiver<()>>,
+    /// True while the periodic-maintenance clock task is alive.
+    periodic_clock_armed: bool,
 }
 
 pub(super) struct RemoteDesktopSessionState {
@@ -112,6 +114,7 @@ impl RemoteDesktopFeatureState {
             focus_subscriptions: Vec::new(),
             wake,
             wake_rx: Some(wake_rx),
+            periodic_clock_armed: false,
         }
     }
 
@@ -123,6 +126,26 @@ impl RemoteDesktopFeatureState {
     /// this must happen before the consumer checks the queues.
     pub(in crate::features) fn arm_event_wake(&self) {
         self.wake.arm(ANY_INTEREST);
+    }
+
+    pub(in crate::features) fn has_sessions(&self) -> bool {
+        !self.sessions.is_empty()
+    }
+
+    /// Whether any session is holding a coalesced pointer move that still needs
+    /// sending. This is what decides the periodic clock's cadence.
+    pub(in crate::features) fn pointer_flush_is_pending(&self) -> bool {
+        self.sessions
+            .values()
+            .any(|session| session.pending_pointer.is_some())
+    }
+
+    pub(in crate::features) fn periodic_clock_is_armed(&self) -> bool {
+        self.periodic_clock_armed
+    }
+
+    pub(in crate::features) fn set_periodic_clock_armed(&mut self, armed: bool) {
+        self.periodic_clock_armed = armed;
     }
 
     pub(in crate::features) fn is_session(&self, session_id: &str) -> bool {

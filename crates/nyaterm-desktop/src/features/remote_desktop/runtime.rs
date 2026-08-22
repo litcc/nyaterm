@@ -19,6 +19,25 @@ const RESIZE_MIN_DELTA: u32 = 32;
 const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const POINTER_MOVE_INTERVAL: Duration = Duration::from_millis(8);
 const METRICS_REPORT_INTERVAL: Duration = Duration::from_secs(5);
+/// Cadence for remote-desktop maintenance when no pointer move is waiting.
+///
+/// Finer than the shortest thing it services (`RESIZE_DEBOUNCE`), so a debounce still
+/// resolves promptly after the user stops; the clipboard and metrics intervals gate
+/// themselves, so this only costs a cheap check for those.
+const MAINTENANCE_INTERVAL: Duration = Duration::from_millis(100);
+
+/// How long before the next remote-desktop maintenance pass.
+///
+/// A waiting pointer move gets `POINTER_MOVE_INTERVAL`, because that is the interval
+/// its own send is budgeted against and a late flush is a visibly late cursor.
+/// Everything else is happy on the coarser maintenance cadence.
+fn remote_desktop_periodic_delay(pointer_flush_pending: bool) -> Duration {
+    if pointer_flush_pending {
+        POINTER_MOVE_INTERVAL
+    } else {
+        MAINTENANCE_INTERVAL
+    }
+}
 
 impl NyaTermApp {
     pub(in crate::features) fn ensure_rdp_focus_reporting(
@@ -391,6 +410,9 @@ impl NyaTermApp {
                 // signals rather than waiting for the next one.
                 let drained = this.update_in(cx, |this, window, cx| {
                     this.remote_desktop.arm_event_wake();
+                    // Any event means a session exists; the periodic clock is scoped
+                    // to that, and every reconnect is scheduled from an event handler.
+                    this.ensure_remote_desktop_periodic_clock(cx);
                     let dirty = this.drain_remote_desktop_queues(window, cx);
                     if dirty {
                         cx.notify();
@@ -460,6 +482,56 @@ impl NyaTermApp {
     /// resize is debounced, the reconnect ladder waits out a backoff, the
     /// clipboard is polled on an interval, and metrics report on one. Giving each
     /// its own timer is Phase 2 of the runtime-tick plan.
+    /// Drive remote-desktop maintenance on its own cadence while a session exists.
+    ///
+    /// These six are all genuinely time-based -- a coalesced pointer move flushes after
+    /// a hold, a resize is debounced, the reconnect ladder waits out a backoff, and
+    /// the clipboard and metrics report on intervals -- so this stays a poll. What was
+    /// wrong was *whose* cadence it used: `runtime_quiet_tick_allowed` has no
+    /// remote-desktop term, so an otherwise-idle app with a live RDP session ran this
+    /// at the 500ms quiet interval, and the trailing pointer move of a gesture --
+    /// budgeted at `POINTER_MOVE_INTERVAL`, 8ms -- landed up to half a second late.
+    ///
+    /// Armed from the remote-desktop event drain. Every reconnect is scheduled by an
+    /// event handler, and a connecting session always reports at least one state
+    /// change, so an event is a reliable point to start from.
+    pub(in crate::features) fn ensure_remote_desktop_periodic_clock(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.remote_desktop.periodic_clock_is_armed() || !self.remote_desktop.has_sessions() {
+            return;
+        }
+        self.remote_desktop.set_periodic_clock_armed(true);
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(delay) = this.update(cx, |this, _| {
+                    remote_desktop_periodic_delay(this.remote_desktop.pointer_flush_is_pending())
+                }) else {
+                    break;
+                };
+                cx.background_executor().timer(delay).await;
+                // `update_in`: keyboard-capture sync needs the window.
+                let Ok(keep_running) = this.update_in(cx, |this, window, cx| {
+                    if this.drive_remote_desktop_periodic(window, cx) {
+                        cx.notify();
+                    }
+                    let running = this.remote_desktop.has_sessions();
+                    if !running {
+                        this.remote_desktop.set_periodic_clock_armed(false);
+                    }
+                    running
+                }) else {
+                    break;
+                };
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(in crate::features) fn drive_remote_desktop_periodic(
         &mut self,
         window: &mut Window,
@@ -1705,9 +1777,10 @@ mod tests {
     use nyaterm_remote_desktop::{RdpError, RdpErrorKind};
 
     use super::{
+        MAINTENANCE_INTERVAL, POINTER_MOVE_INTERVAL, RESIZE_DEBOUNCE,
         clear_rdp_reconnect_after_frame, inline_remote_desktop_password, rdp_error_is_retryable,
         rdp_reconnect_delay, rdp_resize_is_material, remote_desktop_password_id,
-        should_disable_dynamic_resize_after_state,
+        remote_desktop_periodic_delay, should_disable_dynamic_resize_after_state,
     };
     use crate::features::remote_desktop::state::RemoteDesktopSessionState;
 
@@ -1764,6 +1837,26 @@ mod tests {
             );
         }
         assert_eq!(rdp_reconnect_delay(1, 999), Duration::from_millis(1_249));
+    }
+
+    /// A waiting pointer move is the one thing here that needs a fine cadence.
+    ///
+    /// Its send is budgeted against `POINTER_MOVE_INTERVAL`, so a flush on any coarser
+    /// schedule is a visibly late cursor -- which is what the runtime tick's 500ms
+    /// quiet interval was doing, since `runtime_quiet_tick_allowed` has no
+    /// remote-desktop term. Everything else here debounces or gates itself.
+    #[test]
+    fn a_waiting_pointer_move_gets_the_fine_cadence() {
+        assert_eq!(
+            remote_desktop_periodic_delay(true),
+            POINTER_MOVE_INTERVAL,
+            "a coalesced pointer move must not wait longer than its own send interval"
+        );
+        assert_eq!(remote_desktop_periodic_delay(false), MAINTENANCE_INTERVAL);
+        assert!(
+            MAINTENANCE_INTERVAL < RESIZE_DEBOUNCE,
+            "the maintenance cadence has to be finer than the shortest thing it              services, or a resize debounce resolves late"
+        );
     }
 
     #[test]

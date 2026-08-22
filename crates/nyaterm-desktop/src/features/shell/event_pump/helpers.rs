@@ -9,8 +9,6 @@ pub(super) const SESSION_EVENT_DRAIN_WALL_BUDGET: Duration = Duration::from_mill
 pub(super) const SESSION_EVENT_INPUT_WAKE_DRAIN_BATCH: usize = 32;
 pub(super) const SESSION_EVENT_INPUT_WAKE_OUTPUT_BUDGET: usize = 4 * 1024;
 pub(super) const SESSION_EVENT_INPUT_WAKE_WALL_BUDGET: Duration = Duration::from_millis(1);
-pub(super) const RUNTIME_BACKGROUND_EVENT_DRAIN_WALL_BUDGET: Duration = Duration::from_millis(6);
-pub(super) const RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW: Duration = Duration::from_millis(12);
 /// One data-plane drain cycle is budgeted 8ms of session events plus 4ms of frame
 /// applies, so anything past this overran both.
 pub(super) const RUNTIME_DATA_PLANE_DRAIN_SLOW: Duration = Duration::from_millis(16);
@@ -49,23 +47,6 @@ pub(super) struct SessionEventDrainTimings {
     pub(super) terminal_append: Duration,
     pub(super) credential_autofill: Duration,
     pub(super) ai_capture: Duration,
-}
-
-#[derive(Default)]
-pub(super) struct RuntimeBackgroundDrainTimings {
-    pub(super) credential_autofill: Duration,
-    pub(super) recording: Duration,
-    pub(super) transfer: Duration,
-    pub(super) ai: Duration,
-    pub(super) remote: Duration,
-    pub(super) maintenance: Duration,
-    pub(super) budget_exhausted: bool,
-}
-
-pub(super) struct RuntimeDataPlaneResult {
-    pub(super) dirty: bool,
-    pub(super) background_total: Duration,
-    pub(super) background_timings: RuntimeBackgroundDrainTimings,
 }
 
 /// Whether the frame drain may run this cycle, and why not when it may not.
@@ -404,10 +385,6 @@ pub(super) fn session_event_drain_should_yield(
     has_pending_events || transport_queued_events > 0 || transport_queued_output_bytes > 0
 }
 
-pub(super) fn runtime_background_event_drain_budget_exhausted(started_at: Instant) -> bool {
-    started_at.elapsed() >= RUNTIME_BACKGROUND_EVENT_DRAIN_WALL_BUDGET
-}
-
 pub(super) fn remote_refresh_due(last_refresh_at: Option<Instant>, interval_seconds: u32) -> bool {
     last_refresh_at.is_none_or(|last_refresh_at| {
         last_refresh_at.elapsed() >= Duration::from_secs(u64::from(interval_seconds))
@@ -440,25 +417,24 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        CONNECT_SETTLE_HOLD, PendingSessionAuthWait, RUNTIME_BACKGROUND_EVENT_DRAIN_WALL_BUDGET,
-        RUNTIME_IDLE_TICK_INTERVAL, RUNTIME_PRESSURE_TICK_INTERVAL, RuntimeOutputPressureCounts,
-        SESSION_EVENT_DRAIN_BATCH, SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET,
-        SESSION_EVENT_DRAIN_PRESSURE_OUTPUT_BUDGET, SESSION_EVENT_DRAIN_SLOW_CHUNK,
-        SESSION_EVENT_DRAIN_SLOW_TOTAL, SESSION_EVENT_DRAIN_WALL_BUDGET, SLOW_DIAGNOSTIC_THROTTLE,
+        CONNECT_SETTLE_HOLD, PendingSessionAuthWait, RUNTIME_IDLE_TICK_INTERVAL,
+        RUNTIME_PRESSURE_TICK_INTERVAL, RuntimeOutputPressureCounts, SESSION_EVENT_DRAIN_BATCH,
+        SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET, SESSION_EVENT_DRAIN_PRESSURE_OUTPUT_BUDGET,
+        SESSION_EVENT_DRAIN_SLOW_CHUNK, SESSION_EVENT_DRAIN_SLOW_TOTAL,
+        SESSION_EVENT_DRAIN_WALL_BUDGET, SLOW_DIAGNOSTIC_THROTTLE,
         TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL, UI_PAINT_THROTTLE, WINDOW_GEOMETRY_CHURN_HOLD,
         connect_settle_active, connect_settle_deadline, diagnostic_log_due,
-        pending_session_status_message, runtime_background_event_drain_budget_exhausted,
-        runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
-        runtime_idle_plane_allowed, runtime_output_pressure_active_from_counts,
-        runtime_tick_interval_for_pressure, runtime_ui_notify_allowed,
-        session_event_backlog_active, session_event_drain_budget, session_event_drain_is_slow,
-        session_event_drain_should_yield, session_event_input_wake_drain_budget,
-        terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
-        terminal_frame_backlog_active_from_counts, terminal_input_idle_remaining_delay,
-        terminal_log_plain_text, terminal_output_dropped_marker,
-        terminal_performance_tick_session_ids, terminal_render_work_pressure_active,
-        terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
-        window_geometry_churn_active,
+        pending_session_status_message, runtime_background_should_defer_terminal_frames,
+        runtime_data_plane_wake_delay, runtime_idle_plane_allowed,
+        runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
+        runtime_ui_notify_allowed, session_event_backlog_active, session_event_drain_budget,
+        session_event_drain_is_slow, session_event_drain_should_yield,
+        session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
+        terminal_frame_apply_should_defer, terminal_frame_backlog_active_from_counts,
+        terminal_input_idle_remaining_delay, terminal_log_plain_text,
+        terminal_output_dropped_marker, terminal_performance_tick_session_ids,
+        terminal_render_work_pressure_active, terminal_user_scroll_frame_apply_pending,
+        viewport_change_terminal_session_ids, window_geometry_churn_active,
     };
 
     #[test]
@@ -972,16 +948,6 @@ mod tests {
             1,
             1,
             budget
-        ));
-    }
-
-    #[test]
-    fn runtime_background_event_drain_budget_exhaustion_tracks_elapsed_time() {
-        let start = Instant::now() - RUNTIME_BACKGROUND_EVENT_DRAIN_WALL_BUDGET;
-
-        assert!(runtime_background_event_drain_budget_exhausted(start));
-        assert!(!runtime_background_event_drain_budget_exhausted(
-            Instant::now()
         ));
     }
 }

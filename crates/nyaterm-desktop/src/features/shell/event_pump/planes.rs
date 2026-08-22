@@ -1,12 +1,10 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
-    RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW, RUNTIME_TICK_SLOW_THRESHOLD,
-    RuntimeBackgroundDrainTimings, RuntimeDataPlaneResult, RuntimeIdlePlaneResult,
-    RuntimeVisualPlaneResult, TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active,
-    diagnostic_log_due, runtime_background_event_drain_budget_exhausted,
+    RUNTIME_TICK_SLOW_THRESHOLD, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
+    TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
     runtime_idle_plane_allowed, runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
     terminal_render_work_pressure_active, window_geometry_churn_active,
 };
@@ -59,39 +57,6 @@ impl NyaTermApp {
             self.focus_active_ssh_prompt_input(window, cx);
             self.session.prompt_finish_credential_focus();
             dirty = true;
-        }
-        dirty
-    }
-
-    pub(super) fn drain_runtime_background_events(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        started_at: Instant,
-        timings: &mut RuntimeBackgroundDrainTimings,
-        critical_only: bool,
-    ) -> bool {
-        let mut dirty = false;
-        macro_rules! drain_stage {
-            ($field:ident, $expr:expr) => {{
-                let stage_started_at = Instant::now();
-                dirty |= $expr;
-                timings.$field += stage_started_at.elapsed();
-                if runtime_background_event_drain_budget_exhausted(started_at) {
-                    timings.budget_exhausted = true;
-                    return dirty;
-                }
-            }};
-        }
-
-        // Data plane only. Session start / prompts already ran on the control plane.
-        // Session events and terminal frames run on `start_runtime_data_plane_drain`;
-        // helper-pushed remote-desktop events on `start_remote_desktop_event_drain`.
-        // What is left here is the time-based half of each.
-        drain_stage!(remote, self.drive_remote_desktop_periodic(window, cx));
-        if critical_only {
-            // Autofill / recording / transfer / remote are idle-plane sideband.
-            return dirty;
         }
         dirty
     }
@@ -168,13 +133,6 @@ impl NyaTermApp {
             return true;
         }
 
-        let data = self.drive_runtime_data_plane(window, cx);
-        dirty |= data.dirty;
-        self.maybe_log_slow_runtime_background_event_drain(
-            data.background_total,
-            &data.background_timings,
-        );
-
         let idle = self.drive_runtime_idle_plane(window, cx);
         dirty |= idle.dirty;
 
@@ -213,7 +171,6 @@ impl NyaTermApp {
             tracing::warn!(
                 diagnostic = "runtime_tick",
                 total_ms = tick_duration.as_millis(),
-                background_runtime_ms = data.background_total.as_millis(),
                 startup_restore_ms = idle.startup_restore.as_millis(),
                 render_requests_output_pressure = idle.render_request_output_pressure,
                 pending_focus_ms = idle.pending_focus.as_millis(),
@@ -294,7 +251,6 @@ impl NyaTermApp {
                     output_pressure,
                     visual_dirty,
                     tick_ms = tick_duration.as_millis(),
-                    background_runtime_ms = data.background_total.as_millis(),
                     visual_runtime_ms = visual.duration.as_millis(),
                     notify_ms = notify_duration.as_millis(),
                     queued_session_events = self.shell.runtime.session_event_queued_events,
@@ -330,53 +286,6 @@ impl NyaTermApp {
             self.shell.runtime.last_perf_layout_cache_misses = layout_cache_misses;
         }
         self.shell.runtime.event_pump_started
-    }
-
-    pub(super) fn drive_runtime_data_plane(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> RuntimeDataPlaneResult {
-        let background_started_at = Instant::now();
-        let mut background_timings = RuntimeBackgroundDrainTimings::default();
-        let critical_background_only = self.runtime_output_pressure_active();
-        let dirty = self.drain_runtime_background_events(
-            window,
-            cx,
-            background_started_at,
-            &mut background_timings,
-            critical_background_only,
-        );
-        RuntimeDataPlaneResult {
-            dirty,
-            background_total: background_started_at.elapsed(),
-            background_timings,
-        }
-    }
-
-    pub(super) fn maybe_log_slow_runtime_background_event_drain(
-        &mut self,
-        background_total: Duration,
-        background_timings: &RuntimeBackgroundDrainTimings,
-    ) {
-        if !(background_timings.budget_exhausted
-            || background_total >= RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW)
-            || !self.should_log_slow_diagnostic("runtime_background_event_drain", Instant::now())
-        {
-            return;
-        }
-        tracing::warn!(
-            diagnostic = "runtime_background_event_drain",
-            total_ms = background_total.as_millis(),
-            credential_autofill_ms = background_timings.credential_autofill.as_millis(),
-            recording_ms = background_timings.recording.as_millis(),
-            transfer_ms = background_timings.transfer.as_millis(),
-            ai_ms = background_timings.ai.as_millis(),
-            remote_ms = background_timings.remote.as_millis(),
-            maintenance_ms = background_timings.maintenance.as_millis(),
-            budget_exhausted = background_timings.budget_exhausted,
-            "slow runtime background event drain"
-        );
     }
 
     pub(super) fn drive_runtime_idle_plane(
