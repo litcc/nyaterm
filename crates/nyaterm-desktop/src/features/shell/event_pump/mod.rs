@@ -470,7 +470,6 @@ impl NyaTermApp {
             && !self.shell.runtime.window_layout_persist_dirty
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
-            && !self.terminal.history_search_is_pending()
             && !self.ai.chat_focus_is_pending()
             && !self.transfer.rename_focus_is_pending()
             && !self.session.prompt_credential_focus_is_pending()
@@ -663,8 +662,8 @@ mod tests {
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::{
-        GithubGistAuthEvent, GithubGistAuthJobEvent, SessionLaunchConfig, SessionRuntimeMetadata,
-        TerminalSearchMode,
+        GithubGistAuthEvent, GithubGistAuthJobEvent, RecordingHistorySearchEvent,
+        RecordingWriteEvent, SessionLaunchConfig, SessionRuntimeMetadata, TerminalSearchMode,
     };
 
     use super::helpers::{CURSOR_BLINK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL};
@@ -812,23 +811,44 @@ mod tests {
         });
     }
 
+    /// The recording-history reply path, which used to lean on a quiet-gate term.
+    /// Delivery wiring is covered by the gist test above; what is specific here is
+    /// which replies get applied.
     #[test]
-    fn quiet_tick_is_blocked_while_recording_history_search_is_pending() {
+    fn recording_history_replies_apply_only_for_the_outstanding_query() {
         let mut cx = TestAppContext::single();
         let app = quiet_app_with_visible_session(&mut cx);
         cx.update_entity(&app, |app, cx| {
             app.terminal.open_search_for_test();
             app.terminal.set_search_mode(TerminalSearchMode::History);
             app.apply_terminal_search_query("needle".to_string(), cx);
+            let key = app
+                .terminal_history_search_key()
+                .expect("the fixture should arm a history search");
+
+            let mut stale_key = key.clone();
+            stale_key.query = "haystack".to_string();
             assert!(
-                app.terminal.history_search_is_pending(),
-                "fixture must arm a history search"
+                !app.apply_recording_write_event(RecordingWriteEvent::HistorySearch(
+                    RecordingHistorySearchEvent {
+                        key: stale_key,
+                        result: Err("stale".to_string()),
+                    }
+                )),
+                "a reply for a query the user has moved on from must be dropped"
             );
+            assert!(app.terminal_history_search_pending_for_current_query());
+
             assert!(
-                !app.runtime_quiet_tick_allowed(),
-                "the reply is polled by drain_recording_pipeline_events, so the runtime \
-                 must not idle at the quiet cadence while one is outstanding"
+                app.apply_recording_write_event(RecordingWriteEvent::HistorySearch(
+                    RecordingHistorySearchEvent {
+                        key,
+                        result: Err("no recordings".to_string()),
+                    }
+                )),
+                "the outstanding query's reply must settle it"
             );
+            assert!(!app.terminal_history_search_pending_for_current_query());
         });
     }
 }

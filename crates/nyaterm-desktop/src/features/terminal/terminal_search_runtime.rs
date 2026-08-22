@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::sync::Arc;
 
+use futures::StreamExt as _;
 use gpui::{Context, KeyDownEvent, Window};
 
 use crate::features::terminal::terminal_surface::{
@@ -410,23 +411,51 @@ impl NyaTermApp {
         self.recording.request_history_search(key);
     }
 
-    pub(in crate::features) fn drain_recording_pipeline_events(&mut self) -> bool {
-        if self.terminal.search.history_pending_key.is_none() {
-            return false;
-        }
-        let mut dirty = false;
-        while let Some(event) = self.recording.try_recv_event() {
-            match event {
-                RecordingWriteEvent::HistorySearch(event) => {
-                    if self.terminal.search.history_pending_key.as_ref() == Some(&event.key) {
-                        self.terminal.search.history_pending_key = None;
-                        self.terminal.search.history_result = Some(event);
-                        dirty = true;
-                    }
+    /// Deliver recording-writer replies as they arrive.
+    ///
+    /// Started once at window open. Before this the runtime tick polled
+    /// `try_recv_event`, and the only thing keeping that wait short was the
+    /// `history_search_is_pending` term in `runtime_quiet_tick_allowed` -- which
+    /// was missing until it was added as a bug fix, so a recording-history search
+    /// result could sit for a full quiet interval on an otherwise idle app, which
+    /// is exactly the state someone using a search box is in.
+    pub(in crate::features) fn start_recording_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut rx) = self.recording.take_event_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = rx.next().await {
+                if this
+                    .update(cx, |this, cx| {
+                        if this.apply_recording_write_event(event) {
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
                 }
             }
+        })
+        .detach();
+    }
+
+    /// Apply one writer reply, reporting whether the UI needs a repaint.
+    pub(in crate::features) fn apply_recording_write_event(
+        &mut self,
+        event: RecordingWriteEvent,
+    ) -> bool {
+        match event {
+            RecordingWriteEvent::HistorySearch(event) => {
+                // A reply for a query the user has already moved on from.
+                if self.terminal.search.history_pending_key.as_ref() != Some(&event.key) {
+                    return false;
+                }
+                self.terminal.search.history_pending_key = None;
+                self.terminal.search.history_result = Some(event);
+                true
+            }
         }
-        dirty
     }
 
     pub(in crate::features) fn terminal_history_search_pending_for_current_query(&self) -> bool {

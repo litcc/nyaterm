@@ -1,13 +1,17 @@
 use std::sync::{Arc, mpsc};
 use std::thread;
 
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+
 use nyaterm_transport::{
     RecordingManager, TerminalHistorySearchRequest, TerminalHistorySearchResponse,
 };
 
 pub(crate) struct RecordingWritePipeline {
     command_tx: mpsc::Sender<RecordingWriteCommand>,
-    event_rx: mpsc::Receiver<RecordingWriteEvent>,
+    /// Taken once by `NyaTermApp::start_recording_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    event_rx: Option<UnboundedReceiver<RecordingWriteEvent>>,
 }
 
 #[derive(Clone)]
@@ -18,14 +22,18 @@ pub(crate) struct RecordingWriteHandle {
 impl RecordingWritePipeline {
     pub(crate) fn spawn(recording_manager: Arc<RecordingManager>) -> Self {
         let (command_tx, command_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::sync_channel(RECORDING_WRITE_EVENT_CHANNEL_CAP);
+        // Unbounded rather than the bounded channel this used to be: the cap only
+        // mattered while the UI drained lazily on a tick. History-search replies
+        // are one per outstanding request and are now applied as posted, so the
+        // writer thread can never park on a full queue.
+        let (event_tx, event_rx) = unbounded();
         thread::Builder::new()
             .name("nyaterm-recording-writer".to_string())
             .spawn(move || run_recording_writer(recording_manager, command_rx, event_tx))
             .expect("failed to spawn recording writer");
         Self {
             command_tx,
-            event_rx,
+            event_rx: Some(event_rx),
         }
     }
 
@@ -70,12 +78,8 @@ impl RecordingWritePipeline {
             .send(RecordingWriteCommand::HistorySearch { key });
     }
 
-    pub(crate) fn try_recv_event(&self) -> Option<RecordingWriteEvent> {
-        match self.event_rx.try_recv() {
-            Ok(event) => Some(event),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => None,
-        }
+    pub(crate) fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<RecordingWriteEvent>> {
+        self.event_rx.take()
     }
 
     pub(crate) fn writer(&self) -> RecordingWriteHandle {
@@ -162,7 +166,7 @@ enum RecordingWriteCommand {
 fn run_recording_writer(
     recording_manager: Arc<RecordingManager>,
     command_rx: mpsc::Receiver<RecordingWriteCommand>,
-    event_tx: mpsc::SyncSender<RecordingWriteEvent>,
+    event_tx: UnboundedSender<RecordingWriteEvent>,
 ) {
     while let Ok(command) = command_rx.recv() {
         match command {
@@ -182,7 +186,7 @@ fn run_recording_writer(
                 let result = recording_manager
                     .search_history(key.request())
                     .map_err(|error| error.to_string());
-                let _ = event_tx.send(RecordingWriteEvent::HistorySearch(
+                let _ = event_tx.unbounded_send(RecordingWriteEvent::HistorySearch(
                     RecordingHistorySearchEvent { key, result },
                 ));
             }
@@ -192,8 +196,6 @@ fn run_recording_writer(
         }
     }
 }
-
-const RECORDING_WRITE_EVENT_CHANNEL_CAP: usize = 32;
 
 #[cfg(test)]
 mod tests {
@@ -254,7 +256,7 @@ mod tests {
     #[test]
     fn recording_pipeline_search_runs_after_queued_writes() {
         let manager = Arc::new(RecordingManager::new());
-        let pipeline = RecordingWritePipeline::spawn(Arc::clone(&manager));
+        let mut pipeline = RecordingWritePipeline::spawn(Arc::clone(&manager));
         let session_id = "session-c";
         let key = RecordingHistorySearchKey {
             session_id: session_id.to_string(),
@@ -273,7 +275,9 @@ mod tests {
         pipeline.writer().flush();
 
         let event = pipeline
-            .try_recv_event()
+            .take_event_receiver()
+            .expect("the pipeline holds its receiver until the drain starts")
+            .try_recv()
             .expect("search event should be queued");
         let RecordingWriteEvent::HistorySearch(event) = event;
         assert_eq!(event.key, key);

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::channel::mpsc::UnboundedReceiver;
 use nyaterm_transport::{RecordingManager, RecordingStatus};
 
 use crate::models::{
@@ -147,8 +148,10 @@ impl RecordingFeatureState {
         self.pipeline.request_history_search(key);
     }
 
-    pub(in crate::features) fn try_recv_event(&self) -> Option<RecordingWriteEvent> {
-        self.pipeline.try_recv_event()
+    pub(in crate::features) fn take_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<RecordingWriteEvent>> {
+        self.pipeline.take_event_receiver()
     }
 
     pub(in crate::features) fn refresh_active_count(&mut self) {

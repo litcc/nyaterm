@@ -107,7 +107,6 @@ impl NyaTermApp {
             credential_autofill,
             self.drain_pending_credential_autofill_detection(cx)
         );
-        drain_stage!(recording, self.drain_recording_pipeline_events());
         // Not a queue: the agent loop waits for the terminal to fall quiet, so it
         // still needs periodic driving. Phase 2 gives it its own timer.
         drain_stage!(ai, self.drive_ai_agent_loop(cx));
