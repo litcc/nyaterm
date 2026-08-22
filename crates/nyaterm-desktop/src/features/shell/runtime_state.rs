@@ -91,6 +91,8 @@ pub(super) struct ShellRuntimeState {
     pending_session_status_clock_armed: bool,
     /// True while the idle screen-lock clock task is alive.
     idle_lock_clock_armed: bool,
+    /// True while the deferred-focus clock task is alive.
+    pending_focus_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -166,6 +168,7 @@ impl Default for ShellRuntimeState {
             header_status_clock_armed: false,
             pending_session_status_clock_armed: false,
             idle_lock_clock_armed: false,
+            pending_focus_clock_armed: false,
         }
     }
 }
@@ -259,6 +262,14 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_idle_lock_clock_armed(&mut self, armed: bool) {
         self.runtime.idle_lock_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn pending_focus_clock_is_armed(&self) -> bool {
+        self.runtime.pending_focus_clock_armed
+    }
+
+    pub(in crate::features) fn set_pending_focus_clock_armed(&mut self, armed: bool) {
+        self.runtime.pending_focus_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {

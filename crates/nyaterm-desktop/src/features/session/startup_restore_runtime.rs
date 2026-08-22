@@ -373,6 +373,28 @@ impl NyaTermApp {
         self.pump_startup_restore_queue(window, cx);
     }
 
+    /// Pump the next queued restore if one may go now.
+    ///
+    /// The idle plane used to poll this pair of conditions; both change only when a
+    /// session start settles, so the session-start drain drives it instead.
+    pub(in crate::features) fn pump_startup_restore_queue_if_ready(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let pending_session_start = self.session.start_has_pending();
+        let should_pump = !self.session.restore_is_complete()
+            && self
+                .stores
+                .startup_restore
+                .update(cx, |store, _| store.can_pump_queue(pending_session_start));
+        if !should_pump {
+            return false;
+        }
+        self.pump_startup_restore_queue(window, cx);
+        true
+    }
+
     pub(in crate::features) fn pump_startup_restore_queue(
         &mut self,
         window: &mut Window,

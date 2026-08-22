@@ -566,12 +566,6 @@ impl NyaTermApp {
     }
 
     fn window_runtime_quiet_tick_has_due_work(&self) -> bool {
-        if self.ai.chat_focus_is_pending()
-            || self.transfer.rename_focus_is_pending()
-            || self.session.prompt_credential_focus_is_pending()
-        {
-            return true;
-        }
         if self.terminal.terminal_file_drop_hover_is_pending() {
             return true;
         }
@@ -617,9 +611,6 @@ impl NyaTermApp {
             && !self.recording.has_pending_auto_start()
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
-            && !self.ai.chat_focus_is_pending()
-            && !self.transfer.rename_focus_is_pending()
-            && !self.session.prompt_credential_focus_is_pending()
             && !((self.session.active_ssh_config().is_some()
                 && matches!(
                     self.current_right_panel(),

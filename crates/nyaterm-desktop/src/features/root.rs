@@ -90,6 +90,10 @@ impl NyaTermApp {
         self.ensure_cursor_blink_clock(cx);
         self.ensure_header_status_clock(cx);
         self.ensure_idle_lock_clock(cx);
+        // A focus request can only be honoured once its element exists, which is a
+        // result of this paint; arming here is both cheap and the earliest correct
+        // point.
+        self.ensure_pending_focus_clock(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()

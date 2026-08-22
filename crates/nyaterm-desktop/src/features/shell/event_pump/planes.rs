@@ -14,53 +14,6 @@ use crate::features::{
 use crate::models::NavItem;
 
 impl NyaTermApp {
-    fn drive_startup_restore_queue_tick(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let pending_session_start = self.session.start_has_pending();
-        let should_pump = !self.session.restore_is_complete()
-            && self
-                .stores
-                .startup_restore
-                .update(cx, |store, _| store.can_pump_queue(pending_session_start));
-        if !should_pump {
-            return false;
-        }
-        self.pump_startup_restore_queue(window, cx);
-        true
-    }
-
-    fn drive_pending_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if !self.ai.chat_focus_is_pending()
-            && !self.transfer.rename_focus_is_pending()
-            && !self.session.prompt_credential_focus_is_pending()
-        {
-            return false;
-        }
-        let mut dirty = false;
-        if self.ai.take_chat_focus_request() {
-            window.focus(self.ai.chat_focus(), cx);
-            dirty = true;
-        }
-        if let Some(input_id) = self.transfer.pending_rename_input_id()
-            && self.focus_text_input_if_present(&input_id, window, cx)
-        {
-            self.transfer.finish_rename_focus();
-            dirty = true;
-        }
-        if self.session.prompt_credential_focus_is_pending()
-            && (self.session.prompt_has_active_credential()
-                || self.session.prompt_has_active_keyboard_interactive())
-        {
-            self.focus_active_ssh_prompt_input(window, cx);
-            self.session.prompt_finish_credential_focus();
-            dirty = true;
-        }
-        dirty
-    }
-
     pub(crate) fn drive_window_runtime_tick(
         &mut self,
         window: &mut Window,
@@ -83,7 +36,6 @@ impl NyaTermApp {
             self.shell.runtime.connect_settle_until = None;
         }
         if self.title_drag_active(now) {
-            dirty |= self.drive_pending_focus(window, cx);
             if dirty {
                 cx.notify();
             }
@@ -92,7 +44,6 @@ impl NyaTermApp {
         let geometry_churn = window_geometry_churn_active(self.shell.viewport.last_change_at, now);
         let calm_tick = self.runtime_quiet_tick_allowed();
         if geometry_churn && calm_tick {
-            dirty |= self.drive_pending_focus(window, cx);
             if dirty {
                 cx.notify();
             }
@@ -121,7 +72,6 @@ impl NyaTermApp {
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
         {
-            dirty |= self.drive_pending_focus(window, cx);
             // During connect settle, skip blink notifies so first frames stay free.
             if !connect_settle_active(self.shell.runtime.connect_settle_until, now) {
                 let visual = self.drive_runtime_visual_plane(cx);
@@ -171,9 +121,7 @@ impl NyaTermApp {
             tracing::warn!(
                 diagnostic = "runtime_tick",
                 total_ms = tick_duration.as_millis(),
-                startup_restore_ms = idle.startup_restore.as_millis(),
                 render_requests_output_pressure = idle.render_request_output_pressure,
-                pending_focus_ms = idle.pending_focus.as_millis(),
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
                 visual_runtime_ms = visual.duration.as_millis(),
                 notify_ms = notify_duration.as_millis(),
@@ -304,11 +252,6 @@ impl NyaTermApp {
         let demote_idle = output_pressure || geometry_churn || connect_settle;
         result.render_request_output_pressure = demote_idle;
 
-        // Focus transitions remain latency-sensitive even under pressure.
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_pending_focus(window, cx);
-        result.pending_focus = stage_started_at.elapsed();
-
         if !runtime_idle_plane_allowed(demote_idle) {
             result.dirty = dirty;
             return result;
@@ -334,10 +277,6 @@ impl NyaTermApp {
         {
             self.maybe_auto_start_recording(&session_id, &session_name, cx);
         }
-
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_startup_restore_queue_tick(window, cx);
-        result.startup_restore = stage_started_at.elapsed();
 
         let stage_started_at = Instant::now();
         dirty |= self.drive_remote_auto_refresh(window, cx);

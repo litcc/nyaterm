@@ -372,6 +372,11 @@ impl SessionFeatureState {
         self.prompts.active_credential()
     }
 
+    #[cfg(test)]
+    pub(in crate::features) fn prompt_request_credential_focus_for_test(&mut self) {
+        self.prompts.credential_prompt_focus_pending = true;
+    }
+
     pub(in crate::features) fn prompt_totp_clock_is_armed(&self) -> bool {
         self.prompts.totp_clock_armed
     }
