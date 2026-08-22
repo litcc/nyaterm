@@ -1264,6 +1264,16 @@ impl TerminalFramePipeline {
         self.event_queue.arm_wake(TERMINAL_FRAME_EVENT_WAKE_OUTPUT);
     }
 
+    /// Declare interest in every kind of frame event.
+    ///
+    /// The drain task calls this before each check, so a snapshot or search reply
+    /// cannot be missed by a consumer that only armed for output. The individual
+    /// arms at the request sites and the input-echo accelerator stay: `arm_wake`
+    /// is a `fetch_or`, so they compose.
+    pub(crate) fn arm_event_wakes(&self) {
+        self.event_queue.arm_wake(TERMINAL_FRAME_EVENT_WAKE_ALL);
+    }
+
     pub(crate) fn take_event_wake_receiver(&self) -> Option<UnboundedReceiver<()>> {
         self.event_wake_rx.lock().ok()?.take()
     }
@@ -1536,6 +1546,11 @@ struct TerminalFrameEventQueue {
 const TERMINAL_FRAME_EVENT_WAKE_OUTPUT: u8 = 1 << 0;
 const TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT: u8 = 1 << 1;
 const TERMINAL_FRAME_EVENT_WAKE_SEARCH: u8 = 1 << 2;
+/// What the data-plane drain task declares interest in: every kind, because it
+/// applies every kind. Narrowing this strands whichever reply is dropped from it.
+const TERMINAL_FRAME_EVENT_WAKE_ALL: u8 = TERMINAL_FRAME_EVENT_WAKE_OUTPUT
+    | TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT
+    | TERMINAL_FRAME_EVENT_WAKE_SEARCH;
 
 impl TerminalFrameEventQueue {
     #[cfg(test)]

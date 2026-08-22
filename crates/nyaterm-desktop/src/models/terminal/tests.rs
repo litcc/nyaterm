@@ -9,27 +9,27 @@ use crate::terminal::{TerminalLineDecorations, terminal_screen_from_output};
 
 use super::{
     SELECTED_OCCURRENCE_SEARCH_CHUNK_ROWS, SelectedOccurrenceSearchJob,
-    TERMINAL_FRAME_COMMAND_QUEUE_CAP, TERMINAL_FRAME_EVENT_WAKE_OUTPUT,
-    TERMINAL_FRAME_EVENT_WAKE_SEARCH, TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT,
-    TERMINAL_FRAME_OUTPUT_BURST_BYTE_LIMIT, TERMINAL_FRAME_OUTPUT_CHUNK_SIZE,
-    TERMINAL_FRAME_OUTPUT_COALESCE_BYTE_LIMIT, TERMINAL_FRAME_VISIBLE_TEXT_TAIL_CAP,
-    TERMINAL_OUTPUT_VISIBLE_BACKLOG_CAP, TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS,
-    TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT, TERMINAL_UI_OUTPUT_TAIL_CAP,
-    TerminalFrameActionLinks, TerminalFrameCommand, TerminalFrameEvent, TerminalFrameEventQueue,
-    TerminalFrameOutputBatch, TerminalFrameOutputEvent, TerminalFrameOutputSubmission,
-    TerminalFrameParts, TerminalFrameSearchEvent, TerminalFrameSearchKey,
-    TerminalFrameSearchPurpose, TerminalFrameSearchResult, TerminalFrameSession,
-    TerminalFrameSnapshotEvent, TerminalFrameSnapshotPurpose, TerminalPerformanceMode,
-    TerminalPerformanceOverlay, TerminalProtocolState, TerminalRenderCache, TerminalViewState,
-    append_terminal_ui_output_tail, coalesce_terminal_frame_output_command,
-    compact_stale_terminal_frame_commands, next_terminal_frame_command,
-    prepare_terminal_frame_action_links, prepare_terminal_frame_action_links_reusing,
-    process_next_selected_occurrence_search_chunk, process_terminal_frame_output_burst,
-    protect_terminal_output_burst, replace_selected_occurrence_search_job,
-    terminal_expensive_interactions_enabled, terminal_frame_command_channel,
-    terminal_frame_output_commands, terminal_frame_scroll_window_extra_rows,
-    terminal_frame_search_result_is_current, terminal_snapshot_matches_grid_geometry,
-    try_next_terminal_frame_command,
+    TERMINAL_FRAME_COMMAND_QUEUE_CAP, TERMINAL_FRAME_EVENT_WAKE_ALL,
+    TERMINAL_FRAME_EVENT_WAKE_OUTPUT, TERMINAL_FRAME_EVENT_WAKE_SEARCH,
+    TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT, TERMINAL_FRAME_OUTPUT_BURST_BYTE_LIMIT,
+    TERMINAL_FRAME_OUTPUT_CHUNK_SIZE, TERMINAL_FRAME_OUTPUT_COALESCE_BYTE_LIMIT,
+    TERMINAL_FRAME_VISIBLE_TEXT_TAIL_CAP, TERMINAL_OUTPUT_VISIBLE_BACKLOG_CAP,
+    TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS, TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT,
+    TERMINAL_UI_OUTPUT_TAIL_CAP, TerminalFrameActionLinks, TerminalFrameCommand,
+    TerminalFrameEvent, TerminalFrameEventQueue, TerminalFrameOutputBatch,
+    TerminalFrameOutputEvent, TerminalFrameOutputSubmission, TerminalFrameParts,
+    TerminalFrameSearchEvent, TerminalFrameSearchKey, TerminalFrameSearchPurpose,
+    TerminalFrameSearchResult, TerminalFrameSession, TerminalFrameSnapshotEvent,
+    TerminalFrameSnapshotPurpose, TerminalPerformanceMode, TerminalPerformanceOverlay,
+    TerminalProtocolState, TerminalRenderCache, TerminalViewState, append_terminal_ui_output_tail,
+    coalesce_terminal_frame_output_command, compact_stale_terminal_frame_commands,
+    next_terminal_frame_command, prepare_terminal_frame_action_links,
+    prepare_terminal_frame_action_links_reusing, process_next_selected_occurrence_search_chunk,
+    process_terminal_frame_output_burst, protect_terminal_output_burst,
+    replace_selected_occurrence_search_job, terminal_expensive_interactions_enabled,
+    terminal_frame_command_channel, terminal_frame_output_commands,
+    terminal_frame_scroll_window_extra_rows, terminal_frame_search_result_is_current,
+    terminal_snapshot_matches_grid_geometry, try_next_terminal_frame_command,
 };
 
 fn selected_occurrence_test_key(
@@ -1275,6 +1275,42 @@ fn terminal_frame_event_queue_wakes_once_after_interest_is_armed() {
     queue.push(TerminalFrameEvent::Output(output_frame_with_sizes(1, 0)));
     assert!(wake_rx.try_recv().is_err());
     assert_eq!(queue.wake_count(), 1);
+}
+
+/// The mask `arm_event_wakes` installs must leave every reply kind deliverable.
+///
+/// Armed with the production mask, an output wake must not disarm the snapshot
+/// interest -- narrowing `TERMINAL_FRAME_EVENT_WAKE_ALL` strands snapshot replies,
+/// which on a live terminal is a paint that never happens.
+#[test]
+fn the_drain_tasks_frame_interest_mask_covers_every_reply_kind() {
+    let (queue, mut wake_rx) = TerminalFrameEventQueue::new_with_wake(8);
+    queue.arm_wake(TERMINAL_FRAME_EVENT_WAKE_ALL);
+
+    queue.push(TerminalFrameEvent::Output(output_frame_with_sizes(1, 0)));
+    assert!(matches!(wake_rx.try_recv(), Ok(())));
+    assert!(
+        wake_rx.try_recv().is_err(),
+        "output should consume only its own interest"
+    );
+
+    let screen = TerminalScreen::default();
+    queue.push(TerminalFrameEvent::Snapshot(TerminalFrameSnapshotEvent {
+        session_id: "s1".to_string(),
+        offset: 1,
+        snapshot: Arc::new(screen.snapshot()),
+        action_links: None,
+        revision: 1,
+        snapshot_duration: Duration::ZERO,
+        snapshot_stats: Default::default(),
+        action_link_stats: Default::default(),
+        process_duration: Duration::ZERO,
+    }));
+    assert!(
+        matches!(wake_rx.try_recv(), Ok(())),
+        "the snapshot interest must survive the output wake"
+    );
+    assert_eq!(queue.wake_count(), 2);
 }
 
 #[test]

@@ -25,6 +25,10 @@ impl TerminalFeatureState {
         self.view.frame_pipeline.take_event_wake_receiver()
     }
 
+    pub(in crate::features) fn arm_frame_event_wakes(&self) {
+        self.view.frame_pipeline.arm_event_wakes();
+    }
+
     pub(in crate::features) fn frame_queue_metrics(&self) -> TerminalFrameQueueMetrics {
         TerminalFrameQueueMetrics {
             command_count: self.view.frame_pipeline.queued_command_count(),

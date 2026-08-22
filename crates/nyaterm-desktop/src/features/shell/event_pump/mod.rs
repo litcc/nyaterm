@@ -1,17 +1,21 @@
 use std::time::{Duration, Instant};
 
-use futures::StreamExt;
+use futures::{FutureExt as _, StreamExt as _};
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
     PENDING_SESSION_STATUS_INTERVAL, PENDING_SESSION_STILL_CONNECTING_AFTER,
-    PendingSessionAuthWait, RUNTIME_IDLE_TICK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL,
-    RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD,
-    TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, connect_settle_active, connect_settle_deadline,
-    pending_session_status_message, remote_refresh_due, runtime_output_pressure_active_from_counts,
-    runtime_tick_interval_for_pressure, runtime_ui_notify_allowed,
-    terminal_cell_metrics_refresh_needed, terminal_input_idle_remaining_delay,
-    viewport_change_terminal_session_ids, window_geometry_churn_active,
+    PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW, RUNTIME_IDLE_TICK_INTERVAL,
+    RUNTIME_QUIET_TICK_INTERVAL, RuntimeDataPlaneDrain, RuntimeOutputPressureCounts,
+    SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS,
+    TerminalFrameApplyDecision, connect_settle_active, connect_settle_deadline,
+    pending_session_status_message, remote_refresh_due,
+    runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
+    runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
+    runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
+    terminal_frame_apply_should_defer, terminal_input_idle_remaining_delay,
+    terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
+    window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, session::credential_prompt_target, session::keyboard_interactive_prompt_target,
@@ -24,7 +28,9 @@ mod helpers;
 mod planes;
 mod session_events;
 
-use crate::features::terminal::terminal_runtime::TERMINAL_INPUT_LATENCY_WINDOW;
+use crate::features::terminal::terminal_runtime::{
+    TERMINAL_INPUT_LATENCY_WINDOW, TERMINAL_USER_SCROLL_ACTIVE_WINDOW,
+};
 
 // These intervals produce wake deadlines at 4ms, 12ms, and 24ms. The timer
 // calls below are sequential, so storing the absolute deadlines here would
@@ -36,23 +42,228 @@ const TERMINAL_INPUT_WAKE_INTERVALS: [Duration; 3] = [
 ];
 
 impl NyaTermApp {
-    pub(in crate::features) fn start_terminal_frame_event_wake(&mut self, cx: &mut Context<Self>) {
-        let Some(mut wake_rx) = self.terminal.take_frame_event_wake_receiver() else {
+    /// Deliver session events and terminal frames as they are produced.
+    ///
+    /// Started once at window open, replacing the runtime tick's data plane. Before
+    /// this the tick polled both queues at 500ms / 50ms / 16ms depending on
+    /// `runtime_quiet_tick_allowed`, and the frame queue's own wake was only ever
+    /// armed by the input-echo accelerator, so output delivery latency was a
+    /// function of the cadence rather than of the output.
+    ///
+    /// **One task, not two.** The pacing decision between the two drains reads what
+    /// the session drain just moved (`session_event_last_output_event_count` and
+    /// `..._last_drained_output_bytes`), so splitting them would either duplicate
+    /// that state across tasks or lose the tick's output-before-frames order.
+    ///
+    /// Neither queue can become a channel: the bridge queue merges and trims output
+    /// under its byte limit and the frame queue compacts consecutive output, so the
+    /// queues stay and only the signal is a channel. See [`crate::models::event_wake`].
+    pub(in crate::features) fn start_runtime_data_plane_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(session_wake_rx) = self.session.take_event_bridge_wake_receiver() else {
             return;
         };
+        let Some(frame_wake_rx) = self.terminal.take_frame_event_wake_receiver() else {
+            return;
+        };
+        // Merged rather than selected on: both mean the same thing to this task --
+        // look for work -- and one park point keeps the arm/check ordering simple.
+        let mut wake_rx = futures::stream::select(session_wake_rx, frame_wake_rx);
         cx.spawn(async move |this, cx| {
-            while wake_rx.next().await.is_some() {
-                if this
-                    .update(cx, |this, cx| {
-                        this.drain_terminal_frame_event_wake(cx);
-                    })
-                    .is_err()
-                {
+            loop {
+                let Ok(drain) = this.update(cx, |this, cx| this.drive_runtime_data_plane_drain(cx))
+                else {
                     break;
+                };
+                let Some(delay) = drain.wake_delay else {
+                    if wake_rx.next().await.is_none() {
+                        break;
+                    }
+                    continue;
+                };
+                // Paced: wait out the delay, but take a wake that lands inside the
+                // window rather than leaving it queued to cause an empty cycle
+                // after the burst ends.
+                let mut timer = cx.background_executor().timer(delay).fuse();
+                futures::select_biased! {
+                    wake = wake_rx.next() => {
+                        if wake.is_none() {
+                            break;
+                        }
+                    }
+                    _ = timer => {}
                 }
             }
         })
         .detach();
+    }
+
+    /// One drain cycle: session events, then the pacing decision, then frames.
+    fn drive_runtime_data_plane_drain(&mut self, cx: &mut Context<Self>) -> RuntimeDataPlaneDrain {
+        let now = Instant::now();
+        // Arm before looking for work. Checking first and arming afterwards loses a
+        // producer that pushed in between: the check sees an empty queue, the arm
+        // comes too late to make that push signal, and the last entry of a burst
+        // then sits unapplied until something unrelated arrives. Arming first can
+        // only cost one redundant wake. See `models::event_wake` for the contract.
+        self.session.arm_event_bridge_wake();
+        self.terminal.arm_frame_event_wakes();
+
+        let session_started_at = Instant::now();
+        let session_dirty = self.drain_session_events(cx);
+        let session_events = session_started_at.elapsed();
+
+        let decision = self.terminal_frame_apply_decision(now);
+        let frames_started_at = Instant::now();
+        let frames_dirty = if decision.defer {
+            false
+        } else {
+            self.drain_terminal_frame_events(cx)
+        };
+        let terminal_frames = frames_started_at.elapsed();
+
+        let notified =
+            self.notify_after_runtime_data_plane_drain(session_dirty || frames_dirty, cx);
+        // A paint the throttle coalesced is work too: without this the task parks and
+        // the tick becomes the only thing that can flush it, at up to its quiet 500ms.
+        let throttled_notify = !notified && self.shell.runtime.pending_ui_notify;
+        let work_remaining =
+            decision.defer || throttled_notify || self.runtime_data_plane_work_remaining();
+        let wake_delay = runtime_data_plane_wake_delay(
+            work_remaining,
+            self.session.has_protocol_runtime_sessions(),
+        );
+
+        let drain = RuntimeDataPlaneDrain {
+            wake_delay,
+            session_events,
+            terminal_frames,
+            decision,
+        };
+        self.maybe_log_slow_runtime_data_plane_drain(&drain);
+        drain
+    }
+
+    /// Work this task must come back for on its own, because nothing will wake it.
+    ///
+    /// Read from queue state, never from the drains' return values: those report
+    /// chrome dirtiness, and a pure output burst leaves both of them `false`.
+    ///
+    /// Deliberately excluded are the frame pipeline's queued *commands* and the
+    /// bridge's source-side counts. Both mean a worker thread still owes us a push,
+    /// and that push signals the interest armed at the top of this cycle, so parking
+    /// is correct there -- and that is where the idle polling actually goes away.
+    fn runtime_data_plane_work_remaining(&self) -> bool {
+        let frame = self.terminal.frame_queue_metrics();
+        !self.session.pending_events_are_empty()
+            || self.session.event_bridge_queued_event_count() > 0
+            || frame.pending_event_count > 0
+            || frame.event_count > 0
+    }
+
+    /// Whether frames may be applied this cycle. Lifted out of the runtime tick's
+    /// data plane unchanged; both predicates and every interval stay in `helpers`.
+    fn terminal_frame_apply_decision(&self, now: Instant) -> TerminalFrameApplyDecision {
+        let output_pressure = self.runtime_output_pressure_active();
+        let terminal_frame_backlog_active = self.terminal_frame_backlog_active();
+        let user_scroll_frame_pending = terminal_user_scroll_frame_apply_pending(
+            self.shell.runtime.last_terminal_user_scroll_at,
+            self.visible_terminal_session_ids()
+                .into_iter()
+                .any(|session_id| self.terminal_visual_scroll_active_for_session(Some(session_id))),
+            now,
+            TERMINAL_USER_SCROLL_ACTIVE_WINDOW,
+        );
+        let input_latency_active = self
+            .shell
+            .runtime
+            .last_terminal_input_at
+            .is_some_and(|last| {
+                now.saturating_duration_since(last) < TERMINAL_INPUT_LATENCY_WINDOW
+            });
+        let paced = terminal_frame_backlog_active
+            && terminal_frame_apply_should_defer(
+                self.shell.runtime.last_terminal_frame_apply_at,
+                now,
+                output_pressure,
+                user_scroll_frame_pending,
+                input_latency_active,
+            );
+        let deferred_after_output = runtime_background_should_defer_terminal_frames(
+            self.shell.runtime.session_event_last_output_event_count,
+            self.shell.runtime.session_event_last_drained_output_bytes,
+            terminal_frame_backlog_active,
+            paced,
+            user_scroll_frame_pending,
+            input_latency_active,
+        );
+        TerminalFrameApplyDecision {
+            defer: deferred_after_output || paced,
+            deferred_after_output,
+            paced,
+        }
+    }
+
+    /// The tick's notify gate, applied to this task's drain.
+    ///
+    /// Not a bare `cx.notify()`: under output pressure or connect settle that would
+    /// drop `UI_PAINT_THROTTLE`'s full-shell paint coalescing on the busiest path in
+    /// the application. No `force_immediate` either -- input-echo immediacy belongs
+    /// to `arm_terminal_input_wake`'s own ladder, which notifies unconditionally.
+    fn notify_after_runtime_data_plane_drain(
+        &mut self,
+        visual_dirty: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let now = Instant::now();
+        if visual_dirty {
+            self.shell.runtime.pending_ui_notify = true;
+        }
+        let throttle_active = self.runtime_output_pressure_active()
+            || connect_settle_active(self.shell.runtime.connect_settle_until, now);
+        if !runtime_ui_notify_allowed(
+            visual_dirty,
+            self.shell.runtime.pending_ui_notify,
+            false,
+            throttle_active,
+            self.shell.runtime.last_ui_notify_at,
+            now,
+        ) {
+            return false;
+        }
+        cx.notify();
+        self.shell.runtime.last_ui_notify_at = Some(now);
+        self.shell.runtime.pending_ui_notify = false;
+        true
+    }
+
+    fn maybe_log_slow_runtime_data_plane_drain(&mut self, drain: &RuntimeDataPlaneDrain) {
+        let total = drain.session_events + drain.terminal_frames;
+        if total < RUNTIME_DATA_PLANE_DRAIN_SLOW
+            || !self.should_log_slow_diagnostic("runtime_data_plane_drain", Instant::now())
+        {
+            return;
+        }
+        let frame = self.terminal.frame_queue_metrics();
+        tracing::warn!(
+            diagnostic = "runtime_data_plane_drain",
+            total_ms = total.as_millis(),
+            session_events_ms = drain.session_events.as_millis(),
+            terminal_frames_ms = drain.terminal_frames.as_millis(),
+            terminal_frames_deferred = drain.decision.defer,
+            terminal_frames_deferred_after_output = drain.decision.deferred_after_output,
+            terminal_frames_deferred_for_pacing = drain.decision.paced,
+            wake_delay_ms = drain.wake_delay.map(|delay| delay.as_millis()),
+            queued_session_events = self.shell.runtime.session_event_queued_events,
+            queued_session_output_bytes = self.shell.runtime.session_event_queued_output_bytes,
+            bridge_queued_events = self.session.event_bridge_queued_event_count(),
+            bridge_queued_output_bytes = self.session.event_bridge_queued_output_bytes(),
+            frame_command_count = frame.command_count,
+            frame_event_count = frame.event_count,
+            frame_event_wake_count = frame.event_wake_count,
+            pending_frame_events = frame.pending_event_count,
+            output_pressure = self.runtime_output_pressure_active(),
+            "slow runtime data plane drain"
+        );
     }
 
     pub(in crate::features) fn refresh_window_render_inputs(
@@ -145,15 +356,6 @@ impl NyaTermApp {
     fn drain_terminal_input_wake(&mut self, cx: &mut Context<Self>) {
         let chrome_dirty = self.drain_session_events_for_input_wake(cx)
             | self.drain_terminal_frame_events_for_input_wake(cx);
-        if chrome_dirty {
-            cx.notify();
-            self.shell.runtime.last_ui_notify_at = Some(Instant::now());
-            self.shell.runtime.pending_ui_notify = false;
-        }
-    }
-
-    fn drain_terminal_frame_event_wake(&mut self, cx: &mut Context<Self>) {
-        let chrome_dirty = self.drain_terminal_frame_events(cx);
         if chrome_dirty {
             cx.notify();
             self.shell.runtime.last_ui_notify_at = Some(Instant::now());
@@ -658,7 +860,7 @@ mod tests {
 
     use gpui::{AppContext as _, TestAppContext};
     use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
-    use nyaterm_transport::LocalSessionConfig;
+    use nyaterm_transport::{LocalSessionConfig, SessionEvent};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
@@ -667,7 +869,10 @@ mod tests {
         RecordingWriteEvent, SessionLaunchConfig, SessionRuntimeMetadata, TerminalSearchMode,
     };
 
-    use super::helpers::{CURSOR_BLINK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL};
+    use super::helpers::{
+        CURSOR_BLINK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL, SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET,
+        TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL,
+    };
 
     const SESSION_ID: &str = "event-pump-session";
 
@@ -772,6 +977,119 @@ mod tests {
                 Some(Instant::now() - Duration::from_millis(1));
             app.enter_connect_settle();
             assert_eq!(app.window_runtime_tick_delay(), RUNTIME_QUIET_TICK_INTERVAL);
+        });
+    }
+
+    /// The tail of a burst is the case that breaks if the wake is armed once
+    /// outside the drain loop instead of before every check.
+    ///
+    /// The first push finds the interest armed and delivers. The task then drains,
+    /// re-arms, and parks. A second push must find the interest armed *again* --
+    /// `EventWake::signal` clears it on every delivery -- or it signals nothing,
+    /// nothing further arrives, and that entry sits in the queue forever. On a
+    /// terminal that is the last screenful of output after a flood stops.
+    ///
+    /// `run_until_parked` does not advance the clock, so no timer can rescue this.
+    #[test]
+    fn the_tail_of_a_burst_is_applied_after_the_task_parks() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.start_runtime_data_plane_drain(cx);
+            for index in 0..8 {
+                app.session
+                    .push_event_bridge_ui_event_for_test(SessionEvent::Output {
+                        session_id: SESSION_ID.to_string(),
+                        data: format!("line {index}\r\n").into_bytes(),
+                    });
+            }
+            app.session
+                .push_event_bridge_ui_event_for_test(SessionEvent::CwdChanged {
+                    session_id: SESSION_ID.to_string(),
+                    cwd: "/srv/first".to_string(),
+                });
+        });
+        cx.run_until_parked();
+        cx.update_entity(&app, |app, _| {
+            assert_eq!(
+                app.session.cwd(SESSION_ID),
+                Some("/srv/first"),
+                "the first burst should be fully applied"
+            );
+        });
+
+        // The task is parked now. This push is the one that needs a live interest.
+        cx.update_entity(&app, |app, _| {
+            app.session
+                .push_event_bridge_ui_event_for_test(SessionEvent::CwdChanged {
+                    session_id: SESSION_ID.to_string(),
+                    cwd: "/srv/tail".to_string(),
+                });
+        });
+        cx.run_until_parked();
+        cx.update_entity(&app, |app, _| {
+            assert_eq!(
+                app.session.cwd(SESSION_ID),
+                Some("/srv/tail"),
+                "a push arriving while the task is parked must still wake it; \
+                 arming once outside the loop strands this entry"
+            );
+        });
+    }
+
+    /// The other route to a stranded tail: the drain hit a budget rather than the
+    /// end of the queue, so no further push is coming to wake anyone.
+    ///
+    /// `drain_event_bridge` is capped at `SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET`
+    /// bytes, so queueing more than that deterministically leaves the trailing
+    /// entry behind. The task must notice and come back on
+    /// `TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL` -- this is the pacing the runtime
+    /// tick used to provide, which this change keeps rather than removes. If
+    /// `runtime_data_plane_wake_delay` returned `None` while work remained, the
+    /// clock advance below would change nothing.
+    #[test]
+    fn a_drain_cut_short_by_its_budget_comes_back_on_the_pacing_interval() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.start_runtime_data_plane_drain(cx);
+            // Twice the idle output budget, so one cycle cannot reach the tail.
+            let chunk = vec![b'x'; SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET / 2];
+            for _ in 0..4 {
+                app.session
+                    .push_event_bridge_ui_event_for_test(SessionEvent::Output {
+                        session_id: SESSION_ID.to_string(),
+                        data: chunk.clone(),
+                    });
+            }
+            app.session
+                .push_event_bridge_ui_event_for_test(SessionEvent::CwdChanged {
+                    session_id: SESSION_ID.to_string(),
+                    cwd: "/srv/beyond-the-budget".to_string(),
+                });
+        });
+        cx.run_until_parked();
+        cx.update_entity(&app, |app, _| {
+            assert_ne!(
+                app.session.cwd(SESSION_ID),
+                Some("/srv/beyond-the-budget"),
+                "the output budget should have stopped this cycle short of the tail, \
+                 or this test is not exercising the paced path"
+            );
+        });
+
+        // Nothing will push again. Only the task's own re-arm can finish the queue.
+        for _ in 0..8 {
+            cx.executor()
+                .advance_clock(TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL);
+            cx.run_until_parked();
+        }
+        cx.update_entity(&app, |app, _| {
+            assert_eq!(
+                app.session.cwd(SESSION_ID),
+                Some("/srv/beyond-the-budget"),
+                "a queue left non-empty by a budget must be finished by the paced re-arm"
+            );
         });
     }
 

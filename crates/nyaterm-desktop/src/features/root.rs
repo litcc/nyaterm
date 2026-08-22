@@ -67,7 +67,7 @@ impl NyaTermApp {
         self.refresh_window_render_inputs(window, cx);
         self.queue_cloud_sync_history_refresh(None, cx);
         self.queue_wallpaper_refresh(cx);
-        self.start_terminal_frame_event_wake(cx);
+        self.start_runtime_data_plane_drain(cx);
         self.start_tunnel_event_drain(cx);
         self.start_translation_event_drain(cx);
         self.start_update_event_drain(cx);

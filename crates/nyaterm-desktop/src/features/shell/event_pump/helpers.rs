@@ -11,6 +11,9 @@ pub(super) const SESSION_EVENT_INPUT_WAKE_OUTPUT_BUDGET: usize = 4 * 1024;
 pub(super) const SESSION_EVENT_INPUT_WAKE_WALL_BUDGET: Duration = Duration::from_millis(1);
 pub(super) const RUNTIME_BACKGROUND_EVENT_DRAIN_WALL_BUDGET: Duration = Duration::from_millis(6);
 pub(super) const RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW: Duration = Duration::from_millis(12);
+/// One data-plane drain cycle is budgeted 8ms of session events plus 4ms of frame
+/// applies, so anything past this overran both.
+pub(super) const RUNTIME_DATA_PLANE_DRAIN_SLOW: Duration = Duration::from_millis(16);
 pub(super) const RUNTIME_IDLE_TICK_INTERVAL: Duration = Duration::from_millis(50);
 pub(super) const RUNTIME_QUIET_TICK_INTERVAL: Duration = Duration::from_millis(500);
 /// Match display frame pacing; 8ms stacked full ticks under pressure contended with window drag paints.
@@ -50,8 +53,6 @@ pub(super) struct SessionEventDrainTimings {
 
 #[derive(Default)]
 pub(super) struct RuntimeBackgroundDrainTimings {
-    pub(super) terminal_frames: Duration,
-    pub(super) terminal_frames_deferred: bool,
     pub(super) credential_autofill: Duration,
     pub(super) recording: Duration,
     pub(super) transfer: Duration,
@@ -72,8 +73,28 @@ pub(super) struct RuntimeDataPlaneResult {
     pub(super) dirty: bool,
     pub(super) background_total: Duration,
     pub(super) background_timings: RuntimeBackgroundDrainTimings,
-    pub(super) defer_terminal_frame_after_output: bool,
-    pub(super) terminal_frame_apply_paced: bool,
+}
+
+/// Whether the frame drain may run this cycle, and why not when it may not.
+///
+/// Computed between the session-event drain and the frame drain, because
+/// `runtime_background_should_defer_terminal_frames` reads what the former just
+/// drained.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TerminalFrameApplyDecision {
+    /// Frames were held back for pacing; the caller must come back on a timer.
+    pub(super) defer: bool,
+    pub(super) deferred_after_output: bool,
+    pub(super) paced: bool,
+}
+
+/// One drain cycle of the runtime data plane, for the caller's wake decision.
+pub(super) struct RuntimeDataPlaneDrain {
+    /// `None` parks on the wake; `Some(delay)` comes back after `delay`.
+    pub(super) wake_delay: Option<Duration>,
+    pub(super) session_events: Duration,
+    pub(super) terminal_frames: Duration,
+    pub(super) decision: TerminalFrameApplyDecision,
 }
 
 #[derive(Default)]
@@ -301,6 +322,31 @@ pub(super) fn runtime_background_should_defer_terminal_frames(
     drained_output && (!terminal_frame_backlog_active || terminal_frame_apply_paced)
 }
 
+/// How long before the data-plane drain task should look again, or `None` to park
+/// on its wake.
+///
+/// This is the pacing the runtime tick used to provide, kept rather than removed:
+/// the 16ms matches `RUNTIME_PRESSURE_TICK_INTERVAL` and the 50ms matches
+/// `RUNTIME_IDLE_TICK_INTERVAL`, so a busy data plane comes back exactly as often
+/// as it did on the tick. What disappears is the wake when there is nothing to do.
+///
+/// `protocol_runtime_sessions` is the trzsz/zmodem carve-out: those four worker
+/// drains ride inside `drain_session_events` for output ordering and poll
+/// `try_recv_event` with no wake of their own, so while a transfer is live the task
+/// must keep coming back for them.
+pub(super) fn runtime_data_plane_wake_delay(
+    work_remaining: bool,
+    protocol_runtime_sessions: bool,
+) -> Option<Duration> {
+    if work_remaining {
+        return Some(TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL);
+    }
+    if protocol_runtime_sessions {
+        return Some(RUNTIME_IDLE_TICK_INTERVAL);
+    }
+    None
+}
+
 pub(super) fn terminal_frame_apply_should_defer(
     last_apply_at: Option<Instant>,
     now: Instant,
@@ -427,16 +473,16 @@ mod tests {
         connect_settle_active, connect_settle_deadline, diagnostic_log_due,
         pending_session_status_message, runtime_background_event_drain_budget_exhausted,
         runtime_background_should_defer_terminal_frames, runtime_cursor_blink_allowed,
-        runtime_idle_plane_allowed, runtime_output_pressure_active_from_counts,
-        runtime_tick_interval_for_pressure, runtime_ui_notify_allowed,
-        session_event_backlog_active, session_event_drain_budget, session_event_drain_is_slow,
-        session_event_drain_should_yield, session_event_input_wake_drain_budget,
-        terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
-        terminal_frame_backlog_active_from_counts, terminal_input_idle_remaining_delay,
-        terminal_log_plain_text, terminal_output_dropped_marker,
-        terminal_performance_tick_session_ids, terminal_render_work_pressure_active,
-        terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
-        window_geometry_churn_active,
+        runtime_data_plane_wake_delay, runtime_idle_plane_allowed,
+        runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
+        runtime_ui_notify_allowed, session_event_backlog_active, session_event_drain_budget,
+        session_event_drain_is_slow, session_event_drain_should_yield,
+        session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
+        terminal_frame_apply_should_defer, terminal_frame_backlog_active_from_counts,
+        terminal_input_idle_remaining_delay, terminal_log_plain_text,
+        terminal_output_dropped_marker, terminal_performance_tick_session_ids,
+        terminal_render_work_pressure_active, terminal_user_scroll_frame_apply_pending,
+        viewport_change_terminal_session_ids, window_geometry_churn_active,
     };
 
     #[test]
@@ -807,6 +853,31 @@ mod tests {
             false,
             true
         ));
+    }
+
+    #[test]
+    fn runtime_data_plane_wake_delay_keeps_the_ticks_pacing() {
+        // Remaining work is paced at the interval the pressure tick used, so a
+        // burst that outruns one drain cycle still comes back on time rather than
+        // looping tight or -- the failure this guards -- parking on a wake that
+        // nothing is going to send.
+        assert_eq!(
+            runtime_data_plane_wake_delay(true, false),
+            Some(TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL)
+        );
+        assert_eq!(
+            runtime_data_plane_wake_delay(true, true),
+            Some(TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL),
+            "output pacing outranks the sideband poll"
+        );
+        // trzsz/zmodem worker queues have no wake of their own, so a live transfer
+        // keeps the idle cadence the tick gave them.
+        assert_eq!(
+            runtime_data_plane_wake_delay(false, true),
+            Some(RUNTIME_IDLE_TICK_INTERVAL)
+        );
+        // Nothing outstanding: park. This is the polling that goes away.
+        assert_eq!(runtime_data_plane_wake_delay(false, false), None);
     }
 
     #[test]

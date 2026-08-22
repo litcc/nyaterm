@@ -7,14 +7,9 @@ use crate::features::shell::event_pump::helpers::{
     RuntimeBackgroundDrainTimings, RuntimeControlPlaneDrainTimings, RuntimeControlPlaneResult,
     RuntimeDataPlaneResult, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
     TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
-    runtime_background_event_drain_budget_exhausted,
-    runtime_background_should_defer_terminal_frames, runtime_cursor_blink_allowed,
-    runtime_idle_plane_allowed, runtime_ui_notify_allowed, terminal_frame_apply_should_defer,
-    terminal_performance_tick_session_ids, terminal_render_work_pressure_active,
-    terminal_user_scroll_frame_apply_pending, window_geometry_churn_active,
-};
-use crate::features::terminal::terminal_runtime::{
-    TERMINAL_INPUT_LATENCY_WINDOW, TERMINAL_USER_SCROLL_ACTIVE_WINDOW,
+    runtime_background_event_drain_budget_exhausted, runtime_cursor_blink_allowed,
+    runtime_idle_plane_allowed, runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
+    terminal_render_work_pressure_active, window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, terminal::full_shell_paint_count, terminal::terminal_surface_paint_count,
@@ -76,7 +71,6 @@ impl NyaTermApp {
         started_at: Instant,
         timings: &mut RuntimeBackgroundDrainTimings,
         critical_only: bool,
-        defer_terminal_frames: bool,
     ) -> bool {
         let mut dirty = false;
         macro_rules! drain_stage {
@@ -92,15 +86,10 @@ impl NyaTermApp {
         }
 
         // Data plane only. Session start / prompts already ran on the control plane.
-        // Helper-pushed events arrive on `start_remote_desktop_event_drain`;
-        // what is left is the time-based half.
+        // Session events and terminal frames run on `start_runtime_data_plane_drain`;
+        // helper-pushed remote-desktop events on `start_remote_desktop_event_drain`.
+        // What is left here is the time-based half of each.
         drain_stage!(remote, self.drive_remote_desktop_periodic(window, cx));
-        if defer_terminal_frames {
-            // Leave room for paint after a fresh output drain.
-            timings.terminal_frames_deferred = true;
-            return dirty;
-        }
-        drain_stage!(terminal_frames, self.drain_terminal_frame_events(cx));
         if critical_only {
             // Autofill / recording / transfer / remote are idle-plane sideband.
             return dirty;
@@ -195,18 +184,12 @@ impl NyaTermApp {
         let control = self.drive_runtime_control_plane(window, cx);
         dirty |= control.dirty;
 
-        let stage_started_at = Instant::now();
-        dirty |= self.drain_session_events(cx);
-        let session_events_duration = stage_started_at.elapsed();
-
-        let data = self.drive_runtime_data_plane(tick_started_at, window, cx);
+        let data = self.drive_runtime_data_plane(window, cx);
         dirty |= data.dirty;
         self.shell.runtime.last_session_start_drain_duration = control.timings.session_start;
         self.maybe_log_slow_runtime_background_event_drain(
             data.background_total,
             &data.background_timings,
-            data.defer_terminal_frame_after_output,
-            data.terminal_frame_apply_paced,
         );
 
         let idle = self.drive_runtime_idle_plane(window, cx);
@@ -257,11 +240,7 @@ impl NyaTermApp {
                 control_plane_ms = control.duration.as_millis(),
                 control_session_start_ms = control.timings.session_start.as_millis(),
                 control_prompts_ms = control.timings.prompts.as_millis(),
-                session_events_ms = session_events_duration.as_millis(),
                 background_runtime_ms = data.background_total.as_millis(),
-                terminal_frames_deferred = data.background_timings.terminal_frames_deferred,
-                terminal_frames_deferred_after_output = data.defer_terminal_frame_after_output,
-                terminal_frames_deferred_for_pacing = data.terminal_frame_apply_paced,
                 startup_restore_ms = idle.startup_restore.as_millis(),
                 terminal_resize_ms = idle.terminal_resize.as_millis(),
                 render_requests_ms = idle.render_requests.as_millis(),
@@ -349,11 +328,7 @@ impl NyaTermApp {
                     tick_ms = tick_duration.as_millis(),
                     render_input_ms = render_input_duration.as_millis(),
                     control_ms = control.duration.as_millis(),
-                    session_events_ms = session_events_duration.as_millis(),
                     background_runtime_ms = data.background_total.as_millis(),
-                    terminal_frames_deferred = data.background_timings.terminal_frames_deferred,
-                    terminal_frames_deferred_after_output = data.defer_terminal_frame_after_output,
-                    terminal_frames_deferred_for_pacing = data.terminal_frame_apply_paced,
                     visual_runtime_ms = visual.duration.as_millis(),
                     notify_ms = notify_duration.as_millis(),
                     queued_session_events = self.shell.runtime.session_event_queued_events,
@@ -433,61 +408,23 @@ impl NyaTermApp {
 
     pub(super) fn drive_runtime_data_plane(
         &mut self,
-        tick_started_at: Instant,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> RuntimeDataPlaneResult {
         let background_started_at = Instant::now();
         let mut background_timings = RuntimeBackgroundDrainTimings::default();
         let critical_background_only = self.runtime_output_pressure_active();
-        let terminal_frame_backlog_active = self.terminal_frame_backlog_active();
-        let user_scroll_frame_pending = terminal_user_scroll_frame_apply_pending(
-            self.shell.runtime.last_terminal_user_scroll_at,
-            self.visible_terminal_session_ids()
-                .into_iter()
-                .any(|session_id| self.terminal_visual_scroll_active_for_session(Some(session_id))),
-            tick_started_at,
-            TERMINAL_USER_SCROLL_ACTIVE_WINDOW,
-        );
-        let input_latency_active = self
-            .shell
-            .runtime
-            .last_terminal_input_at
-            .is_some_and(|last| {
-                tick_started_at.saturating_duration_since(last) < TERMINAL_INPUT_LATENCY_WINDOW
-            });
-        let terminal_frame_apply_paced = terminal_frame_backlog_active
-            && terminal_frame_apply_should_defer(
-                self.shell.runtime.last_terminal_frame_apply_at,
-                tick_started_at,
-                critical_background_only,
-                user_scroll_frame_pending,
-                input_latency_active,
-            );
-        let defer_terminal_frame_after_output = runtime_background_should_defer_terminal_frames(
-            self.shell.runtime.session_event_last_output_event_count,
-            self.shell.runtime.session_event_last_drained_output_bytes,
-            terminal_frame_backlog_active,
-            terminal_frame_apply_paced,
-            user_scroll_frame_pending,
-            input_latency_active,
-        );
-        let defer_terminal_frame_apply =
-            defer_terminal_frame_after_output || terminal_frame_apply_paced;
         let dirty = self.drain_runtime_background_events(
             window,
             cx,
             background_started_at,
             &mut background_timings,
             critical_background_only,
-            defer_terminal_frame_apply,
         );
         RuntimeDataPlaneResult {
             dirty,
             background_total: background_started_at.elapsed(),
             background_timings,
-            defer_terminal_frame_after_output,
-            terminal_frame_apply_paced,
         }
     }
 
@@ -495,8 +432,6 @@ impl NyaTermApp {
         &mut self,
         background_total: Duration,
         background_timings: &RuntimeBackgroundDrainTimings,
-        defer_terminal_frame_after_output: bool,
-        terminal_frame_apply_paced: bool,
     ) {
         if !(background_timings.budget_exhausted
             || background_total >= RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW)
@@ -507,10 +442,6 @@ impl NyaTermApp {
         tracing::warn!(
             diagnostic = "runtime_background_event_drain",
             total_ms = background_total.as_millis(),
-            terminal_frames_ms = background_timings.terminal_frames.as_millis(),
-            terminal_frames_deferred = background_timings.terminal_frames_deferred,
-            terminal_frames_deferred_after_output = defer_terminal_frame_after_output,
-            terminal_frames_deferred_for_pacing = terminal_frame_apply_paced,
             credential_autofill_ms = background_timings.credential_autofill.as_millis(),
             recording_ms = background_timings.recording.as_millis(),
             transfer_ms = background_timings.transfer.as_millis(),

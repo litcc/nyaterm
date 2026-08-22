@@ -545,6 +545,22 @@ impl SessionFeatureState {
             .drain_events_with_output_budget(max_events, max_output_bytes)
     }
 
+    /// Taken once by `NyaTermApp::start_runtime_data_plane_drain`.
+    pub(in crate::features) fn take_event_bridge_wake_receiver(
+        &self,
+    ) -> Option<UnboundedReceiver<()>> {
+        self.event_bridge.take_ui_queue_wake_receiver()
+    }
+
+    pub(in crate::features) fn arm_event_bridge_wake(&self) {
+        self.event_bridge.arm_ui_queue_wake();
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn push_event_bridge_ui_event_for_test(&self, event: SessionEvent) {
+        self.event_bridge.push_ui_event_for_test(event);
+    }
+
     pub(in crate::features) fn harvest_event_bridge_stats(&self) -> SessionEventBridgeStats {
         self.event_bridge.harvest_direct_stats()
     }

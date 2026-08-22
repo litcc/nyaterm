@@ -6,10 +6,12 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+use futures::channel::mpsc::UnboundedReceiver;
 use nyaterm_transport::{
     SessionDrainStats, SessionEvent, SessionManager, TrzszDetector, ZmodemDetector,
 };
 
+use super::event_wake::{ANY_INTEREST, EventWake};
 use super::{TerminalFrameOutputSubmission, TerminalFramePipeline};
 
 const SESSION_EVENT_BRIDGE_DRAIN_BATCH: usize = 512;
@@ -55,6 +57,8 @@ pub(crate) struct SessionEventBridge {
 struct SessionEventBridgeState {
     control: Mutex<SessionEventBridgeControl>,
     ui_queue: SessionEventBridgeQueue,
+    /// Handed to `NyaTermApp::start_runtime_data_plane_drain` once, at window open.
+    ui_queue_wake_rx: Mutex<Option<UnboundedReceiver<()>>>,
     source_queued_events: AtomicUsize,
     source_queued_output_bytes: AtomicUsize,
     direct_output_events: AtomicU64,
@@ -89,6 +93,8 @@ struct SessionEventBridgeSidebandProbe {
 #[derive(Clone)]
 struct SessionEventBridgeQueue {
     inner: Arc<Mutex<SessionEventBridgeQueueInner>>,
+    /// Signalled after every push. `None` only in the queue's own unit tests.
+    wake: Option<EventWake>,
 }
 
 #[derive(Default)]
@@ -104,6 +110,7 @@ impl SessionEventBridge {
         encoding: String,
         scrollback_limit: usize,
     ) -> Self {
+        let (ui_queue, ui_queue_wake_rx) = SessionEventBridgeQueue::new_with_wake();
         let state = Arc::new(SessionEventBridgeState {
             control: Mutex::new(SessionEventBridgeControl {
                 ui_routed_sessions: HashSet::new(),
@@ -112,7 +119,8 @@ impl SessionEventBridge {
                 source_queued_events: 0,
                 source_queued_output_bytes: 0,
             }),
-            ui_queue: SessionEventBridgeQueue::new(),
+            ui_queue,
+            ui_queue_wake_rx: Mutex::new(Some(ui_queue_wake_rx)),
             source_queued_events: AtomicUsize::new(0),
             source_queued_output_bytes: AtomicUsize::new(0),
             direct_output_events: AtomicU64::new(0),
@@ -127,6 +135,24 @@ impl SessionEventBridge {
             .spawn(move || run_session_event_bridge(session_manager, frame_pipeline, worker_state))
             .expect("failed to spawn session event bridge");
         Self { state }
+    }
+
+    /// Taken once, by the drain task that consumes this queue.
+    pub(crate) fn take_ui_queue_wake_receiver(&self) -> Option<UnboundedReceiver<()>> {
+        self.state.ui_queue_wake_rx.lock().ok()?.take()
+    }
+
+    /// Declare interest in the next UI-queue push. Call before draining; see
+    /// [`crate::models::event_wake`] for why the other order loses wakes.
+    pub(crate) fn arm_ui_queue_wake(&self) {
+        self.state.ui_queue.arm_wake();
+    }
+
+    /// Enqueue as the bridge worker thread would, so a test can exercise the wake
+    /// and the drain without a live PTY.
+    #[cfg(test)]
+    pub(crate) fn push_ui_event_for_test(&self, event: SessionEvent) {
+        self.state.ui_queue.push(event);
     }
 
     pub(crate) fn configure(&self, encoding: String, scrollback_limit: usize) {
@@ -274,17 +300,55 @@ impl SessionEventBridgeState {
 }
 
 impl SessionEventBridgeQueue {
+    #[cfg(test)]
     fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(SessionEventBridgeQueueInner::default())),
+            wake: None,
         }
     }
 
+    fn new_with_wake() -> (Self, UnboundedReceiver<()>) {
+        let (wake, wake_rx) = EventWake::new();
+        (
+            Self {
+                inner: Arc::new(Mutex::new(SessionEventBridgeQueueInner::default())),
+                wake: Some(wake),
+            },
+            wake_rx,
+        )
+    }
+
+    fn arm_wake(&self) {
+        if let Some(wake) = &self.wake {
+            wake.arm(ANY_INTEREST);
+        }
+    }
+
+    #[cfg(test)]
+    fn wake_count(&self) -> u64 {
+        self.wake.as_ref().map(EventWake::signal_count).unwrap_or(0)
+    }
+
+    /// The single place the bridge's UI queue signals its consumer.
+    ///
+    /// The wake lives here rather than at the six `ui_queue.push` sites in
+    /// `run_session_event_bridge`, so no producer path can be added later that
+    /// enqueues without waking. `ANY_INTEREST` because the consumer treats every
+    /// entry the same; the interest gate is what turns a flood into one wake per
+    /// drain cycle instead of one per event.
     fn push(&self, event: SessionEvent) {
-        let Ok(mut inner) = self.inner.lock() else {
-            return;
-        };
-        inner.push(event);
+        {
+            let Ok(mut inner) = self.inner.lock() else {
+                return;
+            };
+            inner.push(event);
+        }
+        // Signalled outside the lock: nothing here needs it, and the consumer may
+        // start draining the moment it is woken.
+        if let Some(wake) = &self.wake {
+            wake.signal(ANY_INTEREST);
+        }
     }
 
     fn drain_with_output_budget(
@@ -768,6 +832,58 @@ mod tests {
             "s1",
             true
         ));
+    }
+
+    #[test]
+    fn bridge_ui_queue_coalesces_a_burst_into_one_wake() {
+        let (queue, mut wake_rx) = SessionEventBridgeQueue::new_with_wake();
+
+        // Unarmed: the consumer is already draining, so a push must cost nothing.
+        queue.push(SessionEvent::Output {
+            session_id: "s1".to_string(),
+            data: b"before the arm".to_vec(),
+        });
+        assert_eq!(queue.wake_count(), 0);
+
+        queue.arm_wake();
+        for index in 0..64 {
+            queue.push(SessionEvent::Output {
+                session_id: "s1".to_string(),
+                data: format!("chunk {index}").into_bytes(),
+            });
+        }
+
+        assert_eq!(
+            queue.wake_count(),
+            1,
+            "a flood must cost one wake per drain cycle, not one per event"
+        );
+        assert!(matches!(wake_rx.try_recv(), Ok(())));
+        assert!(
+            wake_rx.try_recv().is_err(),
+            "only the first push after an arm should have queued a wake"
+        );
+
+        // And the next cycle's arm re-enables delivery.
+        queue.arm_wake();
+        queue.push(SessionEvent::CwdChanged {
+            session_id: "s1".to_string(),
+            cwd: "/srv/app".to_string(),
+        });
+        assert_eq!(queue.wake_count(), 2);
+    }
+
+    #[test]
+    fn bridge_ui_queue_without_a_wake_still_queues() {
+        let queue = SessionEventBridgeQueue::new();
+        queue.arm_wake();
+        queue.push(SessionEvent::CwdChanged {
+            session_id: "s1".to_string(),
+            cwd: "/srv/app".to_string(),
+        });
+
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue.wake_count(), 0);
     }
 
     #[test]
