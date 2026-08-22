@@ -159,7 +159,7 @@ impl NyaTermApp {
             command.push('\r');
         }
         let input_bytes = if should_continue_agent {
-            match self.begin_ai_agent_observation(&card.command) {
+            match self.begin_ai_agent_observation(&card.command, cx) {
                 Ok(Some(wrapped_command)) => wrapped_command.into_bytes(),
                 Ok(None) => command.clone().into_bytes(),
                 Err(error) => {

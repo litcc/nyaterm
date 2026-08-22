@@ -62,13 +62,6 @@ pub(super) struct RuntimeBackgroundDrainTimings {
     pub(super) budget_exhausted: bool,
 }
 
-#[derive(Default)]
-pub(super) struct RuntimeControlPlaneResult {
-    pub(super) dirty: bool,
-    pub(super) duration: Duration,
-    pub(super) timings: RuntimeControlPlaneDrainTimings,
-}
-
 pub(super) struct RuntimeDataPlaneResult {
     pub(super) dirty: bool,
     pub(super) background_total: Duration,
@@ -110,12 +103,6 @@ pub(super) struct RuntimeIdlePlaneResult {
 pub(super) struct RuntimeVisualPlaneResult {
     pub(super) dirty: bool,
     pub(super) duration: Duration,
-}
-
-#[derive(Default)]
-pub(super) struct RuntimeControlPlaneDrainTimings {
-    pub(super) session_start: Duration,
-    pub(super) prompts: Duration,
 }
 
 #[derive(Clone, Copy)]

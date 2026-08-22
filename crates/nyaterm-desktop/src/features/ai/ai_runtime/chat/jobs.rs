@@ -553,6 +553,9 @@ impl NyaTermApp {
 
     /// Apply one worker event, reporting whether the UI needs a repaint.
     fn apply_ai_chat_event(&mut self, event: AiChatWorkerEvent, cx: &mut Context<Self>) -> bool {
+        // A chat event is what resumes an agent loop after a background step, so this
+        // is the second place its observation clock can need starting.
+        self.ensure_ai_agent_loop_clock(cx);
         let mut dirty = false;
         match event {
             AiChatWorkerEvent::Delta {

@@ -4,11 +4,10 @@ use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
     RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW, RUNTIME_TICK_SLOW_THRESHOLD,
-    RuntimeBackgroundDrainTimings, RuntimeControlPlaneDrainTimings, RuntimeControlPlaneResult,
-    RuntimeDataPlaneResult, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
-    TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
-    runtime_background_event_drain_budget_exhausted, runtime_idle_plane_allowed,
-    runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
+    RuntimeBackgroundDrainTimings, RuntimeDataPlaneResult, RuntimeIdlePlaneResult,
+    RuntimeVisualPlaneResult, TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active,
+    diagnostic_log_due, runtime_background_event_drain_budget_exhausted,
+    runtime_idle_plane_allowed, runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
     terminal_render_work_pressure_active, window_geometry_churn_active,
 };
 use crate::features::{
@@ -98,10 +97,6 @@ impl NyaTermApp {
             credential_autofill,
             self.drain_pending_credential_autofill_detection(cx)
         );
-        // Not a queue: the agent loop waits for the terminal to fall quiet, so it
-        // still needs periodic driving. Phase 2 gives it its own timer.
-        drain_stage!(ai, self.drive_ai_agent_loop(cx));
-
         dirty
     }
 
@@ -177,12 +172,8 @@ impl NyaTermApp {
             return true;
         }
 
-        let control = self.drive_runtime_control_plane(window, cx);
-        dirty |= control.dirty;
-
         let data = self.drive_runtime_data_plane(window, cx);
         dirty |= data.dirty;
-        self.shell.runtime.last_session_start_drain_duration = control.timings.session_start;
         self.maybe_log_slow_runtime_background_event_drain(
             data.background_total,
             &data.background_timings,
@@ -200,17 +191,14 @@ impl NyaTermApp {
         let connect_settle =
             connect_settle_active(self.shell.runtime.connect_settle_until, notify_now);
         let output_pressure_for_notify = self.runtime_output_pressure_active();
-        // Control-plane dirtiness (session start/prompts) must paint immediately.
-        let force_immediate_notify = control.dirty;
-        let throttle_active =
-            !force_immediate_notify && (output_pressure_for_notify || connect_settle);
+        let throttle_active = output_pressure_for_notify || connect_settle;
         if visual_dirty {
             self.shell.runtime.pending_ui_notify = true;
         }
         let should_notify = runtime_ui_notify_allowed(
             visual_dirty,
             self.shell.runtime.pending_ui_notify,
-            force_immediate_notify,
+            false,
             throttle_active,
             self.shell.runtime.last_ui_notify_at,
             notify_now,
@@ -229,9 +217,6 @@ impl NyaTermApp {
             tracing::warn!(
                 diagnostic = "runtime_tick",
                 total_ms = tick_duration.as_millis(),
-                control_plane_ms = control.duration.as_millis(),
-                control_session_start_ms = control.timings.session_start.as_millis(),
-                control_prompts_ms = control.timings.prompts.as_millis(),
                 background_runtime_ms = data.background_total.as_millis(),
                 startup_restore_ms = idle.startup_restore.as_millis(),
                 render_requests_ms = idle.render_requests.as_millis(),
@@ -314,7 +299,6 @@ impl NyaTermApp {
                     output_pressure,
                     visual_dirty,
                     tick_ms = tick_duration.as_millis(),
-                    control_ms = control.duration.as_millis(),
                     background_runtime_ms = data.background_total.as_millis(),
                     visual_runtime_ms = visual.duration.as_millis(),
                     notify_ms = notify_duration.as_millis(),
@@ -351,46 +335,6 @@ impl NyaTermApp {
             self.shell.runtime.last_perf_layout_cache_misses = layout_cache_misses;
         }
         self.shell.runtime.event_pump_started
-    }
-
-    pub(super) fn drive_runtime_control_plane(
-        &mut self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> RuntimeControlPlaneResult {
-        let started_at = Instant::now();
-        let mut timings = RuntimeControlPlaneDrainTimings::default();
-        let mut dirty = false;
-
-        // Common idle path: no connecting sessions and no auth/SFTP prompts.
-        if !self.session.start_has_pending()
-            && !self.session.start_has_cancelled_results()
-            && !self.session.prompt_has_pending_or_active_prompt()
-        {
-            return RuntimeControlPlaneResult {
-                dirty: false,
-                duration: started_at.elapsed(),
-                timings,
-            };
-        }
-
-        // Session-start results arrive on their own drain task. What is left here
-        // is prompt activation, which is a state-machine step rather than a queue
-        // read: each `activate_next_*` promotes one queued prompt into the single
-        // active slot, and the next promotion happens when the user answers.
-        // Moving those onto a wake channel belongs with the Class B work.
-        // Activation runs on `start_prompt_activation_drain`. What is left is the
-        // TOTP preview, which refreshes on the code's step boundary -- time-based,
-        // so Phase 2 gives it a timer.
-        let stage_started_at = Instant::now();
-        dirty |= self.refresh_keyboard_interactive_totp();
-        timings.prompts = stage_started_at.elapsed();
-
-        RuntimeControlPlaneResult {
-            dirty,
-            duration: started_at.elapsed(),
-            timings,
-        }
     }
 
     pub(super) fn drive_runtime_data_plane(

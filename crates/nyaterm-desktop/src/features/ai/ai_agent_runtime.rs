@@ -20,7 +20,10 @@ use super::ai_jobs::{
     ai_job_cancelled, observation_summary, remote_command_observation, run_ai_ask_job,
 };
 use super::state::AiAgentObservationPoll;
-use super::{AGENT_DEFAULT_STEP_TIMEOUT, AGENT_OBSERVATION_MIN_WAIT, AGENT_OBSERVATION_QUIET};
+use super::{
+    AGENT_DEFAULT_STEP_TIMEOUT, AGENT_OBSERVATION_MIN_WAIT, AGENT_OBSERVATION_POLL_INTERVAL,
+    AGENT_OBSERVATION_QUIET,
+};
 
 impl NyaTermApp {
     pub(in crate::features) fn upsert_ai_agent_step(
@@ -104,6 +107,7 @@ impl NyaTermApp {
     pub(in crate::features) fn begin_ai_agent_observation(
         &mut self,
         command: &str,
+        cx: &mut Context<Self>,
     ) -> Result<Option<String>, String> {
         let Some(terminal_session_id) = self.ai_effective_target_session_id() else {
             return Ok(None);
@@ -155,6 +159,7 @@ impl NyaTermApp {
             last_seen_len: output_start_len,
             stable_since: now,
         });
+        self.ensure_ai_agent_loop_clock(cx);
         self.sync_session_event_bridge_policy();
         self.ai.set_panel_status(format!(
             "AI Agent observing command output for step {}/{}",
@@ -251,6 +256,7 @@ impl NyaTermApp {
             stable_since: now,
         };
         self.ai.set_agent_loop(state.clone());
+        self.ensure_ai_agent_loop_clock(cx);
         self.ai.set_panel_status(format!(
             "AI Agent running {target_label} background command for step {}/{}",
             step_index + 1,
@@ -291,6 +297,46 @@ impl NyaTermApp {
         });
         cx.notify();
         Ok(())
+    }
+
+    /// Watch for the terminal to fall quiet while an agent loop is running.
+    ///
+    /// This one stays a poll on purpose, and the honest reason is that it is watching
+    /// for the *absence* of output: `poll_agent_observation` waits for the output
+    /// length to hold still for `AGENT_OBSERVATION_QUIET`, and nothing emits an event
+    /// when output stops. What changes is the scope -- it polls only while an agent
+    /// loop exists, at its own cadence, instead of riding a global tick that also had
+    /// to name `ai.has_background_work()` in its quiet gate to stay responsive.
+    ///
+    /// Idempotent, and retires itself when the loop ends.
+    pub(in crate::features) fn ensure_ai_agent_loop_clock(&mut self, cx: &mut Context<Self>) {
+        if self.ai.agent_loop_clock_is_armed() || self.ai.agent_loop_snapshot().is_none() {
+            return;
+        }
+        self.ai.set_agent_loop_clock_armed(true);
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(AGENT_OBSERVATION_POLL_INTERVAL)
+                    .await;
+                let Ok(keep_running) = this.update(cx, |this, cx| {
+                    if this.drive_ai_agent_loop(cx) {
+                        cx.notify();
+                    }
+                    let running = this.ai.agent_loop_snapshot().is_some();
+                    if !running {
+                        this.ai.set_agent_loop_clock_armed(false);
+                    }
+                    running
+                }) else {
+                    break;
+                };
+                if !keep_running {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::features) fn drive_ai_agent_loop(&mut self, cx: &mut Context<Self>) -> bool {

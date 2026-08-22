@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use futures::channel::mpsc::UnboundedReceiver;
 
@@ -16,7 +16,6 @@ pub(super) struct ShellRuntimeState {
     pub(super) session_event_dropped_output_bytes: u64,
     pub(super) session_event_last_output_event_count: usize,
     pub(super) session_event_last_drained_output_bytes: usize,
-    pub(super) last_session_start_drain_duration: Duration,
     pub(super) last_pending_session_status_at: Option<Instant>,
     pub(super) last_terminal_frame_apply_at: Option<Instant>,
     /// Last user-driven terminal scroll input. During this short window the
@@ -125,7 +124,6 @@ impl Default for ShellRuntimeState {
             session_event_dropped_output_bytes: 0,
             session_event_last_output_event_count: 0,
             session_event_last_drained_output_bytes: 0,
-            last_session_start_drain_duration: Duration::ZERO,
             last_pending_session_status_at: None,
             last_terminal_frame_apply_at: None,
             last_terminal_user_scroll_at: None,
