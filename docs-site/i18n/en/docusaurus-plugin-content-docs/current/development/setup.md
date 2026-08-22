@@ -128,7 +128,17 @@ Build every locale with:
 pnpm --dir docs-site build
 ```
 
-The documentation build checks pages and sidebars; Markdown-link problems are reported according to the site configuration. English and Chinese page completeness still requires manual review because there is no automatic translation-completeness check.
+The build checks pages and sidebars, and reports Markdown-link problems according to the site configuration.
+
+What the build cannot catch is checked by a separate script:
+
+```bash
+python3 scripts/ci/check_docs_translations.py
+```
+
+It verifies that every page exists in both locales, that both copies have the same heading count (which catches a whole section going untranslated), that every page is referenced from `sidebars.ts`, and that no authoring notes were left in the published text. The `Documentation site` CI job runs this script and then builds every locale.
+
+Note that the script compares heading counts, not translated wording.
 
 ## Changing third-party dependencies
 

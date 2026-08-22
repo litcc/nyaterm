@@ -128,7 +128,17 @@ pnpm --dir docs-site start:en
 pnpm --dir docs-site build
 ```
 
-文档构建会检查页面和 sidebar；Markdown 链接问题会按站点配置报告。中英文页面是否完整对应仍需要人工复核，当前没有自动翻译完整性检查。
+构建会检查页面和 sidebar，Markdown 链接问题按站点配置报告。
+
+构建不会发现的问题由一个单独的脚本检查：
+
+```bash
+python3 scripts/ci/check_docs_translations.py
+```
+
+它校验每个页面都有中英两份、两份的标题数一致（用来发现整节漏译）、每个页面都被 `sidebars.ts` 引用，以及没有把撰稿备注留在正文里。CI 的 `Documentation site` job 会跑这个脚本再构建全部 locale。
+
+注意脚本比对的是标题数量，不校验译文措辞。
 
 ## 修改第三方依赖
 

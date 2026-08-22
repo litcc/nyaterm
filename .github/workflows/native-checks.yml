@@ -8,6 +8,7 @@ on:
       - 'crates/**'
       - 'vendor/**'
       - 'scripts/**'
+      - 'docs-site/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/actions/**'
@@ -19,6 +20,7 @@ on:
       - 'crates/**'
       - 'vendor/**'
       - 'scripts/**'
+      - 'docs-site/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/actions/**'
@@ -72,6 +74,38 @@ jobs:
           python3 -m unittest
           scripts.tests.test_package_native
           scripts.tests.test_verify_native_package
+
+  docs:
+    name: Documentation site
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check translation parity and authoring leftovers
+        run: python3 scripts/ci/check_docs_translations.py
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+          run_install: false
+
+      - name: Install documentation dependencies
+        run: pnpm --dir docs-site install --frozen-lockfile
+
+      - name: Build all locales
+        run: pnpm --dir docs-site build
 
   macos:
     name: macOS application check

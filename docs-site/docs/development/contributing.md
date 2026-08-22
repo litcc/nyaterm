@@ -74,9 +74,10 @@ cargo clippy --workspace --all-targets
 - `crates/nyaterm-desktop/src/i18n/locales/zh-CN.json`
 - `crates/nyaterm-desktop/src/i18n/locales/en.json`
 
-修改 docs-site 时同步维护 `docs-site/docs/` 中文源文档和 `docs-site/i18n/en/docusaurus-plugin-content-docs/current/` 英文页面，并运行：
+修改 docs-site 时同步维护 `docs-site/docs/` 中文源文档和 `docs-site/i18n/en/docusaurus-plugin-content-docs/current/` 英文页面，新增页面还要加入 `docs-site/sidebars.ts`，并运行：
 
 ```bash
+python3 scripts/ci/check_docs_translations.py
 pnpm --dir docs-site build
 ```
 
