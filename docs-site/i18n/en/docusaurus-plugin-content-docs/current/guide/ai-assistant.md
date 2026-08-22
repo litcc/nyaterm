@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # AI Assistant
 
 NyaTerm includes an AI Assistant panel that can start from terminal context, selected text, file operations, or a manual prompt. It supports two working modes: **Ask** and **Agent**.
@@ -68,7 +64,18 @@ AI commands are displayed as structured cards with:
 
 The risk level is not the model's call alone. NyaTerm takes the **higher** of the model's self-reported level and the **local rule verdict** as the effective level, so a model that underestimates risk still gets stopped by local rules. The command card lists both sources.
 
-The local tiers are documented in [Terminal Features → Command risk assessment](./terminal#command-risk-assessment). Note that tiers classify by command shape, not command name: bare `chmod` / `chown` is medium and only becomes high with `-R`; `rm -rf /` is critical while `rm -rf ./build` is high.
+Local rules use four tiers, and they classify by command *shape* rather than command name:
+
+| Level | Examples |
+|-------|----------|
+| Critical | `rm -rf /`, `mkfs`, `wipefs`, `dd` to a block device, fork bombs, `shutdown` / `reboot` / `poweroff`, stopping sshd |
+| High | anything starting with `sudo`, `rm -r` / `rm -f`, `chmod -R` / `chown -R`, package installs and removals, `docker rm` / `system prune`, `kubectl delete` / `drain` / `apply`, `git reset --hard` |
+| Medium | bare `chmod` / `chown`, redirects `>` / `>>`, `cp` / `mv` / `mkdir` / `touch`, `git pull` / `merge`, `npm run`; anything matching no rule also lands here |
+| Low | read-only diagnostics such as `ls`, `cat`, `ps`, `df`, `docker ps`, `kubectl get`, `git status` |
+
+Note that tiers look at command shape: bare `chmod` / `chown` is medium and only the recursive `-R` flag raises it to high; `rm -rf /` is critical while `rm -rf ./build` is high.
+
+Commands you type manually go through the same rules — see [Terminal Features → Command risk assessment](./terminal#command-risk-assessment).
 
 ### Command execution policy
 

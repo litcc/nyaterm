@@ -1,7 +1,3 @@
----
-sidebar_position: 3
----
-
 # Terminal Features
 
 NyaTerm's terminal experience is designed around high-frequency local and remote work inside one workspace. Search, command history, suggestions, optional enhancements, recording, AI assistance, and SSH-aware helpers are all part of the complete experience.
@@ -67,70 +63,25 @@ NyaTerm provides two related helpers for session workflows.
 
 While typing, NyaTerm can suggest commands based on history. This is useful for repeated operational commands, build commands, and troubleshooting scripts.
 
-## AI Assistant from the terminal
+## Invoking AI from the terminal
 
-NyaTerm can invoke AI workflows directly from terminal context instead of forcing you to copy text into a separate tool.
+The terminal context menu offers these AI entry points, each carrying the current session context automatically:
 
-### Common entry points
+- **Generate command** — describe the goal and let AI produce a command card
+- **Explain recent output** — send the session's latest terminal output to AI without copying logs by hand
+- **Explain selected text** — explain a highlighted log fragment, error, or snippet
+- **Analyze error** — hand the error context to AI for a fix suggestion
+- **Fix selected text** — derive the next command from a selected error
 
-- **Explain recent output** when you want the latest terminal activity summarized immediately
-- **Explain selected text** for a highlighted log fragment or command result
-- **Analyze error** when terminal output already contains a failure you want help with
-- **Generate command** when you want AI to propose the next step from the current session context
+During Agent execution, an output summary appears inline near the terminal. The line count is controlled by `Terminal Output Lines` in **Settings → AI → Agent Settings**; set it to `0` to disable it.
 
-### Inline terminal capture
-
-During Agent execution, NyaTerm can capture AI command execution events and show a compact inline preview of command output close to the terminal workflow.
-
-The amount of inline output is controlled by `Terminal Output Lines` in **Settings → AI → Agent Settings**:
-
-- `Terminal Output Lines` sets how many output lines are shown after each AI-executed command
-- Set it to `0` to disable inline terminal previews
-- This setting changes the AI workflow feedback, not the underlying shell execution itself
-
-### Command cards and risk control
-
-Commands returned by AI can be shown as structured cards carrying a risk level. **Settings → AI** decides:
-
-- Which risk levels may execute without approval
-- Whether command risk checking is enabled
-- Whether generated commands may be saved as quick commands
-- Whether AI history is recorded
-
-### Providers and models
-
-AI capabilities support:
-
-- Built-in provider configuration
-- Custom **OpenAI Compatible** providers
-- Per-model enable / disable
-- A default model selection
-- Context line limits and request timeouts
-
-If you plan to use this in production or on a restricted network, configure provider, model, and risk thresholds in **Settings → AI** first.
-
-See [AI Assistant](./ai-assistant) for the full feature description.
+Modes, command cards, risk control, and provider/model configuration are documented in [AI Assistant](./ai-assistant).
 
 ## Command risk assessment
 
-NyaTerm can assess risk in real time as you type a command manually, and shows a prompt when a rule matches:
+Commands you type manually go through the same risk assessment. When a rule matches, a prompt shows the risk level, why it matched, and a safer alternative; you can proceed anyway or switch to the alternative.
 
-- Risk level
-- Why it matched
-- A safer alternative suggestion
-
-Local rules use four tiers, and they classify by command *shape* rather than command name:
-
-| Level | Examples |
-|-------|----------|
-| Critical | `rm -rf /`, `mkfs`, `wipefs`, `dd` to a block device, fork bombs, `shutdown` / `reboot` / `poweroff`, stopping sshd |
-| High | anything starting with `sudo`, `rm -r` / `rm -f`, `chmod -R` / `chown -R`, package installs and removals, `docker rm` / `system prune`, `kubectl delete` / `drain` / `apply`, `git reset --hard` |
-| Medium | bare `chmod` / `chown`, redirects `>` / `>>`, `cp` / `mv` / `mkdir` / `touch`, `git pull` / `merge`, `npm run`; anything matching no rule also lands here |
-| Low | read-only diagnostics such as `ls`, `cat`, `ps`, `df`, `docker ps`, `kubectl get`, `git status` |
-
-Note that `chmod` and `chown` are only medium on their own — the recursive `-R` flag is what raises them to high. Likewise `rm -rf /` and an ordinary `rm -rf ./build` are not the same tier.
-
-You can proceed anyway or use the suggested alternative. This requires **Command risk checking** in **Settings → AI**.
+This requires **Command risk checking** in **Settings → AI**. The four tiers and how they are decided are documented in [AI Assistant → How the risk level is decided](./ai-assistant#how-the-risk-level-is-decided).
 
 ## Optional terminal enhancements
 
@@ -235,95 +186,9 @@ For SSH sessions, you can configure a Keep-Alive interval in **Settings → Term
 
 The same group also has a **Keep-alive mode** with **Disabled**, **Compatible**, and **Strict**. The current SSH runtime gives **Strict** the same transport behavior as **Compatible**; the option only records configuration intent.
 
-### Remote host monitoring panels
+### Remote host monitoring
 
-NyaTerm provides five right-side monitoring panels for SSH sessions: **Resource Monitor**, **NVIDIA GPU Monitor**, **Ascend NPU Monitor**, **Process Manager**, and **Docker Manager**. They share some behavior:
-
-- They only make sense for an **SSH session**, and bind only to a genuinely active SSH session
-- Each is shown or hidden by its own toggle in **Settings → Terminal**; turning a toggle off also hides its activity-bar icon
-- GPU, NPU, process, and Docker panels accept **3 to 120 seconds**; the resource-monitor panel separately accepts **1 to 60 seconds**
-- A panel stops refreshing after several consecutive polling failures, to avoid repeatedly hitting an unsupported host
-
-Default toggle states are below. Note that Process Manager and Docker Manager are **on by default**:
-
-| Panel | Setting | Default | Default interval |
-|-------|---------|---------|------------------|
-| Resource Monitor | Show remote resource info | On | 3 s |
-| NVIDIA GPU Monitor | Show NVIDIA GPU Monitor | Off | 3 s |
-| Ascend NPU Monitor | Show Ascend NPU Monitor | Off | 3 s |
-| Process Manager | Show Process Manager | On | 5 s |
-| Docker Manager | Show Docker Manager | On | 10 s |
-
-#### Resource Monitor
-
-Remote resource monitoring is on by default. To see data, both of these must be true:
-
-1. The current tab is an **SSH session**
-2. **Show Remote Resource Stats** is enabled in **Settings → Terminal**
-
-When enabled, the **Resource Monitor** icon appears in the right activity bar and the panel polls the host on the configured interval. The default interval is **3 seconds**, and you can change it manually.
-
-The panel displays:
-
-- Hostname, OS, architecture, uptime
-- Load average
-- CPU usage
-- Memory usage
-- Network throughput
-
-#### NVIDIA GPU Monitor
-
-The **NVIDIA GPU Monitor** panel shows NVIDIA GPU status on the remote host. It is off by default; enable **Show NVIDIA GPU Monitor** in **Settings → Terminal**.
-
-The panel displays:
-
-- Driver version and CUDA version
-- Summary: GPU count, highest utilization, memory usage, highest temperature
-- Per-GPU card: index, model, performance state (pstate), utilization and memory bars; expand for UUID, temperature, power draw, fan speed, and free memory. Utilization above **70% / 90%** is color-coded differently
-- A searchable GPU process list (filter by PID, GPU index, user, or process name), sorted by GPU memory used
-
-If the remote host has no NVIDIA GPU or is missing `nvidia-smi`, the panel shows a matching empty state.
-
-#### Ascend NPU Monitor
-
-The **Ascend NPU Monitor** panel shows Ascend NPU status on the remote host. It is off by default; enable **Show Ascend NPU Monitor** in **Settings → Terminal**.
-
-The panel displays:
-
-- Driver version and CANN version
-- Summary: NPU count, highest AI Core utilization, memory usage, highest temperature
-- Per device: device index, Physical ID, Bus ID, AI Core utilization, memory usage, temperature, and power draw
-- A searchable NPU compute process list
-
-If the remote host returns no Ascend NPU information, the panel shows a matching empty state.
-
-#### Process Manager
-
-The **Process Manager** panel shows a live process list from the remote host. It is **on by default**; turn off **Show Process Manager** in **Settings → Terminal** to hide it.
-
-Key capabilities:
-
-- Total process count and a search box (filter by PID, user, state, command, or full command line)
-- Adaptive layout that adds or drops columns based on panel width; sort by process name, PID, CPU%, MEM%, or user
-- Expand a process for PID/PPID, user, state, CPU%, memory%, RSS, elapsed time, and the full command line, plus adjusting the nice value (`-20` to `19`) and clicking **Apply** (renice)
-- A row action menu to copy the PID or command, or send `TERM` / `HUP` / `STOP` / `CONT` signals; `KILL` first opens a confirmation dialog showing the `kill` command
-
-If the remote host does not support process queries, the panel shows a distinct message.
-
-#### Docker Manager
-
-The **Docker Manager** panel manages Docker on the remote host. It is **on by default**; turn off **Show Docker Manager** in **Settings → Terminal** to hide it.
-
-Key capabilities:
-
-- Overview: running / stopped container counts and image count, with the Docker engine version in the header
-- Global search plus tabs for containers, images, volumes, networks, and Compose (when available); extra tabs collapse into a **More** dropdown
-- **Containers**: a state-sorted virtualized list; a row menu views logs (runs `docker logs -f` in the terminal), enters the container (opens a shell), starts / stops / restarts / kills (confirm) / removes (confirm); clicking a row opens a live-refreshing details dialog
-- **Images / Volumes / Networks**: fetched on demand, each row supports removal (confirm)
-- **Compose**: lists projects; expand to lazily load services; supports project-level up / restart / down and service-level logs / enter / up / stop / restart
-- The **More** menu offers `docker system prune` (destructive, confirmed)
-
-Logs and enter-container actions run in the real terminal session; remove, kill, Compose down, prune, and other destructive operations route through a confirmation dialog showing the exact command.
+SSH sessions can open five monitoring panels on the right: Resource Monitor, NVIDIA GPU Monitor, Ascend NPU Monitor, Process Manager, and Docker Manager. Their toggles, defaults, poll intervals, and capabilities are documented in [Remote Host Monitoring](./remote-monitoring).
 
 ## Translation and online search
 
@@ -332,10 +197,18 @@ After selecting text in the terminal, you can use the context menu to:
 - Send the selection to an online search engine
 - Open a translation dialog with an enabled translation provider
 
-Provider visibility depends on settings:
+### Search engines
 
-- **Google** and **Microsoft** work without extra credentials
-- **DeepL / Baidu / Alibaba / Youdao** appear after you enter credentials in **Settings → Translation**
+In **Settings → Search**, you can maintain a custom search engine list, with per-engine:
+
+- Name
+- URL template (using `%s` as the placeholder)
+- Icon
+- Whether it appears in the search menu
+
+### Translation providers
+
+**Google** and **Microsoft** work out of the box; **DeepL**, **Baidu**, **Alibaba**, and **Youdao** only appear in the menu after you enter credentials in **Settings → Translation**. See [Translation](./translation) for the full description.
 
 ## Recording and workflow combinations
 

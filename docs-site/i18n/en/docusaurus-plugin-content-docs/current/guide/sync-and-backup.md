@@ -1,7 +1,3 @@
----
-sidebar_position: 8
----
-
 # Cloud Sync
 
 NyaTerm's **Cloud Sync** capability is not remote file transfer. It syncs portable application configuration through one encrypted current snapshot in remote storage.

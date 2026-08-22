@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # Development Setup
 
 The NyaTerm application is a Cargo workspace. Node.js and pnpm are only required for the Docusaurus documentation site in this repository.

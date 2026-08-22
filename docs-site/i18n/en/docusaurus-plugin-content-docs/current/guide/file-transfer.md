@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # SFTP File Transfer
 
 NyaTerm's remote file workflow is built on top of SSH sessions. That means the **file explorer, SFTP transfers, and local-edit-then-upload-back workflow** are only available in SSH sessions. Local Terminal, Telnet, and Serial do not expose this set of features.

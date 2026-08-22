@@ -1,7 +1,3 @@
----
-sidebar_position: 4
----
-
 # Runtime, Transport, and Storage Development
 
 NyaTerm has no separate Web backend. Domain logic, protocol runtimes, and persistence are split across Rust crates and communicate with the GPUI desktop layer through typed interfaces.

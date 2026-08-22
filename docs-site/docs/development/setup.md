@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # 开发环境搭建
 
 NyaTerm 应用本身是 Cargo workspace。Node.js 和 pnpm 只用于构建本仓库中的 Docusaurus 文档站点。

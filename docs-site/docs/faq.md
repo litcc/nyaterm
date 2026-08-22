@@ -1,7 +1,3 @@
----
-sidebar_position: 100
----
-
 # 常见问题
 
 ## 会话与连接
@@ -141,17 +137,9 @@ sidebar_position: 100
 
 ### 可以从哪些客户端导入会话？
 
-目前支持：
+Xshell、MobaXterm、WindTerm、SecureCRT、FinalShell、Termius 和 NyaTerm / Electerm JSON。各自的文件格式和注意事项见 [导入其他客户端的会话](./guide/ssh-connection#导入其他客户端的会话)。
 
-- Xshell（`.xts`）
-- MobaXterm（`.mxtsessions`）
-- WindTerm（`.sessions`）
-- SecureCRT（`.xml`）
-- FinalShell（`conn` 目录）
-- Termius（本机 IndexedDB）
-- NyaTerm / Electerm JSON（`.json`）
-
-导入后建议检查用户名、端口、认证方式，以及是否需要补充代理 / 跳板机 / OTP。
+导入后检查用户名、端口、认证方式，以及是否需要补充代理 / 跳板机 / OTP 绑定。
 
 ### NyaTerm 的配置文件存放在哪里？
 

@@ -1,7 +1,3 @@
----
-sidebar_position: 4
----
-
 # Quick Commands
 
 Quick Commands let you save common commands as reusable actions, then send them to the current terminal from inside the workspace.

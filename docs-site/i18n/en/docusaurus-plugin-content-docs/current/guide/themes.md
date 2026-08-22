@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # Themes & Appearance
 
 NyaTerm lets you tune the workspace appearance in fairly fine detail, including UI theme, terminal theme, fonts, and cursor behavior.

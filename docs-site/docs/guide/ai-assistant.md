@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # AI 助手
 
 NyaTerm 内置 AI 助手面板，可以从终端上下文、选中文本、文件操作或手动输入发起请求。它支持两种工作模式：**Ask** 和 **Agent**。
@@ -68,7 +64,18 @@ AI 返回的命令以结构化卡片展示，包含：
 
 一条命令的风险等级不是模型单方面说了算。NyaTerm 会取**模型自报等级**和**本地规则判定**中较高的一个作为生效等级，所以模型低估风险时本地规则仍会拦住它。命令卡片上的风险说明会同时列出两个来源。
 
-本地规则的分档见 [终端功能 → 命令风险评估](./terminal#命令风险评估)。需要留意的是分档看的是命令形态而不是命令名：裸 `chmod` / `chown` 是中风险，带 `-R` 才是高风险；`rm -rf /` 是极高风险，而 `rm -rf ./build` 是高风险。
+本地规则按四档划分，判定依据是命令的具体形态而不是命令名：
+
+| 等级 | 命中示例 |
+|------|----------|
+| 极高风险 | `rm -rf /`、`mkfs`、`wipefs`、写块设备的 `dd`、fork bomb、`shutdown` / `reboot` / `poweroff`、停止 sshd |
+| 高风险 | 任何 `sudo` 开头的命令、`rm -r` / `rm -f`、`chmod -R` / `chown -R`、包管理器安装卸载、`docker rm` / `system prune`、`kubectl delete` / `drain` / `apply`、`git reset --hard` |
+| 中风险 | 裸 `chmod` / `chown`、重定向 `>` / `>>`、`cp` / `mv` / `mkdir` / `touch`、`git pull` / `merge`、`npm run`；未命中任何规则的命令也按中风险处理 |
+| 低风险 | `ls`、`cat`、`ps`、`df`、`docker ps`、`kubectl get`、`git status` 等只读诊断命令 |
+
+注意分档看的是命令形态：裸 `chmod` / `chown` 是中风险，带 `-R` 递归标志才升为高风险；`rm -rf /` 是极高风险，而 `rm -rf ./build` 是高风险。
+
+你手动输入命令时也会走这套规则，见 [终端功能 → 命令风险评估](./terminal#命令风险评估)。
 
 ### 命令执行策略
 

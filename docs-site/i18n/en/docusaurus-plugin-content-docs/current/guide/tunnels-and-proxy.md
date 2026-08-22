@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # Tunnels, Proxy, and Jump Hosts
 
 NyaTerm separates network-related features into three layers:

@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # Layout & Workspace
 
 NyaTerm is built around a composable workspace rather than a single terminal tab. You can open multiple sessions, split panes inside a tab, and keep common tools docked around the sides of the app.
@@ -110,7 +106,7 @@ The right side is mainly for live state and navigation:
 
 If your workflow is "pick a connection, then inspect live state," this split feels natural.
 
-The five monitoring panels only make sense for SSH sessions, and each is shown or hidden by its own toggle in **Settings → Terminal**; turning a toggle off also hides its activity-bar icon. Resource Monitor, Process Manager, and Docker Manager are on by default; the two accelerator panels are off. See [Terminal Features → Remote host monitoring panels](./terminal#remote-host-monitoring-panels).
+The five monitoring panels only make sense for SSH sessions, and each is shown or hidden by its own toggle in **Settings → Terminal**; turning a toggle off also hides its activity-bar icon. Resource Monitor, Process Manager, and Docker Manager are on by default; the two accelerator panels are off. See [Remote Host Monitoring](./remote-monitoring).
 
 The **AI Assistant** panel can use the active pane as context to generate commands, explain output or selected text, analyze errors, and create approved quick commands.
 

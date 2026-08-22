@@ -1,7 +1,3 @@
----
-sidebar_position: 1
----
-
 # Architecture
 
 NyaTerm is a native Rust desktop application built with **GPUI**. Its interface, terminal emulator, connection transports, and persistence implementation live in one Cargo workspace without a browser runtime or an IPC bridge.

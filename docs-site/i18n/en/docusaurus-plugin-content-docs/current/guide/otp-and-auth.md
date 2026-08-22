@@ -1,7 +1,3 @@
----
-sidebar_position: 6
----
-
 # OTP & Authentication
 
 NyaTerm ties OTP management into the SSH authentication flow. You can manage OTP entries as reusable credentials, then bind them directly to SSH connections to reduce repeated input.

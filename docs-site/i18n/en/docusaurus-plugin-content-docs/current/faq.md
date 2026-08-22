@@ -1,7 +1,3 @@
----
-sidebar_position: 100
----
-
 # FAQ
 
 ## Sessions and connections
@@ -119,17 +115,9 @@ Manage them centrally in the **OTP** tab of the **Security/Auth** panel, then bi
 
 ### Which clients can NyaTerm import sessions from?
 
-Current supported imports are:
+Xshell, MobaXterm, WindTerm, SecureCRT, FinalShell, Termius, and NyaTerm / Electerm JSON. Each format and its caveats are documented in [Importing sessions from other clients](./guide/ssh-connection#import-sessions-from-other-clients).
 
-- Xshell (`.xts`)
-- MobaXterm (`.mxtsessions`)
-- WindTerm (`.sessions`)
-- SecureCRT (`.xml`)
-- FinalShell (`conn` directory)
-- Termius (local IndexedDB)
-- NyaTerm / Electerm JSON (`.json`)
-
-After import, it is a good idea to review the username, port, authentication method, and whether proxy / jump host / OTP still needs to be configured.
+After import, review the username, port, authentication method, and whether proxy / jump host / OTP binding still needs to be configured.
 
 ### Where are NyaTerm’s config files stored?
 

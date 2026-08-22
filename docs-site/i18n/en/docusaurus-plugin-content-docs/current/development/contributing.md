@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # Contributing
 
 Thank you for your interest in contributing to NyaTerm.

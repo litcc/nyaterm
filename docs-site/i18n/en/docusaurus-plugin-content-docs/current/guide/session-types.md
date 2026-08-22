@@ -1,7 +1,3 @@
----
-sidebar_position: 0
----
-
 # Session Types
 
 NyaTerm is not just an SSH client. It is a desktop app that puts multiple terminal and remote-desktop workflows into one workspace. It currently supports six session types:
@@ -105,46 +101,15 @@ Serial sessions still live inside NyaTerm's tabbed and split workspace, so you c
 
 ## RDP
 
-RDP sessions are for Windows hosts or other environments that expose a Remote Desktop endpoint. They share NyaTerm's saved-connection, tab, and split-pane workspace model, but the underlying session is a graphical desktop instead of a text terminal.
+An RDP session connects to a Windows host or another remote desktop serving RDP. It shares tabs, split panes, and the saved-connection system with terminal sessions, but it carries a graphical framebuffer rather than a text terminal — so there is no command history, SFTP file explorer, SSH proxy / jump host, or remote host monitoring.
 
-When creating an RDP session, you can configure:
-
-- Host, port, username, password, and domain
-- Network Level Authentication (NLA / CredSSP)
-- Certificate policy: ask on unknown certificates, strict rejection, or accept for this session
-- Display mode: fit to window or fixed size
-- Text clipboard mode
-- Automatic reconnect attempts
-
-When connecting to an RDP host with an unknown certificate, NyaTerm opens a certificate verification dialog. You can accept the certificate for the current connection only or accept and remember it. If a remembered certificate changes later, NyaTerm prompts again before connecting.
-
-RDP does not provide terminal command history, the SFTP file explorer, SSH proxy/jump-host behavior, or remote resource monitoring. If you need command-line enhancements, use SSH, Local Terminal, Telnet, or Serial instead.
+Configuration, certificate policies, and error kinds are documented in [RDP Remote Desktop](./rdp).
 
 ## VNC
 
-VNC sessions are for traditional RFB / VNC services such as VM consoles, lab environments, and lightweight graphical desktops. Like RDP, they use a remote-desktop pane and share NyaTerm's saved-connection, recent-use, tab, and split-pane workspace model.
+A VNC session connects to virtual machine consoles, lab environments, or lightweight graphical desktops serving RFB, sharing the remote desktop pane and the same capability boundaries as RDP.
 
-When creating a VNC session, you can configure:
-
-- Host and port
-- Security mode: automatic, None, or classic VNC Authentication
-- Display mode: fit to window, actual size, or stretch
-- Text clipboard toggle
-- Automatic reconnect attempts
-- Shared / view-only behavior
-
-The current VNC transport is direct TCP only, with no TLS / VeNCrypt. Classic VNC Authentication passwords are limited to 8 bytes; NyaTerm rejects longer passwords instead of truncating them. Framebuffer encodings are advertised by default as `DesktopSizePseudo`, ZRLE, Tight, then Raw; Tight JPEG is decoded in the backend into the same RGBA framebuffer path, and Raw remains the stable fallback. CopyRect, cursor pseudo-encoding, remote resize, proxies, and SSH transport are not supported. Text clipboard exchange is limited to Latin-1 text so binary or oversized payloads do not enter the VNC protocol path.
-
-### VNC Interop Matrix
-
-| Scenario | Security | Encoding | Status |
-| --- | --- | --- | --- |
-| Scripted RFB 3.8 fixture | None | ZRLE / Tight / Tight JPEG -> RGBA RawImage | Automated test passed |
-| Scripted RFB 3.8 fixture | classic VNC Auth | ZRLE / Tight / Tight JPEG -> RGBA RawImage | Automated test passed |
-| TigerVNC | None / VNC Auth | Raw / ZRLE / Tight / JPEG | Real server untested |
-| TightVNC | None / VNC Auth | Raw / Tight / JPEG | Real server untested |
-| x11vnc / LibVNCServer | None / VNC Auth | Raw / ZRLE / Tight / JPEG | Real server untested |
-| QEMU / KVM VNC | None / VNC Auth | Raw / ZRLE / Tight / JPEG | Real server untested |
+Transport is currently direct TCP only, with no TLS / VeNCrypt. Configuration, encoding support, and interoperability status are documented in [VNC Remote Desktop](./vnc).
 
 ## How to choose
 

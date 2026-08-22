@@ -1,7 +1,3 @@
----
-sidebar_position: 7
----
-
 # 安全功能
 
 NyaTerm 的安全能力主要围绕三件事展开：

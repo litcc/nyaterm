@@ -1,7 +1,3 @@
----
-sidebar_position: 1
----
-
 # SSH Connection Management
 
 SSH is still NyaTerm's most complete session type. Beyond a basic login, an SSH connection can also be tied to:

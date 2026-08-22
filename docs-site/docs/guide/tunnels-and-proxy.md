@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # 代理、跳板机与隧道
 
 NyaTerm 把网络相关能力分成三层：

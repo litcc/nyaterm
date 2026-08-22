@@ -1,7 +1,3 @@
----
-sidebar_position: 0
----
-
 # 会话类型
 
 NyaTerm 不只是 SSH 客户端，而是一个把多类终端与远程桌面工作流放到同一工作区中的桌面应用。当前支持六类会话：
@@ -107,46 +103,15 @@ Telnet 会话适合：
 
 ## RDP
 
-RDP 会话适合连接 Windows 主机或提供 RDP 服务的远程桌面环境。它和终端会话共享同一套标签页、分屏和保存连接体系，但底层是图形远程桌面，而不是文本终端。
+RDP 会话连接 Windows 主机或其他提供 RDP 服务的远程桌面。它和终端会话共享标签页、分屏和已保存连接体系，但承载的是图形画面而不是文本终端，因此没有命令历史、SFTP 文件浏览器、SSH 代理 / 跳板机或远程主机监控。
 
-创建 RDP 会话时可以配置：
-
-- 主机、端口、用户名、密码和域
-- 是否启用网络级身份验证（NLA / CredSSP）
-- 证书策略：未知证书时询问、严格拒绝或仅本次接受
-- 显示模式：适应窗口或固定尺寸
-- 文本剪贴板模式
-- 自动重连次数
-
-首次连接未知证书的 RDP 主机时，NyaTerm 会显示证书验证对话框。你可以只接受本次连接，也可以接受并记住该证书；如果已保存的证书后续发生变化，连接前会再次提示。
-
-RDP 目前不提供终端命令历史、SFTP 文件浏览器、SSH 代理 / 跳板机或远程资源监控。如果你需要命令行增强能力，应优先使用 SSH、本地终端、Telnet 或串口会话。
+配置项、证书策略和错误分类见 [RDP 远程桌面](./rdp)。
 
 ## VNC
 
-VNC 会话适合连接提供传统 RFB / VNC 服务的虚拟机控制台、实验环境或轻量图形桌面。它和 RDP 一样使用远程桌面 pane，并共享保存连接、最近使用、标签页和分屏工作区。
+VNC 会话连接提供 RFB 服务的虚拟机控制台、实验环境或轻量图形桌面，与 RDP 共用远程桌面 pane 和同一套能力边界。
 
-创建 VNC 会话时可以配置：
-
-- 主机和端口
-- 安全模式：自动、None 或 classic VNC Authentication
-- 显示模式：适应窗口、实际尺寸或拉伸
-- 文本剪贴板开关
-- 自动重连次数
-- shared / view-only 行为
-
-当前 VNC 传输仅支持 direct TCP，没有 TLS / VeNCrypt。classic VNC Authentication 的密码限制为 8 字节以内，NyaTerm 会拒绝超长密码而不会截断。画面编码默认按 `DesktopSizePseudo`、ZRLE、Tight、Raw 顺序声明；Tight JPEG 会在后端解码成统一 RGBA framebuffer，Raw 仍保留为稳定 fallback。暂不支持 CopyRect、cursor pseudo-encoding、远程 resize、代理和 SSH transport。文本剪贴板限定为 Latin-1 文本，避免把二进制或超大内容塞进 VNC 协议路径。
-
-### VNC 互通矩阵
-
-| 场景 | 安全模式 | 编码 | 状态 |
-| --- | --- | --- | --- |
-| Scripted RFB 3.8 fixture | None | ZRLE / Tight / Tight JPEG -> RGBA RawImage | 已通过自动测试 |
-| Scripted RFB 3.8 fixture | classic VNC Auth | ZRLE / Tight / Tight JPEG -> RGBA RawImage | 已通过自动测试 |
-| TigerVNC | None / VNC Auth | Raw / ZRLE / Tight / JPEG | 真实服务器待测 |
-| TightVNC | None / VNC Auth | Raw / Tight / JPEG | 真实服务器待测 |
-| x11vnc / LibVNCServer | None / VNC Auth | Raw / ZRLE / Tight / JPEG | 真实服务器待测 |
-| QEMU / KVM VNC | None / VNC Auth | Raw / ZRLE / Tight / JPEG | 真实服务器待测 |
+当前传输只支持 direct TCP，没有 TLS / VeNCrypt。配置项、编码支持范围和互通状态见 [VNC 远程桌面](./vnc)。
 
 ## 如何选择？
 

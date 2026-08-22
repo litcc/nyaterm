@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # 贡献指南
 
 感谢你有兴趣为 NyaTerm 做出贡献。

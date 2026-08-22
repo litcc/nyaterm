@@ -1,7 +1,3 @@
----
-sidebar_position: 1
----
-
 # SSH 连接管理
 
 SSH 仍然是 NyaTerm 最完整的一类会话。除了基础登录外，SSH 连接还可以进一步挂接：

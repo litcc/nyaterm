@@ -1,7 +1,3 @@
----
-sidebar_position: 6
----
-
 # Translation
 
 NyaTerm includes multi-provider text translation, which is useful for quickly translating logs, errors, command descriptions, or any unfamiliar text you see in the terminal.

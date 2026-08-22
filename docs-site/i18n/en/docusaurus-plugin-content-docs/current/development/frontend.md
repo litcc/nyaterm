@@ -1,7 +1,3 @@
----
-sidebar_position: 3
----
-
 # GPUI Desktop Development
 
 NyaTerm's native interface lives in `crates/nyaterm-desktop`, while shared controls live in `crates/nyaterm-ui`. The desktop layer includes GPUI state, views, window interaction, platform adapters, and integration points for background-job results.

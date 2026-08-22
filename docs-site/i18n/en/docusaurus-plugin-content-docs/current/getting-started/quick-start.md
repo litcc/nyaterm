@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # Quick Start
 
 This chapter helps you experience NyaTerm's core workflow as quickly as possible: create a connection, open sessions, split the workspace, browse files, turn on terminal enhancements, and find the migration, AI assistance, and backup entry points.
@@ -39,20 +35,12 @@ After saving, the connection appears in the saved-connections list.
 
 ## Step 3: Import existing configuration if you have it
 
-If you already maintain many hosts in another client, you do not need to rebuild them manually.
+If you already maintain many hosts in another client, you do not need to rebuild them manually. NyaTerm can import from Xshell, MobaXterm, WindTerm, SecureCRT, FinalShell, Termius, and NyaTerm / Electerm JSON — the format list and caveats are in [Importing sessions from other clients](../guide/ssh-connection#import-sessions-from-other-clients).
 
-NyaTerm can import from:
+The two paths serve different goals:
 
-- **Xshell** (`.xts`)
-- **MobaXterm** (`.mxtsessions`)
-- **WindTerm** (`.sessions`)
-- **SecureCRT** (`.xml`)
-- **FinalShell** (`conn` directory)
-- **Termius** (local IndexedDB)
-- **NyaTerm / Electerm JSON** (`.json`)
-- NyaTerm encrypted backup files (`.nya`)
-
-Session import is best for connection inventories. `.nya` import is best for restoring a full local NyaTerm environment and requires a **Master Password**.
+- Migrating a **connection inventory**: start from the import entry in the **Saved Connections** panel
+- Restoring a **complete NyaTerm environment**: use a `.nya` encrypted backup, which requires a master password first
 
 ## Step 4: Understand the workspace
 

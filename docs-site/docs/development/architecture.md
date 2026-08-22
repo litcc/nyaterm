@@ -1,7 +1,3 @@
----
-sidebar_position: 1
----
-
 # 架构说明
 
 NyaTerm 是一个基于 **GPUI** 构建的原生 Rust 桌面应用。应用界面、终端模拟、连接传输和持久化均位于同一个 Cargo workspace 中，不依赖浏览器运行时或 IPC 桥接层。

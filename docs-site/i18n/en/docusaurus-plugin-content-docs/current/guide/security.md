@@ -1,7 +1,3 @@
----
-sidebar_position: 7
----
-
 # Security
 
 NyaTerm's security features mainly focus on three areas:
