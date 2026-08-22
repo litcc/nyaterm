@@ -12,6 +12,7 @@ mod panel_resize_runtime;
 mod panel_stack_runtime;
 mod pending_focus;
 mod persistence_debounce;
+mod post_start_work;
 mod quick_switch_runtime;
 mod runtime_state;
 mod state;

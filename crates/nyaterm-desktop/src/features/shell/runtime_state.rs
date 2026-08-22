@@ -95,6 +95,8 @@ pub(super) struct ShellRuntimeState {
     pending_focus_clock_armed: bool,
     /// True while the terminal recovery-accounting clock task is alive.
     terminal_recovery_clock_armed: bool,
+    /// True while the deferred bootstrap-work clock task is alive.
+    post_start_work_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -172,6 +174,7 @@ impl Default for ShellRuntimeState {
             idle_lock_clock_armed: false,
             pending_focus_clock_armed: false,
             terminal_recovery_clock_armed: false,
+            post_start_work_clock_armed: false,
         }
     }
 }
@@ -281,6 +284,14 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_terminal_recovery_clock_armed(&mut self, armed: bool) {
         self.runtime.terminal_recovery_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn post_start_work_clock_is_armed(&self) -> bool {
+        self.runtime.post_start_work_clock_armed
+    }
+
+    pub(in crate::features) fn set_post_start_work_clock_armed(&mut self, armed: bool) {
+        self.runtime.post_start_work_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {

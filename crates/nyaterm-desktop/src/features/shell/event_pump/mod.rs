@@ -27,6 +27,11 @@ mod helpers;
 
 /// The pressure input recovery accounting is measured against, shared so the recovery
 /// clock computes it exactly as the visual plane did.
+/// Re-exported for `shell::post_start_work`'s assertion that its retry covers the
+/// longest hold it waits out.
+#[cfg(test)]
+pub(in crate::features::shell) use helpers::CONNECT_SETTLE_HOLD;
+
 pub(in crate::features) fn terminal_performance_pressure(
     app: &NyaTermApp,
     now: std::time::Instant,
@@ -622,8 +627,6 @@ impl NyaTermApp {
             && !self.terminal_frame_backlog_active()
             && !self.session.has_protocol_runtime_sessions()
             && !self.session.prompt_has_pending_or_active_prompt()
-            && !self.recording.has_pending_auto_start()
-            && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
             && !((self.session.active_ssh_config().is_some()
                 && matches!(

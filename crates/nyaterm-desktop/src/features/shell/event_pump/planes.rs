@@ -65,12 +65,7 @@ impl NyaTermApp {
                 || self.header_status_needs_gpu()
                 || self.header_status_needs_npu()))
             || self.current_left_panel() == Some(NavItem::Transfers);
-        if calm_tick
-            && !remote_panels_need_poll
-            && !self.recording.has_pending_auto_start()
-            && self.terminal.terminal_windows_restore_is_complete()
-            && !self.ai.has_background_work()
-        {
+        if calm_tick && !remote_panels_need_poll && !self.ai.has_background_work() {
             // During connect settle, skip blink notifies so first frames stay free.
             if !connect_settle_active(self.shell.runtime.connect_settle_until, now) {
                 let visual = self.drive_runtime_visual_plane(cx);
@@ -254,27 +249,6 @@ impl NyaTermApp {
         if !runtime_idle_plane_allowed(demote_idle) {
             result.dirty = dirty;
             return result;
-        }
-
-        // Layout restore opens the config DB — never do it while sessions are
-        // still connecting or the data plane is under pressure.
-        if !self.terminal.terminal_windows_restore_is_complete()
-            && !self.session.start_has_pending()
-            && !self.runtime_output_pressure_active()
-            && !connect_settle
-        {
-            self.try_restore_terminal_window_layout(cx);
-            if self.terminal.terminal_window_tree_is_some() {
-                self.reconcile_terminal_windows();
-            }
-        }
-        // Auto-recording opens files; keep it off the first calm frames after connect.
-        if !self.session.start_has_pending()
-            && !self.runtime_output_pressure_active()
-            && !connect_settle
-            && let Some((session_id, session_name)) = self.recording.take_pending_auto_start()
-        {
-            self.maybe_auto_start_recording(&session_id, &session_name, cx);
         }
 
         let stage_started_at = Instant::now();

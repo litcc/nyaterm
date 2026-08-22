@@ -94,6 +94,7 @@ impl NyaTermApp {
         // result of this paint; arming here is both cheap and the earliest correct
         // point.
         self.ensure_pending_focus_clock(cx);
+        self.ensure_post_start_work_clock(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()

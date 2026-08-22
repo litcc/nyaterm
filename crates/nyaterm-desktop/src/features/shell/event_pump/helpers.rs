@@ -24,7 +24,7 @@ pub(super) const WINDOW_GEOMETRY_CHURN_HOLD: Duration = Duration::from_millis(20
 pub(super) const TITLE_DRAG_ACTIVE_HOLD: Duration = Duration::from_millis(1200);
 /// After a session becomes live, demote idle/visual for this long so first-frame
 /// output does not compete with chrome rebuilds (does not raise tick cadence).
-pub(super) const CONNECT_SETTLE_HOLD: Duration = Duration::from_millis(750);
+pub(in crate::features::shell) const CONNECT_SETTLE_HOLD: Duration = Duration::from_millis(750);
 /// Under output pressure / connect settle, coalesce full-shell paints.
 pub(super) const UI_PAINT_THROTTLE: Duration = Duration::from_millis(33);
 pub(super) const TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL: Duration = Duration::from_millis(16);
