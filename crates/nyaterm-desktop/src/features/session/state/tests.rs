@@ -826,9 +826,12 @@ fn session_start_state_owns_channel_selection_and_cancellation() {
         Some("local shell")
     );
 
+    let mut rx = starts
+        .take_event_receiver()
+        .expect("the state holds its receiver until the drain starts");
     starts
         .sender()
-        .send(SessionStartResult {
+        .unbounded_send(SessionStartResult {
             request_id: "request-1".to_string(),
             connection_name: "local shell".to_string(),
             kind: SessionKind::LocalPty,
@@ -838,8 +841,7 @@ fn session_start_state_owns_channel_selection_and_cancellation() {
         })
         .expect("session start event channel should stay connected");
     assert_eq!(
-        starts
-            .try_recv()
+        rx.try_recv()
             .expect("session start result should reach its owner")
             .request_id,
         "request-1"

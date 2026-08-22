@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
+
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::time::Instant;
 
 use gpui::{FocusHandle, UniformListScrollHandle};
@@ -2192,8 +2194,10 @@ pub(in crate::features) struct SessionStartTabPlacement {
 }
 
 pub(super) struct SessionStartFeatureState {
-    tx: mpsc::Sender<SessionStartResult>,
-    rx: mpsc::Receiver<SessionStartResult>,
+    tx: UnboundedSender<SessionStartResult>,
+    /// Taken once by `NyaTermApp::start_session_start_event_drain`, which owns
+    /// delivery from then on. `None` afterwards, so a second start is a no-op.
+    rx: Option<UnboundedReceiver<SessionStartResult>>,
     pending: HashMap<String, PendingSessionStart>,
     active_pending: Option<String>,
     failed: HashMap<String, FailedSessionStart>,
@@ -2229,10 +2233,10 @@ pub(in crate::features) struct SavedConnectionStartOptions {
 
 impl SessionStartFeatureState {
     pub(in crate::features) fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = unbounded();
         Self {
             tx,
-            rx,
+            rx: Some(rx),
             pending: HashMap::new(),
             active_pending: None,
             failed: HashMap::new(),
@@ -2245,12 +2249,14 @@ impl SessionStartFeatureState {
         }
     }
 
-    pub(in crate::features) fn sender(&self) -> mpsc::Sender<SessionStartResult> {
+    pub(in crate::features) fn sender(&self) -> UnboundedSender<SessionStartResult> {
         self.tx.clone()
     }
 
-    pub(in crate::features) fn try_recv(&self) -> Result<SessionStartResult, mpsc::TryRecvError> {
-        self.rx.try_recv()
+    pub(in crate::features) fn take_event_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<SessionStartResult>> {
+        self.rx.take()
     }
 
     pub(in crate::features) fn has_pending(&self) -> bool {

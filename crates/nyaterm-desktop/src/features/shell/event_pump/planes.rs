@@ -391,7 +391,7 @@ impl NyaTermApp {
     pub(super) fn drive_runtime_control_plane(
         &mut self,
         _window: &mut Window,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> RuntimeControlPlaneResult {
         let started_at = Instant::now();
         let mut timings = RuntimeControlPlaneDrainTimings::default();
@@ -409,10 +409,11 @@ impl NyaTermApp {
             };
         }
 
-        let stage_started_at = Instant::now();
-        dirty |= self.drain_session_start_events(cx);
-        timings.session_start = stage_started_at.elapsed();
-
+        // Session-start results arrive on their own drain task. What is left here
+        // is prompt activation, which is a state-machine step rather than a queue
+        // read: each `activate_next_*` promotes one queued prompt into the single
+        // active slot, and the next promotion happens when the user answers.
+        // Moving those onto a wake channel belongs with the Class B work.
         let stage_started_at = Instant::now();
         dirty |= self.drain_host_key_prompts()
             | self.drain_agent_prompts()

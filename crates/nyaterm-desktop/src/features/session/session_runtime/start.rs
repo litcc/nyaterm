@@ -651,7 +651,7 @@ impl NyaTermApp {
                 })
             })();
             let worker_finished_at = Instant::now();
-            let _ = session_start_tx.send(SessionStartResult {
+            let _ = session_start_tx.unbounded_send(SessionStartResult {
                 request_id: request_id_for_worker,
                 connection_name,
                 kind: SessionKind::Ssh,
