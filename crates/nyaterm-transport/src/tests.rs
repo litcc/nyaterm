@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -644,7 +644,8 @@ fn ssh_shell_integration_script_emits_osc7_and_ready_marker() {
     )
     .expect("bash script");
 
-    assert!(script.contains("printf '\\033]7;file://%s%s\\007'"));
+    assert!(script.contains("eval \"$(cat <<'NYATERM_INJECTION_EOF'"));
+    assert!(script.contains("file://%s%s"));
     assert!(script.contains("NyaTermCommand"));
     assert!(script.contains("NyaTermReady:session-1"));
 }
@@ -700,10 +701,20 @@ fn cwd_only_shell_scripts_omit_semantic_markers_and_bash_debug_trap() {
 }
 
 #[cfg(unix)]
+static BASH_HISTORY_PROBE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(unix)]
 fn run_bash_injection_history_probe(
     mode: super::ShellIntegrationMode,
     history_initially_enabled: bool,
 ) -> Option<String> {
+    // The PTY implementation and macOS Bash share process-global terminal
+    // resources. Serialize these probes so the regression tests remain stable
+    // when the full test suite runs them concurrently.
+    let _probe_guard = BASH_HISTORY_PROBE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("bash history probe lock");
     if std::process::Command::new("bash")
         .arg("--version")
         .output()
@@ -789,10 +800,15 @@ fn run_bash_injection_history_probe(
     commands.push_str(
         "case $- in *h*) printf '__NYATERM_HISTORY_STATE__:enabled\\n' ;; *) printf '__NYATERM_HISTORY_STATE__:disabled\\n' ;; esac\nprintf '__NYATERM_HISTORY_BEGIN__\\n'\nHISTTIMEFORMAT= builtin history\nprintf '__NYATERM_HISTORY_END__\\n'\nexit\n",
     );
-    writer
-        .write_all(commands.as_bytes())
-        .expect("write bash history probe commands");
-    writer.flush().expect("flush bash history probe commands");
+    // Match the transport's bounded PTY writes. A single large write can exceed
+    // macOS Bash's canonical input queue and leave a here-document unfinished.
+    for chunk in commands.as_bytes().chunks(1024) {
+        writer
+            .write_all(chunk)
+            .expect("write bash history probe commands");
+        writer.flush().expect("flush bash history probe commands");
+        std::thread::sleep(Duration::from_millis(1));
+    }
 
     let child_deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {
@@ -801,7 +817,10 @@ fn run_bash_injection_history_probe(
         }
         if Instant::now() >= child_deadline {
             let _ = child.kill();
-            panic!("interactive bash history probe timed out");
+            let captured =
+                String::from_utf8_lossy(&output.lock().expect("bash history probe output lock"))
+                    .into_owned();
+            panic!("interactive bash history probe timed out; output: {captured:?}");
         }
         std::thread::sleep(Duration::from_millis(10));
     };
