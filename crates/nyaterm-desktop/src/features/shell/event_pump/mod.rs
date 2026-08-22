@@ -643,7 +643,6 @@ impl NyaTermApp {
             && !self.terminal_frame_backlog_active()
             && !self.session.has_protocol_runtime_sessions()
             && !self.session.prompt_has_pending_or_active_prompt()
-            && !self.terminal.action_link_hover_is_pending()
             && !self.recording.has_pending_auto_start()
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()

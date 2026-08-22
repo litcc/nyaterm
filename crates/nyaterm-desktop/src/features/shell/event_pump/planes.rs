@@ -238,11 +238,9 @@ impl NyaTermApp {
                 control_prompts_ms = control.timings.prompts.as_millis(),
                 background_runtime_ms = data.background_total.as_millis(),
                 startup_restore_ms = idle.startup_restore.as_millis(),
-                terminal_resize_ms = idle.terminal_resize.as_millis(),
                 render_requests_ms = idle.render_requests.as_millis(),
                 render_requests_output_pressure = idle.render_request_output_pressure,
                 pending_focus_ms = idle.pending_focus.as_millis(),
-                action_link_tooltip_ms = idle.action_link_tooltip.as_millis(),
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
                 idle_lock_ms = idle.idle_lock.as_millis(),
                 visual_runtime_ms = visual.duration.as_millis(),
@@ -500,17 +498,8 @@ impl NyaTermApp {
         result.startup_restore = stage_started_at.elapsed();
 
         let stage_started_at = Instant::now();
-        // Bounds paint path already resizes; polling is idle-plane maintenance.
-        dirty |= self.drive_terminal_resize();
-        result.terminal_resize = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
         dirty |= self.drive_terminal_render_requests(true);
         result.render_requests = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
-        dirty |= self.poll_action_link_tooltip_delay(cx);
-        result.action_link_tooltip = stage_started_at.elapsed();
 
         let stage_started_at = Instant::now();
         dirty |= self.drive_remote_auto_refresh(window, cx);

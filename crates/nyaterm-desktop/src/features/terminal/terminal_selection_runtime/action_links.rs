@@ -29,6 +29,9 @@ fn action_link_hover_should_yield_to_terminal_latency(
             }))
 }
 
+/// Hover dwell before an action-link tooltip appears (Tauri ActionLinkTooltip).
+const ACTION_LINK_TOOLTIP_DELAY: Duration = Duration::from_millis(250);
+
 impl NyaTermApp {
     pub(in crate::features) fn clear_action_link_tooltip(&mut self, cx: &mut Context<Self>) {
         let visible_changed = self.clear_action_link_tooltip_state();
@@ -44,17 +47,26 @@ impl NyaTermApp {
         )
     }
 
-    pub(in crate::features) fn poll_action_link_tooltip_delay(
-        &mut self,
-        _cx: &mut Context<Self>,
-    ) -> bool {
-        let Some((key, started, tip)) = self.terminal.menus.action_link_hover_pending.clone()
-        else {
-            return false;
-        };
-        if started.elapsed() < Duration::from_millis(250) {
+    /// Promote the hover this timer was armed for. Returns whether anything visible
+    /// changed.
+    ///
+    /// `generation` is the arming timer's own; a hover that has since moved on has
+    /// bumped it, so the stale timer returns without touching anything and the newer
+    /// hover's timer does the work. This is the `hover.begin` / `hover.activate`
+    /// shape used by the resize handles, and it means the timer is the deadline
+    /// rather than something that re-reads the clock to see whether it should have
+    /// fired.
+    fn apply_action_link_tooltip_delay(&mut self, generation: u64) -> bool {
+        let pending = self.terminal.menus.action_link_hover_pending.clone();
+        if !action_link_tooltip_timer_is_current(
+            pending.as_ref().map(|(_, generation, _)| *generation),
+            generation,
+        ) {
             return false;
         }
+        let Some((key, _, tip)) = pending else {
+            return false;
+        };
         self.terminal.menus.action_link_hover_pending = None;
         // Only show if still matching the pending key (not superseded).
         if self
@@ -154,20 +166,36 @@ impl NyaTermApp {
         {
             return;
         }
-        // Pending same link: update position only.
-        if let Some((key, started, _)) = self.terminal.menus.action_link_hover_pending.clone()
+        // Pending same link: update the tooltip its timer will show, keeping that
+        // timer's generation so the delay is not restarted by mouse movement.
+        if let Some((key, generation, _)) = self.terminal.menus.action_link_hover_pending.clone()
             && key == match_key
         {
-            let ready = started.elapsed() >= Duration::from_millis(250);
-            self.terminal.menus.action_link_hover_pending = Some((match_key, started, next));
-            if ready {
-                self.poll_action_link_tooltip_delay(cx);
-            }
+            self.terminal.menus.action_link_hover_pending = Some((match_key, generation, next));
             return;
         }
-        // New link under cursor: start 250ms delay (Tauri ActionLinkTooltip).
+        // New link under cursor: start the delay (Tauri ActionLinkTooltip). The idle
+        // plane used to poll for this, which also meant a hovered link had to be named
+        // in `runtime_quiet_tick_allowed` to be noticed at all.
         let visible_changed = self.terminal.menus.action_link_tooltip.take().is_some();
-        self.terminal.menus.action_link_hover_pending = Some((match_key, Instant::now(), next));
+        self.terminal.menus.action_link_hover_generation = self
+            .terminal
+            .menus
+            .action_link_hover_generation
+            .wrapping_add(1);
+        let generation = self.terminal.menus.action_link_hover_generation;
+        self.terminal.menus.action_link_hover_pending = Some((match_key, generation, next));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(ACTION_LINK_TOOLTIP_DELAY)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.apply_action_link_tooltip_delay(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         if visible_changed {
             cx.notify();
         }
@@ -463,9 +491,14 @@ impl NyaTermApp {
     }
 }
 
+/// Whether the timer arming this call still owns the pending hover.
+fn action_link_tooltip_timer_is_current(pending_generation: Option<u64>, armed: u64) -> bool {
+    pending_generation == Some(armed)
+}
+
 fn clear_action_link_tooltip_state(
     tooltip: &mut Option<ActionLinkTooltipState>,
-    pending: &mut Option<(String, Instant, ActionLinkTooltipState)>,
+    pending: &mut Option<(String, u64, ActionLinkTooltipState)>,
 ) -> bool {
     let visible_changed = tooltip.take().is_some();
     *pending = None;
@@ -485,6 +518,8 @@ fn terminal_bounds_contains(bounds: Bounds<Pixels>, position: Point<Pixels>) -> 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
+
+    use super::action_link_tooltip_timer_is_current;
 
     use gpui::px;
 
@@ -552,10 +587,27 @@ mod tests {
         }
     }
 
+    /// Two hover timers are briefly in flight whenever the cursor crosses from one
+    /// link to another, so the older one has to recognise itself as stale. It does
+    /// that by generation, because the timer *is* the delay -- there is no clock left
+    /// to re-read.
+    #[test]
+    fn only_the_newest_hover_timer_may_show_a_tooltip() {
+        assert!(action_link_tooltip_timer_is_current(Some(2), 2));
+        assert!(
+            !action_link_tooltip_timer_is_current(Some(2), 1),
+            "the cursor moved to a new link; the old timer must do nothing"
+        );
+        assert!(
+            !action_link_tooltip_timer_is_current(None, 1),
+            "the cursor left every link; the timer must not resurrect a tooltip"
+        );
+    }
+
     #[test]
     fn action_link_clear_pending_only_is_not_visible_change() {
         let mut visible = None;
-        let mut pending = Some(("pending".to_string(), Instant::now(), tooltip("pending")));
+        let mut pending = Some(("pending".to_string(), 1, tooltip("pending")));
 
         assert!(!clear_action_link_tooltip_state(&mut visible, &mut pending));
         assert!(pending.is_none());
@@ -564,7 +616,7 @@ mod tests {
     #[test]
     fn action_link_clear_visible_tooltip_is_visible_change() {
         let mut visible = Some(tooltip("visible"));
-        let mut pending = Some(("pending".to_string(), Instant::now(), tooltip("pending")));
+        let mut pending = Some(("pending".to_string(), 1, tooltip("pending")));
 
         assert!(clear_action_link_tooltip_state(&mut visible, &mut pending));
         assert!(visible.is_none());

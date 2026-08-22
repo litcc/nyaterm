@@ -18,7 +18,6 @@ pub(super) struct ShellRuntimeState {
     pub(super) session_event_last_drained_output_bytes: usize,
     pub(super) last_session_start_drain_duration: Duration,
     pub(super) last_pending_session_status_at: Option<Instant>,
-    pub(super) last_terminal_resize_at: Option<Instant>,
     pub(super) last_terminal_frame_apply_at: Option<Instant>,
     /// Last user-driven terminal scroll input. During this short window the
     /// terminal paint path favors text/position over enhanced decorations.
@@ -126,7 +125,6 @@ impl Default for ShellRuntimeState {
             session_event_last_drained_output_bytes: 0,
             last_session_start_drain_duration: Duration::ZERO,
             last_pending_session_status_at: None,
-            last_terminal_resize_at: None,
             last_terminal_frame_apply_at: None,
             last_terminal_user_scroll_at: None,
             last_terminal_input_at: None,
@@ -491,20 +489,6 @@ impl ShellFeatureState {
         self.runtime.terminal_user_scroll_idle_notify_armed = false;
         drain_sorted(&mut self.runtime.pending_terminal_user_scroll_idle_sessions)
     }
-
-    pub(in crate::features) fn terminal_resize_throttled(
-        &self,
-        now: Instant,
-        minimum_interval: Duration,
-    ) -> bool {
-        self.runtime
-            .last_terminal_resize_at
-            .is_some_and(|last| now.saturating_duration_since(last) < minimum_interval)
-    }
-
-    pub(in crate::features) fn note_terminal_resize(&mut self, at: Instant) {
-        self.runtime.last_terminal_resize_at = Some(at);
-    }
 }
 
 fn arm_once(armed: &mut bool) -> bool {
@@ -525,7 +509,6 @@ fn drain_sorted(sessions: &mut HashSet<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::time::{Duration, Instant};
 
     use crate::models::{ActivityBarLayoutState, BottomPanelMode};
 
@@ -624,13 +607,5 @@ mod tests {
         assert_eq!(shell.note_full_shell_paint(), u64::MAX);
         shell.note_terminal_surface_frame_notifies(4);
         assert_eq!(shell.runtime.terminal_surface_frame_notify_count, u64::MAX);
-
-        let now = Instant::now();
-        shell.note_terminal_resize(now);
-        assert!(shell.terminal_resize_throttled(now, Duration::from_millis(100)));
-        assert!(!shell.terminal_resize_throttled(
-            now + Duration::from_millis(100),
-            Duration::from_millis(100)
-        ));
     }
 }
