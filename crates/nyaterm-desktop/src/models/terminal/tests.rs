@@ -1157,6 +1157,42 @@ fn terminal_frame_seed_does_not_replace_live_output() {
 }
 
 #[test]
+fn terminal_frame_control_output_does_not_block_reconnect_seed() {
+    let mut session = TerminalFrameSession::new("UTF-8", 1000);
+    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
+    let recording_pipeline =
+        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+
+    let _ = session.process_output(
+        "s1".to_string(),
+        b"\x1b]0;remote".to_vec(),
+        "UTF-8".to_string(),
+        1000,
+        &recording_pipeline.writer(),
+    );
+    assert!(!session.output_seen);
+    let _ = session.process_output(
+        "s1".to_string(),
+        b" title\x07".to_vec(),
+        "UTF-8".to_string(),
+        1000,
+        &recording_pipeline.writer(),
+    );
+    assert!(!session.output_seen);
+
+    session.seed("reconnect seed\r\n".to_string(), "UTF-8", 1000);
+
+    let snapshot = session.screen.viewport_snapshot(0);
+    assert!(
+        snapshot
+            .rows()
+            .iter()
+            .any(|row| row.text.contains("reconnect seed")),
+        "control-only output must not block the initial reconnect seed"
+    );
+}
+
+#[test]
 fn terminal_frame_search_result_current_requires_matching_revision() {
     let key = TerminalFrameSearchKey {
         query: "alpha".to_string(),
