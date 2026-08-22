@@ -301,6 +301,26 @@ impl SettingsFeatureState {
         }
     }
 
+    /// Mark a domain as owing a durable write without submitting one.
+    ///
+    /// Used by the shutdown path to fold in a write that a debounce window had not
+    /// got to yet: `dirty_persistence_domains` is what decides the shutdown batch,
+    /// and only `queue_persistence` would otherwise have set this.
+    pub(in crate::features) fn mark_persistence_dirty(
+        &mut self,
+        domain: SettingsPersistenceDomain,
+    ) {
+        self.persistence
+            .entry(domain)
+            .or_insert_with(|| SettingsPersistenceSlot {
+                latest_generation: 0,
+                in_flight_generation: None,
+                pending: None,
+                dirty: false,
+            })
+            .dirty = true;
+    }
+
     pub(in crate::features) fn dirty_persistence_domains(&self) -> Vec<SettingsPersistenceDomain> {
         const DOMAINS: [SettingsPersistenceDomain; 13] = [
             SettingsPersistenceDomain::Diagnostics,

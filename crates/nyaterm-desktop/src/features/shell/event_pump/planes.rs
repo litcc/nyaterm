@@ -163,9 +163,6 @@ impl NyaTermApp {
         if calm_tick
             && !remote_panels_need_poll
             && !self.recording.has_pending_auto_start()
-            && !self.shell.runtime.open_tabs_persist_dirty
-            && !self.shell.runtime.window_layout_persist_dirty
-            && !self.shell.runtime.ui_layout_persist_pending
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
         {
@@ -479,16 +476,6 @@ impl NyaTermApp {
             return result;
         }
 
-        // Durable open-tabs/layout writes were removed from connect/register;
-        // flush here when the UI is not under output/geometry pressure.
-        if self.shell.runtime.open_tabs_persist_dirty
-            || self.shell.runtime.window_layout_persist_dirty
-        {
-            self.flush_pending_session_persistence(cx);
-        }
-        if std::mem::take(&mut self.shell.runtime.ui_layout_persist_pending) {
-            self.queue_settings_save(crate::features::settings::SettingsSaveKind::UiLayout, cx);
-        }
         // Layout restore opens the config DB — never do it while sessions are
         // still connecting or the data plane is under pressure.
         if !self.terminal.terminal_windows_restore_is_complete()

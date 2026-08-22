@@ -8,6 +8,7 @@ mod keybinding_runtime;
 mod navigation_runtime;
 mod panel_resize_runtime;
 mod panel_stack_runtime;
+mod persistence_debounce;
 mod quick_switch_runtime;
 mod runtime_state;
 mod state;

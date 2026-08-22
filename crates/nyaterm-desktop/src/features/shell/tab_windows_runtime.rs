@@ -213,7 +213,7 @@ impl NyaTermApp {
             return;
         }
         // Defer disk write — layout changes must not open redb on the UI hot path.
-        self.shell.runtime.window_layout_persist_dirty = true;
+        self.shell.mark_window_layout_persist_dirty();
     }
 
     pub(in crate::features) fn try_restore_terminal_window_layout(

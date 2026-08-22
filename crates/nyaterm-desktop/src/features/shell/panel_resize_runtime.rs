@@ -217,7 +217,7 @@ impl NyaTermApp {
                 .collect(),
         };
         self.settings.apply_ui_layout(update);
-        self.shell.runtime.ui_layout_persist_pending = true;
+        self.shell.mark_ui_layout_persist_pending();
     }
 
     pub(in crate::features) fn panel_resize_handle(

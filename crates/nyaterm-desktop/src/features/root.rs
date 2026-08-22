@@ -86,6 +86,7 @@ impl NyaTermApp {
         self.start_credential_autofill_match_drain(cx);
         self.start_remote_desktop_event_drain(cx);
         self.start_prompt_activation_drain(cx);
+        self.start_shell_persistence_debounce(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()

@@ -428,6 +428,19 @@ impl NyaTermApp {
         self.shell.viewport.title_drag_active(now)
     }
 
+    /// Window move or resize churn, including the title-drag hold.
+    ///
+    /// Exposed for owners outside this module that must not open the config
+    /// database while the compositor is moving the window.
+    pub(in crate::features) fn shell_persistence_geometry_is_busy(&self, now: Instant) -> bool {
+        self.title_drag_active(now)
+            || window_geometry_churn_active(self.shell.viewport.last_change_at, now)
+    }
+
+    pub(in crate::features) fn connect_settle_is_active(&self, now: Instant) -> bool {
+        connect_settle_active(self.shell.runtime.connect_settle_until, now)
+    }
+
     pub(in crate::features) fn should_log_slow_diagnostic(
         &mut self,
         key: &'static str,
@@ -668,9 +681,6 @@ impl NyaTermApp {
             && !self.session.prompt_has_pending_or_active_prompt()
             && !self.terminal.action_link_hover_is_pending()
             && !self.recording.has_pending_auto_start()
-            && !self.shell.runtime.open_tabs_persist_dirty
-            && !self.shell.runtime.window_layout_persist_dirty
-            && !self.shell.runtime.ui_layout_persist_pending
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
             && !self.ai.chat_focus_is_pending()
@@ -1130,20 +1140,24 @@ mod tests {
         });
     }
 
-    /// A queued UI-layout save is only ever flushed by the idle plane, so the
-    /// runtime must not report itself quiet while one is outstanding. Its two
-    /// siblings `open_tabs_persist_dirty` and `window_layout_persist_dirty` are
-    /// declared beside it and were always in the gate; this one was not, which is
-    /// how a header-status change could be applied to state and never written.
+    /// The quiet cadence no longer has to know about persistence at all.
+    ///
+    /// `4644195a` had to add `ui_layout_persist_pending` to the gate because the idle
+    /// plane was the flag's only writer — the third time that defect shipped from
+    /// these three flags. Now they have their own debounce task, so a pending write
+    /// is *not* a reason to keep the runtime off the quiet cadence, and the gate has
+    /// one less thing to forget. The replacement coverage lives in
+    /// `shell::persistence_debounce`, which asserts the write actually happens with
+    /// no tick in the fixture at all.
     #[test]
-    fn quiet_tick_is_blocked_while_a_ui_layout_save_is_pending() {
+    fn a_pending_ui_layout_save_no_longer_holds_the_quiet_cadence() {
         let mut cx = TestAppContext::single();
         let app = quiet_app_with_visible_session(&mut cx);
         cx.update_entity(&app, |app, _| {
-            app.shell.runtime.ui_layout_persist_pending = true;
+            app.shell.mark_ui_layout_persist_pending();
             assert!(
-                !app.runtime_quiet_tick_allowed(),
-                "a pending UI-layout save must keep the runtime off the quiet cadence,                  or the idle plane that flushes it never runs"
+                app.runtime_quiet_tick_allowed(),
+                "persistence has its own timer now; the gate must not be its keeper"
             );
         });
     }

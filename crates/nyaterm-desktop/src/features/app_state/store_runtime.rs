@@ -70,6 +70,14 @@ impl NyaTermApp {
     pub(crate) fn submit_shutdown_persistence(
         &mut self,
     ) -> Result<StoreTask<()>, StoreSubmitError> {
+        // A UI-layout change still inside its debounce window has no dirty settings
+        // domain yet, so fold it in here or quitting inside that window loses it.
+        // The session half below is re-serialized unconditionally and needs no
+        // equivalent.
+        if self.shell.take_ui_layout_persist_pending() {
+            self.settings
+                .mark_persistence_dirty(SettingsPersistenceDomain::UiLayout);
+        }
         let settings_domains = self.settings.dirty_persistence_domains();
         let settings = self.settings.summary().clone();
         let keyword_highlights = self.settings.keyword_config().clone();

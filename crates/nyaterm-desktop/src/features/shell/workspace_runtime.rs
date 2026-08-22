@@ -451,7 +451,7 @@ impl NyaTermApp {
         if !self.session.restore_is_complete() {
             return;
         }
-        self.shell.runtime.window_layout_persist_dirty = true;
+        self.shell.mark_window_layout_persist_dirty();
     }
 
     pub(in crate::features) fn try_restore_workspace_pane_layout(

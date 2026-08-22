@@ -1,6 +1,10 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use futures::channel::mpsc::UnboundedReceiver;
+
+use crate::models::event_wake::{ANY_INTEREST, EventWake};
+
 use super::state::ShellFeatureState;
 
 /// GPUI event-pump, repaint and shell-persistence scheduling state.
@@ -73,6 +77,10 @@ pub(super) struct ShellRuntimeState {
     pub(super) open_tabs_persist_dirty: bool,
     pub(super) window_layout_persist_dirty: bool,
     pub(super) ui_layout_persist_pending: bool,
+    /// Signalled whenever one of the three flags above is marked, so the debounce
+    /// task wakes without anything polling them. Taken once at window open.
+    persist_wake: EventWake,
+    persist_wake_rx: Option<UnboundedReceiver<()>>,
     session_persistence_generation: u64,
     session_persistence_in_flight: Option<u64>,
     pub(super) cursor_blink_on: bool,
@@ -101,6 +109,7 @@ impl ShellPersistenceDirty {
 
 impl Default for ShellRuntimeState {
     fn default() -> Self {
+        let (persist_wake, persist_wake_rx) = EventWake::new();
         Self {
             event_pump_started: false,
             session_event_backlog_active: false,
@@ -144,6 +153,8 @@ impl Default for ShellRuntimeState {
             open_tabs_persist_dirty: false,
             window_layout_persist_dirty: false,
             ui_layout_persist_pending: false,
+            persist_wake,
+            persist_wake_rx: Some(persist_wake_rx),
             session_persistence_generation: 0,
             session_persistence_in_flight: None,
             cursor_blink_on: true,
@@ -211,13 +222,65 @@ impl ShellFeatureState {
         self.runtime.cursor_blink_on
     }
 
+    /// Taken once by `NyaTermApp::start_shell_persistence_debounce`.
+    pub(in crate::features) fn take_persist_wake_receiver(
+        &mut self,
+    ) -> Option<UnboundedReceiver<()>> {
+        self.runtime.persist_wake_rx.take()
+    }
+
+    /// Declare interest in the next dirty mark. Call before checking the flags; see
+    /// [`crate::models::event_wake`] for why the other order loses wakes.
+    pub(in crate::features) fn arm_persist_wake(&self) {
+        self.runtime.persist_wake.arm(ANY_INTEREST);
+    }
+
+    /// The one place a persistence mark signals its debounce task.
+    ///
+    /// Every `mark_*` below routes through here rather than writing the flag
+    /// directly, so a mark added later cannot silently get no writer. That is the
+    /// defect these three flags have already produced three times: a flag whose only
+    /// driver was the idle plane, and a gate that had to name it.
+    fn signal_persist_wake(&self) {
+        self.runtime.persist_wake.signal(ANY_INTEREST);
+    }
+
     pub(in crate::features) fn mark_open_tabs_persist_dirty(&mut self) {
         self.runtime.open_tabs_persist_dirty = true;
+        self.signal_persist_wake();
+    }
+
+    pub(in crate::features) fn mark_window_layout_persist_dirty(&mut self) {
+        self.runtime.window_layout_persist_dirty = true;
+        self.signal_persist_wake();
+    }
+
+    pub(in crate::features) fn mark_ui_layout_persist_pending(&mut self) {
+        self.runtime.ui_layout_persist_pending = true;
+        self.signal_persist_wake();
+    }
+
+    pub(in crate::features) fn take_ui_layout_persist_pending(&mut self) -> bool {
+        std::mem::take(&mut self.runtime.ui_layout_persist_pending)
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn ui_layout_persist_is_pending(&self) -> bool {
+        self.runtime.ui_layout_persist_pending
+    }
+
+    /// Whether anything still owes a durable write, for the debounce task's decision
+    /// to come back or park.
+    pub(in crate::features) fn has_pending_persistence(&self) -> bool {
+        self.runtime.open_tabs_persist_dirty
+            || self.runtime.window_layout_persist_dirty
+            || self.runtime.ui_layout_persist_pending
     }
 
     pub(in crate::features) fn mark_session_persistence_dirty(&mut self) {
         self.runtime.open_tabs_persist_dirty = true;
         self.runtime.window_layout_persist_dirty = true;
+        self.signal_persist_wake();
     }
 
     pub(in crate::features) fn clear_session_persistence_dirty(&mut self) {
@@ -277,6 +340,11 @@ impl ShellFeatureState {
         if !succeeded {
             self.runtime.open_tabs_persist_dirty |= dirty.open_tabs;
             self.runtime.window_layout_persist_dirty |= dirty.window_layout;
+            // A failed write is a fresh mark: the debounce task has to be told, or
+            // the retry waits for some unrelated change to come along.
+            if !dirty.is_empty() {
+                self.signal_persist_wake();
+            }
         }
         true
     }
