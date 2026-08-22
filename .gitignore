@@ -46,7 +46,7 @@ __pycache__/
 
 # Rust / native app
 target/
-data/
+/data/
 nyaterm-portable
 /gen/schemas
 /src-tauri
