@@ -998,9 +998,10 @@ impl TerminalViewState {
             skipped_output_bytes,
             revision,
         } = parts;
-        // UI output tail is only used for copy/export helpers. Skip rebuilding a
-        // large String during output pressure / degraded paint so frame apply stays cheap.
-        if !visible_text.is_empty() && !self.render_degraded {
+        // Keep the bounded UI output tail even while paint is degraded. The tail
+        // is used as reconnect seed/copy input, and append_terminal_ui_output_tail
+        // trims it to a fixed size, so retaining it does not grow without bound.
+        if !visible_text.is_empty() {
             append_terminal_ui_output_tail(&mut self.output, visible_text);
         }
         let old_scrollback_len = self.scrollback_len_for_anchor();
@@ -1051,12 +1052,16 @@ impl TerminalViewState {
         &mut self,
         snapshot: Option<Arc<TerminalSnapshot>>,
         action_links: Option<TerminalFrameActionLinks>,
+        visible_text: &str,
         protocol_state: TerminalProtocolState,
         skipped_output_bytes: usize,
         revision: u64,
     ) {
         // Hidden sessions keep protocol/revision current without retaining a full
-        // viewport snapshot until the surface becomes visible again.
+        // viewport snapshot until the surface becomes visible again. Keep the
+        // bounded text tail so reconnects do not lose a banner that arrived before
+        // the replacement terminal surface was attached.
+        append_terminal_ui_output_tail(&mut self.output, visible_text);
         if let Some(snapshot) = snapshot {
             self.frame_snapshot = Some(snapshot);
             self.frame_action_links = action_links;
@@ -1346,6 +1351,10 @@ impl TerminalFramePipeline {
         if data.is_empty() {
             return;
         }
+        // Wake the GPUI frame consumer as soon as the processor publishes the
+        // resulting event; otherwise the first login burst waits for the
+        // runtime tick instead of taking the existing event-wake path.
+        self.event_queue.arm_wake(TERMINAL_FRAME_EVENT_WAKE_OUTPUT);
         let _ = self.command_tx.send_many(terminal_frame_output_commands(
             TerminalFrameOutputSubmission {
                 session_id: session_id.into(),
@@ -1360,6 +1369,9 @@ impl TerminalFramePipeline {
         if outputs.is_empty() {
             return;
         }
+        // Keep batched output on the same low-latency wake path as a single
+        // submission. The session bridge normally uses this batch method.
+        self.event_queue.arm_wake(TERMINAL_FRAME_EVENT_WAKE_OUTPUT);
         let commands = outputs.into_iter().flat_map(terminal_frame_output_commands);
         let _ = self.command_tx.send_many(commands);
     }
@@ -1840,6 +1852,8 @@ struct TerminalFrameSession {
     output_decoder: TerminalOutputDecoder,
     recording_decoder: TerminalOutputDecoder,
     revision: u64,
+    /// True after at least one live backend output command has been applied.
+    output_seen: bool,
     /// When false, output frames omit full viewport_snapshot (hidden tabs).
     include_live_snapshot: bool,
     action_link_cache: Option<TerminalFrameActionLinks>,
@@ -1859,6 +1873,7 @@ impl TerminalFrameSession {
             output_decoder,
             recording_decoder,
             revision: 0,
+            output_seen: false,
             // New sessions start high-priority until UI reports visibility.
             include_live_snapshot: true,
             action_link_cache: None,
@@ -1873,6 +1888,12 @@ impl TerminalFrameSession {
     }
 
     fn seed(&mut self, output: String, encoding: &str, scrollback_limit: usize) {
+        // A deferred SSH worker can emit its first banner before the UI drains
+        // the start result. Do not let the later reconnect seed reset that live
+        // screen and erase the banner that is already visible in the pipeline.
+        if self.output_seen {
+            return;
+        }
         self.screen = terminal_screen_from_output(&output);
         self.screen.set_encoding(encoding);
         self.screen.set_scrollback_limit(scrollback_limit);
@@ -1881,6 +1902,7 @@ impl TerminalFrameSession {
         self.recording_decoder = TerminalOutputDecoder::default();
         self.recording_decoder.set_encoding(encoding);
         self.revision = self.revision.saturating_add(1);
+        self.output_seen = false;
         self.action_link_cache = None;
     }
 
@@ -1942,6 +1964,10 @@ impl TerminalFrameSession {
         recording_writer: &RecordingWriteHandle,
     ) -> TerminalAdvanceResult {
         self.set_encoding_and_limit(encoding, scrollback_limit);
+        let first_live_output = !self.output_seen && !data.is_empty();
+        if !data.is_empty() {
+            self.output_seen = true;
+        }
         let result = terminal_advance_result(
             &mut self.screen,
             &mut self.output_decoder,
@@ -1950,6 +1976,17 @@ impl TerminalFrameSession {
             data,
             recording_writer,
         );
+        if first_live_output {
+            tracing::info!(
+                diagnostic = "terminal_first_live_output",
+                session_id,
+                raw_bytes = data.len(),
+                accepted_bytes = result.accepted_bytes,
+                visible_text_bytes = result.visible_text.len(),
+                skipped_output_bytes = result.skipped_output_bytes,
+                "first live terminal output reached the frame processor"
+            );
+        }
         self.revision = self.revision.saturating_add(1);
         result
     }
