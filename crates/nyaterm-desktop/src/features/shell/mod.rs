@@ -13,6 +13,7 @@ mod persistence_debounce;
 mod quick_switch_runtime;
 mod runtime_state;
 mod state;
+mod status_clocks;
 mod tab_mouse;
 mod tab_windows_runtime;
 mod workspace_runtime;

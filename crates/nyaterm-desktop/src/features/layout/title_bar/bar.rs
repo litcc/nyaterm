@@ -477,6 +477,7 @@ impl NyaTermApp {
         self.shell
             .set_header_status_rendered_minute(current_unix_minute());
         self.persist_header_status_settings();
+        self.ensure_header_status_clock(cx);
         cx.notify();
     }
 
@@ -487,9 +488,12 @@ impl NyaTermApp {
     ) {
         self.settings.set_header_status_visible(visible);
         self.persist_header_status_settings();
+        self.ensure_header_status_clock(cx);
         cx.notify();
     }
 
+    /// Both header-status setters funnel through here, so this is the one place the
+    /// date/time clock has to be reconsidered when the header changes shape.
     fn persist_header_status_settings(&mut self) {
         if self.shell.has_settings_draft() {
             self.shell

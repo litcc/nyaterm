@@ -4,12 +4,11 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
-    PENDING_SESSION_STATUS_INTERVAL, PENDING_SESSION_STILL_CONNECTING_AFTER,
-    PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW, RUNTIME_IDLE_TICK_INTERVAL,
-    RUNTIME_QUIET_TICK_INTERVAL, RuntimeDataPlaneDrain, RuntimeOutputPressureCounts,
-    SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS,
-    TerminalFrameApplyDecision, connect_settle_active, connect_settle_deadline,
-    pending_session_status_message, remote_refresh_due,
+    PENDING_SESSION_STILL_CONNECTING_AFTER, PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW,
+    RUNTIME_IDLE_TICK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL, RuntimeDataPlaneDrain,
+    RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD,
+    TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision, connect_settle_active,
+    connect_settle_deadline, pending_session_status_message, remote_refresh_due,
     runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
     runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
     runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
@@ -25,6 +24,8 @@ use crate::models::{HeaderStatusMode, NavItem};
 
 mod bridge;
 mod helpers;
+
+pub(super) use helpers::PENDING_SESSION_STATUS_INTERVAL;
 mod planes;
 mod session_events;
 
@@ -565,9 +566,6 @@ impl NyaTermApp {
     }
 
     fn window_runtime_quiet_tick_has_due_work(&self) -> bool {
-        if self.header_status_clock_refresh_due() {
-            return true;
-        }
         if self.ai.chat_focus_is_pending()
             || self.transfer.rename_focus_is_pending()
             || self.session.prompt_credential_focus_is_pending()
@@ -666,7 +664,7 @@ impl NyaTermApp {
                 || self.current_left_panel() == Some(NavItem::Transfers))
     }
 
-    pub(super) fn drive_pending_session_status(&mut self) -> bool {
+    pub(in crate::features) fn drive_pending_session_status(&mut self) -> bool {
         let Some((name, requested_at)) = self.session.start_pending_status_source() else {
             self.shell.runtime.last_pending_session_status_at = None;
             return false;

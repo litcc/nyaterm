@@ -87,6 +87,10 @@ pub(super) struct ShellRuntimeState {
     /// True while the blink clock task is alive. The clock is its own deadline, so
     /// there is no "next toggle at" instant to keep here any more.
     cursor_blink_clock_armed: bool,
+    /// True while the header date/time clock task is alive.
+    header_status_clock_armed: bool,
+    /// True while the "still connecting" status clock task is alive.
+    pending_session_status_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -161,6 +165,8 @@ impl Default for ShellRuntimeState {
             session_persistence_in_flight: None,
             cursor_blink_on: true,
             cursor_blink_clock_armed: false,
+            header_status_clock_armed: false,
+            pending_session_status_clock_armed: false,
         }
     }
 }
@@ -230,6 +236,22 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_cursor_blink_clock_armed(&mut self, armed: bool) {
         self.runtime.cursor_blink_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn header_status_clock_is_armed(&self) -> bool {
+        self.runtime.header_status_clock_armed
+    }
+
+    pub(in crate::features) fn set_header_status_clock_armed(&mut self, armed: bool) {
+        self.runtime.header_status_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn pending_session_status_clock_is_armed(&self) -> bool {
+        self.runtime.pending_session_status_clock_armed
+    }
+
+    pub(in crate::features) fn set_pending_session_status_clock_armed(&mut self, armed: bool) {
+        self.runtime.pending_session_status_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {

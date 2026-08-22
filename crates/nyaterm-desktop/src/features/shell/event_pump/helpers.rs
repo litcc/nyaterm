@@ -36,7 +36,8 @@ pub(super) const RUNTIME_TICK_SLOW_THRESHOLD: Duration = Duration::from_millis(4
 pub(super) const SESSION_EVENT_DRAIN_SLOW_TOTAL: Duration = Duration::from_millis(20);
 pub(super) const SESSION_EVENT_DRAIN_SLOW_CHUNK: Duration = Duration::from_millis(8);
 pub(super) const PENDING_SESSION_STILL_CONNECTING_AFTER: Duration = Duration::from_secs(15);
-pub(super) const PENDING_SESSION_STATUS_INTERVAL: Duration = Duration::from_secs(1);
+pub(in crate::features::shell) const PENDING_SESSION_STATUS_INTERVAL: Duration =
+    Duration::from_secs(1);
 
 #[derive(Default)]
 pub(super) struct SessionEventDrainTimings {

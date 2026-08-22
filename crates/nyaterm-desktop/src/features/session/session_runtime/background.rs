@@ -168,6 +168,9 @@ impl NyaTermApp {
         // work on the click path before the worker even starts.
         let _ = append_start_log;
         self.shell.show_workspace();
+        // A pending start is the only state the "still connecting" status means
+        // anything in, so its clock is armed here rather than polled for.
+        self.ensure_pending_session_status_clock(cx);
         cx.notify();
         request_id
     }

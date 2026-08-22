@@ -112,8 +112,10 @@ impl NyaTermApp {
     ) -> bool {
         let tick_started_at = Instant::now();
         let stage_started_at = Instant::now();
+        // The header's date/time is on its own minute-boundary clock, and the
+        // "still connecting" status on its own 1s clock while a start is pending;
+        // see `shell::status_clocks`.
         let mut dirty = self.refresh_window_render_inputs(window, cx);
-        dirty |= self.refresh_header_status_clock();
         let render_input_duration = stage_started_at.elapsed();
 
         // Skip full planes when the compositor is moving/resizing the window, or
@@ -195,9 +197,6 @@ impl NyaTermApp {
         let visual = self.drive_runtime_visual_plane(cx);
         dirty |= visual.dirty;
 
-        let pending_session_stage_started_at = Instant::now();
-        dirty |= self.drive_pending_session_status();
-        let pending_session_status_duration = pending_session_stage_started_at.elapsed();
         let visual_dirty = dirty;
         let notify_started_at = Instant::now();
         let notify_now = notify_started_at;
@@ -247,7 +246,6 @@ impl NyaTermApp {
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
                 idle_lock_ms = idle.idle_lock.as_millis(),
                 visual_runtime_ms = visual.duration.as_millis(),
-                pending_session_status_ms = pending_session_status_duration.as_millis(),
                 notify_ms = notify_duration.as_millis(),
                 queued_events = self.shell.runtime.session_event_queued_events,
                 queued_output_bytes = self.shell.runtime.session_event_queued_output_bytes,
