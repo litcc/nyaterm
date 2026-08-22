@@ -1,5 +1,7 @@
 use rust_i18n::t;
 
+use futures::StreamExt as _;
+
 use nyaterm_ui::NyaScrollable;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -128,7 +130,9 @@ impl NyaTermApp {
         {
             return false;
         }
-        let mut dirty = self.drain_credential_autofill_match_events(cx);
+        // Replies arrive on `start_credential_autofill_match_drain`; what is
+        // left here is snapshot-driven detection.
+        let mut dirty = false;
         let detection_was_pending = self.terminal.assist.credential_autofill_detection_pending;
         let runtime_backlog = CredentialAutofillRuntimeBacklog {
             queued_output_bytes: self.shell.session_event_queued_output_bytes(),
@@ -320,6 +324,59 @@ impl NyaTermApp {
                 pending: self.terminal.assist.credential_autofill_pending.clone(),
             });
         true
+    }
+
+    /// Deliver credential-autofill match replies as they arrive.
+    ///
+    /// Started once at window open. The reply queue dedups per (session, prompt)
+    /// and drops the oldest under pressure, so it stays a queue and only the wake
+    /// signal is a channel; see `models::event_wake`.
+    ///
+    /// Only the *reply* half moves here. Prompt detection still runs on the
+    /// runtime tick, because it scans the terminal frame snapshot and
+    /// deliberately holds off while output backlog is high -- that belongs with
+    /// the terminal frame work, driven off a frame being applied.
+    pub(in crate::features) fn start_credential_autofill_match_drain(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut wake_rx) = self
+            .terminal
+            .assist
+            .credential_autofill_match_pipeline
+            .take_wake_receiver()
+        else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            loop {
+                // Arm before draining: a reply pushed between the drain and the
+                // arm would otherwise go unsignalled and sit until something
+                // unrelated woke us.
+                let drained = this.update(cx, |this, cx| {
+                    this.terminal
+                        .assist
+                        .credential_autofill_match_pipeline
+                        .arm_event_wake();
+                    let dirty = this.drain_credential_autofill_match_events(cx);
+                    if dirty {
+                        cx.notify();
+                    }
+                    dirty
+                });
+                match drained {
+                    Err(_) => break,
+                    // Applying one reply can leave more queued; keep going before
+                    // sleeping, rather than waiting for the next signal.
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                }
+                if wake_rx.next().await.is_none() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     fn drain_credential_autofill_match_events(&mut self, cx: &mut Context<Self>) -> bool {

@@ -1,3 +1,4 @@
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::Pixels;
 use nyaterm_core::{
     CredentialPromptKind, SavedCredential, compile_prompt_regex,
@@ -6,6 +7,8 @@ use nyaterm_core::{
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
+
+use super::event_wake::{ANY_INTEREST, EventWake};
 
 const CREDENTIAL_AUTOFILL_MATCH_REGEX_CACHE_LIMIT: usize = 512;
 
@@ -557,13 +560,17 @@ pub(crate) enum CredentialAutofillMatchOutcome {
 pub(crate) struct CredentialAutofillMatchPipeline {
     command_tx: mpsc::Sender<CredentialAutofillMatchRequest>,
     event_queue: CredentialAutofillMatchEventQueue,
+    /// Taken once by `NyaTermApp::start_credential_autofill_match_drain`,
+    /// which owns delivery from then on.
+    wake_rx: Option<UnboundedReceiver<()>>,
 }
 
 impl CredentialAutofillMatchPipeline {
     pub(crate) fn spawn() -> Self {
         let (command_tx, command_rx) = mpsc::channel();
+        let (wake, wake_rx) = EventWake::new();
         let event_queue =
-            CredentialAutofillMatchEventQueue::new(CREDENTIAL_AUTOFILL_MATCH_EVENT_CAP);
+            CredentialAutofillMatchEventQueue::new(CREDENTIAL_AUTOFILL_MATCH_EVENT_CAP, wake);
         let event_queue_for_worker = event_queue.clone();
         thread::Builder::new()
             .name("nyaterm-credential-autofill".to_string())
@@ -572,7 +579,19 @@ impl CredentialAutofillMatchPipeline {
         Self {
             command_tx,
             event_queue,
+            wake_rx: Some(wake_rx),
         }
+    }
+
+    pub(crate) fn take_wake_receiver(&mut self) -> Option<UnboundedReceiver<()>> {
+        self.wake_rx.take()
+    }
+
+    /// Declare interest in the next match reply. See `models::event_wake`: this
+    /// must happen before the consumer checks the queue, or a reply pushed in
+    /// between is not signalled and the consumer sleeps on a non-empty queue.
+    pub(crate) fn arm_event_wake(&self) {
+        self.event_queue.wake.arm(ANY_INTEREST);
     }
 
     pub(crate) fn request(&self, request: CredentialAutofillMatchRequest) {
@@ -594,13 +613,17 @@ impl Default for CredentialAutofillMatchPipeline {
 struct CredentialAutofillMatchEventQueue {
     inner: Arc<Mutex<VecDeque<CredentialAutofillMatchEvent>>>,
     cap: usize,
+    /// The queue drops and dedups entries, so it cannot become a channel; only
+    /// the wake signal lives outside it.
+    wake: EventWake,
 }
 
 impl CredentialAutofillMatchEventQueue {
-    fn new(cap: usize) -> Self {
+    fn new(cap: usize, wake: EventWake) -> Self {
         Self {
             inner: Arc::new(Mutex::new(VecDeque::with_capacity(cap.min(128)))),
             cap,
+            wake,
         }
     }
 
@@ -616,10 +639,17 @@ impl CredentialAutofillMatchEventQueue {
             queue.pop_front();
         }
         queue.push_back(event);
+        drop(queue);
+        self.wake.signal(ANY_INTEREST);
     }
 
     fn try_recv(&self) -> Option<CredentialAutofillMatchEvent> {
         self.inner.lock().ok()?.pop_front()
+    }
+
+    #[cfg(test)]
+    fn arm_wake_for_test(&self) {
+        self.wake.arm(ANY_INTEREST);
     }
 }
 
@@ -832,6 +862,7 @@ mod credential_autofill_match_tests {
         CredentialAutofillMatchRequestKey, CredentialPromptKind, PendingCredentialAutofill,
         SavedCredential, credential_autofill_match_outcome,
     };
+    use crate::models::event_wake::EventWake;
 
     fn credential(
         id: &str,
@@ -886,8 +917,28 @@ mod credential_autofill_match_tests {
     }
 
     #[test]
+    fn credential_autofill_event_queue_signals_once_per_arm() {
+        let (wake, mut wake_rx) = EventWake::new();
+        let queue = CredentialAutofillMatchEventQueue::new(8, wake);
+
+        // No interest declared yet, so the matcher thread costs nothing.
+        queue.push(event(1, "s1", "Password:"));
+        assert!(wake_rx.try_recv().is_err());
+
+        queue.arm_wake_for_test();
+        queue.push(event(2, "s1", "Password:"));
+        assert!(wake_rx.try_recv().is_ok(), "an armed queue must signal");
+        queue.push(event(3, "s1", "Password:"));
+        assert!(
+            wake_rx.try_recv().is_err(),
+            "a burst after one arm must not queue a wake per reply"
+        );
+    }
+
+    #[test]
     fn credential_autofill_event_queue_keeps_latest_prompt_match() {
-        let queue = CredentialAutofillMatchEventQueue::new(8);
+        let (wake, _wake_rx) = EventWake::new();
+        let queue = CredentialAutofillMatchEventQueue::new(8, wake);
 
         queue.push(event(1, "s1", "Password:"));
         queue.push(event(2, "s1", "Password:"));
@@ -901,7 +952,8 @@ mod credential_autofill_match_tests {
 
     #[test]
     fn credential_autofill_event_queue_preserves_different_prompts() {
-        let queue = CredentialAutofillMatchEventQueue::new(8);
+        let (wake, _wake_rx) = EventWake::new();
+        let queue = CredentialAutofillMatchEventQueue::new(8, wake);
 
         queue.push(event(1, "s1", "login as:"));
         queue.push(event(2, "s1", "Password:"));
