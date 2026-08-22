@@ -417,12 +417,11 @@ impl NyaTermApp {
         // read: each `activate_next_*` promotes one queued prompt into the single
         // active slot, and the next promotion happens when the user answers.
         // Moving those onto a wake channel belongs with the Class B work.
+        // Activation runs on `start_prompt_activation_drain`. What is left is the
+        // TOTP preview, which refreshes on the code's step boundary -- time-based,
+        // so Phase 2 gives it a timer.
         let stage_started_at = Instant::now();
-        dirty |= self.drain_host_key_prompts()
-            | self.drain_agent_prompts()
-            | self.drain_credential_prompts()
-            | self.drain_duplicate_prompts()
-            | self.refresh_keyboard_interactive_totp();
+        dirty |= self.refresh_keyboard_interactive_totp();
         timings.prompts = stage_started_at.elapsed();
 
         RuntimeControlPlaneResult {

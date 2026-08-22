@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nyaterm_core::DecryptedOtpEntry;
+
+use crate::models::event_wake::{ANY_INTEREST, EventWake};
 use nyaterm_store::{KnownHostCheck, StoreBlockingClient, StoreDomain};
 use nyaterm_transport::{
     SftpDuplicateDecision, SftpDuplicateRequest, SftpDuplicateResolver, SshAgentPrompt,
@@ -341,9 +343,27 @@ pub(in crate::features) struct SftpDuplicatePromptState {
 #[derive(Debug, Default)]
 pub(in crate::features) struct SftpDuplicatePromptBroker {
     pending: Mutex<VecDeque<SftpDuplicatePromptRequest>>,
+    /// Signalled after a transport thread enqueues, so activation does not
+    /// have to be polled. `Option` because the brokers are `Default`-built,
+    /// including in tests that drive them without a wake at all.
+    wake: Mutex<Option<EventWake>>,
 }
 
 impl SftpDuplicatePromptBroker {
+    pub(in crate::features) fn set_wake(&self, wake: EventWake) {
+        if let Ok(mut slot) = self.wake.lock() {
+            *slot = Some(wake);
+        }
+    }
+
+    fn signal_wake(&self) {
+        if let Ok(slot) = self.wake.lock()
+            && let Some(wake) = slot.as_ref()
+        {
+            wake.signal(ANY_INTEREST);
+        }
+    }
+
     fn request_decision(
         &self,
         request: SftpDuplicateRequest,
@@ -358,6 +378,7 @@ impl SftpDuplicatePromptBroker {
             .lock()
             .map_err(|_| "remote transfer duplicate prompt queue is poisoned".to_string())?
             .push_back(request);
+        self.signal_wake();
 
         response_rx
             .recv_timeout(Duration::from_secs(300))
@@ -411,9 +432,27 @@ pub(in crate::features) struct HostKeyPromptRequest {
 #[derive(Debug, Default)]
 pub(in crate::features) struct HostKeyPromptBroker {
     pending: Mutex<VecDeque<HostKeyPromptRequest>>,
+    /// Signalled after a transport thread enqueues, so activation does not
+    /// have to be polled. `Option` because the brokers are `Default`-built,
+    /// including in tests that drive them without a wake at all.
+    wake: Mutex<Option<EventWake>>,
 }
 
 impl HostKeyPromptBroker {
+    pub(in crate::features) fn set_wake(&self, wake: EventWake) {
+        if let Ok(mut slot) = self.wake.lock() {
+            *slot = Some(wake);
+        }
+    }
+
+    fn signal_wake(&self) {
+        if let Ok(slot) = self.wake.lock()
+            && let Some(wake) = slot.as_ref()
+        {
+            wake.signal(ANY_INTEREST);
+        }
+    }
+
     fn request_decision(
         &self,
         host_key: SshHostKey,
@@ -430,6 +469,7 @@ impl HostKeyPromptBroker {
             .lock()
             .map_err(|_| "host-key prompt queue is poisoned".to_string())?
             .push_back(request);
+        self.signal_wake();
 
         response_rx
             .recv_timeout(Duration::from_secs(300))
@@ -517,9 +557,27 @@ impl std::fmt::Debug for KeyboardInteractivePromptState {
 #[derive(Debug, Default)]
 pub(in crate::features) struct CredentialPromptBroker {
     pending: Mutex<VecDeque<CredentialPromptRequest>>,
+    /// Signalled after a transport thread enqueues, so activation does not
+    /// have to be polled. `Option` because the brokers are `Default`-built,
+    /// including in tests that drive them without a wake at all.
+    wake: Mutex<Option<EventWake>>,
 }
 
 impl CredentialPromptBroker {
+    pub(in crate::features) fn set_wake(&self, wake: EventWake) {
+        if let Ok(mut slot) = self.wake.lock() {
+            *slot = Some(wake);
+        }
+    }
+
+    fn signal_wake(&self) {
+        if let Ok(slot) = self.wake.lock()
+            && let Some(wake) = slot.as_ref()
+        {
+            wake.signal(ANY_INTEREST);
+        }
+    }
+
     fn request_secret(&self, prompt: SshCredentialPrompt) -> Result<Option<String>, String> {
         let (response_tx, response_rx) = mpsc::channel();
         let request = CredentialPromptRequest::Secret {
@@ -531,6 +589,7 @@ impl CredentialPromptBroker {
             .lock()
             .map_err(|_| "credential prompt queue is poisoned".to_string())?
             .push_back(request);
+        self.signal_wake();
 
         response_rx
             .recv_timeout(Duration::from_secs(300))
@@ -551,6 +610,7 @@ impl CredentialPromptBroker {
             .lock()
             .map_err(|_| "credential prompt queue is poisoned".to_string())?
             .push_back(queued);
+        self.signal_wake();
 
         response_rx
             .recv_timeout(Duration::from_secs(300))
@@ -595,9 +655,27 @@ pub(in crate::features) struct AgentPromptRequest {
 #[derive(Debug, Default)]
 pub(in crate::features) struct AgentPromptBroker {
     pending: Mutex<VecDeque<AgentPromptRequest>>,
+    /// Signalled after a transport thread enqueues, so activation does not
+    /// have to be polled. `Option` because the brokers are `Default`-built,
+    /// including in tests that drive them without a wake at all.
+    wake: Mutex<Option<EventWake>>,
 }
 
 impl AgentPromptBroker {
+    pub(in crate::features) fn set_wake(&self, wake: EventWake) {
+        if let Ok(mut slot) = self.wake.lock() {
+            *slot = Some(wake);
+        }
+    }
+
+    fn signal_wake(&self) {
+        if let Ok(slot) = self.wake.lock()
+            && let Some(wake) = slot.as_ref()
+        {
+            wake.signal(ANY_INTEREST);
+        }
+    }
+
     fn request_action(&self, prompt: SshAgentPrompt) -> Result<SshAgentPromptAction, String> {
         self.request_action_with_timeout(prompt, Duration::from_secs(300))
     }
@@ -618,6 +696,7 @@ impl AgentPromptBroker {
             .lock()
             .map_err(|_| "SSH Agent prompt queue is poisoned".to_string())?
             .push_back(request);
+        self.signal_wake();
         match response_rx.recv_timeout(timeout) {
             Ok(action) => Ok(action),
             Err(_) => {

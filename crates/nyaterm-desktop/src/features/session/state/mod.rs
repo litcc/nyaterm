@@ -12,6 +12,7 @@ use nyaterm_transport::{
 };
 
 use crate::features::runtime_jobs::SessionStartResult;
+use crate::models::event_wake::{ANY_INTEREST, EventWake};
 use crate::models::{
     SessionEventBridge, SessionEventBridgeDrain, SessionEventBridgeStats, SessionLaunchConfig,
     SessionRuntimeMetadata, StartupCommandAction, StartupCommandRequest, TabActionsSubmenu,
@@ -95,6 +96,10 @@ pub(in crate::features) struct SessionFeatureFocus {
 
 /// Native authentication and transfer prompts tied to the session runtime.
 pub(super) struct SessionPromptState {
+    /// One wake shared by all four brokers: activation runs all four steps on
+    /// any signal, and each is a cheap no-op when its queue is empty.
+    wake: EventWake,
+    wake_rx: Option<UnboundedReceiver<()>>,
     duplicate_prompts: Arc<SftpDuplicatePromptBroker>,
     active_duplicate_prompt: Option<SftpDuplicatePromptState>,
     host_key_prompts: Arc<HostKeyPromptBroker>,
@@ -171,20 +176,7 @@ impl SessionFeatureState {
             start: SessionStartFeatureState::new(),
             restore: SessionRestoreState::default(),
             events: SessionEventQueueState::default(),
-            prompts: SessionPromptState {
-                duplicate_prompts: Arc::new(SftpDuplicatePromptBroker::default()),
-                active_duplicate_prompt: None,
-                host_key_prompts: Arc::new(HostKeyPromptBroker::default()),
-                active_host_key_prompt: None,
-                credential_prompts: Arc::new(CredentialPromptBroker::default()),
-                active_credential_prompt: None,
-                active_keyboard_interactive_prompt: None,
-                agent_prompts: Arc::new(AgentPromptBroker::default()),
-                active_agent_prompt: None,
-                credential_prompt_focus_pending: false,
-                credential_focus: focus.credential,
-                otp_provider,
-            },
+            prompts: SessionPromptState::new(otp_provider, focus.credential),
             dialogs: SessionDialogState {
                 tab_actions_session_id: None,
                 tab_actions_anchor: None,
@@ -1631,6 +1623,53 @@ impl SessionPromptState {
             || self.duplicate_prompts.has_pending()
     }
 
+    /// Install one wake across all four brokers, before any of them can be
+    /// handed to a transport thread.
+    fn new(otp_provider: Arc<NativeOtpProvider>, credential_focus: FocusHandle) -> Self {
+        let (wake, wake_rx) = EventWake::new();
+        let duplicate_prompts = Arc::new(SftpDuplicatePromptBroker::default());
+        let host_key_prompts = Arc::new(HostKeyPromptBroker::default());
+        let credential_prompts = Arc::new(CredentialPromptBroker::default());
+        let agent_prompts = Arc::new(AgentPromptBroker::default());
+        duplicate_prompts.set_wake(wake.clone());
+        host_key_prompts.set_wake(wake.clone());
+        credential_prompts.set_wake(wake.clone());
+        agent_prompts.set_wake(wake.clone());
+        Self {
+            wake,
+            wake_rx: Some(wake_rx),
+            duplicate_prompts,
+            active_duplicate_prompt: None,
+            host_key_prompts,
+            active_host_key_prompt: None,
+            credential_prompts,
+            active_credential_prompt: None,
+            active_keyboard_interactive_prompt: None,
+            agent_prompts,
+            active_agent_prompt: None,
+            credential_prompt_focus_pending: false,
+            credential_focus,
+            otp_provider,
+        }
+    }
+
+    pub(in crate::features) fn take_wake_receiver(&mut self) -> Option<UnboundedReceiver<()>> {
+        self.wake_rx.take()
+    }
+
+    /// Declare interest in the next enqueued prompt. See `models::event_wake`:
+    /// this must happen before the consumer checks the queues.
+    pub(in crate::features) fn arm_wake(&self) {
+        self.wake.arm(ANY_INTEREST);
+    }
+
+    /// Freeing the single active slot is what lets the next queued prompt in, and
+    /// nothing is enqueued at that moment, so the activation pass has to be woken
+    /// explicitly. Every `take_*` below does this.
+    fn signal_wake(&self) {
+        self.wake.signal(ANY_INTEREST);
+    }
+
     pub(in crate::features) fn take_host_key_resolution(
         &mut self,
         request_id: &str,
@@ -1642,6 +1681,7 @@ impl SessionPromptState {
             self.active_host_key_prompt = Some(request);
             return PromptResolution::Changed;
         }
+        self.signal_wake();
         PromptResolution::Ready(request)
     }
 
@@ -1656,12 +1696,14 @@ impl SessionPromptState {
             self.active_duplicate_prompt = Some(prompt);
             return PromptResolution::Changed;
         }
+        self.signal_wake();
         PromptResolution::Ready(prompt)
     }
 
     pub(in crate::features) fn take_credential(&mut self) -> Option<CredentialPromptState> {
         let state = self.active_credential_prompt.take()?;
         self.credential_prompt_focus_pending = false;
+        self.signal_wake();
         Some(state)
     }
 
@@ -1670,11 +1712,14 @@ impl SessionPromptState {
     ) -> Option<KeyboardInteractivePromptState> {
         let state = self.active_keyboard_interactive_prompt.take()?;
         self.credential_prompt_focus_pending = false;
+        self.signal_wake();
         Some(state)
     }
 
     pub(in crate::features) fn take_agent(&mut self) -> Option<AgentPromptRequest> {
-        self.active_agent_prompt.take()
+        let request = self.active_agent_prompt.take()?;
+        self.signal_wake();
+        Some(request)
     }
 
     pub(in crate::features) fn keyboard_interactive_otp_id(&self) -> Option<String> {

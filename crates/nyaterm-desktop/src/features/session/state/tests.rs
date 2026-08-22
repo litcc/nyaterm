@@ -19,11 +19,10 @@ use crate::models::{
 use crate::temporary_ssh_link::TemporaryLinkProtocol;
 
 use super::{
-    AgentPromptBroker, CredentialPromptBroker, CredentialPromptState, FailedSessionStart,
-    HostKeyPromptBroker, HostKeyPromptRequest, KeyboardInteractivePromptState,
-    NativeOtpCodePreview, NativeOtpProvider, PendingSessionStart, PromptResolution,
-    RenameSessionSubmission, SessionFeatureFocus, SessionFeatureState, SessionPromptState,
-    SessionStartEventRequest, SessionStartFeatureState, SftpDuplicatePromptBroker,
+    CredentialPromptState, FailedSessionStart, HostKeyPromptRequest,
+    KeyboardInteractivePromptState, NativeOtpCodePreview, NativeOtpProvider, PendingSessionStart,
+    PromptResolution, RenameSessionSubmission, SessionFeatureFocus, SessionFeatureState,
+    SessionPromptState, SessionStartEventRequest, SessionStartFeatureState,
 };
 
 fn pending(name: &str) -> PendingSessionStart {
@@ -64,20 +63,7 @@ fn test_otp_provider() -> Arc<NativeOtpProvider> {
 }
 
 fn prompt_state(cx: &TestAppContext) -> SessionPromptState {
-    SessionPromptState {
-        duplicate_prompts: Arc::new(SftpDuplicatePromptBroker::default()),
-        active_duplicate_prompt: None,
-        host_key_prompts: Arc::new(HostKeyPromptBroker::default()),
-        active_host_key_prompt: None,
-        credential_prompts: Arc::new(CredentialPromptBroker::default()),
-        active_credential_prompt: None,
-        active_keyboard_interactive_prompt: None,
-        agent_prompts: Arc::new(AgentPromptBroker::default()),
-        active_agent_prompt: None,
-        credential_prompt_focus_pending: false,
-        credential_focus: cx.update(|cx| cx.focus_handle()),
-        otp_provider: test_otp_provider(),
-    }
+    SessionPromptState::new(test_otp_provider(), cx.update(|cx| cx.focus_handle()))
 }
 
 fn session_state(cx: &TestAppContext) -> SessionFeatureState {
@@ -135,6 +121,43 @@ fn credential_prompt_state(id: &str) -> CredentialPromptState {
         response_tx,
         value: String::new(),
     }
+}
+
+/// Answering a prompt frees the single active slot the next queued one needs,
+/// and nothing is enqueued at that moment, so the activation pass has to be woken
+/// explicitly. Without this the second prompt of a pair never appears.
+#[test]
+fn resolving_a_prompt_wakes_the_activation_pass() {
+    let cx = TestAppContext::single();
+    let mut prompts = prompt_state(&cx);
+    let mut wake_rx = prompts
+        .take_wake_receiver()
+        .expect("the state holds its receiver until the drain starts");
+
+    prompts.activate_credential(credential_prompt_state("credential-1"));
+    prompts.arm_wake();
+    assert!(
+        wake_rx.try_recv().is_err(),
+        "activating does not itself free the slot"
+    );
+
+    assert!(prompts.take_credential().is_some());
+    assert!(
+        wake_rx.try_recv().is_ok(),
+        "freeing the active slot must wake the activation pass"
+    );
+
+    // A mismatched resolution leaves the slot occupied, so it must not wake.
+    prompts.activate_credential(credential_prompt_state("credential-2"));
+    prompts.arm_wake();
+    assert!(matches!(
+        prompts.take_host_key_resolution("absent"),
+        PromptResolution::Inactive
+    ));
+    assert!(
+        wake_rx.try_recv().is_err(),
+        "a resolution that frees nothing must not wake"
+    );
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use std::hash::{Hash, Hasher};
 
+use futures::StreamExt as _;
 use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
 use nyaterm_transport::{
     SftpDuplicateDecision, SftpDuplicateRequest, SshAgentPromptAction, SshCredentialPrompt,
@@ -322,6 +323,50 @@ impl NyaTermApp {
         let field = self.text_input(target.id, &target.seed, setup, cx);
         window.focus(&field.read(cx).focus_handle(), cx);
         true
+    }
+
+    /// Promote queued auth and transfer prompts into the single active slot.
+    ///
+    /// Started once at window open. Before this the runtime tick ran the four
+    /// activation steps on every control-plane pass.
+    ///
+    /// Two things wake this, and both are needed. A transport thread enqueuing a
+    /// prompt is the obvious one. The other is the user *answering* the active
+    /// prompt: that frees the slot the next one needs, and nothing is enqueued at
+    /// that moment, so every `SessionPromptState::take_*` signals as it clears the
+    /// slot. Without that the second prompt of a pair would never appear.
+    pub(in crate::features) fn start_prompt_activation_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut wake_rx) = self.session.prompts.take_wake_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            loop {
+                // Arm before checking, so a prompt enqueued in between still
+                // signals rather than waiting for the next one.
+                let activated = this.update(cx, |this, cx| {
+                    this.session.prompts.arm_wake();
+                    let dirty = this.drain_host_key_prompts()
+                        | this.drain_agent_prompts()
+                        | this.drain_credential_prompts()
+                        | this.drain_duplicate_prompts();
+                    if dirty {
+                        cx.notify();
+                    }
+                    dirty
+                });
+                // No `continue` on success: only one prompt occupies the slot at
+                // a time, so a queue with several waiting needs another pass once
+                // this one resolves -- and that pass is driven by the `take_*`
+                // signal, not by looping here.
+                if activated.is_err() {
+                    break;
+                }
+                if wake_rx.next().await.is_none() {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::features) fn drain_host_key_prompts(&mut self) -> bool {
