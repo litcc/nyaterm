@@ -834,6 +834,12 @@ fn fit_wallpaper_tile_size(viewport: (f32, f32), intrinsic: (f32, f32)) -> (f32,
 impl Render for NyaTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started_at = Instant::now();
+        // Reconcile viewport size and cell metrics here rather than on the runtime
+        // tick. `render` already holds the window, and the chrome built below reads
+        // `shell.viewport_size()`, so this paint sees the fresh values instead of
+        // whatever the last tick recorded. Nothing here notifies *this* entity, so it
+        // cannot loop: surfaces are separate entities.
+        self.refresh_window_render_inputs(window, cx);
         // Safety net for the idle screen-lock deadline. Every unlock and every
         // settings change arms the clock directly; this catches a path added later
         // that forgets to, because a clock that failed to arm means the screen never

@@ -512,18 +512,9 @@ impl NyaTermApp {
         runtime_tick_interval_for_pressure(self.runtime_output_pressure_active())
     }
 
-    pub(crate) fn window_runtime_tick_needs_update(
-        &self,
-        viewport_size: (f32, f32),
-        now: Instant,
-    ) -> bool {
+    pub(crate) fn window_runtime_tick_needs_update(&self, now: Instant) -> bool {
         if !self.shell.runtime.event_pump_started {
             return false;
-        }
-        if self.shell.viewport.size != viewport_size
-            || terminal_cell_metrics_refresh_needed(self.terminal.cell_metrics())
-        {
-            return true;
         }
         if self
             .shell

@@ -30,14 +30,8 @@ impl WindowRuntimeStore {
                     let keep_running = cx
                         .update(|window, cx| {
                             let now = Instant::now();
-                            let viewport_size = window.viewport_size();
-                            let viewport_size = (
-                                f32::from(viewport_size.width),
-                                f32::from(viewport_size.height),
-                            );
-                            let should_update = app.read_with(cx, |app, _| {
-                                app.window_runtime_tick_needs_update(viewport_size, now)
-                            });
+                            let should_update = app
+                                .read_with(cx, |app, _| app.window_runtime_tick_needs_update(now));
                             if !should_update {
                                 skipped_updates = skipped_updates.saturating_add(1);
                                 if skipped_updates > 0

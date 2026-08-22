@@ -111,12 +111,9 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let tick_started_at = Instant::now();
-        let stage_started_at = Instant::now();
-        // The header's date/time is on its own minute-boundary clock, and the
-        // "still connecting" status on its own 1s clock while a start is pending;
-        // see `shell::status_clocks`.
-        let mut dirty = self.refresh_window_render_inputs(window, cx);
-        let render_input_duration = stage_started_at.elapsed();
+        // Viewport/cell-metrics reconcile happens in `render`, the header clock and
+        // connect status on their own timers; see `shell::status_clocks`.
+        let mut dirty = false;
 
         // Skip full planes when the compositor is moving/resizing the window, or
         // when there is simply nothing pending (common during pure window drag).
@@ -232,7 +229,6 @@ impl NyaTermApp {
             tracing::warn!(
                 diagnostic = "runtime_tick",
                 total_ms = tick_duration.as_millis(),
-                render_input_ms = render_input_duration.as_millis(),
                 control_plane_ms = control.duration.as_millis(),
                 control_session_start_ms = control.timings.session_start.as_millis(),
                 control_prompts_ms = control.timings.prompts.as_millis(),
@@ -318,7 +314,6 @@ impl NyaTermApp {
                     output_pressure,
                     visual_dirty,
                     tick_ms = tick_duration.as_millis(),
-                    render_input_ms = render_input_duration.as_millis(),
                     control_ms = control.duration.as_millis(),
                     background_runtime_ms = data.background_total.as_millis(),
                     visual_runtime_ms = visual.duration.as_millis(),
