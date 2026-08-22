@@ -13,7 +13,10 @@ const LEGACY_COMMAND_MARKER_PREFIX: &str = "7777;DflyCommand:";
 const MAX_OSC_BUF: usize = 64 * 1024;
 const INITIAL_PROMPT_TAIL_LIMIT: usize = 1024;
 const SUPPRESSED_OUTPUT_LIMIT: usize = 64 * 1024;
-const SHELL_INJECTION_CHUNK_SIZE: usize = 2048;
+// Keep each PTY write below the smallest canonical input queue observed on
+// macOS. Newline-aware chunking preserves complete shell statements while
+// avoiding dropped bytes when the remote shell is briefly not scheduled.
+const SHELL_INJECTION_CHUNK_SIZE: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ShellKind {

@@ -1,7 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+#[cfg(unix)]
+use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -177,6 +179,9 @@ fn local_session_echoes_output() {
         return;
     }
 
+    #[cfg(unix)]
+    let _pty_guard = pty_test_guard();
+
     let manager = SessionManager::new();
     let info = manager
         .create_local_session(LocalSessionConfig {
@@ -211,6 +216,9 @@ fn local_session_info_preserves_working_dir() {
     if cfg!(target_os = "windows") {
         return;
     }
+
+    #[cfg(unix)]
+    let _pty_guard = pty_test_guard();
 
     let dir = std::env::temp_dir().join(format!("nyaterm-local-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).expect("temp dir");
@@ -262,6 +270,9 @@ fn resize_updates_session_info() {
     if cfg!(target_os = "windows") {
         return;
     }
+
+    #[cfg(unix)]
+    let _pty_guard = pty_test_guard();
 
     let manager = SessionManager::new();
     let info = manager
@@ -701,20 +712,25 @@ fn cwd_only_shell_scripts_omit_semantic_markers_and_bash_debug_trap() {
 }
 
 #[cfg(unix)]
-static BASH_HISTORY_PROBE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static PTY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[cfg(unix)]
+fn pty_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    // macOS shares a small amount of terminal state between pseudo-terminal
+    // children. Serializing all transport PTY tests avoids timing-dependent
+    // failures when the full suite runs in parallel.
+    PTY_TEST_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[cfg(unix)]
 fn run_bash_injection_history_probe(
     mode: super::ShellIntegrationMode,
     history_initially_enabled: bool,
 ) -> Option<String> {
-    // The PTY implementation and macOS Bash share process-global terminal
-    // resources. Serialize these probes so the regression tests remain stable
-    // when the full test suite runs them concurrently.
-    let _probe_guard = BASH_HISTORY_PROBE_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("bash history probe lock");
+    let _probe_guard = pty_test_guard();
     if std::process::Command::new("bash")
         .arg("--version")
         .output()
@@ -800,14 +816,25 @@ fn run_bash_injection_history_probe(
     commands.push_str(
         "case $- in *h*) printf '__NYATERM_HISTORY_STATE__:enabled\\n' ;; *) printf '__NYATERM_HISTORY_STATE__:disabled\\n' ;; esac\nprintf '__NYATERM_HISTORY_BEGIN__\\n'\nHISTTIMEFORMAT= builtin history\nprintf '__NYATERM_HISTORY_END__\\n'\nexit\n",
     );
-    // Match the transport's bounded PTY writes. A single large write can exceed
-    // macOS Bash's canonical input queue and leave a here-document unfinished.
-    for chunk in commands.as_bytes().chunks(1024) {
+    // Match the transport's bounded, newline-aware PTY writes. A single large
+    // write can exceed macOS Bash's canonical input queue and leave a
+    // here-document unfinished.
+    let mut sent = 0;
+    while sent < commands.len() {
+        let mut end = (sent + 512).min(commands.len());
+        if end < commands.len()
+            && let Some(newline) = commands.as_bytes()[sent..end]
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+        {
+            end = sent + newline + 1;
+        }
         writer
-            .write_all(chunk)
+            .write_all(&commands.as_bytes()[sent..end])
             .expect("write bash history probe commands");
         writer.flush().expect("flush bash history probe commands");
-        std::thread::sleep(Duration::from_millis(1));
+        sent = end;
+        std::thread::sleep(Duration::from_millis(2));
     }
 
     let child_deadline = Instant::now() + Duration::from_secs(10);
