@@ -1,6 +1,5 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -881,15 +880,8 @@ impl SshAgentPromptProvider for AgentPromptBroker {
     }
 }
 
-fn agent_prompt_id(prompt: &SshAgentPrompt) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    prompt.connection_name.hash(&mut hasher);
-    prompt.host.hash(&mut hasher);
-    prompt.port.hash(&mut hasher);
-    prompt.username.hash(&mut hasher);
-    prompt.phase.hash(&mut hasher);
-    prompt.attempt.hash(&mut hasher);
-    format!("agent-{:016x}", hasher.finish())
+fn agent_prompt_id(_prompt: &SshAgentPrompt) -> String {
+    format!("agent-{}", nyaterm_core::uuid())
 }
 
 #[cfg(test)]
@@ -970,6 +962,24 @@ mod prompt_state_debug_tests {
         assert_eq!(request.snapshot().state, AgentPromptState::Failed);
         session.finish();
         assert_eq!(request.snapshot().state, AgentPromptState::Resolved);
+    }
+
+    #[test]
+    fn identical_agent_prompts_receive_unique_ids() {
+        let broker = AgentPromptBroker::default();
+        let first_session = broker
+            .begin_prompt(&agent_prompt())
+            .expect("begin first prompt");
+        let first = broker.pop_pending().expect("first pending prompt");
+        let second_session = broker
+            .begin_prompt(&agent_prompt())
+            .expect("begin second prompt");
+        let second = broker.pop_pending().expect("second pending prompt");
+
+        assert_ne!(first.id, second.id);
+        first_session.finish();
+        second_session.finish();
+        assert!(!broker.has_pending());
     }
 
     #[test]
