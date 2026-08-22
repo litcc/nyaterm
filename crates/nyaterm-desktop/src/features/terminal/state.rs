@@ -257,6 +257,7 @@ impl TerminalFeatureState {
         self.search.mode = mode;
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn buffer_search_is_open(&self) -> bool {
         self.search.open && self.search.mode == TerminalSearchMode::Buffer
     }
@@ -301,6 +302,18 @@ impl TerminalFeatureState {
 
     pub(in crate::features) fn close_actions(&mut self) {
         self.menus.actions_open = false;
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn mark_credential_autofill_detection_for_test(&mut self) {
+        self.assist.credential_autofill_detection_pending = true;
+    }
+
+    /// A credential-prompt detection was marked while output was being processed and
+    /// has not run yet. The data-plane drain task watches this so it comes back for
+    /// it rather than parking.
+    pub(in crate::features) fn credential_autofill_detection_is_pending(&self) -> bool {
+        self.assist.credential_autofill_detection_pending
     }
 
     #[cfg(test)]

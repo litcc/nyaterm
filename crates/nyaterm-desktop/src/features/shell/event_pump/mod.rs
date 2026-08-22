@@ -122,13 +122,23 @@ impl NyaTermApp {
         };
         let terminal_frames = frames_started_at.elapsed();
 
+        // Both of these read what the frame drain just applied. Autofill detection
+        // scans the active snapshot and is gated on the output backlog being low, and
+        // render requests ask for the snapshots a visible session is missing -- so the
+        // cycle that applied a frame is exactly when they want to run, rather than a
+        // cadence that has to be fast enough to notice.
+        let sideband_dirty = self.drain_pending_credential_autofill_detection(cx)
+            | self.drive_terminal_render_requests(true);
+
         // A DECSCUSR arrives as a frame, and a tab becoming visible produces a
         // snapshot, so this cycle sees every change to what the blink clock depends
         // on. Cheap: one bool once the clock is already running.
         self.ensure_cursor_blink_clock(cx);
 
-        let notified =
-            self.notify_after_runtime_data_plane_drain(session_dirty || frames_dirty, cx);
+        let notified = self.notify_after_runtime_data_plane_drain(
+            session_dirty || frames_dirty || sideband_dirty,
+            cx,
+        );
         // A paint the throttle coalesced is work too: without this the task parks and
         // the tick becomes the only thing that can flush it, at up to its quiet 500ms.
         let throttled_notify = !notified && self.shell.runtime.pending_ui_notify;
@@ -158,12 +168,21 @@ impl NyaTermApp {
     /// bridge's source-side counts. Both mean a worker thread still owes us a push,
     /// and that push signals the interest armed at the top of this cycle, so parking
     /// is correct there -- and that is where the idle polling actually goes away.
+    #[cfg(test)]
+    fn runtime_data_plane_work_remaining_for_test(&self) -> bool {
+        self.runtime_data_plane_work_remaining()
+    }
+
     fn runtime_data_plane_work_remaining(&self) -> bool {
         let frame = self.terminal.frame_queue_metrics();
         !self.session.pending_events_are_empty()
             || self.session.event_bridge_queued_event_count() > 0
             || frame.pending_event_count > 0
             || frame.event_count > 0
+            // Detection is marked while output is being processed and is gated on the
+            // backlog clearing, so the cycle that marked it usually cannot run it. It
+            // clears itself when it does run, so this cannot spin.
+            || self.terminal.credential_autofill_detection_is_pending()
     }
 
     /// Whether frames may be applied this cycle. Lifted out of the runtime tick's
@@ -559,41 +578,12 @@ impl NyaTermApp {
         if self.transfer.browser_external_drop_hover_is_pending() {
             return true;
         }
-        if self.visible_terminal_performance_recovery_due() {
-            return true;
-        }
-        self.terminal_render_requests_pending()
+        self.visible_terminal_performance_recovery_due()
     }
 
     fn visible_terminal_performance_recovery_due(&self) -> bool {
         self.terminal
             .visible_performance_recovery_due(self.visible_terminal_session_ids())
-    }
-
-    fn terminal_render_requests_pending(&self) -> bool {
-        let visible_session_ids = self.visible_terminal_session_ids();
-        if self
-            .terminal
-            .visible_live_snapshot_missing(visible_session_ids.iter().copied())
-        {
-            return true;
-        }
-        if visible_session_ids
-            .iter()
-            .any(|session_id| self.terminal_visual_scroll_active_for_session(Some(session_id)))
-        {
-            return true;
-        }
-        if !self.terminal.buffer_search_is_open() {
-            return false;
-        }
-        let Some(session_id) = self.session.active_id() else {
-            return false;
-        };
-        let Some(key) = self.terminal_search_key() else {
-            return false;
-        };
-        self.terminal.search_refresh_is_due(session_id, &key)
     }
 
     pub(in crate::features) fn enter_connect_settle(&mut self) {
@@ -915,6 +905,30 @@ mod tests {
             // Nor during connect settle, where the phase is held either way.
             app.enter_connect_settle();
             assert_eq!(app.window_runtime_tick_delay(), RUNTIME_QUIET_TICK_INTERVAL);
+        });
+    }
+
+    /// A pending credential-prompt detection must not be stranded by the task parking.
+    ///
+    /// Detection is *marked* while output is being processed but is gated on the output
+    /// backlog clearing, so the cycle that marks it usually cannot also run it. If the
+    /// burst then ends, nothing further wakes the task -- which is the same failure
+    /// shape as a stranded burst tail, and why this flag is one of the things
+    /// `runtime_data_plane_work_remaining` reports.
+    #[test]
+    fn a_pending_credential_detection_keeps_the_drain_task_coming_back() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                !app.terminal.credential_autofill_detection_is_pending(),
+                "the fixture must start with nothing outstanding"
+            );
+            app.terminal.mark_credential_autofill_detection_for_test();
+            assert!(
+                app.runtime_data_plane_work_remaining_for_test(),
+                "a marked detection must keep the task on its paced re-arm rather than                  letting it park with the detection never run"
+            );
         });
     }
 

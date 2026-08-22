@@ -93,10 +93,6 @@ impl NyaTermApp {
             // Autofill / recording / transfer / remote are idle-plane sideband.
             return dirty;
         }
-        drain_stage!(
-            credential_autofill,
-            self.drain_pending_credential_autofill_detection(cx)
-        );
         dirty
     }
 
@@ -219,7 +215,6 @@ impl NyaTermApp {
                 total_ms = tick_duration.as_millis(),
                 background_runtime_ms = data.background_total.as_millis(),
                 startup_restore_ms = idle.startup_restore.as_millis(),
-                render_requests_ms = idle.render_requests.as_millis(),
                 render_requests_output_pressure = idle.render_request_output_pressure,
                 pending_focus_ms = idle.pending_focus.as_millis(),
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
@@ -434,10 +429,6 @@ impl NyaTermApp {
         let stage_started_at = Instant::now();
         dirty |= self.drive_startup_restore_queue_tick(window, cx);
         result.startup_restore = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_terminal_render_requests(true);
-        result.render_requests = stage_started_at.elapsed();
 
         let stage_started_at = Instant::now();
         dirty |= self.drive_remote_auto_refresh(window, cx);

@@ -94,7 +94,6 @@ pub(super) struct RuntimeDataPlaneDrain {
 pub(super) struct RuntimeIdlePlaneResult {
     pub(super) dirty: bool,
     pub(super) startup_restore: Duration,
-    pub(super) render_requests: Duration,
     pub(super) render_request_output_pressure: bool,
     pub(super) pending_focus: Duration,
     pub(super) remote_refresh: Duration,
