@@ -3,7 +3,7 @@
 
 mod chrome;
 mod connections;
-mod event_wake;
+pub(crate) mod event_wake;
 mod layout_state;
 mod navigation;
 mod network;

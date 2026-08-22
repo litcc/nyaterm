@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use futures::StreamExt as _;
 use gpui::{Bounds, ClipboardItem, Context, DevicePixels, Point, Size, Window, point, size};
 use nyaterm_remote_desktop::{
     CertificateDecision, ClipboardOrigin, DirtyRect, Framebuffer, RdpCapability,
@@ -368,11 +369,50 @@ impl NyaTermApp {
         }
     }
 
-    pub(in crate::features) fn drain_rdp_runtime_events(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// Deliver RDP and VNC session events as the helper processes produce them.
+    ///
+    /// Started once at window open. Before this the runtime tick polled every
+    /// session queue, which capped remote-desktop framerate at the tick cadence:
+    /// `has_protocol_runtime_sessions()` keeps the tick off the 500ms quiet
+    /// interval, but that still left 50ms idle / 16ms under pressure, so a helper
+    /// delivering 60fps was sampled at 20-60fps.
+    ///
+    /// The session queues keep only the newest frame, so they stay queues and
+    /// only the signal is a channel; see `models::event_wake`. `update_in` rather
+    /// than `update` because applying a frame needs the `Window` for its dynamic
+    /// texture.
+    pub(in crate::features) fn start_remote_desktop_event_drain(&mut self, cx: &mut Context<Self>) {
+        let Some(mut wake_rx) = self.remote_desktop.take_wake_receiver() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            loop {
+                // Arm before draining, so a frame enqueued in between still
+                // signals rather than waiting for the next one.
+                let drained = this.update_in(cx, |this, window, cx| {
+                    this.remote_desktop.arm_event_wake();
+                    let dirty = this.drain_remote_desktop_queues(window, cx);
+                    if dirty {
+                        cx.notify();
+                    }
+                    dirty
+                });
+                match drained {
+                    Err(_) => break,
+                    // A frame can arrive while the previous one is being applied.
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                }
+                if wake_rx.next().await.is_none() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// The queue half: everything the helper processes push.
+    fn drain_remote_desktop_queues(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         for texture in self.remote_desktop.pending_texture_removals.drain(..) {
             window.remove_dynamic_texture(texture);
         }
@@ -411,7 +451,21 @@ impl NyaTermApp {
             }
             self.apply_rdp_frame_batch(&session_id, vnc_drain.frames, window);
         }
-        dirty |= self.drive_rdp_pointer_flush();
+        dirty
+    }
+
+    /// The time-based half, still driven by the runtime tick.
+    ///
+    /// None of these is a queue read: a pointer batch flushes after a hold, a
+    /// resize is debounced, the reconnect ladder waits out a backoff, the
+    /// clipboard is polled on an interval, and metrics report on one. Giving each
+    /// its own timer is Phase 2 of the runtime-tick plan.
+    pub(in crate::features) fn drive_remote_desktop_periodic(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let mut dirty = self.drive_rdp_pointer_flush();
         dirty |= self.drive_rdp_resize_debounce();
         dirty |= self.drive_rdp_reconnects(cx);
         self.sync_rdp_keyboard_capture(window);

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::models::event_wake::{ANY_INTEREST, EventWake};
+use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{Bounds, DynamicTexture, FocusHandle, Pixels, Subscription};
 use nyaterm_remote_desktop::{
     ClipboardTracker, Framebuffer, KeyMapper, RdpCapability, RdpCertificateRequest, RdpCursorEvent,
@@ -21,6 +23,10 @@ pub(in crate::features) struct RemoteDesktopFeatureState {
     pub(super) metrics_dropped_frames: usize,
     pub(super) pending_texture_removals: Vec<DynamicTexture>,
     pub(super) focus_subscriptions: Vec<Subscription>,
+    /// Signalled by both session managers after they enqueue. Taken once by
+    /// `NyaTermApp::start_remote_desktop_event_drain`.
+    wake: EventWake,
+    wake_rx: Option<UnboundedReceiver<()>>,
 }
 
 pub(super) struct RemoteDesktopSessionState {
@@ -77,9 +83,23 @@ impl Default for RemoteDesktopSessionState {
 
 impl RemoteDesktopFeatureState {
     pub(in crate::features) fn new(focus: FocusHandle) -> Self {
+        let (wake, wake_rx) = EventWake::new();
+        let manager = Arc::new(RdpSessionManager::new());
+        let vnc_manager = Arc::new(VncSessionManager::new());
+        // Installed before any session exists, so every session queue gets it.
+        // The closure only touches an atomic and an unbounded channel, which is
+        // what `QueueWaker` requires of a callback invoked under the queue lock.
+        let rdp_wake = wake.clone();
+        manager.set_queue_waker(Arc::new(move || {
+            rdp_wake.signal(ANY_INTEREST);
+        }));
+        let vnc_wake = wake.clone();
+        vnc_manager.set_queue_waker(Arc::new(move || {
+            vnc_wake.signal(ANY_INTEREST);
+        }));
         Self {
-            manager: Arc::new(RdpSessionManager::new()),
-            vnc_manager: Arc::new(VncSessionManager::new()),
+            manager,
+            vnc_manager,
             sessions: HashMap::new(),
             focus,
             last_clipboard_poll: None,
@@ -90,7 +110,19 @@ impl RemoteDesktopFeatureState {
             metrics_dropped_frames: 0,
             pending_texture_removals: Vec::new(),
             focus_subscriptions: Vec::new(),
+            wake,
+            wake_rx: Some(wake_rx),
         }
+    }
+
+    pub(in crate::features) fn take_wake_receiver(&mut self) -> Option<UnboundedReceiver<()>> {
+        self.wake_rx.take()
+    }
+
+    /// Declare interest in the next enqueued event. See `models::event_wake`:
+    /// this must happen before the consumer checks the queues.
+    pub(in crate::features) fn arm_event_wake(&self) {
+        self.wake.arm(ANY_INTEREST);
     }
 
     pub(in crate::features) fn is_session(&self, session_id: &str) -> bool {

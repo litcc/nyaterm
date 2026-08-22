@@ -8,10 +8,10 @@ use uuid::Uuid;
 
 use crate::helper_process;
 use crate::{
-    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, PacketType, RdpFrameEvent,
-    VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent, VncSecurityMode,
-    VncSessionConfig, VncSessionDrain, VncSessionState, decode_frame_packet, decode_vnc_control,
-    encode_vnc_control, read_packet, write_packet,
+    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, PacketType, QueueWaker,
+    RdpFrameEvent, VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent,
+    VncSecurityMode, VncSessionConfig, VncSessionDrain, VncSessionState, decode_frame_packet,
+    decode_vnc_control, encode_vnc_control, read_packet, write_packet,
 };
 
 const FRAME_QUEUE_LIMIT: usize = 64;
@@ -25,6 +25,9 @@ fn resolve_helper_path() -> Result<PathBuf, VncError> {
 
 #[derive(Default)]
 struct EventQueue {
+    /// Signalled after anything is enqueued. Held here rather than at each
+    /// call site so every producer path wakes the consumer.
+    waker: Option<QueueWaker>,
     control: VecDeque<VncRuntimeEvent>,
     frames: VecDeque<RdpFrameEvent>,
     current_epoch: Option<u64>,
@@ -35,6 +38,13 @@ struct EventQueue {
 impl EventQueue {
     fn push_control(&mut self, event: VncRuntimeEvent) {
         self.control.push_back(event);
+        self.wake();
+    }
+
+    fn wake(&self) {
+        if let Some(waker) = &self.waker {
+            waker();
+        }
     }
 
     fn push_reset(&mut self, session_id: &str, epoch: u64, width: u32, height: u32) {
@@ -49,6 +59,7 @@ impl EventQueue {
                 height,
             },
         });
+        self.wake();
     }
 
     /// Queue a framebuffer update, returning `true` when the queue overflowed and
@@ -60,6 +71,14 @@ impl EventQueue {
     /// flagged `full` merely by starting at the origin, so withholding would stall
     /// the display whenever a server only sends interior rectangles.
     fn push_frame(&mut self, frame: RdpFrameEvent) -> bool {
+        let dropped = self.push_frame_inner(frame);
+        // Wake unconditionally rather than mirroring the branch structure below;
+        // see the RDP queue for why a redundant wake is the cheaper mistake.
+        self.wake();
+        dropped
+    }
+
+    fn push_frame_inner(&mut self, frame: RdpFrameEvent) -> bool {
         let RdpFrameEvent::Bitmap { epoch, full, .. } = &frame else {
             self.frames.push_back(frame);
             return false;
@@ -106,11 +125,28 @@ struct SessionRecord {
 #[derive(Default)]
 pub struct VncSessionManager {
     sessions: Mutex<HashMap<String, SessionRecord>>,
+    /// Installed once by the application; copied into every session queue so
+    /// the reader thread can wake the consumer instead of being polled.
+    queue_waker: Mutex<Option<QueueWaker>>,
 }
 
 impl VncSessionManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Install the waker every session queue signals after enqueuing.
+    ///
+    /// Sessions created before this call keep polling semantics, so install it
+    /// during startup, before any session exists.
+    pub fn set_queue_waker(&self, waker: QueueWaker) {
+        if let Ok(mut slot) = self.queue_waker.lock() {
+            *slot = Some(waker);
+        }
+    }
+
+    fn queue_waker(&self) -> Option<QueueWaker> {
+        self.queue_waker.lock().ok()?.clone()
     }
 
     pub fn create_session(&self, config: VncSessionConfig) -> Result<String, VncError> {
@@ -149,7 +185,10 @@ impl VncSessionManager {
             )
         })?;
         let writer = Arc::new(Mutex::new(stdin));
-        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let queue = Arc::new(Mutex::new(EventQueue {
+            waker: self.queue_waker(),
+            ..EventQueue::default()
+        }));
         let state = Arc::new(Mutex::new(VncSessionState::Connecting));
         let reader = spawn_reader(
             session_id.clone(),
@@ -596,12 +635,41 @@ fn is_latin1_within_limit(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::{EventQueue, FRAME_QUEUE_LIMIT, is_latin1_within_limit, validate_vnc_config};
     use crate::{
         Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PixelFormat, RdpFrameEvent, VncClipboardConfig,
-        VncDisplayConfig, VncErrorKind, VncReconnectConfig, VncSecurityConfig, VncSecurityMode,
-        VncSessionConfig,
+        VncDisplayConfig, VncErrorKind, VncReconnectConfig, VncRuntimeEvent, VncSecurityConfig,
+        VncSecurityMode, VncSessionConfig,
     };
+
+    #[test]
+    fn every_producer_path_wakes_the_consumer() {
+        let signals = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&signals);
+        let mut queue = EventQueue {
+            waker: Some(Arc::new(move || {
+                counter.fetch_add(1, Ordering::Relaxed);
+            })),
+            ..EventQueue::default()
+        };
+
+        queue.push_reset("s", 1, 4, 4);
+        assert_eq!(signals.load(Ordering::Relaxed), 1, "a reset must wake");
+        queue.push_frame(frame(1, 0, true));
+        assert_eq!(signals.load(Ordering::Relaxed), 2, "a frame must wake");
+        queue.push_control(VncRuntimeEvent::Clipboard {
+            session_id: "s".to_string(),
+            text: String::new(),
+        });
+        assert_eq!(
+            signals.load(Ordering::Relaxed),
+            3,
+            "a control event must wake"
+        );
+    }
 
     fn config() -> VncSessionConfig {
         VncSessionConfig {

@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::helper_process;
 use crate::{
-    PROTOCOL_VERSION, PacketType, RdpCertificateResponse, RdpControlMessage, RdpError,
+    PROTOCOL_VERSION, PacketType, QueueWaker, RdpCertificateResponse, RdpControlMessage, RdpError,
     RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpSessionConfig, RdpSessionDrain,
     RdpSessionState, decode_control, decode_cursor_packet, decode_frame_packet, encode_control,
     read_packet, write_packet,
@@ -29,6 +29,9 @@ pub fn resolve_helper_path() -> Result<PathBuf, RdpError> {
 
 #[derive(Default)]
 struct EventQueue {
+    /// Signalled after anything is enqueued. Held here rather than at each
+    /// call site so every producer path wakes the consumer.
+    waker: Option<QueueWaker>,
     control: VecDeque<RdpRuntimeEvent>,
     frames: VecDeque<RdpFrameEvent>,
     current_epoch: Option<u64>,
@@ -39,6 +42,13 @@ struct EventQueue {
 impl EventQueue {
     fn push_control(&mut self, event: RdpRuntimeEvent) {
         self.control.push_back(event);
+        self.wake();
+    }
+
+    fn wake(&self) {
+        if let Some(waker) = &self.waker {
+            waker();
+        }
     }
 
     fn push_reset(&mut self, session_id: &str, epoch: u64, width: u32, height: u32) {
@@ -53,9 +63,20 @@ impl EventQueue {
                 height,
             },
         });
+        self.wake();
     }
 
     fn push_frame(&mut self, frame: RdpFrameEvent) -> bool {
+        let dropped = self.push_frame_inner(frame);
+        // Wake unconditionally rather than mirroring the branch structure below.
+        // Two paths discard a frame for a stale epoch without touching the queue,
+        // and a redundant wake there costs one empty drain -- cheaper than a
+        // missed wake, and those paths only occur briefly after a resize.
+        self.wake();
+        dropped
+    }
+
+    fn push_frame_inner(&mut self, frame: RdpFrameEvent) -> bool {
         let RdpFrameEvent::Bitmap {
             epoch,
             full,
@@ -120,11 +141,28 @@ struct SessionRecord {
 pub struct RdpSessionManager {
     sessions: Mutex<HashMap<String, SessionRecord>>,
     pending_certificates: Arc<Mutex<HashMap<String, String>>>,
+    /// Installed once by the application; copied into every session queue so
+    /// the reader thread can wake the consumer instead of being polled.
+    queue_waker: Mutex<Option<QueueWaker>>,
 }
 
 impl RdpSessionManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Install the waker every session queue signals after enqueuing.
+    ///
+    /// Sessions created before this call keep polling semantics, so install it
+    /// during startup, before any session exists.
+    pub fn set_queue_waker(&self, waker: QueueWaker) {
+        if let Ok(mut slot) = self.queue_waker.lock() {
+            *slot = Some(waker);
+        }
+    }
+
+    fn queue_waker(&self) -> Option<QueueWaker> {
+        self.queue_waker.lock().ok()?.clone()
     }
 
     pub fn create_session(&self, config: RdpSessionConfig) -> Result<String, RdpError> {
@@ -164,7 +202,10 @@ impl RdpSessionManager {
             )
         })?;
         let writer = Arc::new(Mutex::new(stdin));
-        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let queue = Arc::new(Mutex::new(EventQueue {
+            waker: self.queue_waker(),
+            ..EventQueue::default()
+        }));
         let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
         let reader = spawn_reader(
             session_id.clone(),
@@ -688,8 +729,48 @@ fn validate_size(width: u32, height: u32) -> Result<(), RdpError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::{EventQueue, FRAME_QUEUE_LIMIT};
-    use crate::{PixelFormat, RdpFrameEvent};
+    use crate::{PixelFormat, RdpFrameEvent, RdpRuntimeEvent};
+
+    #[test]
+    fn every_producer_path_wakes_the_consumer() {
+        let signals = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&signals);
+        let mut queue = EventQueue {
+            waker: Some(Arc::new(move || {
+                counter.fetch_add(1, Ordering::Relaxed);
+            })),
+            ..EventQueue::default()
+        };
+
+        queue.push_reset("s", 1, 4, 4);
+        assert_eq!(signals.load(Ordering::Relaxed), 1, "a reset must wake");
+        queue.push_frame(frame(1, 0, true));
+        assert_eq!(signals.load(Ordering::Relaxed), 2, "a frame must wake");
+        queue.push_control(RdpRuntimeEvent::Clipboard {
+            session_id: "s".to_string(),
+            text: String::new(),
+            generation: 0,
+        });
+        assert_eq!(
+            signals.load(Ordering::Relaxed),
+            3,
+            "a control event must wake"
+        );
+    }
+
+    #[test]
+    fn a_queue_without_a_waker_still_works() {
+        let mut queue = EventQueue::default();
+
+        queue.push_reset("s", 1, 4, 4);
+        queue.push_frame(frame(1, 0, true));
+
+        assert_eq!(queue.drain().frames.len(), 1);
+    }
 
     fn frame(epoch: u64, x: u32, full: bool) -> RdpFrameEvent {
         RdpFrameEvent::Bitmap {
