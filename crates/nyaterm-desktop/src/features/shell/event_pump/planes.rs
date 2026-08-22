@@ -176,6 +176,7 @@ impl NyaTermApp {
             && !self.recording.has_pending_auto_start()
             && !self.shell.runtime.open_tabs_persist_dirty
             && !self.shell.runtime.window_layout_persist_dirty
+            && !self.shell.runtime.ui_layout_persist_pending
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
         {

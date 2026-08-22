@@ -468,6 +468,7 @@ impl NyaTermApp {
             && !self.recording.has_pending_auto_start()
             && !self.shell.runtime.open_tabs_persist_dirty
             && !self.shell.runtime.window_layout_persist_dirty
+            && !self.shell.runtime.ui_layout_persist_pending
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
             && !self.ai.chat_focus_is_pending()
@@ -807,6 +808,24 @@ mod tests {
                 app.cloud_sync.github_auth().message.as_deref(),
                 Some(rust_i18n::t!("settings.githubGistSlowDown").as_ref()),
                 "the polling event should already be applied"
+            );
+        });
+    }
+
+    /// A queued UI-layout save is only ever flushed by the idle plane, so the
+    /// runtime must not report itself quiet while one is outstanding. Its two
+    /// siblings `open_tabs_persist_dirty` and `window_layout_persist_dirty` are
+    /// declared beside it and were always in the gate; this one was not, which is
+    /// how a header-status change could be applied to state and never written.
+    #[test]
+    fn quiet_tick_is_blocked_while_a_ui_layout_save_is_pending() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            app.shell.runtime.ui_layout_persist_pending = true;
+            assert!(
+                !app.runtime_quiet_tick_allowed(),
+                "a pending UI-layout save must keep the runtime off the quiet cadence,                  or the idle plane that flushes it never runs"
             );
         });
     }
