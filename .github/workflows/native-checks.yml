@@ -90,15 +90,19 @@ jobs:
       - name: Check translation parity and authoring leftovers
         run: python3 scripts/ci/check_docs_translations.py
 
+      # pnpm 11 requires Node.js >= 22.13 (it imports node:sqlite), and Node 20
+      # reached end of life in April 2026. pnpm is pinned exactly rather than to
+      # the 11 range so a future 11.x cannot raise the Node floor again without
+      # this file changing.
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 11
+          version: 11.15.1
           run_install: false
 
       - name: Install documentation dependencies

@@ -109,7 +109,7 @@ cargo build -p nyaterm-app --bin nyaterm --release
 
 ## 文档站开发
 
-编辑 `docs-site` 时另外安装 Node.js 18+ 和 [pnpm](https://pnpm.io/)：
+编辑 `docs-site` 时另外安装 Node.js 22.13+ 和 [pnpm](https://pnpm.io/)。Docusaurus 本身只要求 Node 18+，但本仓库固定的 pnpm 版本用到了 `node:sqlite`，在更低版本上会直接崩溃。`docs-site/package.json` 的 `packageManager` 字段固定了 pnpm 版本，启用 corepack 时会自动对齐。
 
 ```bash
 pnpm --dir docs-site install

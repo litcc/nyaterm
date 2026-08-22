@@ -109,7 +109,7 @@ Release packages come from `scripts/release/package_native.py`, which puts the h
 
 ## Documentation development
 
-When editing `docs-site`, also install Node.js 18+ and [pnpm](https://pnpm.io/):
+When editing `docs-site`, also install Node.js 22.13+ and [pnpm](https://pnpm.io/). Docusaurus itself only needs Node 18+, but the pnpm version this repository pins imports `node:sqlite` and crashes outright on anything older. The `packageManager` field in `docs-site/package.json` pins that pnpm version, and corepack picks it up automatically.
 
 ```bash
 pnpm --dir docs-site install
