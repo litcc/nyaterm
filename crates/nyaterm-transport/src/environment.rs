@@ -75,6 +75,7 @@ pub struct ShellEnvironmentCache {
     load_lock: Mutex<()>,
     timeout: Duration,
     shell_path: Option<PathBuf>,
+    detected_shell: OnceLock<PathBuf>,
 }
 
 pub(crate) fn default_shell() -> String {
@@ -111,6 +112,7 @@ impl ShellEnvironmentCache {
             load_lock: Mutex::new(()),
             timeout: DEFAULT_TIMEOUT,
             shell_path: None,
+            detected_shell: OnceLock::new(),
         })
     }
 
@@ -278,20 +280,29 @@ impl ShellEnvironmentCache {
         deadline: Instant,
     ) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
         let timeout = remaining_until(deadline)?;
+        let shell_path = self
+            .shell_path
+            .clone()
+            .or_else(|| self.detected_shell.get().cloned());
         if tokio::runtime::Handle::try_current().is_err() {
             return self
-                .load_from_shell_on_runtime_thread(variables, timeout)
+                .load_from_shell_on_runtime_thread(variables, timeout, shell_path)
                 .await;
         }
-        load_from_shell_with_runtime(self.shell_path.as_deref(), timeout, variables).await
+        let (loaded, detected_shell) =
+            load_from_shell_with_fallback(shell_path.as_deref(), timeout, variables).await?;
+        if let Some(detected_shell) = detected_shell {
+            let _ = self.detected_shell.set(detected_shell);
+        }
+        Ok(loaded)
     }
 
     async fn load_from_shell_on_runtime_thread(
         &self,
         variables: &[String],
         timeout: Duration,
+        shell_path: Option<PathBuf>,
     ) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
-        let shell_path = self.shell_path.clone();
         let variables = variables.to_vec();
         let (sender, receiver) = futures::channel::oneshot::channel();
         std::thread::Builder::new()
@@ -302,7 +313,7 @@ impl ShellEnvironmentCache {
                     .build()
                     .map_err(ShellEnvironmentError::Spawn)
                     .and_then(|runtime| {
-                        runtime.block_on(load_from_shell_with_runtime(
+                        runtime.block_on(load_from_shell_with_fallback(
                             shell_path.as_deref(),
                             timeout,
                             &variables,
@@ -311,10 +322,38 @@ impl ShellEnvironmentCache {
                 let _ = sender.send(result);
             })
             .map_err(ShellEnvironmentError::Spawn)?;
-        receiver
+        let (loaded, detected_shell) = receiver
             .await
-            .map_err(|_| ShellEnvironmentError::ShellExit)?
+            .map_err(|_| ShellEnvironmentError::ShellExit)??;
+        if let Some(detected_shell) = detected_shell {
+            let _ = self.detected_shell.set(detected_shell);
+        }
+        Ok(loaded)
     }
+}
+
+async fn load_from_shell_with_fallback(
+    shell_path: Option<&Path>,
+    timeout: Duration,
+    variables: &[String],
+) -> Result<(HashMap<String, EnvironmentValue>, Option<PathBuf>), ShellEnvironmentError> {
+    #[cfg(windows)]
+    if shell_path.is_none() {
+        for preferred in ["powershell.exe", "pwsh.exe"] {
+            let preferred = Path::new(preferred);
+            match load_from_shell_with_runtime(Some(preferred), timeout, variables).await {
+                Ok(values) => return Ok((values, Some(preferred.to_path_buf()))),
+                Err(ShellEnvironmentError::Spawn(_)) => continue,
+                Err(error) => return Err(error),
+            }
+        }
+        let fallback = fallback_environment_shell_path();
+        let values = load_from_shell_with_runtime(Some(&fallback), timeout, variables).await?;
+        return Ok((values, Some(fallback)));
+    }
+
+    let values = load_from_shell_with_runtime(shell_path, timeout, variables).await?;
+    Ok((values, None))
 }
 
 async fn load_from_shell_with_runtime(
@@ -322,9 +361,12 @@ async fn load_from_shell_with_runtime(
     timeout: Duration,
     variables: &[String],
 ) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
+    let shell = shell_path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(default_environment_shell_path);
     let marker = format!("__NYATERM_ENV_{}__", uuid::Uuid::new_v4().simple());
-    let script = build_shell_script(&marker, variables);
-    let mut command = shell_command(shell_path, &script);
+    let script = build_shell_script(&shell, &marker, variables);
+    let mut command = shell_command(&shell, &script);
     command
         .env(SHELL_ENV_READER_MARKER, "1")
         .stdin(std::process::Stdio::null())
@@ -359,6 +401,18 @@ async fn load_from_shell_with_runtime(
     let _stderr = _stderr?;
     if !status.success() {
         return Err(ShellEnvironmentError::ShellExit);
+    }
+    #[cfg(windows)]
+    if !is_powershell_shell(&shell) {
+        let parsed = parse_cmd_shell_output(&marker, &stdout, variables);
+        #[cfg(test)]
+        if parsed.is_err() {
+            eprintln!(
+                "cmd environment output diagnostics: {}",
+                summarize_cmd_shell_output(&marker, &stdout)
+            );
+        }
+        return parsed;
     }
     parse_shell_output(&marker, &stdout, variables)
 }
@@ -451,7 +505,7 @@ fn remaining_until(deadline: Instant) -> Result<Duration, ShellEnvironmentError>
 }
 
 #[cfg(not(windows))]
-fn build_shell_script(marker: &str, variables: &[String]) -> String {
+fn build_shell_script(_shell_path: &Path, marker: &str, variables: &[String]) -> String {
     let start = format!("{marker}:START");
     let value_prefix = format!("{marker}:VALUE:");
     let value_end_prefix = format!("{marker}:VALUE_END:");
@@ -471,7 +525,16 @@ fn build_shell_script(marker: &str, variables: &[String]) -> String {
 }
 
 #[cfg(windows)]
-fn build_shell_script(marker: &str, variables: &[String]) -> String {
+fn build_shell_script(shell_path: &Path, marker: &str, variables: &[String]) -> String {
+    if is_powershell_shell(shell_path) {
+        return build_powershell_shell_script(marker, variables);
+    }
+
+    build_cmd_shell_script(marker, variables)
+}
+
+#[cfg(windows)]
+fn build_powershell_shell_script(marker: &str, variables: &[String]) -> String {
     let start = format!("{marker}:START");
     let value_prefix = format!("{marker}:VALUE:");
     let value_end_prefix = format!("{marker}:VALUE_END:");
@@ -493,6 +556,28 @@ fn build_shell_script(marker: &str, variables: &[String]) -> String {
     }
     script.push_str(&format!("Write-Output '{end}'\n"));
     script
+}
+
+#[cfg(windows)]
+fn build_cmd_shell_script(marker: &str, variables: &[String]) -> String {
+    let start = format!("{marker}:START");
+    let variable_start_prefix = format!("{marker}:VARIABLE_START:");
+    let variable_end_prefix = format!("{marker}:VARIABLE_END:");
+    let end = format!("{marker}:END");
+    // Pass one command chain to `cmd /c`; embedded newlines are interpreted
+    // differently by Windows command processors and can truncate the frame.
+    let mut commands = vec![String::from("@echo off"), String::from("chcp 65001 >nul")];
+    commands.push(format!("echo {start}"));
+    for variable in variables {
+        commands.push(format!("echo {variable_start_prefix}{variable}"));
+        // Keep the query as a single built-in command. Missing variables may
+        // emit a localized diagnostic, which is redirected and ignored by the
+        // framed parser without involving a fragile pipe expression.
+        commands.push(format!("set {variable} 2>nul"));
+        commands.push(format!("echo {variable_end_prefix}{variable}"));
+    }
+    commands.push(format!("echo {end}"));
+    commands.join("&")
 }
 
 fn parse_shell_output(
@@ -559,6 +644,97 @@ fn parse_shell_output(
     Ok(result)
 }
 
+#[cfg(windows)]
+fn parse_cmd_shell_output(
+    marker: &str,
+    output: &[u8],
+    variables: &[String],
+) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
+    // `cmd.exe` can emit localized diagnostics using the active code page.
+    // Protocol markers and assignment names remain ASCII, so preserve the
+    // framed data while treating unrelated bytes as shell noise.
+    let output = Zeroizing::new(String::from_utf8_lossy(output).into_owned());
+    let start = format!("{marker}:START");
+    let variable_start_prefix = format!("{marker}:VARIABLE_START:");
+    let variable_end_prefix = format!("{marker}:VARIABLE_END:");
+    let end = format!("{marker}:END");
+    let expected: HashSet<&str> = variables.iter().map(String::as_str).collect();
+    let mut result = HashMap::new();
+    let mut current_variable = None;
+    let mut started = false;
+    let mut ended = false;
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        let marker_line = line.trim_end();
+        if marker_line == start {
+            started = true;
+            continue;
+        }
+        if !started || ended {
+            continue;
+        }
+        if marker_line == end {
+            ended = true;
+            break;
+        }
+        if let Some(variable) = marker_line.strip_prefix(&variable_start_prefix) {
+            current_variable = expected.contains(variable).then_some(variable);
+            continue;
+        }
+        if let Some(variable) = marker_line.strip_prefix(&variable_end_prefix) {
+            if current_variable == Some(variable) {
+                current_variable = None;
+            } else {
+                return Err(ShellEnvironmentError::OutputEncoding);
+            }
+            continue;
+        }
+        let Some(variable) = current_variable else {
+            continue;
+        };
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case(variable) && !value.is_empty() {
+            result.insert(
+                variable.to_string(),
+                EnvironmentValue::new(value.to_string()),
+            );
+        }
+    }
+    if !started || !ended || current_variable.is_some() {
+        return Err(ShellEnvironmentError::OutputEncoding);
+    }
+    Ok(result)
+}
+
+#[cfg(all(windows, test))]
+fn summarize_cmd_shell_output(marker: &str, output: &[u8]) -> String {
+    let count = |needle: &[u8]| {
+        output
+            .windows(needle.len())
+            .filter(|window| *window == needle)
+            .count()
+    };
+    let start = format!("{marker}:START");
+    let end = format!("{marker}:END");
+    let variable_start = format!("{marker}:VARIABLE_START:");
+    let variable_end = format!("{marker}:VARIABLE_END:");
+    format!(
+        "bytes={}, utf8={}, nul_bytes={}, odd_bytes={}, cr={}, lf={}, start={}, end={}, variable_start={}, variable_end={}",
+        output.len(),
+        std::str::from_utf8(output).is_ok(),
+        output.iter().filter(|byte| **byte == 0).count(),
+        output.len() % 2,
+        output.iter().filter(|byte| **byte == b'\r').count(),
+        output.iter().filter(|byte| **byte == b'\n').count(),
+        count(start.as_bytes()),
+        count(end.as_bytes()),
+        count(variable_start.as_bytes()),
+        count(variable_end.as_bytes()),
+    )
+}
+
 async fn read_limited<R>(reader: R) -> Result<Zeroizing<Vec<u8>>, ShellEnvironmentError>
 where
     R: AsyncRead + Unpin,
@@ -575,28 +751,17 @@ where
     Ok(output)
 }
 
-fn shell_command(shell_path: Option<&Path>, script: &str) -> Command {
+fn shell_command(shell_path: &Path, script: &str) -> Command {
     #[cfg(unix)]
     {
-        let shell = shell_path
-            .map(Path::to_path_buf)
-            .unwrap_or_else(default_shell_path);
-        let mut command = Command::new(shell);
+        let mut command = Command::new(shell_path);
         command.args(["-i", "-l", "-c", script]);
         command
     }
     #[cfg(windows)]
     {
-        let shell = shell_path
-            .map(Path::to_path_buf)
-            .unwrap_or_else(default_shell_path);
-        let name = shell
-            .file_stem()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        let mut command = Command::new(shell);
-        if name == "powershell" || name == "pwsh" {
+        let mut command = Command::new(shell_path);
+        if is_powershell_shell(shell_path) {
             command.args(["-NoLogo", "-Command", script]);
         } else {
             command.args(["/d", "/s", "/c", script]);
@@ -605,24 +770,51 @@ fn shell_command(shell_path: Option<&Path>, script: &str) -> Command {
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let shell = shell_path
-            .map(Path::to_path_buf)
-            .unwrap_or_else(default_shell_path);
-        let mut command = Command::new(shell);
+        let mut command = Command::new(shell_path);
         command.args(["-c", script]);
         command
     }
 }
 
-fn default_shell_path() -> PathBuf {
+#[cfg(windows)]
+fn is_powershell_shell(shell_path: &Path) -> bool {
+    matches!(
+        shell_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "powershell" | "pwsh"
+    )
+}
+
+#[cfg(windows)]
+fn default_environment_shell_path() -> PathBuf {
+    PathBuf::from("powershell.exe")
+}
+
+#[cfg(not(windows))]
+fn default_environment_shell_path() -> PathBuf {
     PathBuf::from(default_shell())
+}
+
+#[cfg(windows)]
+fn fallback_environment_shell_path() -> PathBuf {
+    std::env::var_os("COMSPEC")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("cmd.exe"))
 }
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::parse_cmd_shell_output;
     use super::{
         EnvironmentValue, ShellEnvironmentCache, ShellEnvironmentError, parse_shell_output,
     };
+    #[cfg(windows)]
+    use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
@@ -644,7 +836,7 @@ mod tests {
     #[tokio::test]
     async fn resolve_caches_a_requested_value() {
         let cache = ShellEnvironmentCache::new();
-        let value = cache.resolve("PATH").await.unwrap();
+        let value = cache.refresh("PATH").await.unwrap();
         assert!(value.is_some());
         assert!(cache.cached("PATH").unwrap().is_some());
     }
@@ -656,6 +848,53 @@ mod tests {
         assert!(cache.resolve(&variable).await.unwrap().is_none());
         assert!(cache.is_missing_cached(&variable).unwrap());
         assert!(cache.resolve(&variable).await.unwrap().is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cmd_shell_output_parser_reads_only_requested_values() {
+        let marker = "__NYATERM_ENV_TEST__";
+        let output = concat!(
+            "__NYATERM_ENV_TEST__:START \r\n",
+            "__NYATERM_ENV_TEST__:VARIABLE_START:PATH \r\n",
+            "PATH=C:\\Windows\\System32;C:\\Tools=stable\r\n",
+            "PATH_EXTRA=must-not-leak\r\n",
+            "__NYATERM_ENV_TEST__:VARIABLE_END:PATH \r\n",
+            "__NYATERM_ENV_TEST__:VARIABLE_START:MISSING \r\n",
+            "Environment variable MISSING is not defined.\r\n",
+            "__NYATERM_ENV_TEST__:VARIABLE_END:MISSING \r\n",
+            "__NYATERM_ENV_TEST__:END \r\n",
+        );
+        let variables = vec!["PATH".to_string(), "MISSING".to_string()];
+        let values = parse_cmd_shell_output(marker, output.as_bytes(), &variables).unwrap();
+
+        assert_eq!(
+            values.get("PATH").map(EnvironmentValue::as_str),
+            Some("C:\\Windows\\System32;C:\\Tools=stable")
+        );
+        assert!(!values.contains_key("MISSING"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cmd_shell_loader_reads_a_requested_environment_value() {
+        let mut cache = ShellEnvironmentCache::new();
+        Arc::get_mut(&mut cache).unwrap().shell_path = Some(PathBuf::from("cmd.exe"));
+
+        let value = cache.refresh("PATH").await.unwrap();
+
+        assert!(value.is_some());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cmd_shell_loader_caches_a_missing_variable() {
+        let mut cache = ShellEnvironmentCache::new();
+        Arc::get_mut(&mut cache).unwrap().shell_path = Some(PathBuf::from("cmd.exe"));
+        let variable = format!("NYATERM_CMD_MISSING_{}", uuid::Uuid::new_v4().simple());
+
+        assert!(cache.refresh(&variable).await.unwrap().is_none());
+        assert!(cache.is_missing_cached(&variable).unwrap());
     }
 
     #[cfg(unix)]

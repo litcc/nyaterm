@@ -620,8 +620,11 @@ fn map_recording_rotation(
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        fs,
+        path::Path,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use nyaterm_core::{AppSettingsSummary, Group};
     use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
@@ -652,10 +655,9 @@ mod tests {
         let path =
             session_transcript_file_path(&settings, "prod / shell", now).expect("transcript path");
 
-        assert_eq!(
-            path.to_string_lossy(),
-            "/tmp/nyaterm-recordings/session-prod_shell-2026-08-15T07-08-09.log"
-        );
+        let expected =
+            Path::new("/tmp/nyaterm-recordings").join("session-prod_shell-2026-08-15T07-08-09.log");
+        assert_eq!(path, expected);
     }
 
     #[test]
