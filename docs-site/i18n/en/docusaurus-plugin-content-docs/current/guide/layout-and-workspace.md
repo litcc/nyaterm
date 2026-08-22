@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # Layout & Workspace
 
 NyaTerm is built around a composable workspace rather than a single terminal tab. You can open multiple sessions, split panes inside a tab, and keep common tools docked around the sides of the app.
@@ -33,30 +29,19 @@ Common tab actions include:
 - Reconnecting a session
 - Viewing session details
 
-This makes NyaTerm a good fit for separating:
+Tab names and colors can separate environments, projects, or task phases.
 
-- Different environments
-- Different projects
-- Different task phases
+## Command Palette
 
-## Command Palette and session quick switcher
+The **Command Palette** is a searchable overlay opened with `Ctrl / Cmd + Shift + S` (labeled **Open Command Palette** in settings). It searches three kinds of entries:
 
-The **Command Palette** helps you find app actions, session entry points, and common workspace workflows. Open it from the top menu or keyboard shortcut, then filter by keyword.
+- **Active sessions** — tabs you already have open
+- **Pending sessions** — sessions that were started but have not connected yet, including the failure reason
+- **Saved connections** — entries from your connection list; selecting one starts the connection
 
-It is useful for:
+Use the arrow keys to select and Enter to open. When you have many tabs and connections open, this is the fastest way to navigate.
 
-- Opening or switching to an existing session
-- Creating new SSH or Local Terminal sessions
-- Finding settings, panel toggles, lock actions, and other app-level commands
-- Staying keyboard-first while navigating the workspace
-
-### Session quick switcher
-
-When you have many tabs and connections open, the session quick switcher is the fastest way to navigate. It is a command-palette-style searchable dialog that you open via its keyboard shortcut or activity-bar entry.
-
-- Search across saved connections and local sessions by name
-- Open or switch to a session with the keyboard or mouse
-- Use the built-in shortcut to create a new SSH session right from the dialog
+The palette only searches sessions and connections. It does **not** contain app-level actions such as opening settings, toggling panels, or locking the screen — those live in the top menu and keyboard shortcuts.
 
 ## Split panes
 
@@ -65,7 +50,7 @@ Right-click a tab to split the current session into:
 - **Horizontal Split**
 - **Vertical Split**
 
-The panes still belong to the same tab, but each pane can hold its own independent session content. Newer workspace builds also let you drag tabs into target docking areas, which is a more visual way to move sessions into horizontal or vertical splits. This is useful for:
+The panes still belong to the same tab, but each holds its own independent session. You can also drag a tab into a target docking area to move a session into a horizontal or vertical split. Typical uses:
 
 - Watching logs in one pane and running commands in another
 - Comparing two hosts side by side
@@ -113,81 +98,66 @@ The right side is mainly for live state and navigation:
 - Saved connections
 - Active sessions
 - Command history
-- Resource monitor, GPU monitor, process manager, and Docker manager (SSH sessions)
+- Resource Monitor, NVIDIA GPU Monitor, Ascend NPU Monitor, Process Manager, and Docker Manager (SSH sessions)
 
-If your workflow is "pick a connection, then inspect live state," this split feels natural.
+The five monitoring panels only make sense for SSH sessions, and each is shown or hidden by its own toggle in **Settings → Terminal**; turning a toggle off also hides its activity-bar icon. Resource Monitor, Process Manager, and Docker Manager are on by default; the two accelerator panels are off. See [Remote Host Monitoring](./remote-monitoring).
 
-The GPU monitor, process manager, and Docker manager panels are off by default; enable them per panel in **Settings → Terminal**. When a panel is disabled its activity-bar icon is hidden, and monitor panels only bind to a genuinely active SSH session.
+## AI Assistant panel
 
-The **AI Assistant** panel can use the active pane as context to generate commands, explain output or selected text, analyze errors, and create approved quick commands.
+The **AI Assistant** is a persistent panel on the right rather than a separate popup, so it always has the active pane as context:
+
+- Generate a terminal command from natural language
+- Explain recent terminal output or the current selection
+- Analyze an error and suggest a fix
+- Produce an approvable command card and run it
+- Save a command as a quick command
 
 ## Bottom helper area
 
-The bottom area is used for features that do not need to permanently occupy a sidebar, such as:
+The bottom area carries features that do not need to occupy a sidebar permanently:
 
-- **Quick Commands** — reusable commands with variable prompts
-- **Serial Send** — useful when repeatedly sending fixed text to a serial device
+- **Quick Commands** — reusable command snippets with variable prompts
+- **Serial Send** — repeatedly send fixed text to a serial device
 - **Recording** — start or stop session recording
-- **Lock** — quickly lock the app
-
-This is one of the differences between NyaTerm and a basic multi-tab terminal: it organizes the actions around sessions, not just the terminal surface itself.
+- **Lock** — lock the app
 
 ## Child windows
 
-Some flows open dedicated child windows instead of replacing the main workspace, such as:
+These flows open dedicated child windows so they do not interrupt the active session in the main workspace:
 
 - Settings
 - New session / connection creation
 - Quick command editing
 - Auto-upload prompts
 
-This helps because it:
+NyaTerm remembers child-window size, position, and modal relationships, and restores focus and window state when one reopens.
 
-- Avoids interrupting the main workspace
-- Gives complex configuration its own focused space
-- Makes screenshots and demos easier to structure
+## Tray and window state
 
-## Tray, child windows, and window state
+With **Minimize to tray when closing** enabled in **Settings → General**, closing the main window keeps the app running in the background instead of quitting, and you can restore it from the tray. Active sessions, sync, and backup jobs keep running in the background.
 
-If **Minimize to tray when closing** is enabled in **Settings → General**, closing the main window keeps the app running in the background instead of quitting immediately. The main window can also be hidden and restored later from the tray or system entry point.
+## Synchronized input groups
 
-NyaTerm also tries to remember child-window size, position, and modal relationships. Settings, new-session, remote-file editing, and auto-upload windows should reopen with more stable focus and window state.
+A synchronized input group ties several terminal sessions together: keystrokes in one session are mirrored to the other unpaused sessions in the group. Command preview and history are only generated on the session you actually typed in.
 
-This is useful when you want to:
+Groups are runtime state and are not persisted, so they need to be recreated after an application restart.
 
-- Keep active sessions alive
-- Let sync or backup continue in the background
-- Reopen the main workspace quickly from the tray
+### Creating and managing groups
 
-## Recommended workflow combinations
+1. Open the **Synchronized Input Groups** panel with `Ctrl / Cmd + Shift + G` or from the right activity bar
+2. Click **New group**, then set a name and color
+3. Pick sessions to join from the active session list
 
-### Local + remote
+With many active sessions you can filter by **All**, **Available** (not yet in this group), **Joined**, or **Same host**, and the search box filters by name, type, host, or session ID.
 
-- Tab 1: SSH session to the target host
-- Tab 2: Local Terminal for builds or Git commands
-- Right panel: Command History
+### Broadcast control
 
-### Dual-pane troubleshooting
+- The whole group can be enabled or paused
+- Individual sessions in the group can be paused separately
+- Sessions that have closed are marked Missing and can be cleared in one action
 
-- Left pane: live logs
-- Right pane: diagnostic commands
-- Resource Monitor open to watch CPU / memory changes
+### Send command panel
 
-### File + terminal workflow
+The bottom **Send Command** panel offers target selection: the current session, all sessions, or a specific `Group: <name>`. A group target is filtered automatically by session type (serial versus shell) and excludes paused or duplicate sessions.
 
-- SSH terminal enters the target directory
-- File explorer syncs to the same path
-- Open a remote file, edit it locally, then upload it back
-
-### Multi-host synchronized input
-
-- Open multiple SSH sessions for related hosts
-- Add the sessions to a synchronized input group
-- Input typed in one active session is broadcast to the other enabled sessions in the group
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/layout/quick-start-split-workspace.png`
-- Show a split workspace with one SSH session and one Local Terminal
-- Another good image path: `/img/docs/readme/main-workspace.png`
-- Include the activity bars, center terminal area, and bottom helper area together
-:::
+The quick commands panel also offers **Send to all sessions**, which sends a command to every active session at once.

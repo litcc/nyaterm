@@ -1,7 +1,3 @@
----
-sidebar_position: 100
----
-
 # FAQ
 
 ## Sessions and connections
@@ -69,6 +65,22 @@ Keyword highlighting is disabled by default. Enable it first in **Settings → T
 
 These are also optional enhancements. Enable them separately in **Settings → Terminal**.
 
+### Why are there no models available in the AI Assistant?
+
+Check, in order:
+
+1. Whether AI is enabled in **Settings → AI**
+2. Whether at least one provider is configured and enabled
+3. Whether at least one model is enabled for that provider
+
+When using a custom provider, confirm it is OpenAI-compatible and that the base URL, API key, and model discovery results are all correct.
+
+### Why doesn't the app quit when I close the window?
+
+Check **Minimize to tray when closing** in **Settings → General**.
+
+When it is on, closing the main window moves the app to the tray instead of quitting, and active sessions and sync jobs keep running.
+
 ## File transfer
 
 ### Why didn’t the auto-upload prompt appear after I opened a remote file?
@@ -119,17 +131,9 @@ Manage them centrally in the **OTP** tab of the **Security/Auth** panel, then bi
 
 ### Which clients can NyaTerm import sessions from?
 
-Current supported imports are:
+Xshell, MobaXterm, WindTerm, SecureCRT, FinalShell, Termius, and NyaTerm / Electerm JSON. Each format and its caveats are documented in [Importing sessions from other clients](./guide/ssh-connection#import-sessions-from-other-clients).
 
-- Xshell (`.xts`)
-- MobaXterm (`.mxtsessions`)
-- WindTerm (`.sessions`)
-- SecureCRT (`.xml`)
-- FinalShell (`conn` directory)
-- Termius (local IndexedDB)
-- NyaTerm / Electerm JSON (`.json`)
-
-After import, it is a good idea to review the username, port, authentication method, and whether proxy / jump host / OTP still needs to be configured.
+After import, review the username, port, authentication method, and whether proxy / jump host / OTP binding still needs to be configured.
 
 ### Where are NyaTerm’s config files stored?
 

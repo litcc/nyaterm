@@ -1,7 +1,3 @@
----
-sidebar_position: 4
----
-
 # 运行时、传输与存储开发
 
 NyaTerm 没有独立的 Web 后端。原生应用的领域逻辑、协议运行时和持久化按职责拆分在多个 Rust crate 中，并通过有类型的接口与 GPUI 桌面层协作。
@@ -14,10 +10,13 @@ NyaTerm 没有独立的 Web 后端。原生应用的领域逻辑、协议运行�
 | `nyaterm-transport` | PTY、SSH、SFTP、Telnet、串口、隧道、远程操作和传输运行时 |
 | `nyaterm-store` | redb、事务、存储 worker、加密适配和兼容性读取 |
 | `nyaterm-terminal` | 终端状态机、快照、控制序列、编码和图形协议 |
-| `nyaterm-remote-desktop` | RDP/VNC 共享协议、frame 和输入模型 |
+| `nyaterm-remote-desktop` | RDP/VNC 会话管理、framebuffer 与输入模型、证书策略、剪贴板状态和 helper IPC 合约 |
+| `nyaterm-rdp-helper` / `nyaterm-vnc-helper` | 隔离的 helper 进程，持有各自的协议解码器 |
 | `nyaterm-otp` | HOTP/TOTP 兼容实现 |
 
 低层 crate 不导入 GPUI 或桌面呈现类型。需要跨边界时定义小型 typed adapter，不把 application-wide model 下沉到 transport 或 store。
+
+解析服务器控制字节的协议解码器只放在 helper crate 里。`nyaterm-remote-desktop` 自己不含解码器，两个 helper 必须把解码器 panic 转换成致命 IPC 错误上报。详见 [架构说明 → RDP / VNC 的进程隔离](./architecture#rdp--vnc-的进程隔离)。
 
 ## 会话与传输运行时
 
@@ -73,4 +72,5 @@ AI provider、翻译、云同步和更新检查通过原生 HTTP adapter 运行�
 - PTY、SSH、SFTP、Telnet、串口、隧道和事件队列测试放在 `nyaterm-transport`。
 - 终端解析、快照、graphics 和 encoding 测试放在 `nyaterm-terminal`。
 - 存储修改需要新数据 round trip、代表性旧数据、错误密码和损坏数据测试。
+- RDP/VNC 的协议、framebuffer、输入映射、IPC、证书、剪贴板和重连测试放在 `nyaterm-remote-desktop`、`nyaterm-rdp-helper` 或 `nyaterm-vnc-helper`。两个 helper crate 的 `tests/lifecycle.rs` 覆盖握手、正常断开和崩溃 / 挂起回收，IPC 合约变更时同步更新两边。
 - 跨 crate 行为优先测试小型 adapter，不依赖真实凭据或生产服务。

@@ -1,7 +1,3 @@
----
-sidebar_position: 8
----
-
 # Cloud Sync
 
 NyaTerm's **Cloud Sync** capability is not remote file transfer. It syncs portable application configuration through one encrypted current snapshot in remote storage.
@@ -51,7 +47,7 @@ Use the settings page to:
 
 ### 2. The Cloud Sync panel in the workspace
 
-The workspace **Cloud Sync** panel is useful for checking:
+The workspace **Cloud Sync** panel shows:
 
 - current status
 - recent sync activity

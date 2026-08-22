@@ -1,7 +1,3 @@
----
-sidebar_position: 4
----
-
 # Runtime, Transport, and Storage Development
 
 NyaTerm has no separate Web backend. Domain logic, protocol runtimes, and persistence are split across Rust crates and communicate with the GPUI desktop layer through typed interfaces.
@@ -14,10 +10,13 @@ NyaTerm has no separate Web backend. Domain logic, protocol runtimes, and persis
 | `nyaterm-transport` | PTY, SSH, SFTP, Telnet, Serial, tunnels, remote operations, and transfer runtimes |
 | `nyaterm-store` | redb, transactions, storage workers, encryption adapters, compatibility readers |
 | `nyaterm-terminal` | Terminal state, snapshots, control sequences, encodings, and graphics protocols |
-| `nyaterm-remote-desktop` | Shared RDP/VNC protocol, framebuffer, and input models |
+| `nyaterm-remote-desktop` | RDP/VNC session management, framebuffer and input models, certificate policy, clipboard state, and the helper IPC contracts |
+| `nyaterm-rdp-helper` / `nyaterm-vnc-helper` | Isolated helper processes owning their protocol decoders |
 | `nyaterm-otp` | HOTP/TOTP compatibility implementation |
 
 Low-level crates do not import GPUI or desktop presentation types. Use a small typed adapter at a boundary instead of pushing application-wide models into transport or storage code.
+
+Protocol decoders that parse server-controlled bytes live only in the helper crates. `nyaterm-remote-desktop` owns no decoder, and both helpers must translate a decoder panic into a fatal IPC error. See [Architecture → RDP / VNC process isolation](./architecture#rdp--vnc-process-isolation).
 
 ## Session and transport runtime
 
@@ -73,4 +72,5 @@ Background tasks handle cancellation, window closure, and runtime shutdown. On e
 - PTY, SSH, SFTP, Telnet, Serial, tunnel, and event-queue tests live in `nyaterm-transport`.
 - Terminal parsing, snapshots, graphics, and encoding tests live in `nyaterm-terminal`.
 - Storage changes include new-data round trips, representative legacy data, invalid-password cases, and corrupted data.
+- RDP/VNC protocol, framebuffer, input mapping, IPC, certificate, clipboard, and reconnect tests belong in `nyaterm-remote-desktop`, `nyaterm-rdp-helper`, or `nyaterm-vnc-helper`. Both helper crates' `tests/lifecycle.rs` cover the handshake, an ordinary disconnect, and crash/hang reaping; keep them in step when the IPC contract changes.
 - Cross-crate behavior is tested through small adapters without real credentials or production services.

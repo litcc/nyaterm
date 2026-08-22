@@ -1,5 +1,4 @@
 ---
-sidebar_position: 1
 slug: /
 ---
 
@@ -25,7 +24,7 @@ NyaTerm currently supports six session types:
 - **SSH** — remote login, file transfer, resource monitoring, tunnels, OTP, and related workflows
 - **Local Terminal** — open a local shell inside the same workspace
 - **Telnet** — support for legacy systems and lab environments
-- **Serial** — useful for network gear, embedded boards, and debug ports
+- **Serial** — network gear, embedded boards, and debug ports
 - **RDP** — Windows Remote Desktop and graphical administration
 - **VNC** — traditional RFB/VNC services and VM consoles; real-server interoperability is still being validated
 
@@ -83,7 +82,7 @@ NyaTerm currently supports six session types:
 
 ### Cloud Sync
 
-- Sync NyaTerm's portable configuration data through **WebDAV**, **S3-compatible** storage, Gist, or drive providers
+- Seven remote storage backends: **WebDAV**, **S3-compatible** storage, **Gitee Snippet**, **GitHub Gist**, **Google Drive**, **OneDrive**, and **AliyunDrive**
 - Configure a master password in **Settings → Security** before using **Settings → Cloud Sync**
 - Support startup checks, debounced auto-push after supported local changes, and manual push / pull
 - Resolve snapshot-level conflicts from the settings page or the in-workspace history panel when both local and remote state changed

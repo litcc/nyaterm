@@ -1,7 +1,3 @@
----
-sidebar_position: 100
----
-
 # 常见问题
 
 ## 会话与连接
@@ -17,7 +13,7 @@ sidebar_position: 100
 - **RDP**：图形远程桌面，不提供文本终端能力
 - **VNC**：传统 RFB 图形远程桌面；部分真实服务器组合仍在验证
 
-如果你希望使用文件浏览器、远程资源监控或 OTP，请确认当前打开的是 **SSH 会话**。
+要使用文件浏览器、远程主机监控或 OTP，确认当前打开的是 **SSH 会话**。
 
 ### 为什么某些会话没有文件浏览器？
 
@@ -77,13 +73,13 @@ sidebar_position: 100
 2. 是否已经配置并启用了至少一个 provider
 3. 是否已经为 provider 启用至少一个模型
 
-如果你使用的是自定义 provider，请确认它兼容 OpenAI 风格接口，并且 base URL、API Key 和模型发现结果都正确。
+使用自定义 provider 时，确认它兼容 OpenAI 风格接口，且 base URL、API Key 和模型发现结果都正确。
 
 ### 为什么点关闭窗口后应用没有完全退出？
 
 请检查 **设置 → 常规** 里的 **关闭时最小化到托盘** 是否已经开启。
 
-开启后，关闭主窗口会把应用转为托盘驻留，而不是直接退出。这适合需要保留后台会话、同步或后续快速唤起窗口的场景。
+开启后，关闭主窗口会把应用转为托盘驻留而不退出，活动会话和同步任务继续运行。
 
 ## 文件传输
 
@@ -95,7 +91,7 @@ sidebar_position: 100
 2. NyaTerm 下载该文件到本地临时目录并启动监听
 3. 你在本地编辑器里保存这个文件
 
-如果你是自己另外复制了一个文件再编辑，NyaTerm 不会知道它和远端文件之间的关系。
+自己另外复制一份文件再编辑时，NyaTerm 无法知道它和远端文件的对应关系。
 
 ### 文件浏览器为什么没有跟着 `cd` 自动切换目录？
 
@@ -141,17 +137,9 @@ sidebar_position: 100
 
 ### 可以从哪些客户端导入会话？
 
-目前支持：
+Xshell、MobaXterm、WindTerm、SecureCRT、FinalShell、Termius 和 NyaTerm / Electerm JSON。各自的文件格式和注意事项见 [导入其他客户端的会话](./guide/ssh-connection#导入其他客户端的会话)。
 
-- Xshell（`.xts`）
-- MobaXterm（`.mxtsessions`）
-- WindTerm（`.sessions`）
-- SecureCRT（`.xml`）
-- FinalShell（`conn` 目录）
-- Termius（本机 IndexedDB）
-- NyaTerm / Electerm JSON（`.json`）
-
-导入后建议检查用户名、端口、认证方式，以及是否需要补充代理 / 跳板机 / OTP。
+导入后检查用户名、端口、认证方式，以及是否需要补充代理 / 跳板机 / OTP 绑定。
 
 ### NyaTerm 的配置文件存放在哪里？
 

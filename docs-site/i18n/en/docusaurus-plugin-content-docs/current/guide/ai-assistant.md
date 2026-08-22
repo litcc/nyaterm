@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # AI Assistant
 
 NyaTerm includes an AI Assistant panel that can start from terminal context, selected text, file operations, or a manual prompt. It supports two working modes: **Ask** and **Agent**.
@@ -33,14 +29,14 @@ Agent mode characteristics:
 
 ## Agent tools and final answers
 
-Newer Agent workflows separate "run terminal commands" from "summarize the result":
+The Agent workflow separates "run terminal commands" from "summarize the result":
 
 - Agent can propose commands to run in the active terminal session
 - Commands still go through risk levels, policy checks, and manual approval
 - Execution state is recorded, and output summaries can be shown near the terminal according to `Terminal Output Lines`
 - After terminal steps finish, Agent uses a final-answer tool to provide the user-facing summary instead of mixing it into command output
 
-This makes multi-step troubleshooting, build checks, deployment checks, and similar workflows easier to audit: the terminal keeps the real execution record, while the final answer explains the outcome and next steps.
+With the two split apart, the terminal keeps the real execution record while the final answer explains the outcome and next steps, so multi-step troubleshooting and deployment checks are easier to review afterwards.
 
 ## Conversation management
 
@@ -53,7 +49,7 @@ AI Assistant supports multiple conversations:
 
 ## Session mentions
 
-Type `@` in the input box to mention other terminal sessions and bring their context into the current AI conversation. This is useful for cross-session analysis or comparisons.
+Type `@` in the input box to mention other terminal sessions and bring their context into the current AI conversation, for cross-session analysis or comparison.
 
 ## Command cards and risk control
 
@@ -64,24 +60,44 @@ AI commands are displayed as structured cards with:
 - Execute or approval actions
 - Save-as-quick-command option
 
-### Risk levels
+### How the risk level is decided
 
-| Level | Meaning | Default behavior |
-|------|---------|------------------|
-| Low | Read-only or information-query commands | Can be auto-executed |
-| Medium | File or configuration changes | Depends on settings |
-| High | Deletion, permission changes, and similar impact | Requires approval |
-| Critical | Destructive patterns such as `chmod`, `chown`, or `rm -rf` | Requires confirmation text |
+The risk level is not the model's call alone. NyaTerm takes the **higher** of the model's self-reported level and the **local rule verdict** as the effective level, so a model that underestimates risk still gets stopped by local rules. The command card lists both sources.
 
-In **Settings → AI**, you can configure:
+Local rules use four tiers, and they classify by command *shape* rather than command name:
 
-- Highest risk level that may auto-execute
-- Whether risk checks are enabled
-- Whether generated commands can be saved as quick commands
+| Level | Examples |
+|-------|----------|
+| Critical | `rm -rf /`, `mkfs`, `wipefs`, `dd` to a block device, fork bombs, `shutdown` / `reboot` / `poweroff`, stopping sshd |
+| High | anything starting with `sudo`, `rm -r` / `rm -f`, `chmod -R` / `chown -R`, package installs and removals, `docker rm` / `system prune`, `kubectl delete` / `drain` / `apply`, `git reset --hard` |
+| Medium | bare `chmod` / `chown`, redirects `>` / `>>`, `cp` / `mv` / `mkdir` / `touch`, `git pull` / `merge`, `npm run`; anything matching no rule also lands here |
+| Low | read-only diagnostics such as `ls`, `cat`, `ps`, `df`, `docker ps`, `kubectl get`, `git status` |
+
+Note that tiers look at command shape: bare `chmod` / `chown` is medium and only the recursive `-R` flag raises it to high; `rm -rf /` is critical while `rm -rf ./build` is high.
+
+Commands you type manually go through the same rules — see [Terminal Features → Command risk assessment](./terminal#command-risk-assessment).
+
+### Command execution policy
+
+The effective level decides whether a command may run, together with **Command execution policy** in **Settings → AI → Agent Settings**:
+
+| Policy | Behavior |
+|--------|----------|
+| Confirm before execution | Every command needs your confirmation |
+| Fully automatic | No confirmation; commands run directly |
+| Smart approval | Runs automatically when the effective level is at or below **Smart mode auto-execute ceiling**, otherwise waits for approval |
+
+**Smart approval** has one hard rule: **critical risk always requires manual confirmation**, even with the auto-execute ceiling raised to its maximum.
+
+**Settings → AI** also configures:
+
+- **Smart mode auto-execute ceiling**
+- Whether command risk checking is enabled
+- Whether generated commands may be saved as quick commands
 
 ### Safer alternatives
 
-When AI detects a high-risk command, it may also provide a safer alternative command.
+When a command is judged high risk, AI may also provide a safer alternative command.
 
 ## Recent output and inline terminal output
 

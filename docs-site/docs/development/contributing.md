@@ -1,7 +1,3 @@
----
-sidebar_position: 5
----
-
 # 贡献指南
 
 感谢你有兴趣为 NyaTerm 做出贡献。
@@ -20,6 +16,7 @@ sidebar_position: 5
 - 终端状态机与快照放在 `nyaterm-terminal`；GPUI 终端绘制放在 `nyaterm-terminal-gpui`。
 - GPUI 状态、视图和后台任务协调放在 `nyaterm-desktop`。
 - 共享 GPUI 控件和主题集成放在 `nyaterm-ui`。
+- RDP/VNC 会话管理、输入模型和 IPC 合约放在 `nyaterm-remote-desktop`；协议解码器只放在 `nyaterm-rdp-helper` 和 `nyaterm-vnc-helper`。
 
 跨 crate 修改应保持 adapter 小而明确，并确保每份状态只有一个权威 owner。
 
@@ -77,11 +74,20 @@ cargo clippy --workspace --all-targets
 - `crates/nyaterm-desktop/src/i18n/locales/zh-CN.json`
 - `crates/nyaterm-desktop/src/i18n/locales/en.json`
 
-修改 docs-site 时同步维护 `docs-site/docs/` 中文源文档和 `docs-site/i18n/en/docusaurus-plugin-content-docs/current/` 英文页面，并运行：
+修改 docs-site 时同步维护 `docs-site/docs/` 中文源文档和 `docs-site/i18n/en/docusaurus-plugin-content-docs/current/` 英文页面，新增页面还要加入 `docs-site/sidebars.ts`，并运行：
 
 ```bash
+python3 scripts/ci/check_docs_translations.py
 pnpm --dir docs-site build
 ```
+
+## 修改第三方依赖
+
+打了补丁的第三方依赖不在仓库里，而是 [github.com/nyakang](https://github.com/nyakang) 下 fork 的 `nyaterm` 分支上的补丁序列。改动流程见 [开发环境搭建 → 修改第三方依赖](./setup#修改第三方依赖)。
+
+要点：提交到 fork 分支并推送，再在根 `Cargo.toml` 里 bump revision；补丁按关注点拆分；在提交信息和该分支的 `NYATERM.md` 里记录原因和验证方式。PR 描述中需注明改动的 fork 分支和 revision。
+
+**不要改 `temp/`。** 那里是只读副本，不参与编译，改动既不生效也不报错。
 
 ## 安全与兼容性
 

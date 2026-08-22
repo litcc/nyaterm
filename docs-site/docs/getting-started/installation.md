@@ -1,22 +1,26 @@
----
-sidebar_position: 1
----
-
 # 安装指南
 
 ## 系统要求
 
 NyaTerm 支持以下操作系统：
 
-- **Windows** 10/11 (64-bit)
-- **macOS** 12+ (Intel & Apple Silicon)
-- **Linux**（Ubuntu 20.04+、Fedora 36+、Arch Linux 等）
+- **Windows** 10/11（x64 / ARM64）
+- **macOS** 12+（Intel / Apple Silicon）
+- **Linux**（x64 / ARM64；Ubuntu 20.04+、Fedora 36+、Arch Linux 等）
+
+NyaTerm 用 GPUI 做原生 GPU 渲染，因此对图形环境有要求：
+
+- **Linux**：需要可用的 Vulkan 驱动（例如 `libvulkan1` 和 `mesa-vulkan-drivers`），以及 X11 或 Wayland 会话。缺少 Vulkan 驱动时应用无法启动
+- **macOS**：使用 Metal，系统自带
+- **Windows**：使用系统图形驱动，通常无需额外安装
+
+NyaTerm 是桌面客户端而不是终端复用器，在纯 SSH 的无头服务器上无法运行。
 
 ## 下载安装
 
 ### 从发布页面下载
 
-前往 [Releases](https://github.com/nyakang/nyaterm/releases) 页面，下载适合你操作系统的安装包：
+前往 [Releases](https://github.com/nyakang/nyaterm/releases) 页面，按操作系统下载安装包：
 
 | 平台 | 安装包格式 |
 |------|-----------|
@@ -24,9 +28,9 @@ NyaTerm 支持以下操作系统：
 | macOS | `.dmg` / `.app.tar.gz` |
 | Linux | `.deb` / `.AppImage` / `.rpm` |
 
-Windows 便携版解压后运行 `NyaTerm.exe` 即可。**Help → 检查更新** 会检查 GitHub Releases，并提供 Releases 页面入口；当前不会自动下载或替换程序文件。更新便携版时，请关闭 NyaTerm 后手动替换程序文件，并保留同目录下的 `data/`。
+Windows 便携版解压后运行 `NyaTerm.exe` 即可，配置数据保存在同目录的 `data/`。
 
-请从 [Releases](https://github.com/nyakang/nyaterm/releases) 选择最新的 Windows 便携版（x64 或 ARM64）。文档不维护固定版本的直链，以免链接和版本过期。
+**Help → 检查更新** 只检查 GitHub Releases 并提供页面入口，不会自动下载或替换程序文件。更新便携版时关闭 NyaTerm 后手动替换程序文件，保留 `data/` 目录。
 
 ### macOS
 
@@ -46,67 +50,14 @@ sudo xattr -cr /Applications/NyaTerm.app
 
 ### 从源码构建
 
-如果你想从源码构建，请参考 [开发环境搭建](../development/setup) 章节。
+从源码构建见 [开发环境搭建](../development/setup)。
 
-## 首次启动后会看到什么
+## 迁移旧环境
 
-安装完成后启动 NyaTerm，主窗口通常会由这些区域组成：
+在其他客户端维护过会话时，安装后可以直接导入 Xshell、MobaXterm、WindTerm、SecureCRT、FinalShell、Termius 或 NyaTerm / Electerm JSON。完整格式清单和导入注意事项见 [SSH 连接管理 → 导入其他客户端的会话](../guide/ssh-connection#导入其他客户端的会话)。
 
-- **顶部菜单与窗口栏** — File / View / Help、窗口控制与应用级入口
-- **中央工作区** — 终端标签页，以及标签内横向 / 纵向分屏
-- **左侧活动栏与面板** — 文件浏览器、网络、Security/Auth、云同步、设置等能力入口
-- **右侧活动栏与面板** — 已保存连接、AI Assistant、活动会话、命令历史、资源监控等运行态信息
-- **底部辅助区** — 快捷命令、串口发送、录制、锁屏等辅助操作
+要完整恢复一个 NyaTerm 环境，用 `.nya` 加密配置备份而不是会话导入——它恢复的不只是连接列表。`.nya` 导入 / 导出需要先在 **设置 → 安全** 设置主密码，导入后通常需要重启应用。
 
-某些流程会打开独立子窗口，而不是打断主工作区，例如：
+## 下一步
 
-- 设置
-- 新建连接
-- 快捷命令编辑
-- 自动上传提示
-
-## 安装后建议先检查的设置
-
-建议在正式投入使用前，先快速浏览以下几项：
-
-- **设置 → 常规**：启动恢复、关闭时最小化到托盘、关闭确认
-- **设置 → 常规**：日志级别、日志保留时间、打开日志目录、导出诊断包
-- **设置 → 交互**：命令建议开关、历史命令长度范围、复制与右键粘贴、macOS IME 兼容
-- **设置 → 终端**：回滚缓冲区、Keep-Alive、动作链接、行号 / 时间戳、关键词高亮、资源监控、工作区间距、字体粗细、图片路径粘贴
-- **设置 → 传输**：默认下载目录、默认编辑器、录制保存路径、并发、重试与重复目标策略
-- **设置 → 安全**：主密码、锁屏、空闲自动锁定、主机密钥策略
-- **设置 → AI**：provider、模型、风险控制、历史记录与上下文限制
-
-如果你经常在后台保留会话或同步任务，**关闭时最小化到托盘** 值得优先确认。
-
-## 如果你要迁移旧环境
-
-如果你之前已经在其他工具中维护会话，安装后可以直接导入：
-
-- **Xshell**（`.xts`）
-- **MobaXterm**（`.mxtsessions`）
-- **WindTerm**（`.sessions`）
-- **SecureCRT**（`.xml`）
-- **FinalShell**（`conn` 目录）
-- **Termius**（本机 IndexedDB）
-- **NyaTerm / Electerm JSON**（`.json`）
-- **NyaTerm** 的 `.nya` 加密配置备份
-
-如果你的目标是完整恢复 NyaTerm 配置，优先使用 `.nya`；它会恢复的不只是连接，还包括更多本地配置数据。
-
-需要注意：
-
-- `.nya` 导入 / 导出需要先设置主密码
-- 导入 `.nya` 后通常需要重启应用
-- 普通会话导入更适合迁移连接列表，不会替代完整配置恢复
-
-## 第一次体验建议
-
-如果你是第一次使用，建议按这个顺序体验：
-
-1. 打开 [快速开始](./quick-start)
-2. 创建一个 **SSH** 连接，或先导入已有会话
-3. 再创建一个 **本地终端**，体验混合工作区
-4. 在 SSH 会话里打开文件浏览器和传输面板
-5. 试试命令历史、快捷命令、AI 助手、录制与终端搜索
-6. 如果你在 Windows 上，可额外尝试把本地文件或文件夹直接拖到文件浏览器中上传
+装好之后从 [快速开始](./quick-start) 继续，它会带你建立第一个连接、认识工作区，并指出哪些设置值得先过一遍。

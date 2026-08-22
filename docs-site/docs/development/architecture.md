@@ -1,7 +1,3 @@
----
-sidebar_position: 1
----
-
 # 架构说明
 
 NyaTerm 是一个基于 **GPUI** 构建的原生 Rust 桌面应用。应用界面、终端模拟、连接传输和持久化均位于同一个 Cargo workspace 中，不依赖浏览器运行时或 IPC 桥接层。
@@ -17,8 +13,13 @@ nyaterm-app
             ├─ nyaterm-terminal-gpui     终端布局、输入和绘制
             ├─ nyaterm-terminal          终端状态机、解析和快照
             ├─ nyaterm-transport         PTY、SSH、SFTP 和其他协议
+            ├─ nyaterm-remote-desktop    RDP/VNC 会话管理与 helper IPC 合约
             ├─ nyaterm-store             redb、事务和兼容性读取
             └─ nyaterm-core              纯模型、格式和策略
+
+  独立进程（通过 IPC 通信，不被应用链接）
+       ├─ nyaterm-rdp-helper            IronRDP 解码
+       └─ nyaterm-vnc-helper            vnc-rs 解码
 ```
 
 各 crate 的主要职责如下：
@@ -33,6 +34,9 @@ nyaterm-app
 | `nyaterm-transport` | PTY、SSH、Telnet、串口、SFTP、隧道、远程操作和传输协议 |
 | `nyaterm-store` | redb 数据库、事务、加密适配和兼容性读取 |
 | `nyaterm-core` | 领域模型、兼容格式、解析、策略及纯逻辑 |
+| `nyaterm-remote-desktop` | 与 UI 无关的 RDP/VNC 会话管理、framebuffer 与输入模型、证书策略、剪贴板状态和 helper IPC 合约 |
+| `nyaterm-rdp-helper` | 隔离的 IronRDP helper 进程 |
+| `nyaterm-vnc-helper` | 隔离的 VNC helper 进程，持有 fork 的 `vnc-rs` 解码器、重连梯度和服务端策略门控 |
 | `nyaterm-otp` | HOTP/TOTP 兼容实现 |
 
 ## 启动流程
@@ -91,9 +95,23 @@ nyaterm-terminal-gpui layout, input and painting
 
 配置模型、备份格式、云同步文档和加密策略等 schema-neutral 合约位于 `nyaterm-core`。数据库实现与旧数据读取位于 `nyaterm-store`。现有 table 名、key、字段名、加密前缀、`.nya` 备份和 Dragonfly fallback 都属于兼容性边界。
 
+## RDP / VNC 的进程隔离
+
+RDP 和 VNC 的协议解码器解析的是**服务器控制的字节流**，因此它们不在应用链接的任何 crate 里，而是各自跑在独立的 helper 进程中，通过 `nyaterm-remote-desktop` 里的类型化 IPC 协议与应用通信。
+
+这条边界的含义：
+
+- 解码器崩溃不会带走应用。两个 helper 都必须把解码器 panic 转换成一个致命 IPC 错误上报，而不是静默退出
+- `nyaterm-remote-desktop` 自己不含任何解码器。它只负责会话管理、framebuffer 与输入模型、证书策略和剪贴板状态
+- VNC 的服务端策略门控（`view_only`、`shared`、剪贴板启用）必须在 helper 里强制执行，而不是只在应用侧判断
+- 应用在自己的可执行文件旁边解析 helper 路径，`NYATERM_RDP_HELPER` / `NYATERM_VNC_HELPER` 可覆盖
+
+两个 helper crate 各自带一个 `tests/lifecycle.rs`，覆盖握手、正常断开和崩溃 / 挂起回收。IPC 合约变更时必须同步更新两边。
+
 ## 依赖规则
 
-- `nyaterm-core`、`nyaterm-terminal` 和 `nyaterm-transport` 不依赖 GPUI。
+- `nyaterm-core`、`nyaterm-terminal`、`nyaterm-transport` 和 `nyaterm-remote-desktop` 不依赖 GPUI。
+- 解析服务器控制字节的协议解码器只放在 helper crate 里，不放进应用链接的 crate。
 - 桌面功能通过 `nyaterm-ui` 使用普通输入、选择、菜单、开关和对话框。
 - 模块使用正常 Rust module tree 和显式 import。
 - 新功能优先放入已有 focused feature state；只有需要独立生命周期时才新增权威 Entity。

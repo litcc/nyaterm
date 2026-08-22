@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # Development Setup
 
 The NyaTerm application is a Cargo workspace. Node.js and pnpm are only required for the Docusaurus documentation site in this repository.
@@ -59,7 +55,7 @@ git clone https://github.com/nyakang/nyaterm.git
 cd nyaterm
 ```
 
-Cargo manages application dependencies; there is no root JavaScript dependency installation step.
+Cargo manages all application dependencies. The Node.js dependencies in this repository belong to `docs-site` only.
 
 ## Run the application
 
@@ -67,7 +63,19 @@ Cargo manages application dependencies; there is no root JavaScript dependency i
 cargo run -p nyaterm-app --bin nyaterm
 ```
 
-The first build compiles GPUI and vendored dependencies, so it takes noticeably longer than subsequent incremental builds.
+The first build compiles GPUI and every dependency, so it takes noticeably longer than subsequent incremental builds.
+
+### RDP / VNC need their helpers built first
+
+RDP and VNC each run in a separate helper process that the application resolves beside its own executable. The command above **only builds the application**, so both protocols fail with `HelperMissing`. Build the helpers first:
+
+```bash
+cargo build -p nyaterm-rdp-helper -p nyaterm-vnc-helper
+```
+
+A bare `cargo build` or `cargo check` covers all three — they are the workspace `default-members`.
+
+`NYATERM_RDP_HELPER` and `NYATERM_VNC_HELPER` override the lookup with an explicit path, which is handy for pointing at binaries in another target directory.
 
 ## Common checks
 
@@ -95,7 +103,9 @@ cargo clippy --workspace --all-targets
 cargo build -p nyaterm-app --bin nyaterm --release
 ```
 
-The native binary is written to `target/release/nyaterm`, or `target/release/nyaterm.exe` on Windows. This command only builds the application binary; it does not produce `.msi`, `.dmg`, `.deb`, or AppImage installers.
+The native binary is written to `target/release/nyaterm`, or `target/release/nyaterm.exe` on Windows. This command builds only the application binary — neither the helpers nor any installer.
+
+Release packages come from `scripts/release/package_native.py`, which puts the helpers next to the application and produces `-setup.exe` / `_portable.zip`, `.dmg` / `.app.tar.gz`, and `.AppImage` / `.deb` / `.rpm` per platform. When you add a helper, its `HELPER_BINS` list must be updated too.
 
 ## Documentation development
 
@@ -118,7 +128,25 @@ Build every locale with:
 pnpm --dir docs-site build
 ```
 
-The documentation build checks pages and sidebars; Markdown-link problems are reported according to the site configuration. English and Chinese page completeness still requires manual review because there is no automatic translation-completeness check.
+The build checks pages and sidebars, and reports Markdown-link problems according to the site configuration.
+
+What the build cannot catch is checked by a separate script:
+
+```bash
+python3 scripts/ci/check_docs_translations.py
+```
+
+It verifies that every page exists in both locales, that both copies have the same heading count (which catches a whole section going untranslated), that every page is referenced from `sidebars.ts`, and that no authoring notes were left in the published text. The `Documentation site` CI job runs this script and then builds every locale.
+
+Note that the script compares heading counts, not translated wording.
+
+## Changing third-party dependencies
+
+The third-party dependencies NyaTerm patches are **not vendored into this repository**. Each is a patch series on a fork under [github.com/nyakang](https://github.com/nyakang) on branch `nyaterm`, consumed from a revision pinned in the root `Cargo.toml`: `alacritty`, `gpui-component`, `IronRDP`, `russh`, `russh-sftp`, `sspi-rs`, `vnc-rs`, `zed` (`gpui`), and `zmodem2`.
+
+The workflow is: commit to the fork branch, push, then bump the pinned revision in the root `Cargo.toml`. Keep the patch series split by concern rather than squashed, and record the reason and the validation performed on the patch commit and in that branch's `NYATERM.md`. Prefer rebasing an existing series onto a newer upstream revision over accumulating snapshots.
+
+`temp/vendor/` holds read-only local copies of those sources, kept only so they can be read locally. **Nothing there is compiled — editing it has no effect on the build and produces no error.**
 
 ## Development conventions
 

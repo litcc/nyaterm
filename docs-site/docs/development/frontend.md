@@ -1,7 +1,3 @@
----
-sidebar_position: 3
----
-
 # GPUI 桌面开发
 
 NyaTerm 的原生界面位于 `crates/nyaterm-desktop`，共享控件位于 `crates/nyaterm-ui`。这里的“桌面层”同时包含 GPUI 状态、视图、窗口交互、平台适配和后台任务结果的接入。

@@ -738,7 +738,7 @@ function JourneySection() {
     },
     {
       title: translate({message: '按功能查阅使用说明'}),
-      description: translate({message: '查看 SSH、SFTP、终端操作、OTP、主题、代理和同步备份的具体用法。'}),
+      description: translate({message: '查看 SSH、RDP/VNC、SFTP、终端操作、AI 助手、OTP、代理和云同步的具体用法。'}),
       to: '/docs/',
       label: translate({message: '查看文档'}),
     },
@@ -783,7 +783,7 @@ export default function Home(): React.ReactElement {
       value: 'workspace',
       label: translate({message: '工作区'}),
       title: translate({message: '在一个工作区中组织多种会话'}),
-      description: translate({message: 'SSH、本地 shell、Telnet 和串口会话使用同一套标签页与分屏布局，便于同时查看不同主机、设备或任务。'}),
+      description: translate({message: 'SSH、本地 shell、Telnet、串口、RDP 和 VNC 会话使用同一套标签页与分屏布局，便于同时查看不同主机、设备或任务。'}),
       bullets: [
         translate({message: '用标签页区分不同连接、任务或环境'}),
         translate({message: '在单个标签页内横向或纵向拆分终端区域'}),
@@ -862,7 +862,7 @@ export default function Home(): React.ReactElement {
   return (
     <Layout
       title={translate({message: '首页'})}
-      description={translate({message: '支持 SSH、串口、本地 shell、SFTP 和配置备份的桌面终端客户端'})}>
+      description={translate({message: '支持 SSH、RDP、VNC、串口、本地 shell、SFTP 和加密配置同步的原生桌面终端客户端'})}>
       <HomepageHeader />
       <main>
         <FeaturesSection features={featureTabs} />

@@ -1,7 +1,3 @@
----
-sidebar_position: 7
----
-
 # Security
 
 NyaTerm's security features mainly focus on three areas:
@@ -155,10 +151,3 @@ The **Export Configuration** action creates an encrypted `.nya` backup for migra
 - Enable both **master password** and **screen lock** on shared computers or demo machines
 - Save **jump host** and **proxy** definitions explicitly for environments that depend on them
 - Verify the source of a new host key before trusting it
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/security/security-settings.png`
-- Show master password, screen lock, idle lock time, and host key policy
-- Another good image path: `/img/docs/security/security-auth-panel.png`
-- Show the Keys, Passwords, and OTP tabs in the Security/Auth panel
-:::
