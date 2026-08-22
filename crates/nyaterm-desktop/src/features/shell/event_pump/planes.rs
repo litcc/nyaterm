@@ -586,6 +586,7 @@ impl NyaTermApp {
         let surface_paint_sessions = self.terminal.tick_session_performance(
             performance_session_ids.iter().map(String::as_str),
             render_work_pressure,
+            now,
         );
         for session_id in surface_paint_sessions {
             self.notify_terminal_surface_only(Some(session_id.as_str()), cx);

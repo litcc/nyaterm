@@ -14,22 +14,23 @@ use super::{
     TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT, TERMINAL_FRAME_OUTPUT_BURST_BYTE_LIMIT,
     TERMINAL_FRAME_OUTPUT_CHUNK_SIZE, TERMINAL_FRAME_OUTPUT_COALESCE_BYTE_LIMIT,
     TERMINAL_FRAME_VISIBLE_TEXT_TAIL_CAP, TERMINAL_OUTPUT_VISIBLE_BACKLOG_CAP,
-    TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS, TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT,
-    TERMINAL_UI_OUTPUT_TAIL_CAP, TerminalFrameActionLinks, TerminalFrameCommand,
-    TerminalFrameEvent, TerminalFrameEventQueue, TerminalFrameOutputBatch,
-    TerminalFrameOutputEvent, TerminalFrameOutputSubmission, TerminalFrameParts,
-    TerminalFrameSearchEvent, TerminalFrameSearchKey, TerminalFrameSearchPurpose,
-    TerminalFrameSearchResult, TerminalFrameSession, TerminalFrameSnapshotEvent,
-    TerminalFrameSnapshotPurpose, TerminalPerformanceMode, TerminalPerformanceOverlay,
-    TerminalProtocolState, TerminalRenderCache, TerminalViewState, append_terminal_ui_output_tail,
-    coalesce_terminal_frame_output_command, compact_stale_terminal_frame_commands,
-    next_terminal_frame_command, prepare_terminal_frame_action_links,
-    prepare_terminal_frame_action_links_reusing, process_next_selected_occurrence_search_chunk,
-    process_terminal_frame_output_burst, protect_terminal_output_burst,
-    replace_selected_occurrence_search_job, terminal_expensive_interactions_enabled,
-    terminal_frame_command_channel, terminal_frame_output_commands,
-    terminal_frame_scroll_window_extra_rows, terminal_frame_search_result_is_current,
-    terminal_snapshot_matches_grid_geometry, try_next_terminal_frame_command,
+    TERMINAL_PERFORMANCE_RECOVERY_NOTICE, TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM,
+    TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT, TERMINAL_UI_OUTPUT_TAIL_CAP,
+    TerminalFrameActionLinks, TerminalFrameCommand, TerminalFrameEvent, TerminalFrameEventQueue,
+    TerminalFrameOutputBatch, TerminalFrameOutputEvent, TerminalFrameOutputSubmission,
+    TerminalFrameParts, TerminalFrameSearchEvent, TerminalFrameSearchKey,
+    TerminalFrameSearchPurpose, TerminalFrameSearchResult, TerminalFrameSession,
+    TerminalFrameSnapshotEvent, TerminalFrameSnapshotPurpose, TerminalPerformanceMode,
+    TerminalPerformanceOverlay, TerminalProtocolState, TerminalRenderCache, TerminalViewState,
+    append_terminal_ui_output_tail, coalesce_terminal_frame_output_command,
+    compact_stale_terminal_frame_commands, next_terminal_frame_command,
+    prepare_terminal_frame_action_links, prepare_terminal_frame_action_links_reusing,
+    process_next_selected_occurrence_search_chunk, process_terminal_frame_output_burst,
+    protect_terminal_output_burst, replace_selected_occurrence_search_job,
+    terminal_expensive_interactions_enabled, terminal_frame_command_channel,
+    terminal_frame_output_commands, terminal_frame_scroll_window_extra_rows,
+    terminal_frame_search_result_is_current, terminal_snapshot_matches_grid_geometry,
+    try_next_terminal_frame_command,
 };
 
 fn selected_occurrence_test_key(
@@ -2585,21 +2586,29 @@ fn terminal_frame_command_queue_stops_after_sender_drop() {
     assert!(rx.recv().is_none());
 }
 
+/// Two observations spanning the calm window, which is the minimum the accounting
+/// can honestly claim: output between ticks shows up as `output_burst_bytes`, so a
+/// span it never observed cannot count as calm.
+fn tick_through_calm_window(view: &mut TerminalViewState, start: Instant) {
+    view.tick_performance_overlay(false, start);
+    view.tick_performance_overlay(false, start + TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM);
+}
+
 #[test]
 fn render_degradation_stays_active_while_output_pressure_is_present() {
     let mut view = TerminalViewState::new();
+    let start = Instant::now();
 
     assert!(view.render_degraded);
 
-    view.tick_performance_overlay(true);
+    view.tick_performance_overlay(true, start);
 
     assert!(view.render_degraded);
-    assert_eq!(view.render_degraded_calm_ticks, 0);
-    for _ in 0..TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS {
-        view.tick_performance_overlay(true);
-    }
+    assert_eq!(view.render_degraded_calm_since, None);
+    // However long pressure lasts, no calm window ever opens.
+    view.tick_performance_overlay(true, start + TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM * 4);
     assert!(view.render_degraded);
-    assert_eq!(view.render_degraded_calm_ticks, 0);
+    assert_eq!(view.render_degraded_calm_since, None);
 }
 
 #[test]
@@ -2607,9 +2616,7 @@ fn render_degradation_is_initial_view_profile() {
     let mut view = TerminalViewState::new();
 
     assert!(view.render_degraded);
-    for _ in 0..TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS {
-        view.tick_performance_overlay(false);
-    }
+    tick_through_calm_window(&mut view, Instant::now());
 
     assert!(!view.render_degraded);
 }
@@ -2617,30 +2624,85 @@ fn render_degradation_is_initial_view_profile() {
 #[test]
 fn render_degradation_starts_after_output_frame_applies() {
     let mut view = TerminalViewState::new();
-    for _ in 0..TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS {
-        view.tick_performance_overlay(false);
-    }
+    let start = Instant::now();
+    tick_through_calm_window(&mut view, start);
     assert!(!view.render_degraded);
     let frame = output_frame_with_sizes(1, 0);
 
     apply_output_frame_to_view(&mut view, frame);
-    view.tick_performance_overlay(false);
+    view.tick_performance_overlay(false, start + TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM * 2);
 
     assert!(view.render_degraded);
-    assert_eq!(view.render_degraded_calm_ticks, 0);
+    assert_eq!(view.render_degraded_calm_since, None);
 }
 
+/// Recovery is a wall-clock window, not a tick count.
+///
+/// The counter this replaced was 8 ticks, described as a "short calm window" at the
+/// 50ms cadence. The event pump also runs at 500ms when the app is calm -- which is
+/// precisely the state after a flood ends -- so those 8 ticks were 4s of degraded
+/// rendering, and 0.13s under pressure. Ticking the clock in one step here fails if
+/// the accounting goes back to counting calls.
 #[test]
-fn render_degradation_recovers_after_consecutive_calm_ticks() {
+fn render_degradation_recovers_on_a_wall_clock_calm_window() {
     let mut view = TerminalViewState::new();
     view.enter_render_degraded_mode();
+    let start = Instant::now();
 
-    for _ in 0..TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS.saturating_sub(1) {
-        view.tick_performance_overlay(false);
-        assert!(view.render_degraded);
+    // Many calls inside the window must not recover: it is time, not calls.
+    for step in 0..8 {
+        view.tick_performance_overlay(
+            false,
+            start + TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM / 16 * step,
+        );
+        assert!(
+            view.render_degraded,
+            "recovery must wait for the calm window, not a call count"
+        );
     }
-    view.tick_performance_overlay(false);
+
+    view.tick_performance_overlay(false, start + TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM);
 
     assert!(!view.render_degraded);
-    assert_eq!(view.render_degraded_calm_ticks, 0);
+    assert_eq!(view.render_degraded_calm_since, None);
+}
+
+/// The recovered banner dismisses on a deadline, not after 60 pump ticks.
+///
+/// At the 500ms quiet cadence -- where an app lands once a flood stops and the user
+/// is left looking at the notice -- 60 ticks was 30 seconds instead of the ~3s the
+/// constant's comment claimed. Two ticks are enough here because the dismissal is a
+/// deadline; a call-counting implementation needs sixty and fails.
+#[test]
+fn the_recovered_notice_dismisses_on_a_deadline_not_a_tick_count() {
+    let mut view = TerminalViewState::new();
+    let start = Instant::now();
+    view.enter_overloaded_mode();
+    assert_eq!(
+        view.performance_overlay,
+        Some(TerminalPerformanceOverlay::Overloaded)
+    );
+
+    // First calm tick leaves overloaded mode and raises the notice.
+    view.tick_performance_overlay(false, start);
+    assert_eq!(
+        view.performance_overlay,
+        Some(TerminalPerformanceOverlay::Recovered)
+    );
+
+    // Still up just before the deadline.
+    view.tick_performance_overlay(
+        false,
+        start + TERMINAL_PERFORMANCE_RECOVERY_NOTICE - Duration::from_millis(1),
+    );
+    assert_eq!(
+        view.performance_overlay,
+        Some(TerminalPerformanceOverlay::Recovered),
+        "the notice must stay up for its full duration"
+    );
+
+    view.tick_performance_overlay(false, start + TERMINAL_PERFORMANCE_RECOVERY_NOTICE);
+
+    assert_eq!(view.performance_overlay, None);
+    assert_eq!(view.performance_overlay_until, None);
 }

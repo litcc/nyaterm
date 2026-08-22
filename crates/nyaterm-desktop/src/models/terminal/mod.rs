@@ -54,10 +54,18 @@ const TERMINAL_FRAME_SCROLL_WINDOW_MAX_EXTRA_ROWS: usize = 192;
 const TERMINAL_FRAME_PRIORITY_SCROLL_WINDOW_MIN_EXTRA_ROWS: usize = 64;
 const TERMINAL_FRAME_PRIORITY_SCROLL_WINDOW_MAX_EXTRA_ROWS: usize = 256;
 const TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT: usize = 16;
-/// ~3s recovery notice at the 50ms event-pump cadence.
-pub(crate) const TERMINAL_PERFORMANCE_RECOVERY_TICKS: u8 = 60;
-/// Require a short calm window before re-enabling expensive render decorations.
-pub(crate) const TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS: u8 = 8;
+/// How long the "recovered" notice stays up after leaving overloaded mode.
+///
+/// Was `TERMINAL_PERFORMANCE_RECOVERY_TICKS: u8 = 60`, documented as "~3s recovery
+/// notice at the 50ms event-pump cadence" -- but the pump has three cadences, so 60
+/// ticks was 0.96s under pressure and **30s on the 500ms quiet interval**, which is
+/// exactly the state an app falls into once a flood ends and the user is left
+/// looking at the notice.
+pub(crate) const TERMINAL_PERFORMANCE_RECOVERY_NOTICE: Duration = Duration::from_secs(3);
+/// How long output must stay calm before expensive render decorations come back.
+///
+/// Was 8 ticks, which is 0.13s under pressure and 4s on the quiet interval.
+pub(crate) const TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM: Duration = Duration::from_millis(400);
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TerminalFrameActionLinks {
@@ -612,16 +620,16 @@ pub(crate) struct TerminalViewState {
     pub(crate) has_new_while_scrolled: bool,
     pub(crate) performance_mode: TerminalPerformanceMode,
     pub(crate) performance_overlay: Option<TerminalPerformanceOverlay>,
-    /// Remaining pump ticks for recovered banner auto-dismiss (0 = none).
-    pub(crate) performance_overlay_ticks: u8,
+    /// Deadline for the recovered banner's auto-dismiss (`None` = nothing to dismiss).
+    pub(crate) performance_overlay_until: Option<Instant>,
     /// Characters dropped while protecting responsiveness (Tauri skippedOutputChars).
     pub(crate) skipped_output_chars: u64,
     /// Bytes accepted in the current calm window (reset each event-pump tick).
     pub(crate) output_burst_bytes: usize,
     /// True while expensive render decorations are temporarily skipped.
     pub(crate) render_degraded: bool,
-    /// Consecutive low-pressure ticks before re-enabling render decorations.
-    pub(crate) render_degraded_calm_ticks: u8,
+    /// Start of the current uninterrupted calm window (`None` = not calm yet).
+    pub(crate) render_degraded_calm_since: Option<Instant>,
     /// Last size sent to the PTY/backend for this session.
     pub(crate) last_backend_resize: Option<TerminalBackendResize>,
     /// Stable logical row selected by an ordinary left click.
@@ -666,11 +674,11 @@ impl TerminalViewState {
             has_new_while_scrolled: false,
             performance_mode: TerminalPerformanceMode::Normal,
             performance_overlay: None,
-            performance_overlay_ticks: 0,
+            performance_overlay_until: None,
             skipped_output_chars: 0,
             output_burst_bytes: 0,
             render_degraded: true,
-            render_degraded_calm_ticks: 0,
+            render_degraded_calm_since: None,
             last_backend_resize: None,
             target_line: None,
         }
@@ -705,11 +713,11 @@ impl TerminalViewState {
             has_new_while_scrolled: false,
             performance_mode: TerminalPerformanceMode::Normal,
             performance_overlay: None,
-            performance_overlay_ticks: 0,
+            performance_overlay_until: None,
             skipped_output_chars: 0,
             output_burst_bytes: 0,
             render_degraded: true,
-            render_degraded_calm_ticks: 0,
+            render_degraded_calm_since: None,
             last_backend_resize: None,
             target_line: None,
         }
@@ -889,11 +897,11 @@ impl TerminalViewState {
     pub(crate) fn enter_overloaded_mode(&mut self) {
         self.performance_mode = TerminalPerformanceMode::Overloaded;
         self.performance_overlay = Some(TerminalPerformanceOverlay::Overloaded);
-        self.performance_overlay_ticks = 0;
+        self.performance_overlay_until = None;
         self.enter_render_degraded_mode();
     }
 
-    pub(crate) fn maybe_exit_overloaded_mode(&mut self) {
+    pub(crate) fn maybe_exit_overloaded_mode(&mut self, now: Instant) {
         if self.performance_mode != TerminalPerformanceMode::Overloaded {
             return;
         }
@@ -903,15 +911,15 @@ impl TerminalViewState {
         }
         self.performance_mode = TerminalPerformanceMode::Normal;
         self.performance_overlay = Some(TerminalPerformanceOverlay::Recovered);
-        self.performance_overlay_ticks = TERMINAL_PERFORMANCE_RECOVERY_TICKS;
+        self.performance_overlay_until = Some(now + TERMINAL_PERFORMANCE_RECOVERY_NOTICE);
     }
 
     pub(crate) fn enter_render_degraded_mode(&mut self) {
         self.render_degraded = true;
-        self.render_degraded_calm_ticks = 0;
+        self.render_degraded_calm_since = None;
     }
 
-    fn tick_render_degradation(&mut self, output_pressure: bool) {
+    fn tick_render_degradation(&mut self, output_pressure: bool, now: Instant) {
         if output_pressure || self.output_burst_bytes > 0 {
             self.enter_render_degraded_mode();
             return;
@@ -919,23 +927,27 @@ impl TerminalViewState {
         if !self.render_degraded {
             return;
         }
-        self.render_degraded_calm_ticks = self.render_degraded_calm_ticks.saturating_add(1);
-        if self.render_degraded_calm_ticks >= TERMINAL_RENDER_DEGRADATION_RECOVERY_TICKS {
+        // The first calm observation opens the window rather than closing it: output
+        // between two ticks is accounted for by `output_burst_bytes` above, so calm
+        // can only be claimed for a span this actually observed.
+        let calm_since = *self.render_degraded_calm_since.get_or_insert(now);
+        if now.saturating_duration_since(calm_since) >= TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM {
             self.render_degraded = false;
-            self.render_degraded_calm_ticks = 0;
+            self.render_degraded_calm_since = None;
         }
     }
 
-    pub(crate) fn tick_performance_overlay(&mut self, output_pressure: bool) {
+    pub(crate) fn tick_performance_overlay(&mut self, output_pressure: bool, now: Instant) {
         // End-of-tick calm accounting for recovery.
-        self.maybe_exit_overloaded_mode();
-        self.tick_render_degradation(output_pressure);
+        self.maybe_exit_overloaded_mode(now);
+        self.tick_render_degradation(output_pressure, now);
         self.output_burst_bytes = 0;
-        if self.performance_overlay_ticks > 0 {
-            self.performance_overlay_ticks = self.performance_overlay_ticks.saturating_sub(1);
-            if self.performance_overlay_ticks == 0
-                && self.performance_overlay == Some(TerminalPerformanceOverlay::Recovered)
-            {
+        if self
+            .performance_overlay_until
+            .is_some_and(|until| now >= until)
+        {
+            self.performance_overlay_until = None;
+            if self.performance_overlay == Some(TerminalPerformanceOverlay::Recovered) {
                 self.performance_overlay = None;
             }
         }
@@ -958,11 +970,11 @@ impl TerminalViewState {
         self.has_new_while_scrolled = false;
         self.performance_mode = TerminalPerformanceMode::Normal;
         self.performance_overlay = None;
-        self.performance_overlay_ticks = 0;
+        self.performance_overlay_until = None;
         self.skipped_output_chars = 0;
         self.output_burst_bytes = 0;
         self.render_degraded = true;
-        self.render_degraded_calm_ticks = 0;
+        self.render_degraded_calm_since = None;
     }
 
     pub(crate) fn clamp_scroll_offset(&mut self) {

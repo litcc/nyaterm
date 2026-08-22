@@ -1,6 +1,7 @@
 //! Cross-domain projections and lifecycle transitions for terminal views.
 
 use std::collections::hash_map::Entry;
+use std::time::Instant;
 
 use futures::channel::mpsc::UnboundedReceiver;
 
@@ -226,6 +227,7 @@ impl TerminalFeatureState {
         &mut self,
         session_ids: impl IntoIterator<Item = &'a str>,
         output_pressure: bool,
+        now: Instant,
     ) -> Vec<String> {
         let mut changed = Vec::new();
         for session_id in session_ids {
@@ -241,7 +243,7 @@ impl TerminalFeatureState {
             }
             let before = view.performance_overlay;
             let was_degraded = view.render_degraded;
-            view.tick_performance_overlay(output_pressure);
+            view.tick_performance_overlay(output_pressure, now);
             if view.performance_overlay != before || view.render_degraded != was_degraded {
                 changed.push(session_id.to_string());
             }
