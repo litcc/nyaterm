@@ -47,7 +47,7 @@ Use the settings page to:
 
 ### 2. The Cloud Sync panel in the workspace
 
-The workspace **Cloud Sync** panel is useful for checking:
+The workspace **Cloud Sync** panel shows:
 
 - current status
 - recent sync activity

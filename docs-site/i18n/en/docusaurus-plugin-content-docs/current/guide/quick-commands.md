@@ -70,7 +70,7 @@ The Quick Commands panel supports these management patterns:
 - Switch between compact and regular views to fit different panel widths
 - Reuse existing categories when creating new commands; imports also try to preserve the category structure from the external file
 
-That makes it useful for organizing sets like:
+Common ways to categorize:
 
 - Kubernetes
 - Docker
@@ -80,7 +80,7 @@ That makes it useful for organizing sets like:
 
 ## Export quick commands
 
-Click **Export Commands** in the upper-right corner of the Quick Commands panel to export the current commands and categories as a NyaTerm JSON file. The exported file is useful for:
+Click **Export Commands** in the upper-right corner of the Quick Commands panel to export the current commands and categories as a NyaTerm JSON file. The exported file can be used to:
 
 - Merging into another device with **Import Quick Commands**
 - Sharing a team template

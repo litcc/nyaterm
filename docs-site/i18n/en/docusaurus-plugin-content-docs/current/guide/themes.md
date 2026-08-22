@@ -96,4 +96,4 @@ NyaTerm provides these common shortcuts:
 - **Zoom Out** — `Ctrl / Cmd + -`
 - **Reset Zoom** — `Ctrl / Cmd + 0`
 
-These are especially useful for demos, screen sharing, or high-DPI displays.
+Use them to adjust readability during demos, screen sharing, or on high-DPI displays.

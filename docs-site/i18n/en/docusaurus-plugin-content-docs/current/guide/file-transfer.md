@@ -32,6 +32,18 @@ From the file list or the context menu, you can perform:
 
 The **Open** action is not just a preview. It prepares the round-trip editing flow.
 
+## Selection and bulk operations
+
+The file explorer supports the selection model you would expect from a file manager:
+
+- Click to select a single entry
+- `Ctrl / Cmd` for multi-select
+- `Shift` for range select
+- `Ctrl / Cmd + A` to select every entry in the current directory
+- `Delete` to delete the current selection
+
+With multiple entries selected, the toolbar's **Download** and **Delete** act on the whole selection. Opening the context menu on an already-selected entry while multi-selecting also applies the bulk actions to the entire selection.
+
 ## Uploads and downloads
 
 ### Upload
@@ -141,7 +153,7 @@ This is because the Zmodem protocol is driven directly by both ends of the termi
 
 NyaTerm also supports in-terminal trzsz transfers. Run `tsz` on the remote side to download files, or `trz` to upload files; directory uploads open a local directory picker. These transfers appear in the queue with progress information.
 
-trzsz, like Zmodem, is driven by the terminal protocol and is not a replacement for SFTP file operations. It is useful when SFTP is unavailable but the remote host provides the trzsz commands. Pause, resume, and retry behavior follows the active protocol session and should not be treated like an SFTP queue job.
+trzsz, like Zmodem, is driven by the terminal protocol and is not a replacement for SFTP file operations. Use it when SFTP is unavailable but the remote host provides the trzsz commands. Pause, resume, and retry behavior follows the active protocol session and should not be treated like an SFTP queue job.
 
 ## Sync with terminal paths
 
@@ -150,7 +162,7 @@ The file explorer can work together with the current SSH terminal path:
 - **Manual Sync** — jump the explorer to the terminal's current directory
 - **Auto Sync** — automatically follow when the terminal changes directories
 
-This is useful when you are moving around in a deploy or log directory and want the file panel to stay aligned.
+After you `cd` into a deploy or log directory in the terminal, the file explorer follows to the same path.
 
 ## Edit locally and upload back automatically
 
@@ -175,7 +187,17 @@ After the file changes, you can choose:
 
 If you choose **Always upload** for a file, later saves in the **current session** are sent back automatically without prompting again.
 
-### Good fits
+### Only uploads when content actually changed
+
+The watcher decides by content fingerprint, not just save events or modification times:
+
+- When content is unchanged (an editor only bumping the mtime, for example), no upload is triggered
+- Only a real content change opens the upload prompt or performs the automatic upload
+- Atomic saves that write a temporary file and rename it are recognized correctly
+
+This avoids duplicate uploads caused by editor save behavior.
+
+### Typical uses
 
 - Editing remote config files
 - Tweaking deploy scripts
@@ -193,10 +215,3 @@ The **Properties** view shows:
 - Octal permission values
 
 If your workflow requires checking permissions before replacing a file, this is often clearer than relying only on `ls -l`.
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/file-transfer/remote-file-browser.png`
-- Show an SSH session with the file browser, toolbar, and context menu visible
-- Another good image path: `/img/docs/file-transfer/auto-upload-dialog.png`
-- Open a remote text file, save it in a local editor, and capture the auto-upload prompt
-:::

@@ -29,14 +29,14 @@ Agent mode characteristics:
 
 ## Agent tools and final answers
 
-Newer Agent workflows separate "run terminal commands" from "summarize the result":
+The Agent workflow separates "run terminal commands" from "summarize the result":
 
 - Agent can propose commands to run in the active terminal session
 - Commands still go through risk levels, policy checks, and manual approval
 - Execution state is recorded, and output summaries can be shown near the terminal according to `Terminal Output Lines`
 - After terminal steps finish, Agent uses a final-answer tool to provide the user-facing summary instead of mixing it into command output
 
-This makes multi-step troubleshooting, build checks, deployment checks, and similar workflows easier to audit: the terminal keeps the real execution record, while the final answer explains the outcome and next steps.
+With the two split apart, the terminal keeps the real execution record while the final answer explains the outcome and next steps, so multi-step troubleshooting and deployment checks are easier to review afterwards.
 
 ## Conversation management
 
@@ -49,7 +49,7 @@ AI Assistant supports multiple conversations:
 
 ## Session mentions
 
-Type `@` in the input box to mention other terminal sessions and bring their context into the current AI conversation. This is useful for cross-session analysis or comparisons.
+Type `@` in the input box to mention other terminal sessions and bring their context into the current AI conversation, for cross-session analysis or comparison.
 
 ## Command cards and risk control
 

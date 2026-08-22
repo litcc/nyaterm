@@ -41,23 +41,9 @@ You can select saved passwords or saved keys instead of re-entering them every t
 
 **No authentication (none)** is for hosts that complete authentication by other means (for example some jump-host or gateway flows, or servers that accept an empty auth). Only use it when the target host genuinely requires no SSH-level credential.
 
-#### Password authentication
+Password authentication covers temporary test hosts, environments that have not issued private keys yet, and accounts combined with OTP. Private key authentication covers daily operations work, reusing one identity across many hosts, and workflows involving jump hosts or automation.
 
-Useful for:
-
-- Temporary test hosts
-- Environments that have not issued private keys yet
-- Accounts that are combined with OTP
-
-#### Private key authentication
-
-Useful for:
-
-- Daily operations work
-- Reusing one identity across many hosts
-- Workflows that involve jump hosts or automation
-
-Both passwords and keys can be managed centrally in **Security/Auth**.
+Both passwords and keys are managed centrally in **Security/Auth**.
 
 #### SSH Agent authentication
 
@@ -69,7 +55,7 @@ When the Agent is waiting for a hardware touch, PIN, or desktop approval, NyaTer
 
 ### Interactive authentication requests
 
-When a server asks for additional keyboard-interactive input, OTP, or a restarted authentication step, NyaTerm collects the information through a dedicated SSH authentication request window instead of mixing every prompt into terminal output. This makes it easier to distinguish:
+When a server asks for additional keyboard-interactive input, OTP, or a restarted authentication step, NyaTerm collects the information through a dedicated SSH authentication request window instead of mixing every prompt into terminal output. The window distinguishes:
 
 - Normal password / private-key authentication
 - Keyboard-interactive authentication
@@ -261,14 +247,9 @@ Handling rules:
 
 ## Session input synchronization
 
-When you need to run the same operation on several hosts at once, use **session input sync groups** to broadcast what you type in one terminal to multiple sessions.
+When you need to run the same operation on several hosts at once, use a **synchronized input group** to broadcast what you type in one terminal to multiple sessions. It is not SSH-only — serial sessions can join too.
 
-- Create named, colored sync groups in the sync group manager dialog and add currently live sessions to a group
-- A group can be enabled or disabled as a whole, and individual sessions can be paused
-- While a session belongs to an enabled group, keystrokes in one terminal are mirrored to the other non-paused sessions in the group; command preview and history are recorded only on the origin session where you actually type
-- The bottom **Send Command** panel adds a target selector: current session, all sessions, or a specific `Group: <name>`. Group targets are filtered by session type (Serial vs shell) and exclude paused or duplicate sessions
-
-Sync groups are runtime state and are not persisted, so you need to recreate them after restarting the app.
+Configuration, filtering, broadcast control, and the send command panel are documented in [Layout & Workspace → Synchronized input groups](./layout-and-workspace#synchronized-input-groups).
 
 ## Import sessions from other clients
 
@@ -292,7 +273,7 @@ If the default path is not found, select the Termius `file__0.indexeddb.leveldb`
 
 ### Import from NyaTerm JSON
 
-If you need to organize connection inventories in bulk, choose **NyaTerm JSON** and import a `.json` file. This format is useful when session data is generated from scripts, asset inventories, or other systems.
+Choose **NyaTerm JSON** to import a `.json` file, for session data generated from scripts, asset inventories, or other systems.
 
 Sample file: [session-import-sample.json](/examples/session-import-sample.json)
 
@@ -347,20 +328,6 @@ Known host records are stored in the local redb `known_hosts` document. Legacy `
 
 If you operate in a stricter environment, verify the host key source before accepting it.
 
-## When should you choose SSH?
+## When to use SSH
 
-SSH is the right first choice when:
-
-- You need the file explorer or SFTP
-- You need OTP, jump hosts, proxies, or tunnels
-- You need remote resource monitoring
-- You want a saved connection you can reuse long term
-
-If you only want a local shell inside NyaTerm, use **Local Terminal** from [Session Types](./session-types) instead.
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/session-types/ssh-advanced-form.png`
-- Show the SSH form with host, authentication, and the advanced area for proxy / jump host / OTP binding
-- Another good image path: `/img/docs/network/ssh-import-and-groups.png`
-- Show saved-connection groups and the import entry
-:::
+The file explorer / SFTP, OTP, jump hosts, proxies, tunnels, and remote host monitoring all require SSH — those capabilities exist only on SSH sessions. For a plain local shell, use [Local Terminal](./session-types#local-terminal).

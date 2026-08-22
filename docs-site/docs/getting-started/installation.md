@@ -14,13 +14,13 @@ NyaTerm 用 GPUI 做原生 GPU 渲染，因此对图形环境有要求：
 - **macOS**：使用 Metal，系统自带
 - **Windows**：使用系统图形驱动，通常无需额外安装
 
-如果你在纯 SSH 的无头服务器上，NyaTerm 不适用——它是桌面客户端，不是终端复用器。
+NyaTerm 是桌面客户端而不是终端复用器，在纯 SSH 的无头服务器上无法运行。
 
 ## 下载安装
 
 ### 从发布页面下载
 
-前往 [Releases](https://github.com/nyakang/nyaterm/releases) 页面，下载适合你操作系统的安装包：
+前往 [Releases](https://github.com/nyakang/nyaterm/releases) 页面，按操作系统下载安装包：
 
 | 平台 | 安装包格式 |
 |------|-----------|
@@ -50,11 +50,11 @@ sudo xattr -cr /Applications/NyaTerm.app
 
 ### 从源码构建
 
-如果你想从源码构建，请参考 [开发环境搭建](../development/setup) 章节。
+从源码构建见 [开发环境搭建](../development/setup)。
 
 ## 迁移旧环境
 
-如果你之前在其他客户端维护会话，安装后可以直接导入 Xshell、MobaXterm、WindTerm、SecureCRT、FinalShell、Termius 或 NyaTerm / Electerm JSON。完整格式清单和导入注意事项见 [SSH 连接管理 → 导入其他客户端的会话](../guide/ssh-connection#导入其他客户端的会话)。
+在其他客户端维护过会话时，安装后可以直接导入 Xshell、MobaXterm、WindTerm、SecureCRT、FinalShell、Termius 或 NyaTerm / Electerm JSON。完整格式清单和导入注意事项见 [SSH 连接管理 → 导入其他客户端的会话](../guide/ssh-connection#导入其他客户端的会话)。
 
 要完整恢复一个 NyaTerm 环境，用 `.nya` 加密配置备份而不是会话导入——它恢复的不只是连接列表。`.nya` 导入 / 导出需要先在 **设置 → 安全** 设置主密码，导入后通常需要重启应用。
 

@@ -53,7 +53,7 @@ After binding, you can:
 - Quickly inspect the current code during login
 - Enable **auto-fill OTP** in compatible interactive authentication flows
 
-This is especially useful for environments that require password or private key plus a second factor.
+This covers environments that require a password or private key plus a second factor.
 
 ## OTP interaction during authentication
 
@@ -95,11 +95,4 @@ A clean workflow is:
 1. Organize passwords, keys, and OTP entries in **Security/Auth**
 2. Bind them to specific SSH connections afterward
 
-This keeps connection records cleaner and makes it easier to update credentials later.
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/security/otp-management.png`
-- Show the OTP management page with TOTP / HOTP switching, QR import, and the code panel
-- Another good image path: `/img/docs/security/otp-dialog.png`
-- Show the OTP dialog during an SSH login flow
-:::
+Connection records stay cleaner, and credentials can be replaced in one place later.

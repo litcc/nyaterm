@@ -42,7 +42,7 @@ If you need any of these, use **SSH** first:
 
 ## Local Terminal
 
-Local Terminal is useful when you want your local shell workflow inside the same NyaTerm workspace, for example:
+Local Terminal puts your local shell workflow inside the same NyaTerm workspace, for example:
 
 - Running frontend or Rust builds locally
 - Running scripts, reading logs, or using Git
@@ -63,7 +63,7 @@ When creating a local terminal, you can also choose:
 
 ## Telnet
 
-Telnet is useful for:
+Telnet sessions are for:
 
 - Maintaining older equipment
 - Lab environments
@@ -82,7 +82,7 @@ For devices that expect specific erase behavior, Telnet also exposes `Backspace 
 
 ## Serial
 
-Serial sessions are useful for connecting to:
+Serial sessions connect to:
 
 - Network device console ports
 - Routers and switches
@@ -133,9 +133,3 @@ One of NyaTerm's strengths is that you can mix these session types in the same w
 - A VNC pane open to operate a VM console
 
 That is why some features are documented as session-specific. The workspace is shared, but the capability boundary still depends on the underlying session type.
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/session-types/new-session-tabs.png`
-- Show the SSH / Local Terminal / Telnet / Serial tabs in the new-session window
-- Keeping the default field areas visible helps readers understand the differences
-:::

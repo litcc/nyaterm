@@ -1,6 +1,6 @@
 # Terminal Features
 
-NyaTerm's terminal experience is designed around high-frequency local and remote work inside one workspace. Search, command history, suggestions, optional enhancements, recording, AI assistance, and SSH-aware helpers are all part of the complete experience.
+This page covers terminal basics, command history and suggestions, the optional enhancements, SSH-specific helpers, and session recording.
 
 ## Core operations
 
@@ -28,7 +28,7 @@ In **Settings → Interaction**, you can also adjust:
 - The default scrollback buffer keeps **5000 lines**, adjustable from **100 to 100000**
 - You can customize font family, font size, normal font weight, bold font weight, cursor style, and cursor blink
 - Use the menu or keyboard shortcuts to zoom in, zoom out, or reset zoom; the terminal root coordinates zoom handling so nested workspaces do not process it twice
-- **Hardware acceleration** is enabled by default; you can toggle it manually in **Settings → Terminal** when diagnosing rendering or driver issues
+- **Hardware acceleration** is enabled by default; turn it off in **Settings → Terminal** when diagnosing rendering or driver issues
 
 ### Paste and input compatibility
 
@@ -61,7 +61,7 @@ NyaTerm provides two related helpers for session workflows.
 
 ### Input suggestions
 
-While typing, NyaTerm can suggest commands based on history. This is useful for repeated operational commands, build commands, and troubleshooting scripts.
+While typing, NyaTerm suggests commands based on history.
 
 ## Invoking AI from the terminal
 
@@ -85,7 +85,7 @@ This requires **Command risk checking** in **Settings → AI**. The four tiers a
 
 ## Optional terminal enhancements
 
-These features are intentionally opt-in rather than enabled all at once.
+All of the following are off by default; enable what you need.
 
 ### Line numbers and timestamp gutter
 
@@ -94,7 +94,7 @@ In **Settings → Terminal**, you can enable:
 - **Show line numbers**
 - **Show timestamps**
 
-When enabled, a gutter appears on the left side of terminal output. It is especially useful for long logs, command output, and recorded sessions.
+When enabled, a gutter appears on the left side of terminal output, which helps when reading long logs, command output, or a recorded session.
 
 ### Action links
 
@@ -210,34 +210,15 @@ In **Settings → Search**, you can maintain a custom search engine list, with p
 
 **Google** and **Microsoft** work out of the box; **DeepL**, **Baidu**, **Alibaba**, and **Youdao** only appear in the menu after you enter credentials in **Settings → Translation**. See [Translation](./translation) for the full description.
 
-## Recording and workflow combinations
+## Session recording
 
-NyaTerm supports session recording, which is useful for:
+`Ctrl / Cmd + Shift + R` starts or stops recording the active session, writing terminal output to a log file.
 
-- Preserving troubleshooting steps
-- Sharing a reproducible path with teammates
-- Capturing terminal examples with visible timing
+Recordings go to the system download directory by default. **Settings → Transfer** has a separate **Recording path** so archived transcripts stay apart from ordinary downloads.
 
-In **Settings → Transfer**, you can also tune recording behavior:
+The same group has two more recording options:
 
-- **Auto-start recording**: begin recording as soon as a session opens, so you never forget to start it for sessions you always want captured
-- **Include timestamps**: write timestamps into the saved transcript, which helps with auditing or correlating output with wall-clock time
+- **Auto-start recording** — record as soon as a session opens, with no manual trigger
+- **Include timestamps** — write timestamps into the transcript so output can be correlated with wall-clock time
 
-You can also configure recording on individual saved connections. This is useful when a policy belongs to the connection itself, such as "always record production bastion sessions" or "do not record this lab device", instead of deciding manually after each session opens.
-
-If you are preparing screenshots or demos, a good combination is:
-
-- Line numbers / timestamp gutter
-- Keyword highlighting
-- Action links
-- Command history
-- Resource monitor
-
-That usually gives a more realistic screenshot than showing one toggle in isolation.
-
-:::tip Screenshot suggestion
-- Suggested image path: `/img/docs/terminal/gutter-line-numbers-timestamps.png`
-- Enable line numbers and timestamps in **Settings → Terminal**, then run `scripts/demo-terminal-gutter.sh`
-- Another good image path: `/img/docs/terminal/action-links-and-highlights.png`
-- Enable action links and keyword highlighting, then run `scripts/demo-terminal-output.sh` and `scripts/demo-action-links.sh`
-:::
+Recording options can also be set on an individual saved connection, which binds a policy like "always record production bastion sessions" to the connection itself instead of deciding after each session opens.

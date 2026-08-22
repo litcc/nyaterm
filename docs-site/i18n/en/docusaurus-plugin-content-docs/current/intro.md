@@ -24,7 +24,7 @@ NyaTerm currently supports six session types:
 - **SSH** — remote login, file transfer, resource monitoring, tunnels, OTP, and related workflows
 - **Local Terminal** — open a local shell inside the same workspace
 - **Telnet** — support for legacy systems and lab environments
-- **Serial** — useful for network gear, embedded boards, and debug ports
+- **Serial** — network gear, embedded boards, and debug ports
 - **RDP** — Windows Remote Desktop and graphical administration
 - **VNC** — traditional RFB/VNC services and VM consoles; real-server interoperability is still being validated
 

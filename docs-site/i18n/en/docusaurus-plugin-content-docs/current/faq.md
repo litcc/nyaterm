@@ -65,6 +65,22 @@ Keyword highlighting is disabled by default. Enable it first in **Settings → T
 
 These are also optional enhancements. Enable them separately in **Settings → Terminal**.
 
+### Why are there no models available in the AI Assistant?
+
+Check, in order:
+
+1. Whether AI is enabled in **Settings → AI**
+2. Whether at least one provider is configured and enabled
+3. Whether at least one model is enabled for that provider
+
+When using a custom provider, confirm it is OpenAI-compatible and that the base URL, API key, and model discovery results are all correct.
+
+### Why doesn't the app quit when I close the window?
+
+Check **Minimize to tray when closing** in **Settings → General**.
+
+When it is on, closing the main window moves the app to the tray instead of quitting, and active sessions and sync jobs keep running.
+
 ## File transfer
 
 ### Why didn’t the auto-upload prompt appear after I opened a remote file?
