@@ -23,6 +23,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::mpsc as tokio_mpsc;
 
 mod ascend_npu;
+mod environment;
 mod gpu;
 mod local_fs;
 mod rdp;
@@ -53,6 +54,8 @@ mod ssh_shell_integration;
 mod tunnel;
 mod x11;
 
+use environment::{default_shell, should_use_interactive_login_args};
+
 pub use tunnel::{SshTunnelConfig, SshTunnelInfo, SshTunnelManager, SshTunnelMode};
 pub use x11::{
     X11AuthRewriter, X11DisplayTarget, X11ForwardingConfig, effective_x11_display,
@@ -64,6 +67,10 @@ mod sftp_transfer_types;
 mod trzsz;
 mod zmodem;
 
+pub use environment::{
+    EnvironmentValue, ShellEnvironmentCache, ShellEnvironmentError,
+    normalize_environment_variable_name,
+};
 pub use session_config::{
     LocalSessionConfig, SerialSessionConfig, SftpCwdFollowMode, SftpSettings, SshAgentEndpoint,
     SshAgentForwardingConfig, SshAgentForwardingPolicy, SshAgentForwardingSources, SshAgentPrompt,
@@ -100,6 +107,7 @@ pub use sftp_transfer_types::{
 pub use ssh_agent_broker::{
     SshAgentEndpointPreviewError, SshAgentEndpointPreviewErrorCode, SshAgentIdentityPreview,
     SshAgentIdentityPreviewResponse, preview_identities, preview_identities_blocking,
+    preview_identities_blocking_with_environment, preview_identities_with_environment,
 };
 pub use ssh_algorithms::{
     SshAlgorithmDefaults, SshAlgorithmListKind, SshAlgorithmOption, SshAlgorithmRisk,
@@ -240,6 +248,7 @@ struct SshMultiplexInner {
     /// handles with different forwarding policies must never be shared.
     agent_forwarding_config: Option<SshAgentForwardingConfig>,
     agent_stored_key_revision: Option<u64>,
+    shell_environment: Arc<ShellEnvironmentCache>,
     forwarded_tcpip: ForwardedTcpIpRegistry,
     /// Remote operations wait until the owning interactive PTY reader has
     /// started.  Before that point a second channel could race the desktop
@@ -336,6 +345,10 @@ impl SshMultiplexHandle {
         self.inner.forwarded_tcpip.clone()
     }
 
+    fn shell_environment(&self) -> Arc<ShellEnvironmentCache> {
+        self.inner.shell_environment.clone()
+    }
+
     fn mark_interactive_ready(&self) {
         self.inner.interactive_ready.store(true, Ordering::Release);
         self.inner.interactive_ready_notify.notify_waiters();
@@ -392,6 +405,7 @@ fn connected_ssh_multiplex_handle(
     jumps: Vec<SharedSshHandle>,
     forwarded_tcpip: ForwardedTcpIpRegistry,
     interactive_ready: bool,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> SshMultiplexHandle {
     let info = SshMultiplexInfo {
         name: config.name.clone(),
@@ -409,6 +423,7 @@ fn connected_ssh_multiplex_handle(
             info,
             agent_forwarding_config: effective_agent_forwarding_config(config),
             agent_stored_key_revision: current_agent_stored_key_revision(config),
+            shell_environment,
             forwarded_tcpip,
             interactive_ready: Arc::new(AtomicBool::new(interactive_ready)),
             interactive_ready_notify: Arc::new(tokio::sync::Notify::new()),
@@ -430,6 +445,14 @@ fn forwarded_tcpip_sender_for(
 }
 
 pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<SshMultiplexHandle> {
+    open_ssh_multiplex_handle_with_environment(config, ShellEnvironmentCache::global())
+}
+
+/// Opens an SSH multiplex handle using a shared shell environment cache.
+pub fn open_ssh_multiplex_handle_with_environment(
+    config: SshSessionConfig,
+    shell_environment: Arc<ShellEnvironmentCache>,
+) -> anyhow::Result<SshMultiplexHandle> {
     let runtime = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -442,6 +465,7 @@ pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<Ssh
         &config,
         Some(forwarded_tcpip.clone()),
         None,
+        shell_environment.clone(),
     ))?;
     let jumps = jumps
         .into_iter()
@@ -456,6 +480,7 @@ pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<Ssh
         // This handle is created specifically for independent remote
         // operations; no interactive PTY owns a readiness barrier for it.
         true,
+        shell_environment,
     ))
 }
 
@@ -488,6 +513,7 @@ const INTERACTIVE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 pub struct SessionManager {
     sessions: Mutex<HashMap<String, ManagedSession>>,
     event_queue: SessionEventQueue,
+    shell_environment: Arc<ShellEnvironmentCache>,
 }
 
 enum ManagedSession {
@@ -674,7 +700,14 @@ impl SessionManager {
         Self {
             sessions: Mutex::new(HashMap::new()),
             event_queue: SessionEventQueue::new(),
+            shell_environment: ShellEnvironmentCache::global(),
         }
+    }
+
+    /// Returns the shared shell environment cache used by this manager's SSH
+    /// sessions and forwarding channels.
+    pub fn shell_environment(&self) -> Arc<ShellEnvironmentCache> {
+        self.shell_environment.clone()
     }
 
     pub fn create_local_session(
@@ -1720,7 +1753,17 @@ async fn run_deferred_ssh_worker(
     // setup.  Opening another channel during this window can change the
     // ordering of the PTY startup burst that contains the login banner.
     let multiplex_for_ready = multiplex.clone();
-    let pending_session = match open_pending_ssh_shell(&config, multiplex.as_ref()).await {
+    let shell_environment = multiplex
+        .as_ref()
+        .map(SshMultiplexHandle::shell_environment)
+        .unwrap_or_else(ShellEnvironmentCache::global);
+    let pending_session = match open_pending_ssh_shell(
+        &config,
+        multiplex.as_ref(),
+        shell_environment.clone(),
+    )
+    .await
+    {
         Ok(session) => session,
         Err(error) => {
             // A reused authenticated connection remains usable even when this
@@ -1742,6 +1785,7 @@ async fn run_deferred_ssh_worker(
             pending_session.jump_handles.clone(),
             pending_session.forwarded_tcpip.clone(),
             false,
+            shell_environment,
         )),
         SshShellHandle::Multiplexed(_) => None,
     };
@@ -2310,6 +2354,7 @@ fn push_ssh_integration_output(
 async fn open_pending_ssh_shell(
     config: &SshSessionConfig,
     multiplex: Option<&SshMultiplexHandle>,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> anyhow::Result<PendingOpenSshShellSession> {
     tracing::debug!(
         stage = "connection",
@@ -2354,6 +2399,7 @@ async fn open_pending_ssh_shell(
             config,
             Some(forwarded_tcpip.clone()),
             x11_tx,
+            shell_environment,
         )
         .await?;
         let handle = Arc::new(tokio::sync::Mutex::new(handle));
@@ -2623,20 +2669,45 @@ type SshHandleChain = (
 fn open_authenticated_ssh_handle(
     config: &SshSessionConfig,
 ) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
-    open_authenticated_ssh_handle_with_channel_senders(config, None, None)
+    open_authenticated_ssh_handle_with_environment(config, ShellEnvironmentCache::global())
+}
+
+fn open_authenticated_ssh_handle_with_environment(
+    config: &SshSessionConfig,
+    shell_environment: Arc<ShellEnvironmentCache>,
+) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
+    open_authenticated_ssh_handle_with_channel_senders(config, None, None, shell_environment)
 }
 
 fn open_authenticated_ssh_handle_with_forwarded_tx(
     config: &SshSessionConfig,
     forwarded_tcpip_tx: Option<tokio_mpsc::UnboundedSender<ForwardedTcpIpChannel>>,
 ) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
-    open_authenticated_ssh_handle_with_channel_senders(config, forwarded_tcpip_tx, None)
+    open_authenticated_ssh_handle_with_forwarded_tx_and_environment(
+        config,
+        forwarded_tcpip_tx,
+        ShellEnvironmentCache::global(),
+    )
+}
+
+fn open_authenticated_ssh_handle_with_forwarded_tx_and_environment(
+    config: &SshSessionConfig,
+    forwarded_tcpip_tx: Option<tokio_mpsc::UnboundedSender<ForwardedTcpIpChannel>>,
+    shell_environment: Arc<ShellEnvironmentCache>,
+) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
+    open_authenticated_ssh_handle_with_channel_senders(
+        config,
+        forwarded_tcpip_tx,
+        None,
+        shell_environment,
+    )
 }
 
 fn open_authenticated_ssh_handle_with_channel_senders(
     config: &SshSessionConfig,
     forwarded_tcpip_tx: Option<tokio_mpsc::UnboundedSender<ForwardedTcpIpChannel>>,
     x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
     let forwarded_tcpip = forwarded_tcpip_tx.map(|tx| {
         Arc::new(tokio::sync::Mutex::new(ForwardedTcpIpDispatch {
@@ -2644,13 +2715,19 @@ fn open_authenticated_ssh_handle_with_channel_senders(
             by_listener: HashMap::new(),
         }))
     });
-    open_authenticated_ssh_handle_with_sender_registry(config, forwarded_tcpip, x11_tx)
+    open_authenticated_ssh_handle_with_sender_registry(
+        config,
+        forwarded_tcpip,
+        x11_tx,
+        shell_environment,
+    )
 }
 
 fn open_authenticated_ssh_handle_with_sender_registry(
     config: &SshSessionConfig,
     forwarded_tcpip: Option<ForwardedTcpIpRegistry>,
     x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
     Box::pin(async move {
         // Retry is an explicit user action from the prompt. Keep creating a
@@ -2661,7 +2738,11 @@ fn open_authenticated_ssh_handle_with_sender_registry(
             let result = async {
                 if let Some(jump_config) = config.proxy_jump.as_deref() {
                     let (jump_handle, mut jump_handles) =
-                        open_authenticated_ssh_handle(jump_config).await?;
+                        open_authenticated_ssh_handle_with_environment(
+                            jump_config,
+                            shell_environment.clone(),
+                        )
+                        .await?;
                     let direct_channel = tokio::time::timeout(
                         Duration::from_secs(30),
                         jump_handle.channel_open_direct_tcpip(
@@ -2686,12 +2767,19 @@ fn open_authenticated_ssh_handle_with_sender_registry(
                                 x11_tx: x11_tx.clone(),
                                 agent_forwarding_config: effective_agent_forwarding_config(config),
                                 agent_stored_key_provider: config.agent_stored_key_provider.clone(),
+                                shell_environment: shell_environment.clone(),
                             },
                         ),
                     )
                     .await
                     .map_err(|_| anyhow::anyhow!("SSH ProxyJump target connection timed out"))??;
-                    let authentication = authenticate_ssh(&mut handle, config, agent_attempt).await;
+                    let authentication = authenticate_ssh(
+                        &mut handle,
+                        config,
+                        agent_attempt,
+                        shell_environment.clone(),
+                    )
+                    .await;
                     if let Err(error) = &authentication
                         && is_agent_retry(error)
                     {
@@ -2733,12 +2821,23 @@ fn open_authenticated_ssh_handle_with_sender_registry(
                 } else {
                     let mut handle = tokio::time::timeout(
                         Duration::from_secs(30),
-                        connect_ssh_transport(config, forwarded_tcpip.clone(), x11_tx.clone()),
+                        connect_ssh_transport(
+                            config,
+                            forwarded_tcpip.clone(),
+                            x11_tx.clone(),
+                            shell_environment.clone(),
+                        ),
                     )
                     .await
                     .map_err(|_| anyhow::anyhow!("SSH connection timed out"))??;
 
-                    let authentication = authenticate_ssh(&mut handle, config, agent_attempt).await;
+                    let authentication = authenticate_ssh(
+                        &mut handle,
+                        config,
+                        agent_attempt,
+                        shell_environment.clone(),
+                    )
+                    .await;
                     if let Err(error) = &authentication
                         && is_agent_retry(error)
                     {
@@ -2779,6 +2878,7 @@ async fn connect_ssh_transport(
     config: &SshSessionConfig,
     forwarded_tcpip: Option<ForwardedTcpIpRegistry>,
     x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> anyhow::Result<client::Handle<SshClientHandler>> {
     let handler = SshClientHandler {
         host: config.host.clone(),
@@ -2788,6 +2888,7 @@ async fn connect_ssh_transport(
         x11_tx,
         agent_forwarding_config: effective_agent_forwarding_config(config),
         agent_stored_key_provider: config.agent_stored_key_provider.clone(),
+        shell_environment,
     };
     let Some(proxy) = config.proxy.as_ref() else {
         return client::connect(
@@ -3039,6 +3140,7 @@ struct SshClientHandler {
     x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
     agent_forwarding_config: Option<SshAgentForwardingConfig>,
     agent_stored_key_provider: Option<Arc<dyn SshAgentStoredKeyProvider>>,
+    shell_environment: Arc<ShellEnvironmentCache>,
 }
 
 impl client::Handler for SshClientHandler {
@@ -3170,8 +3272,14 @@ impl client::Handler for SshClientHandler {
         };
         if is_raw_relay_compatible(&config) {
             let endpoint = config.sources.external_agent_endpoints[0].clone();
+            let shell_environment = self.shell_environment.clone();
             tokio::spawn(async move {
-                let Ok(agent_stream) = ssh_agent::connect_agent_stream(&endpoint).await else {
+                let Ok(agent_stream) = ssh_agent::connect_agent_stream_with_environment(
+                    &endpoint,
+                    Some(shell_environment),
+                )
+                .await
+                else {
                     reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
                     let _ = channel.close().await;
                     return;
@@ -3183,9 +3291,17 @@ impl client::Handler for SshClientHandler {
             return Ok(());
         }
         let provider = self.agent_stored_key_provider.clone();
+        let shell_environment = self.shell_environment.clone();
         tokio::spawn(async move {
             reply.accept().await;
-            ssh_agent_broker::serve_channel(channel.into_stream(), config, provider, permit).await;
+            ssh_agent_broker::serve_channel(
+                channel.into_stream(),
+                config,
+                provider,
+                shell_environment,
+                permit,
+            )
+            .await;
         });
         Ok(())
     }
@@ -3522,23 +3638,6 @@ fn utf8_env_or(name: &str, fallback: &str) -> String {
             normalized.contains("utf-8") || normalized.contains("utf8")
         })
         .unwrap_or_else(|| fallback.to_string())
-}
-
-fn default_shell() -> String {
-    if cfg!(target_os = "windows") {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    }
-}
-
-fn should_use_interactive_login_args(program: &str) -> bool {
-    let name = program
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(program)
-        .to_ascii_lowercase();
-    matches!(name.as_str(), "bash" | "zsh" | "fish")
 }
 
 pub type SharedSessionManager = Arc<SessionManager>;

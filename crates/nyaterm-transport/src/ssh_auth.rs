@@ -4,7 +4,7 @@
 //! heuristics and auto-fill rules are unchanged; this only moves the code.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use russh::keys::PrivateKeyWithHashAlg;
 use russh::{MethodKind, client};
@@ -15,7 +15,8 @@ use super::{
     SshKeyAuthConfig, SshKeyboardInteractivePrompt, SshKeyboardInteractiveRequest,
     SshSessionConfig,
 };
-use crate::ssh_agent::connect_agent_client;
+use crate::ssh_agent::connect_agent_client_with_environment_until;
+use crate::{ShellEnvironmentCache, ssh_agent::AGENT_CONNECTION_TIMEOUT};
 
 /// Marks a user-selected retry that requires a fresh SSH transport.
 #[derive(Debug)]
@@ -46,9 +47,10 @@ pub(super) async fn authenticate_ssh(
     handle: &mut client::Handle<SshClientHandler>,
     config: &SshSessionConfig,
     agent_attempt: u32,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> anyhow::Result<()> {
     if config.agent_auth {
-        return authenticate_ssh_agent(handle, config, agent_attempt).await;
+        return authenticate_ssh_agent(handle, config, agent_attempt, shell_environment).await;
     }
     if let Some(key_auth) = config.key_auth.as_ref() {
         return authenticate_ssh_key(handle, config, key_auth).await;
@@ -100,9 +102,10 @@ async fn authenticate_ssh_agent(
     handle: &mut client::Handle<SshClientHandler>,
     config: &SshSessionConfig,
     attempt: u32,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> anyhow::Result<()> {
     let Some(provider) = config.agent_prompt_provider.as_ref() else {
-        return authenticate_ssh_agent_once(handle, config)
+        return authenticate_ssh_agent_once(handle, config, shell_environment)
             .await
             .map_err(|failure| failure.error);
     };
@@ -121,7 +124,7 @@ async fn authenticate_ssh_agent(
         .map_err(|error| anyhow::anyhow!("SSH Agent prompt failed: {error}"))?;
 
     let Some(request) = request else {
-        match authenticate_ssh_agent_once(handle, config).await {
+        match authenticate_ssh_agent_once(handle, config, shell_environment.clone()).await {
             Ok(()) => return Ok(()),
             Err(failure) => {
                 let action = provider
@@ -149,7 +152,7 @@ async fn authenticate_ssh_agent(
     let waiter = Arc::clone(&request);
     let mut action_task = tokio::task::spawn_blocking(move || waiter.wait_action());
     tokio::select! {
-        result = authenticate_ssh_agent_once(handle, config) => {
+        result = authenticate_ssh_agent_once(handle, config, shell_environment.clone()) => {
             match result {
                 Ok(()) => {
                     request.finish();
@@ -218,10 +221,16 @@ struct SshAgentFailure {
 async fn authenticate_ssh_agent_once(
     handle: &mut client::Handle<SshClientHandler>,
     config: &SshSessionConfig,
+    shell_environment: Arc<ShellEnvironmentCache>,
 ) -> Result<(), SshAgentFailure> {
+    let deadline = Instant::now() + AGENT_CONNECTION_TIMEOUT;
     let mut agent = tokio::time::timeout(
-        Duration::from_secs(5),
-        connect_agent_client(&config.agent_endpoint),
+        AGENT_CONNECTION_TIMEOUT,
+        connect_agent_client_with_environment_until(
+            &config.agent_endpoint,
+            Some(shell_environment),
+            deadline,
+        ),
     )
     .await
     .map_err(|_| SshAgentFailure {

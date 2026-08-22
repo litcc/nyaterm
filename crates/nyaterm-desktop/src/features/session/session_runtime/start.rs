@@ -41,6 +41,7 @@ pub(in crate::features) struct SshSessionConfigBuildContext {
     pub(in crate::features) credential_prompts: Arc<CredentialPromptBroker>,
     pub(in crate::features) agent_prompts: Arc<AgentPromptBroker>,
     pub(in crate::features) otp_provider: Arc<NativeOtpProvider>,
+    pub(in crate::features) shell_environment: Arc<nyaterm_transport::ShellEnvironmentCache>,
 }
 
 /// Loads stored SSH keys only when the transport broker needs identities.
@@ -700,6 +701,7 @@ impl NyaTermApp {
             credential_prompts: self.session.prompts.credential_broker(),
             agent_prompts: self.session.prompts.agent_broker(),
             otp_provider: self.session.prompts.otp_provider(),
+            shell_environment: self.session.manager_handle().shell_environment(),
         }
     }
 
@@ -758,15 +760,17 @@ impl NyaTermApp {
         let provider: Arc<dyn SshAgentStoredKeyProvider> = Arc::new(StoreSshAgentKeyProvider {
             store: self.store_blocking_client(),
         });
+        let shell_environment = self.ssh_session_config_build_context().shell_environment;
         cx.notify();
         let task = cx.background_spawn(async move {
             let (sender, receiver) = oneshot::channel();
             let worker = std::thread::Builder::new()
                 .name("nyaterm-ssh-agent-preview".to_string())
                 .spawn(move || {
-                    let preview = nyaterm_transport::preview_identities_blocking(
+                    let preview = nyaterm_transport::preview_identities_blocking_with_environment(
                         &runtime_config,
                         Some(provider),
+                        shell_environment,
                     );
                     let _ = sender.send(preview);
                 });
@@ -1234,6 +1238,7 @@ mod tests {
             credential_prompts: Arc::new(CredentialPromptBroker::default()),
             agent_prompts: Arc::new(AgentPromptBroker::default()),
             otp_provider: Arc::new(NativeOtpProvider::new(store)),
+            shell_environment: nyaterm_transport::ShellEnvironmentCache::new(),
         }
     }
 

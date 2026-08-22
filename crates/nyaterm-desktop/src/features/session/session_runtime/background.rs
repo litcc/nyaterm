@@ -5,7 +5,7 @@ use gpui::Context;
 use nyaterm_core::{AiExecutionProfile, uuid};
 use nyaterm_transport::{
     LocalSessionConfig, SerialSessionConfig, SessionInfo, SessionKind, SessionManager,
-    SshSessionConfig, TelnetSessionConfig, open_ssh_multiplex_handle,
+    SshSessionConfig, TelnetSessionConfig, open_ssh_multiplex_handle_with_environment,
 };
 
 use super::super::state::{failed_session_start_display_name, pending_session_start_display_name};
@@ -412,8 +412,11 @@ impl NyaTermApp {
             let result = (|| {
                 let multiplex = match existing_multiplex {
                     Some(handle) if !handle.is_closed() => handle,
-                    _ => open_ssh_multiplex_handle(config.clone())
-                        .map_err(|error| error.to_string())?,
+                    _ => open_ssh_multiplex_handle_with_environment(
+                        config.clone(),
+                        session_manager.shell_environment(),
+                    )
+                    .map_err(|error| error.to_string())?,
                 };
                 let (info, ssh_start_handle) = session_manager
                     .create_ssh_session_with_multiplex_deferred(config.clone(), multiplex.clone())
