@@ -426,6 +426,9 @@ impl NyaTermApp {
     pub(in crate::features) fn toggle_cursor_blink(&mut self, cx: &mut Context<Self>) {
         let cursor_blink = self.settings.toggle_cursor_blink();
         self.save_appearance_settings(cx);
+        // Turning it on has to start the clock; turning it off lets the clock notice
+        // on its next tick and leave the caret visible.
+        self.ensure_cursor_blink_clock(cx);
         self.shell.set_status(if cursor_blink {
             "cursor blink on".to_string()
         } else {

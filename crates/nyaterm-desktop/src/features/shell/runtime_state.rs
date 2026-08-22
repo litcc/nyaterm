@@ -84,7 +84,9 @@ pub(super) struct ShellRuntimeState {
     session_persistence_generation: u64,
     session_persistence_in_flight: Option<u64>,
     pub(super) cursor_blink_on: bool,
-    pub(super) cursor_blink_next_at: Option<Instant>,
+    /// True while the blink clock task is alive. The clock is its own deadline, so
+    /// there is no "next toggle at" instant to keep here any more.
+    cursor_blink_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -158,7 +160,7 @@ impl Default for ShellRuntimeState {
             session_persistence_generation: 0,
             session_persistence_in_flight: None,
             cursor_blink_on: true,
-            cursor_blink_next_at: None,
+            cursor_blink_clock_armed: false,
         }
     }
 }
@@ -220,6 +222,25 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn cursor_blink_on(&self) -> bool {
         self.runtime.cursor_blink_on
+    }
+
+    pub(in crate::features) fn cursor_blink_clock_is_armed(&self) -> bool {
+        self.runtime.cursor_blink_clock_armed
+    }
+
+    pub(in crate::features) fn set_cursor_blink_clock_armed(&mut self, armed: bool) {
+        self.runtime.cursor_blink_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {
+        self.runtime.cursor_blink_on = !self.runtime.cursor_blink_on;
+    }
+
+    /// Force the caret's blink phase. Returns whether it changed.
+    pub(in crate::features) fn set_cursor_blink_on(&mut self, on: bool) -> bool {
+        let changed = self.runtime.cursor_blink_on != on;
+        self.runtime.cursor_blink_on = on;
+        changed
     }
 
     /// Taken once by `NyaTermApp::start_shell_persistence_debounce`.

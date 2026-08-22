@@ -121,6 +121,11 @@ impl NyaTermApp {
         };
         let terminal_frames = frames_started_at.elapsed();
 
+        // A DECSCUSR arrives as a frame, and a tab becoming visible produces a
+        // snapshot, so this cycle sees every change to what the blink clock depends
+        // on. Cheap: one bool once the clock is already running.
+        self.ensure_cursor_blink_clock(cx);
+
         let notified =
             self.notify_after_runtime_data_plane_drain(session_dirty || frames_dirty, cx);
         // A paint the throttle coalesced is work too: without this the task parks and
@@ -511,38 +516,9 @@ impl NyaTermApp {
             return RUNTIME_IDLE_TICK_INTERVAL;
         }
         if self.runtime_quiet_tick_allowed() {
-            // The quiet cadence is coarser than CURSOR_BLINK_INTERVAL, so a tick
-            // that lands just before the blink deadline pushes the toggle out to
-            // the following quiet tick and stretches the visible half-period to
-            // roughly twice its setting. Wake at the deadline instead. The delay
-            // is recomputed every loop iteration, so this costs one extra wake
-            // per blink rather than a permanently faster cadence.
-            return match self.cursor_blink_wake_delay(now) {
-                Some(delay) => delay.min(RUNTIME_QUIET_TICK_INTERVAL),
-                None => RUNTIME_QUIET_TICK_INTERVAL,
-            };
+            return RUNTIME_QUIET_TICK_INTERVAL;
         }
         runtime_tick_interval_for_pressure(self.runtime_output_pressure_active())
-    }
-
-    /// Time until the caret should next toggle, or `None` when no blink is due.
-    ///
-    /// Returns `None` during connect settle because the visual plane deliberately
-    /// holds the blink phase there; waking for a deadline that will not be
-    /// honoured would spin on an already-elapsed instant.
-    fn cursor_blink_wake_delay(&self, now: Instant) -> Option<Duration> {
-        if connect_settle_active(self.shell.runtime.connect_settle_until, now) {
-            return None;
-        }
-        if !self.settings.summary().cursor_blink || self.visible_terminal_session_ids().is_empty() {
-            return None;
-        }
-        Some(
-            self.shell
-                .runtime
-                .cursor_blink_next_at?
-                .saturating_duration_since(now),
-        )
     }
 
     pub(crate) fn window_runtime_tick_needs_update(
@@ -585,10 +561,10 @@ impl NyaTermApp {
         if !self.runtime_quiet_tick_allowed() {
             return true;
         }
-        self.window_runtime_quiet_tick_has_due_work(now)
+        self.window_runtime_quiet_tick_has_due_work()
     }
 
-    fn window_runtime_quiet_tick_has_due_work(&self, now: Instant) -> bool {
+    fn window_runtime_quiet_tick_has_due_work(&self) -> bool {
         if self.header_status_clock_refresh_due() {
             return true;
         }
@@ -602,16 +578,6 @@ impl NyaTermApp {
             return true;
         }
         if self.transfer.browser_external_drop_hover_is_pending() {
-            return true;
-        }
-        if self.settings.summary().cursor_blink
-            && !self.visible_terminal_session_ids().is_empty()
-            && self
-                .shell
-                .runtime
-                .cursor_blink_next_at
-                .is_some_and(|next| now >= next)
-        {
             return true;
         }
         if self.visible_terminal_performance_recovery_due() {
@@ -866,7 +832,6 @@ impl NyaTermApp {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::time::{Duration, Instant};
 
     use gpui::{AppContext as _, TestAppContext};
     use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
@@ -880,7 +845,7 @@ mod tests {
     };
 
     use super::helpers::{
-        CURSOR_BLINK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL, SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET,
+        RUNTIME_QUIET_TICK_INTERVAL, SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET,
         TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL,
     };
 
@@ -944,8 +909,17 @@ mod tests {
         app
     }
 
+    /// The caret keeps its own cadence now, so the tick delay owes it nothing.
+    ///
+    /// This is the Phase 0 clamp's test, re-pointed. `1c3d9e85` had to make
+    /// `window_runtime_tick_delay` wake on the blink deadline, because a 500ms quiet
+    /// cadence against a 530ms interval stretched the visible half-period to roughly
+    /// 1000ms. With blink on its own timer the clamp is gone and the quiet cadence is
+    /// plainly the quiet cadence -- which is also what lets Phase 3 delete this
+    /// function without taking the caret with it. What the caret actually does is
+    /// asserted in `shell::cursor_blink`.
     #[test]
-    fn quiet_tick_wakes_on_the_cursor_blink_deadline_instead_of_skipping_it() {
+    fn the_quiet_tick_delay_no_longer_bends_around_the_blink_deadline() {
         let mut cx = TestAppContext::single();
         let app = quiet_app_with_visible_session(&mut cx);
         cx.update_entity(&app, |app, _| {
@@ -954,37 +928,13 @@ mod tests {
             app.settings.replace_summary(summary);
             assert!(!app.visible_terminal_session_ids().is_empty());
 
-            // A deadline beyond the quiet cadence still yields the quiet cadence;
-            // the delay is recomputed each loop iteration, so nothing is lost.
-            app.shell.runtime.cursor_blink_next_at = Some(Instant::now() + CURSOR_BLINK_INTERVAL);
-            assert_eq!(app.window_runtime_tick_delay(), RUNTIME_QUIET_TICK_INTERVAL);
-
-            // Once the remainder falls inside the quiet cadence the tick must land
-            // on the deadline. Returning the full quiet interval here is what
-            // pushed the toggle to the following tick and stretched the visible
-            // blink half-period to roughly twice CURSOR_BLINK_INTERVAL.
-            let remaining = Duration::from_millis(30);
-            app.shell.runtime.cursor_blink_next_at = Some(Instant::now() + remaining);
-            let delay = app.window_runtime_tick_delay();
-            assert!(
-                delay <= remaining,
-                "delay {delay:?} skips a blink deadline {remaining:?} away"
+            assert_eq!(
+                app.window_runtime_tick_delay(),
+                RUNTIME_QUIET_TICK_INTERVAL,
+                "blink has its own clock; the tick must not shorten its delay for it"
             );
-        });
-    }
 
-    #[test]
-    fn quiet_tick_holds_the_blink_phase_during_connect_settle() {
-        let mut cx = TestAppContext::single();
-        let app = quiet_app_with_visible_session(&mut cx);
-        cx.update_entity(&app, |app, _| {
-            let mut summary = app.settings.summary().clone();
-            summary.cursor_blink = true;
-            app.settings.replace_summary(summary);
-            // The visual plane deliberately freezes blink during connect settle, so
-            // an elapsed deadline must not pull the tick delay down to zero.
-            app.shell.runtime.cursor_blink_next_at =
-                Some(Instant::now() - Duration::from_millis(1));
+            // Nor during connect settle, where the phase is held either way.
             app.enter_connect_settle();
             assert_eq!(app.window_runtime_tick_delay(), RUNTIME_QUIET_TICK_INTERVAL);
         });

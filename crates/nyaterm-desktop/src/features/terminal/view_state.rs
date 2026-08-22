@@ -198,6 +198,25 @@ impl TerminalFeatureState {
         })
     }
 
+    /// Whether any of these sessions' terminals asked for a blinking caret.
+    ///
+    /// DECSCUSR / DECSET 12 arrive as a snapshot attribute, and both paint paths
+    /// already honour it (`settings.cursor_blink || snapshot.cursor.blinking`), so
+    /// the blink clock has to consider it too or the request paints as a solid
+    /// caret forever.
+    pub(in crate::features) fn visible_cursor_blink_requested<'a>(
+        &self,
+        session_ids: impl IntoIterator<Item = &'a str>,
+    ) -> bool {
+        session_ids.into_iter().any(|session_id| {
+            self.view.views.get(session_id).is_some_and(|view| {
+                view.frame_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.cursor.blinking)
+            })
+        })
+    }
+
     pub(in crate::features) fn visible_live_snapshot_missing<'a>(
         &self,
         session_ids: impl IntoIterator<Item = &'a str>,

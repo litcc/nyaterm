@@ -30,7 +30,6 @@ pub(super) const CONNECT_SETTLE_HOLD: Duration = Duration::from_millis(750);
 /// Under output pressure / connect settle, coalesce full-shell paints.
 pub(super) const UI_PAINT_THROTTLE: Duration = Duration::from_millis(33);
 pub(super) const TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL: Duration = Duration::from_millis(16);
-pub(super) const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 pub(super) const SLOW_DIAGNOSTIC_THROTTLE: Duration = Duration::from_secs(2);
 pub(super) const TERMINAL_PERF_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const RUNTIME_TICK_SLOW_THRESHOLD: Duration = Duration::from_millis(40);
@@ -398,13 +397,6 @@ pub(super) fn runtime_idle_plane_allowed(runtime_output_pressure: bool) -> bool 
     !runtime_output_pressure
 }
 
-pub(super) fn runtime_cursor_blink_allowed(
-    runtime_output_pressure: bool,
-    cursor_blink_enabled: bool,
-) -> bool {
-    cursor_blink_enabled && !runtime_output_pressure
-}
-
 pub(super) fn terminal_performance_tick_session_ids(visible_session_ids: &[&str]) -> Vec<String> {
     let mut ids = Vec::with_capacity(visible_session_ids.len());
     for session_id in visible_session_ids {
@@ -472,17 +464,17 @@ mod tests {
         TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL, UI_PAINT_THROTTLE, WINDOW_GEOMETRY_CHURN_HOLD,
         connect_settle_active, connect_settle_deadline, diagnostic_log_due,
         pending_session_status_message, runtime_background_event_drain_budget_exhausted,
-        runtime_background_should_defer_terminal_frames, runtime_cursor_blink_allowed,
-        runtime_data_plane_wake_delay, runtime_idle_plane_allowed,
-        runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
-        runtime_ui_notify_allowed, session_event_backlog_active, session_event_drain_budget,
-        session_event_drain_is_slow, session_event_drain_should_yield,
-        session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
-        terminal_frame_apply_should_defer, terminal_frame_backlog_active_from_counts,
-        terminal_input_idle_remaining_delay, terminal_log_plain_text,
-        terminal_output_dropped_marker, terminal_performance_tick_session_ids,
-        terminal_render_work_pressure_active, terminal_user_scroll_frame_apply_pending,
-        viewport_change_terminal_session_ids, window_geometry_churn_active,
+        runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
+        runtime_idle_plane_allowed, runtime_output_pressure_active_from_counts,
+        runtime_tick_interval_for_pressure, runtime_ui_notify_allowed,
+        session_event_backlog_active, session_event_drain_budget, session_event_drain_is_slow,
+        session_event_drain_should_yield, session_event_input_wake_drain_budget,
+        terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
+        terminal_frame_backlog_active_from_counts, terminal_input_idle_remaining_delay,
+        terminal_log_plain_text, terminal_output_dropped_marker,
+        terminal_performance_tick_session_ids, terminal_render_work_pressure_active,
+        terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
+        window_geometry_churn_active,
     };
 
     #[test]
@@ -968,14 +960,6 @@ mod tests {
     fn runtime_idle_plane_waits_for_output_calm() {
         assert!(runtime_idle_plane_allowed(false));
         assert!(!runtime_idle_plane_allowed(true));
-    }
-
-    #[test]
-    fn runtime_cursor_blink_pauses_under_output_pressure() {
-        assert!(runtime_cursor_blink_allowed(false, true));
-        assert!(!runtime_cursor_blink_allowed(true, true));
-        assert!(!runtime_cursor_blink_allowed(false, false));
-        assert!(!runtime_cursor_blink_allowed(true, false));
     }
 
     #[test]

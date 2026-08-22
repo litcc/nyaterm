@@ -3,12 +3,12 @@ use std::time::{Duration, Instant};
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
-    CURSOR_BLINK_INTERVAL, RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW, RUNTIME_TICK_SLOW_THRESHOLD,
+    RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW, RUNTIME_TICK_SLOW_THRESHOLD,
     RuntimeBackgroundDrainTimings, RuntimeControlPlaneDrainTimings, RuntimeControlPlaneResult,
     RuntimeDataPlaneResult, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
     TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
-    runtime_background_event_drain_budget_exhausted, runtime_cursor_blink_allowed,
-    runtime_idle_plane_allowed, runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
+    runtime_background_event_drain_budget_exhausted, runtime_idle_plane_allowed,
+    runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
     terminal_render_work_pressure_active, window_geometry_churn_active,
 };
 use crate::features::{
@@ -534,36 +534,9 @@ impl NyaTermApp {
         let now = Instant::now();
         let output_pressure = self.runtime_output_pressure_active()
             || connect_settle_active(self.shell.runtime.connect_settle_until, now);
-        // ~530ms blink half-period. This is time based so quiet runtime ticks
-        // can stay slow without stretching cursor blink to multi-second periods.
-        // Under output pressure / connect settle, keep last blink phase.
-        let mut surface_visual_dirty = false;
-        if runtime_cursor_blink_allowed(output_pressure, self.settings.summary().cursor_blink) {
-            let next_blink_at = self
-                .shell
-                .runtime
-                .cursor_blink_next_at
-                .unwrap_or(now + CURSOR_BLINK_INTERVAL);
-            if now >= next_blink_at {
-                self.shell.runtime.cursor_blink_on = !self.shell.runtime.cursor_blink_on;
-                self.shell.runtime.cursor_blink_next_at = Some(now + CURSOR_BLINK_INTERVAL);
-                surface_visual_dirty = true;
-            } else {
-                self.shell.runtime.cursor_blink_next_at = Some(next_blink_at);
-            }
-        } else if !self.settings.summary().cursor_blink {
-            if !self.shell.runtime.cursor_blink_on {
-                surface_visual_dirty = true;
-            }
-            self.shell.runtime.cursor_blink_on = true;
-            self.shell.runtime.cursor_blink_next_at = None;
-        } else {
-            self.shell.runtime.cursor_blink_next_at = Some(now + CURSOR_BLINK_INTERVAL);
-        }
-        if surface_visual_dirty {
-            // Cursor blink is terminal-local; do not rebuild full shell.
-            self.notify_active_terminal_surface(cx);
-        }
+        // Cursor blink is owned by `shell::cursor_blink`'s own timer, not by this
+        // plane: at the quiet cadence a tick-driven toggle stretched the visible
+        // half-period to roughly twice its setting.
         let render_work_pressure =
             terminal_render_work_pressure_active(output_pressure, self.session.start_has_pending());
         // Large-output protection recovery accounting.

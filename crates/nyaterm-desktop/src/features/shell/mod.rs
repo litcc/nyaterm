@@ -2,6 +2,7 @@
 
 mod activity_bar_runtime;
 mod appearance;
+mod cursor_blink;
 mod event_pump;
 mod global_shortcut_runtime;
 mod keybinding_runtime;
