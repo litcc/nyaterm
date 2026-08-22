@@ -142,6 +142,8 @@ struct AiAgentState {
     task_prompt: Option<String>,
     step_index: u16,
     loop_state: Option<AiAgentLoopState>,
+    /// True while the agent-loop observation clock task is alive.
+    loop_clock_armed: bool,
     capture: AgentOutputCaptureProcessor,
     steps: Vec<AiAgentStepView>,
     thought_expanded: HashSet<u16>,
@@ -271,6 +273,7 @@ impl AiFeatureState {
                 task_prompt: None,
                 step_index: 0,
                 loop_state: None,
+                loop_clock_armed: false,
                 capture: AgentOutputCaptureProcessor::new(),
                 steps: Vec::new(),
                 thought_expanded: HashSet::new(),
@@ -1549,6 +1552,14 @@ impl AiFeatureState {
 
     pub(in crate::features) fn agent_loop_snapshot(&self) -> Option<AiAgentLoopState> {
         self.agent.loop_state.clone()
+    }
+
+    pub(in crate::features) fn agent_loop_clock_is_armed(&self) -> bool {
+        self.agent.loop_clock_armed
+    }
+
+    pub(in crate::features) fn set_agent_loop_clock_armed(&mut self, armed: bool) {
+        self.agent.loop_clock_armed = armed;
     }
 
     pub(in crate::features) fn process_agent_output(

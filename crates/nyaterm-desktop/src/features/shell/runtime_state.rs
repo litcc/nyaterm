@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use futures::channel::mpsc::UnboundedReceiver;
 
@@ -16,9 +16,7 @@ pub(super) struct ShellRuntimeState {
     pub(super) session_event_dropped_output_bytes: u64,
     pub(super) session_event_last_output_event_count: usize,
     pub(super) session_event_last_drained_output_bytes: usize,
-    pub(super) last_session_start_drain_duration: Duration,
     pub(super) last_pending_session_status_at: Option<Instant>,
-    pub(super) last_terminal_resize_at: Option<Instant>,
     pub(super) last_terminal_frame_apply_at: Option<Instant>,
     /// Last user-driven terminal scroll input. During this short window the
     /// terminal paint path favors text/position over enhanced decorations.
@@ -87,6 +85,16 @@ pub(super) struct ShellRuntimeState {
     /// True while the blink clock task is alive. The clock is its own deadline, so
     /// there is no "next toggle at" instant to keep here any more.
     cursor_blink_clock_armed: bool,
+    /// True while the header date/time clock task is alive.
+    header_status_clock_armed: bool,
+    /// True while the "still connecting" status clock task is alive.
+    pending_session_status_clock_armed: bool,
+    /// True while the idle screen-lock clock task is alive.
+    idle_lock_clock_armed: bool,
+    /// True while the deferred-focus clock task is alive.
+    pending_focus_clock_armed: bool,
+    /// True while the terminal recovery-accounting clock task is alive.
+    terminal_recovery_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -120,9 +128,7 @@ impl Default for ShellRuntimeState {
             session_event_dropped_output_bytes: 0,
             session_event_last_output_event_count: 0,
             session_event_last_drained_output_bytes: 0,
-            last_session_start_drain_duration: Duration::ZERO,
             last_pending_session_status_at: None,
-            last_terminal_resize_at: None,
             last_terminal_frame_apply_at: None,
             last_terminal_user_scroll_at: None,
             last_terminal_input_at: None,
@@ -161,6 +167,11 @@ impl Default for ShellRuntimeState {
             session_persistence_in_flight: None,
             cursor_blink_on: true,
             cursor_blink_clock_armed: false,
+            header_status_clock_armed: false,
+            pending_session_status_clock_armed: false,
+            idle_lock_clock_armed: false,
+            pending_focus_clock_armed: false,
+            terminal_recovery_clock_armed: false,
         }
     }
 }
@@ -230,6 +241,46 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_cursor_blink_clock_armed(&mut self, armed: bool) {
         self.runtime.cursor_blink_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn header_status_clock_is_armed(&self) -> bool {
+        self.runtime.header_status_clock_armed
+    }
+
+    pub(in crate::features) fn set_header_status_clock_armed(&mut self, armed: bool) {
+        self.runtime.header_status_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn pending_session_status_clock_is_armed(&self) -> bool {
+        self.runtime.pending_session_status_clock_armed
+    }
+
+    pub(in crate::features) fn set_pending_session_status_clock_armed(&mut self, armed: bool) {
+        self.runtime.pending_session_status_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn idle_lock_clock_is_armed(&self) -> bool {
+        self.runtime.idle_lock_clock_armed
+    }
+
+    pub(in crate::features) fn set_idle_lock_clock_armed(&mut self, armed: bool) {
+        self.runtime.idle_lock_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn pending_focus_clock_is_armed(&self) -> bool {
+        self.runtime.pending_focus_clock_armed
+    }
+
+    pub(in crate::features) fn set_pending_focus_clock_armed(&mut self, armed: bool) {
+        self.runtime.pending_focus_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn terminal_recovery_clock_is_armed(&self) -> bool {
+        self.runtime.terminal_recovery_clock_armed
+    }
+
+    pub(in crate::features) fn set_terminal_recovery_clock_armed(&mut self, armed: bool) {
+        self.runtime.terminal_recovery_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {
@@ -469,20 +520,6 @@ impl ShellFeatureState {
         self.runtime.terminal_user_scroll_idle_notify_armed = false;
         drain_sorted(&mut self.runtime.pending_terminal_user_scroll_idle_sessions)
     }
-
-    pub(in crate::features) fn terminal_resize_throttled(
-        &self,
-        now: Instant,
-        minimum_interval: Duration,
-    ) -> bool {
-        self.runtime
-            .last_terminal_resize_at
-            .is_some_and(|last| now.saturating_duration_since(last) < minimum_interval)
-    }
-
-    pub(in crate::features) fn note_terminal_resize(&mut self, at: Instant) {
-        self.runtime.last_terminal_resize_at = Some(at);
-    }
 }
 
 fn arm_once(armed: &mut bool) -> bool {
@@ -503,7 +540,6 @@ fn drain_sorted(sessions: &mut HashSet<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::time::{Duration, Instant};
 
     use crate::models::{ActivityBarLayoutState, BottomPanelMode};
 
@@ -602,13 +638,5 @@ mod tests {
         assert_eq!(shell.note_full_shell_paint(), u64::MAX);
         shell.note_terminal_surface_frame_notifies(4);
         assert_eq!(shell.runtime.terminal_surface_frame_notify_count, u64::MAX);
-
-        let now = Instant::now();
-        shell.note_terminal_resize(now);
-        assert!(shell.terminal_resize_throttled(now, Duration::from_millis(100)));
-        assert!(!shell.terminal_resize_throttled(
-            now + Duration::from_millis(100),
-            Duration::from_millis(100)
-        ));
     }
 }

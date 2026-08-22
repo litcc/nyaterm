@@ -5,16 +5,20 @@ mod appearance;
 mod cursor_blink;
 mod event_pump;
 mod global_shortcut_runtime;
+mod idle_lock;
 mod keybinding_runtime;
 mod navigation_runtime;
 mod panel_resize_runtime;
 mod panel_stack_runtime;
+mod pending_focus;
 mod persistence_debounce;
 mod quick_switch_runtime;
 mod runtime_state;
 mod state;
+mod status_clocks;
 mod tab_mouse;
 mod tab_windows_runtime;
+mod terminal_recovery;
 mod workspace_runtime;
 
 pub(in crate::features) use activity_bar_runtime::{

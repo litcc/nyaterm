@@ -32,6 +32,8 @@ impl NyaTermApp {
 
     pub(in crate::features) fn unlock_app(&mut self, cx: &mut Context<Self>) {
         self.security.deactivate_screen_lock();
+        // Unlocking resets the idle timer, so the clock starts counting again.
+        self.ensure_idle_lock_clock(cx);
         self.forget_text_inputs("lock-screen.password");
         self.shell.set_status("screen unlocked".to_string());
         cx.notify();

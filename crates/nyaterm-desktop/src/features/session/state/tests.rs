@@ -218,6 +218,77 @@ fn mismatched_host_key_resolution_preserves_active_prompt() {
     );
 }
 
+/// The TOTP clock sleeps to the code's own step boundary rather than polling.
+///
+/// This replaced the last thing on the runtime tick's control plane. Waking on the
+/// boundary is both the latest moment that is still correct and the earliest worth
+/// waking for; a clock that waited a whole period from *now* would show a stale code
+/// for up to that period.
+#[test]
+fn totp_clock_sleeps_to_the_next_step_boundary() {
+    let cx = TestAppContext::single();
+    let mut prompts = prompt_state(&cx);
+    prompts.activate_keyboard_interactive(totp_prompt_for_test(30));
+
+    // 30s period: one second past a boundary leaves 29 to wait, and the last second
+    // of a step leaves one.
+    assert_eq!(prompts.keyboard_totp_seconds_to_next_step(31), Some(29));
+    assert_eq!(prompts.keyboard_totp_seconds_to_next_step(59), Some(1));
+    assert_eq!(
+        prompts.keyboard_totp_seconds_to_next_step(60),
+        Some(30),
+        "landing exactly on a boundary waits a full step, never zero"
+    );
+}
+
+/// No prompt showing a TOTP code means no clock at all.
+#[test]
+fn no_totp_clock_without_a_code_on_screen() {
+    let cx = TestAppContext::single();
+    let mut prompts = prompt_state(&cx);
+    assert_eq!(prompts.keyboard_totp_seconds_to_next_step(31), None);
+
+    // A keyboard-interactive prompt that is not TOTP must not run one either.
+    let mut prompt = totp_prompt_for_test(30);
+    prompt.otp_type = Some("hotp".to_string());
+    prompts.activate_keyboard_interactive(prompt);
+    assert_eq!(
+        prompts.keyboard_totp_seconds_to_next_step(31),
+        None,
+        "only a TOTP code changes on a wall-clock step"
+    );
+}
+
+fn totp_prompt_for_test(period: u64) -> KeyboardInteractivePromptState {
+    let (response_tx, _response_rx) = mpsc::channel();
+    // The receiver is dropped, which is fine: these tests never send a response.
+    KeyboardInteractivePromptState {
+        id: "keyboard-totp".to_string(),
+        request: SshKeyboardInteractiveRequest {
+            host: "example.test".to_string(),
+            port: 22,
+            username: "nya".to_string(),
+            connection_name: "example".to_string(),
+            name: "verification".to_string(),
+            instructions: String::new(),
+            round: 1,
+            prompts: vec![SshKeyboardInteractivePrompt {
+                prompt: "Code".to_string(),
+                echo: false,
+            }],
+            otp_id: Some("otp-1".to_string()),
+        },
+        response_tx,
+        responses: vec![String::new()],
+        focused_index: 0,
+        otp_code: Some("123456".to_string()),
+        otp_type: Some("totp".to_string()),
+        otp_period: period,
+        otp_time_step: None,
+        otp_error: None,
+    }
+}
+
 #[test]
 fn otp_missing_entry_preserves_manual_timing_but_clears_refresh_timing() {
     let cx = TestAppContext::single();

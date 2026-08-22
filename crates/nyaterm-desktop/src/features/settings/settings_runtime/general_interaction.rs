@@ -248,6 +248,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn toggle_screen_lock_enabled(&mut self, cx: &mut Context<Self>) {
         self.settings.toggle_screen_lock_enabled();
+        self.ensure_idle_lock_clock(cx);
         self.security.reset_screen_lock_idle_timer();
         self.save_screen_lock_settings(cx);
     }
@@ -259,6 +260,7 @@ impl NyaTermApp {
     ) {
         self.settings.set_idle_lock_minutes(value);
         self.security.reset_screen_lock_idle_timer();
+        self.ensure_idle_lock_clock(cx);
         self.save_screen_lock_settings(cx);
     }
 

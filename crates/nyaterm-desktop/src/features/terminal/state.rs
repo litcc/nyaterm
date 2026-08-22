@@ -7,7 +7,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
 use std::sync::Arc;
-use std::time::Instant;
 
 use gpui::{Entity, FocusHandle, Subscription};
 use nyaterm_core::ResolvedKeywordHighlightRule;
@@ -154,8 +153,12 @@ pub(super) struct TerminalMenuState {
     pub(super) actions_focus: FocusHandle,
     pub(super) action_link_menu: Option<ActionLinkMenuState>,
     pub(super) action_link_tooltip: Option<ActionLinkTooltipState>,
-    /// Pending action-link hover (Tauri 250ms delay before showing tooltip).
-    pub(super) action_link_hover_pending: Option<(String, Instant, ActionLinkTooltipState)>,
+    /// Pending action-link hover, with the generation of the timer that owns it. The
+    /// timer is the delay; the generation is how a superseded one recognises itself.
+    pub(super) action_link_hover_pending: Option<(String, u64, ActionLinkTooltipState)>,
+    /// Incremented for every new hover, so an in-flight timer can tell whether the
+    /// cursor has moved on since it was armed.
+    pub(super) action_link_hover_generation: u64,
 }
 
 /// Paint-time caches invalidated whenever appearance settings change.
@@ -254,6 +257,7 @@ impl TerminalFeatureState {
                 action_link_menu: None,
                 action_link_tooltip: None,
                 action_link_hover_pending: None,
+                action_link_hover_generation: 0,
             },
             paint: TerminalPaintCacheState {
                 cached_terminal_theme_palette: None,
@@ -272,6 +276,7 @@ impl TerminalFeatureState {
         self.search.mode = mode;
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn buffer_search_is_open(&self) -> bool {
         self.search.open && self.search.mode == TerminalSearchMode::Buffer
     }
@@ -318,6 +323,19 @@ impl TerminalFeatureState {
         self.menus.actions_open = false;
     }
 
+    #[cfg(test)]
+    pub(in crate::features) fn mark_credential_autofill_detection_for_test(&mut self) {
+        self.assist.credential_autofill_detection_pending = true;
+    }
+
+    /// A credential-prompt detection was marked while output was being processed and
+    /// has not run yet. The data-plane drain task watches this so it comes back for
+    /// it rather than parking.
+    pub(in crate::features) fn credential_autofill_detection_is_pending(&self) -> bool {
+        self.assist.credential_autofill_detection_pending
+    }
+
+    #[cfg(test)]
     pub(in crate::features) fn action_link_hover_is_pending(&self) -> bool {
         self.menus.action_link_hover_pending.is_some()
     }
@@ -679,7 +697,7 @@ mod tests {
         state.selection.dragging = true;
         state.menus.action_link_hover_pending = Some((
             "https://example.com".to_string(),
-            std::time::Instant::now(),
+            1,
             crate::models::ActionLinkTooltipState {
                 x: px(10.),
                 y: px(20.),

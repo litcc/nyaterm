@@ -1447,32 +1447,6 @@ impl NyaTermApp {
         )
     }
 
-    pub(in crate::features) fn drive_terminal_resize(&mut self) -> bool {
-        if self
-            .shell
-            .terminal_resize_throttled(Instant::now(), Duration::from_millis(100))
-        {
-            return false;
-        }
-        let bounds = if let Some(session_id) = self.session.active_id() {
-            self.terminal
-                .layout
-                .session_surface_bounds
-                .get(session_id)
-                .copied()
-                .or(self.terminal.layout.surface_bounds)
-        } else {
-            self.terminal.layout.surface_bounds
-        };
-        let Some(bounds) = bounds else {
-            return false;
-        };
-        self.resize_terminal_to_bounds_for_session(
-            self.session.active_id_owned().as_deref(),
-            bounds,
-        )
-    }
-
     pub(in crate::features) fn resize_all_known_terminal_surfaces(&mut self) -> bool {
         let mut dirty = false;
         if let Some(bounds) = self.terminal.layout.surface_bounds {
@@ -1568,7 +1542,6 @@ impl NyaTermApp {
             self.terminal.view.screen.resize(cols, rows);
             self.clear_terminal_scroll_residual_for_session(None);
         }
-        self.shell.note_terminal_resize(Instant::now());
         true
     }
 

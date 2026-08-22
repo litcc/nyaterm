@@ -110,6 +110,8 @@ pub(super) struct SessionPromptState {
     agent_prompts: Arc<AgentPromptBroker>,
     active_agent_prompt: Option<AgentPromptRequest>,
     credential_prompt_focus_pending: bool,
+    /// True while the TOTP step-boundary clock task is alive.
+    totp_clock_armed: bool,
     credential_focus: FocusHandle,
     otp_provider: Arc<NativeOtpProvider>,
 }
@@ -260,10 +262,6 @@ impl SessionFeatureState {
         self.start.visible_tab_reservation_count()
     }
 
-    pub(in crate::features) fn start_has_cancelled_results(&self) -> bool {
-        self.start.has_cancelled_results()
-    }
-
     pub(in crate::features) fn start_has_active_pending(&self) -> bool {
         self.start.has_active_pending()
     }
@@ -372,6 +370,26 @@ impl SessionFeatureState {
 
     pub(in crate::features) fn prompt_active_credential(&self) -> Option<&CredentialPromptState> {
         self.prompts.active_credential()
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn prompt_request_credential_focus_for_test(&mut self) {
+        self.prompts.credential_prompt_focus_pending = true;
+    }
+
+    pub(in crate::features) fn prompt_totp_clock_is_armed(&self) -> bool {
+        self.prompts.totp_clock_armed
+    }
+
+    pub(in crate::features) fn set_prompt_totp_clock_armed(&mut self, armed: bool) {
+        self.prompts.totp_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn prompt_keyboard_totp_seconds_to_next_step(
+        &self,
+        now: u64,
+    ) -> Option<u64> {
+        self.prompts.keyboard_totp_seconds_to_next_step(now)
     }
 
     pub(in crate::features) fn prompt_active_keyboard_interactive(
@@ -1679,6 +1697,7 @@ impl SessionPromptState {
             agent_prompts,
             active_agent_prompt: None,
             credential_prompt_focus_pending: false,
+            totp_clock_armed: false,
             credential_focus,
             otp_provider,
         }
@@ -1962,6 +1981,20 @@ impl SessionPromptState {
     ) {
         self.active_keyboard_interactive_prompt = Some(state);
         self.credential_prompt_focus_pending = true;
+    }
+
+    /// Seconds until the active TOTP code's next step boundary, if one is showing.
+    ///
+    /// The preview only changes on that boundary, so this is both the latest moment
+    /// that is still correct and the earliest worth waking for. `None` means nothing
+    /// is showing a TOTP code and no clock is needed.
+    pub(in crate::features) fn keyboard_totp_seconds_to_next_step(&self, now: u64) -> Option<u64> {
+        let state = self.active_keyboard_interactive_prompt.as_ref()?;
+        if state.otp_type.as_deref() != Some("totp") || state.otp_code.is_none() {
+            return None;
+        }
+        let period = state.otp_period.max(1);
+        Some(period - (now % period))
     }
 
     pub(in crate::features) fn keyboard_totp_refresh_otp_id(&self, now: u64) -> Option<String> {
@@ -2382,6 +2415,7 @@ impl SessionStartFeatureState {
         placement
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn has_cancelled_results(&self) -> bool {
         !self.cancelled.is_empty()
     }

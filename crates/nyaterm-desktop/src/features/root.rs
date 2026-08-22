@@ -88,6 +88,12 @@ impl NyaTermApp {
         self.start_prompt_activation_drain(cx);
         self.start_shell_persistence_debounce(cx);
         self.ensure_cursor_blink_clock(cx);
+        self.ensure_header_status_clock(cx);
+        self.ensure_idle_lock_clock(cx);
+        // A focus request can only be honoured once its element exists, which is a
+        // result of this paint; arming here is both cheap and the earliest correct
+        // point.
+        self.ensure_pending_focus_clock(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()
@@ -832,6 +838,18 @@ fn fit_wallpaper_tile_size(viewport: (f32, f32), intrinsic: (f32, f32)) -> (f32,
 impl Render for NyaTermApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_started_at = Instant::now();
+        // Reconcile viewport size and cell metrics here rather than on the runtime
+        // tick. `render` already holds the window, and the chrome built below reads
+        // `shell.viewport_size()`, so this paint sees the fresh values instead of
+        // whatever the last tick recorded. Nothing here notifies *this* entity, so it
+        // cannot loop: surfaces are separate entities.
+        self.refresh_window_render_inputs(window, cx);
+        // Safety net for the idle screen-lock deadline. Every unlock and every
+        // settings change arms the clock directly; this catches a path added later
+        // that forgets to, because a clock that failed to arm means the screen never
+        // locks. Costs one bool compare when it is already running, and arming
+        // redundantly is harmless -- the clock just re-checks and defers.
+        self.ensure_idle_lock_clock(cx);
         FULL_SHELL_PAINT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let full_shell_paint_count = self.shell.note_full_shell_paint();
         let root_started_at = Instant::now();

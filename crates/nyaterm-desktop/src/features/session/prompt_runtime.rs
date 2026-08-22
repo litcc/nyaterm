@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::time::Duration;
 
 use futures::StreamExt as _;
 use gpui::{ClipboardItem, Context, KeyDownEvent, Window};
@@ -349,6 +350,9 @@ impl NyaTermApp {
                     if dirty {
                         cx.notify();
                     }
+                    // A keyboard-interactive TOTP prompt can only reach the screen
+                    // through an activation, so this is where its clock starts.
+                    this.ensure_keyboard_interactive_totp_clock(cx);
                     dirty
                 });
                 // No `continue` on success: only one prompt occupies the slot at
@@ -466,6 +470,62 @@ impl NyaTermApp {
             return true;
         }
         false
+    }
+
+    /// Keep the shown TOTP code current while a keyboard-interactive prompt displays
+    /// one.
+    ///
+    /// This was the last thing on the runtime tick's control plane. It is genuinely
+    /// time-driven -- the code changes on its own step boundary -- but it only matters
+    /// while such a prompt is on screen, which is a state with a definite beginning
+    /// and end. Idempotent, and it retires itself when the prompt goes away.
+    pub(in crate::features) fn ensure_keyboard_interactive_totp_clock(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.session.prompt_totp_clock_is_armed()
+            || self
+                .session
+                .prompt_keyboard_totp_seconds_to_next_step(unix_seconds_now())
+                .is_none()
+        {
+            return;
+        }
+        self.session.set_prompt_totp_clock_armed(true);
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(Some(delay)) = this.update(cx, |this, _| {
+                    this.session
+                        .prompt_keyboard_totp_seconds_to_next_step(unix_seconds_now())
+                        .map(Duration::from_secs)
+                }) else {
+                    let _ = this.update(cx, |this, _| {
+                        this.session.set_prompt_totp_clock_armed(false);
+                    });
+                    break;
+                };
+                cx.background_executor().timer(delay).await;
+                let Ok(still_showing) = this.update(cx, |this, cx| {
+                    if this.refresh_keyboard_interactive_totp() {
+                        cx.notify();
+                    }
+                    let showing = this
+                        .session
+                        .prompt_keyboard_totp_seconds_to_next_step(unix_seconds_now())
+                        .is_some();
+                    if !showing {
+                        this.session.set_prompt_totp_clock_armed(false);
+                    }
+                    showing
+                }) else {
+                    break;
+                };
+                if !still_showing {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(in crate::features) fn refresh_keyboard_interactive_totp(&mut self) -> bool {

@@ -1,15 +1,11 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
-    RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW, RUNTIME_TICK_SLOW_THRESHOLD,
-    RuntimeBackgroundDrainTimings, RuntimeControlPlaneDrainTimings, RuntimeControlPlaneResult,
-    RuntimeDataPlaneResult, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
+    RUNTIME_TICK_SLOW_THRESHOLD, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
     TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
-    runtime_background_event_drain_budget_exhausted, runtime_idle_plane_allowed,
-    runtime_ui_notify_allowed, terminal_performance_tick_session_ids,
-    terminal_render_work_pressure_active, window_geometry_churn_active,
+    runtime_idle_plane_allowed, runtime_ui_notify_allowed, window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, terminal::full_shell_paint_count, terminal::terminal_surface_paint_count,
@@ -17,104 +13,15 @@ use crate::features::{
 use crate::models::NavItem;
 
 impl NyaTermApp {
-    fn drive_startup_restore_queue_tick(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let pending_session_start = self.session.start_has_pending();
-        let should_pump = !self.session.restore_is_complete()
-            && self
-                .stores
-                .startup_restore
-                .update(cx, |store, _| store.can_pump_queue(pending_session_start));
-        if !should_pump {
-            return false;
-        }
-        self.pump_startup_restore_queue(window, cx);
-        true
-    }
-
-    fn drive_pending_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if !self.ai.chat_focus_is_pending()
-            && !self.transfer.rename_focus_is_pending()
-            && !self.session.prompt_credential_focus_is_pending()
-        {
-            return false;
-        }
-        let mut dirty = false;
-        if self.ai.take_chat_focus_request() {
-            window.focus(self.ai.chat_focus(), cx);
-            dirty = true;
-        }
-        if let Some(input_id) = self.transfer.pending_rename_input_id()
-            && self.focus_text_input_if_present(&input_id, window, cx)
-        {
-            self.transfer.finish_rename_focus();
-            dirty = true;
-        }
-        if self.session.prompt_credential_focus_is_pending()
-            && (self.session.prompt_has_active_credential()
-                || self.session.prompt_has_active_keyboard_interactive())
-        {
-            self.focus_active_ssh_prompt_input(window, cx);
-            self.session.prompt_finish_credential_focus();
-            dirty = true;
-        }
-        dirty
-    }
-
-    pub(super) fn drain_runtime_background_events(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-        started_at: Instant,
-        timings: &mut RuntimeBackgroundDrainTimings,
-        critical_only: bool,
-    ) -> bool {
-        let mut dirty = false;
-        macro_rules! drain_stage {
-            ($field:ident, $expr:expr) => {{
-                let stage_started_at = Instant::now();
-                dirty |= $expr;
-                timings.$field += stage_started_at.elapsed();
-                if runtime_background_event_drain_budget_exhausted(started_at) {
-                    timings.budget_exhausted = true;
-                    return dirty;
-                }
-            }};
-        }
-
-        // Data plane only. Session start / prompts already ran on the control plane.
-        // Session events and terminal frames run on `start_runtime_data_plane_drain`;
-        // helper-pushed remote-desktop events on `start_remote_desktop_event_drain`.
-        // What is left here is the time-based half of each.
-        drain_stage!(remote, self.drive_remote_desktop_periodic(window, cx));
-        if critical_only {
-            // Autofill / recording / transfer / remote are idle-plane sideband.
-            return dirty;
-        }
-        drain_stage!(
-            credential_autofill,
-            self.drain_pending_credential_autofill_detection(cx)
-        );
-        // Not a queue: the agent loop waits for the terminal to fall quiet, so it
-        // still needs periodic driving. Phase 2 gives it its own timer.
-        drain_stage!(ai, self.drive_ai_agent_loop(cx));
-
-        dirty
-    }
-
     pub(crate) fn drive_window_runtime_tick(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let tick_started_at = Instant::now();
-        let stage_started_at = Instant::now();
-        let mut dirty = self.refresh_window_render_inputs(window, cx);
-        dirty |= self.refresh_header_status_clock();
-        let render_input_duration = stage_started_at.elapsed();
+        // Viewport/cell-metrics reconcile happens in `render`, the header clock and
+        // connect status on their own timers; see `shell::status_clocks`.
+        let mut dirty = false;
 
         // Skip full planes when the compositor is moving/resizing the window, or
         // when there is simply nothing pending (common during pure window drag).
@@ -128,7 +35,6 @@ impl NyaTermApp {
             self.shell.runtime.connect_settle_until = None;
         }
         if self.title_drag_active(now) {
-            dirty |= self.drive_pending_focus(window, cx);
             if dirty {
                 cx.notify();
             }
@@ -137,7 +43,6 @@ impl NyaTermApp {
         let geometry_churn = window_geometry_churn_active(self.shell.viewport.last_change_at, now);
         let calm_tick = self.runtime_quiet_tick_allowed();
         if geometry_churn && calm_tick {
-            dirty |= self.drive_pending_focus(window, cx);
             if dirty {
                 cx.notify();
             }
@@ -166,7 +71,6 @@ impl NyaTermApp {
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
         {
-            dirty |= self.drive_pending_focus(window, cx);
             // During connect settle, skip blink notifies so first frames stay free.
             if !connect_settle_active(self.shell.runtime.connect_settle_until, now) {
                 let visual = self.drive_runtime_visual_plane(cx);
@@ -178,43 +82,26 @@ impl NyaTermApp {
             return true;
         }
 
-        let control = self.drive_runtime_control_plane(window, cx);
-        dirty |= control.dirty;
-
-        let data = self.drive_runtime_data_plane(window, cx);
-        dirty |= data.dirty;
-        self.shell.runtime.last_session_start_drain_duration = control.timings.session_start;
-        self.maybe_log_slow_runtime_background_event_drain(
-            data.background_total,
-            &data.background_timings,
-        );
-
         let idle = self.drive_runtime_idle_plane(window, cx);
         dirty |= idle.dirty;
 
         let visual = self.drive_runtime_visual_plane(cx);
         dirty |= visual.dirty;
 
-        let pending_session_stage_started_at = Instant::now();
-        dirty |= self.drive_pending_session_status();
-        let pending_session_status_duration = pending_session_stage_started_at.elapsed();
         let visual_dirty = dirty;
         let notify_started_at = Instant::now();
         let notify_now = notify_started_at;
         let connect_settle =
             connect_settle_active(self.shell.runtime.connect_settle_until, notify_now);
         let output_pressure_for_notify = self.runtime_output_pressure_active();
-        // Control-plane dirtiness (session start/prompts) must paint immediately.
-        let force_immediate_notify = control.dirty;
-        let throttle_active =
-            !force_immediate_notify && (output_pressure_for_notify || connect_settle);
+        let throttle_active = output_pressure_for_notify || connect_settle;
         if visual_dirty {
             self.shell.runtime.pending_ui_notify = true;
         }
         let should_notify = runtime_ui_notify_allowed(
             visual_dirty,
             self.shell.runtime.pending_ui_notify,
-            force_immediate_notify,
+            false,
             throttle_active,
             self.shell.runtime.last_ui_notify_at,
             notify_now,
@@ -233,21 +120,9 @@ impl NyaTermApp {
             tracing::warn!(
                 diagnostic = "runtime_tick",
                 total_ms = tick_duration.as_millis(),
-                render_input_ms = render_input_duration.as_millis(),
-                control_plane_ms = control.duration.as_millis(),
-                control_session_start_ms = control.timings.session_start.as_millis(),
-                control_prompts_ms = control.timings.prompts.as_millis(),
-                background_runtime_ms = data.background_total.as_millis(),
-                startup_restore_ms = idle.startup_restore.as_millis(),
-                terminal_resize_ms = idle.terminal_resize.as_millis(),
-                render_requests_ms = idle.render_requests.as_millis(),
                 render_requests_output_pressure = idle.render_request_output_pressure,
-                pending_focus_ms = idle.pending_focus.as_millis(),
-                action_link_tooltip_ms = idle.action_link_tooltip.as_millis(),
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
-                idle_lock_ms = idle.idle_lock.as_millis(),
                 visual_runtime_ms = visual.duration.as_millis(),
-                pending_session_status_ms = pending_session_status_duration.as_millis(),
                 notify_ms = notify_duration.as_millis(),
                 queued_events = self.shell.runtime.session_event_queued_events,
                 queued_output_bytes = self.shell.runtime.session_event_queued_output_bytes,
@@ -323,9 +198,6 @@ impl NyaTermApp {
                     output_pressure,
                     visual_dirty,
                     tick_ms = tick_duration.as_millis(),
-                    render_input_ms = render_input_duration.as_millis(),
-                    control_ms = control.duration.as_millis(),
-                    background_runtime_ms = data.background_total.as_millis(),
                     visual_runtime_ms = visual.duration.as_millis(),
                     notify_ms = notify_duration.as_millis(),
                     queued_session_events = self.shell.runtime.session_event_queued_events,
@@ -363,93 +235,6 @@ impl NyaTermApp {
         self.shell.runtime.event_pump_started
     }
 
-    pub(super) fn drive_runtime_control_plane(
-        &mut self,
-        _window: &mut Window,
-        _cx: &mut Context<Self>,
-    ) -> RuntimeControlPlaneResult {
-        let started_at = Instant::now();
-        let mut timings = RuntimeControlPlaneDrainTimings::default();
-        let mut dirty = false;
-
-        // Common idle path: no connecting sessions and no auth/SFTP prompts.
-        if !self.session.start_has_pending()
-            && !self.session.start_has_cancelled_results()
-            && !self.session.prompt_has_pending_or_active_prompt()
-        {
-            return RuntimeControlPlaneResult {
-                dirty: false,
-                duration: started_at.elapsed(),
-                timings,
-            };
-        }
-
-        // Session-start results arrive on their own drain task. What is left here
-        // is prompt activation, which is a state-machine step rather than a queue
-        // read: each `activate_next_*` promotes one queued prompt into the single
-        // active slot, and the next promotion happens when the user answers.
-        // Moving those onto a wake channel belongs with the Class B work.
-        // Activation runs on `start_prompt_activation_drain`. What is left is the
-        // TOTP preview, which refreshes on the code's step boundary -- time-based,
-        // so Phase 2 gives it a timer.
-        let stage_started_at = Instant::now();
-        dirty |= self.refresh_keyboard_interactive_totp();
-        timings.prompts = stage_started_at.elapsed();
-
-        RuntimeControlPlaneResult {
-            dirty,
-            duration: started_at.elapsed(),
-            timings,
-        }
-    }
-
-    pub(super) fn drive_runtime_data_plane(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> RuntimeDataPlaneResult {
-        let background_started_at = Instant::now();
-        let mut background_timings = RuntimeBackgroundDrainTimings::default();
-        let critical_background_only = self.runtime_output_pressure_active();
-        let dirty = self.drain_runtime_background_events(
-            window,
-            cx,
-            background_started_at,
-            &mut background_timings,
-            critical_background_only,
-        );
-        RuntimeDataPlaneResult {
-            dirty,
-            background_total: background_started_at.elapsed(),
-            background_timings,
-        }
-    }
-
-    pub(super) fn maybe_log_slow_runtime_background_event_drain(
-        &mut self,
-        background_total: Duration,
-        background_timings: &RuntimeBackgroundDrainTimings,
-    ) {
-        if !(background_timings.budget_exhausted
-            || background_total >= RUNTIME_BACKGROUND_EVENT_DRAIN_SLOW)
-            || !self.should_log_slow_diagnostic("runtime_background_event_drain", Instant::now())
-        {
-            return;
-        }
-        tracing::warn!(
-            diagnostic = "runtime_background_event_drain",
-            total_ms = background_total.as_millis(),
-            credential_autofill_ms = background_timings.credential_autofill.as_millis(),
-            recording_ms = background_timings.recording.as_millis(),
-            transfer_ms = background_timings.transfer.as_millis(),
-            ai_ms = background_timings.ai.as_millis(),
-            remote_ms = background_timings.remote.as_millis(),
-            maintenance_ms = background_timings.maintenance.as_millis(),
-            budget_exhausted = background_timings.budget_exhausted,
-            "slow runtime background event drain"
-        );
-    }
-
     pub(super) fn drive_runtime_idle_plane(
         &mut self,
         window: &mut Window,
@@ -465,11 +250,6 @@ impl NyaTermApp {
         // Geometry churn / connect settle: keep focus only (no remote/layout/DB).
         let demote_idle = output_pressure || geometry_churn || connect_settle;
         result.render_request_output_pressure = demote_idle;
-
-        // Focus transitions remain latency-sensitive even under pressure.
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_pending_focus(window, cx);
-        result.pending_focus = stage_started_at.elapsed();
 
         if !runtime_idle_plane_allowed(demote_idle) {
             result.dirty = dirty;
@@ -498,29 +278,9 @@ impl NyaTermApp {
         }
 
         let stage_started_at = Instant::now();
-        dirty |= self.drive_startup_restore_queue_tick(window, cx);
-        result.startup_restore = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
-        // Bounds paint path already resizes; polling is idle-plane maintenance.
-        dirty |= self.drive_terminal_resize();
-        result.terminal_resize = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_terminal_render_requests(true);
-        result.render_requests = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
-        dirty |= self.poll_action_link_tooltip_delay(cx);
-        result.action_link_tooltip = stage_started_at.elapsed();
-
-        let stage_started_at = Instant::now();
         dirty |= self.drive_remote_auto_refresh(window, cx);
         result.remote_refresh = stage_started_at.elapsed();
 
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_idle_lock(window, cx);
-        result.idle_lock = stage_started_at.elapsed();
         result.dirty = dirty;
         result
     }
@@ -531,27 +291,10 @@ impl NyaTermApp {
     ) -> RuntimeVisualPlaneResult {
         let visual_stage_started_at = Instant::now();
         let mut dirty = false;
-        let now = Instant::now();
-        let output_pressure = self.runtime_output_pressure_active()
-            || connect_settle_active(self.shell.runtime.connect_settle_until, now);
-        // Cursor blink is owned by `shell::cursor_blink`'s own timer, not by this
-        // plane: at the quiet cadence a tick-driven toggle stretched the visible
-        // half-period to roughly twice its setting.
-        let render_work_pressure =
-            terminal_render_work_pressure_active(output_pressure, self.session.start_has_pending());
-        // Large-output protection recovery accounting.
-        // Under pressure only touch views that already need recovery accounting.
-        let visible_session_ids = self.visible_terminal_session_ids();
-        let performance_session_ids = terminal_performance_tick_session_ids(&visible_session_ids);
-        let surface_paint_sessions = self.terminal.tick_session_performance(
-            performance_session_ids.iter().map(String::as_str),
-            render_work_pressure,
-            now,
-        );
-        for session_id in surface_paint_sessions {
-            self.notify_terminal_surface_only(Some(session_id.as_str()), cx);
-        }
-        // Drop overlay only while a platform drag is active.
+        // Cursor blink is owned by `shell::cursor_blink` and recovery accounting by
+        // `shell::terminal_recovery`, each on its own deadline. What is left here is
+        // the drop-hover clear, which polls `has_active_drag` on purpose: it is how a
+        // drag that ends *without* a drop on our element gets noticed.
         if !cx.has_active_drag() && self.terminal.clear_terminal_file_drop_hover() {
             dirty = true;
         }

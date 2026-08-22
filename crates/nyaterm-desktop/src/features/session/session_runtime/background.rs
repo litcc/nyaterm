@@ -168,6 +168,9 @@ impl NyaTermApp {
         // work on the click path before the worker even starts.
         let _ = append_start_log;
         self.shell.show_workspace();
+        // A pending start is the only state the "still connecting" status means
+        // anything in, so its clock is armed here rather than polled for.
+        self.ensure_pending_session_status_clock(cx);
         cx.notify();
         request_id
     }
@@ -483,9 +486,14 @@ impl NyaTermApp {
         };
         cx.spawn(async move |this, cx| {
             while let Some(event) = rx.next().await {
+                // `update_in`: pumping the restore queue opens sessions, which needs
+                // the window.
                 if this
-                    .update(cx, |this, cx| {
+                    .update_in(cx, |this, window, cx| {
                         this.apply_session_start_event(event, cx);
+                        // A start finishing is precisely when the next queued restore
+                        // may go; the idle plane used to poll for that.
+                        this.pump_startup_restore_queue_if_ready(window, cx);
                         cx.notify();
                     })
                     .is_err()

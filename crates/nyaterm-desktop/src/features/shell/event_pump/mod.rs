@@ -4,12 +4,11 @@ use futures::{FutureExt as _, StreamExt as _};
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
-    PENDING_SESSION_STATUS_INTERVAL, PENDING_SESSION_STILL_CONNECTING_AFTER,
-    PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW, RUNTIME_IDLE_TICK_INTERVAL,
-    RUNTIME_QUIET_TICK_INTERVAL, RuntimeDataPlaneDrain, RuntimeOutputPressureCounts,
-    SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS,
-    TerminalFrameApplyDecision, connect_settle_active, connect_settle_deadline,
-    pending_session_status_message, remote_refresh_due,
+    PENDING_SESSION_STILL_CONNECTING_AFTER, PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW,
+    RUNTIME_IDLE_TICK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL, RuntimeDataPlaneDrain,
+    RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD,
+    TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision, connect_settle_active,
+    connect_settle_deadline, pending_session_status_message, remote_refresh_due,
     runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
     runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
     runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
@@ -25,6 +24,19 @@ use crate::models::{HeaderStatusMode, NavItem};
 
 mod bridge;
 mod helpers;
+
+/// The pressure input recovery accounting is measured against, shared so the recovery
+/// clock computes it exactly as the visual plane did.
+pub(in crate::features) fn terminal_performance_pressure(
+    app: &NyaTermApp,
+    now: std::time::Instant,
+) -> bool {
+    let output_pressure = app.runtime_output_pressure_active()
+        || connect_settle_active(app.shell.runtime.connect_settle_until, now);
+    helpers::terminal_render_work_pressure_active(output_pressure, app.session.start_has_pending())
+}
+
+pub(super) use helpers::PENDING_SESSION_STATUS_INTERVAL;
 mod planes;
 mod session_events;
 
@@ -121,13 +133,26 @@ impl NyaTermApp {
         };
         let terminal_frames = frames_started_at.elapsed();
 
+        // Both of these read what the frame drain just applied. Autofill detection
+        // scans the active snapshot and is gated on the output backlog being low, and
+        // render requests ask for the snapshots a visible session is missing -- so the
+        // cycle that applied a frame is exactly when they want to run, rather than a
+        // cadence that has to be fast enough to notice.
+        let sideband_dirty = self.drain_pending_credential_autofill_detection(cx)
+            | self.drive_terminal_render_requests(true);
+
         // A DECSCUSR arrives as a frame, and a tab becoming visible produces a
         // snapshot, so this cycle sees every change to what the blink clock depends
         // on. Cheap: one bool once the clock is already running.
         self.ensure_cursor_blink_clock(cx);
+        // Entering degraded rendering is a consequence of output being applied, so
+        // this cycle is where recovery accounting starts needing to run.
+        self.ensure_terminal_recovery_clock(cx);
 
-        let notified =
-            self.notify_after_runtime_data_plane_drain(session_dirty || frames_dirty, cx);
+        let notified = self.notify_after_runtime_data_plane_drain(
+            session_dirty || frames_dirty || sideband_dirty,
+            cx,
+        );
         // A paint the throttle coalesced is work too: without this the task parks and
         // the tick becomes the only thing that can flush it, at up to its quiet 500ms.
         let throttled_notify = !notified && self.shell.runtime.pending_ui_notify;
@@ -157,12 +182,21 @@ impl NyaTermApp {
     /// bridge's source-side counts. Both mean a worker thread still owes us a push,
     /// and that push signals the interest armed at the top of this cycle, so parking
     /// is correct there -- and that is where the idle polling actually goes away.
+    #[cfg(test)]
+    fn runtime_data_plane_work_remaining_for_test(&self) -> bool {
+        self.runtime_data_plane_work_remaining()
+    }
+
     fn runtime_data_plane_work_remaining(&self) -> bool {
         let frame = self.terminal.frame_queue_metrics();
         !self.session.pending_events_are_empty()
             || self.session.event_bridge_queued_event_count() > 0
             || frame.pending_event_count > 0
             || frame.event_count > 0
+            // Detection is marked while output is being processed and is gated on the
+            // backlog clearing, so the cycle that marked it usually cannot run it. It
+            // clears itself when it does run, so this cannot spin.
+            || self.terminal.credential_autofill_detection_is_pending()
     }
 
     /// Whether frames may be applied this cycle. Lifted out of the runtime tick's
@@ -461,23 +495,13 @@ impl NyaTermApp {
             .visible_layout_cache_stats(self.visible_terminal_session_ids())
     }
 
-    pub(in crate::features) fn drive_idle_lock(
+    /// Put the screen into its locked state. Whether it is *time* to is decided by
+    /// `shell::idle_lock`, which owns the deadline.
+    pub(in crate::features) fn lock_screen_for_idle(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.security.screen_locked()
-            || !self.settings.summary().enable_screen_lock
-            || self.settings.summary().idle_lock_minutes == 0
-        {
-            return false;
-        }
-        let idle_for = self.security.screen_lock_idle_for();
-        let lock_after =
-            Duration::from_secs(u64::from(self.settings.summary().idle_lock_minutes) * 60);
-        if idle_for < lock_after {
-            return false;
-        }
         let lock_status = if self.settings.summary().has_master_password {
             "Enter the master password to unlock.".to_string()
         } else {
@@ -521,18 +545,9 @@ impl NyaTermApp {
         runtime_tick_interval_for_pressure(self.runtime_output_pressure_active())
     }
 
-    pub(crate) fn window_runtime_tick_needs_update(
-        &self,
-        viewport_size: (f32, f32),
-        now: Instant,
-    ) -> bool {
+    pub(crate) fn window_runtime_tick_needs_update(&self, now: Instant) -> bool {
         if !self.shell.runtime.event_pump_started {
             return false;
-        }
-        if self.shell.viewport.size != viewport_size
-            || terminal_cell_metrics_refresh_needed(self.terminal.cell_metrics())
-        {
-            return true;
         }
         if self
             .shell
@@ -565,56 +580,18 @@ impl NyaTermApp {
     }
 
     fn window_runtime_quiet_tick_has_due_work(&self) -> bool {
-        if self.header_status_clock_refresh_due() {
-            return true;
-        }
-        if self.ai.chat_focus_is_pending()
-            || self.transfer.rename_focus_is_pending()
-            || self.session.prompt_credential_focus_is_pending()
-        {
-            return true;
-        }
         if self.terminal.terminal_file_drop_hover_is_pending() {
             return true;
         }
         if self.transfer.browser_external_drop_hover_is_pending() {
             return true;
         }
-        if self.visible_terminal_performance_recovery_due() {
-            return true;
-        }
-        self.terminal_render_requests_pending()
+        self.visible_terminal_performance_recovery_due()
     }
 
-    fn visible_terminal_performance_recovery_due(&self) -> bool {
+    pub(in crate::features) fn visible_terminal_performance_recovery_due(&self) -> bool {
         self.terminal
             .visible_performance_recovery_due(self.visible_terminal_session_ids())
-    }
-
-    fn terminal_render_requests_pending(&self) -> bool {
-        let visible_session_ids = self.visible_terminal_session_ids();
-        if self
-            .terminal
-            .visible_live_snapshot_missing(visible_session_ids.iter().copied())
-        {
-            return true;
-        }
-        if visible_session_ids
-            .iter()
-            .any(|session_id| self.terminal_visual_scroll_active_for_session(Some(session_id)))
-        {
-            return true;
-        }
-        if !self.terminal.buffer_search_is_open() {
-            return false;
-        }
-        let Some(session_id) = self.session.active_id() else {
-            return false;
-        };
-        let Some(key) = self.terminal_search_key() else {
-            return false;
-        };
-        self.terminal.search_refresh_is_due(session_id, &key)
     }
 
     pub(in crate::features) fn enter_connect_settle(&mut self) {
@@ -645,13 +622,9 @@ impl NyaTermApp {
             && !self.terminal_frame_backlog_active()
             && !self.session.has_protocol_runtime_sessions()
             && !self.session.prompt_has_pending_or_active_prompt()
-            && !self.terminal.action_link_hover_is_pending()
             && !self.recording.has_pending_auto_start()
             && self.terminal.terminal_windows_restore_is_complete()
             && !self.ai.has_background_work()
-            && !self.ai.chat_focus_is_pending()
-            && !self.transfer.rename_focus_is_pending()
-            && !self.session.prompt_credential_focus_is_pending()
             && !((self.session.active_ssh_config().is_some()
                 && matches!(
                     self.current_right_panel(),
@@ -666,7 +639,7 @@ impl NyaTermApp {
                 || self.current_left_panel() == Some(NavItem::Transfers))
     }
 
-    pub(super) fn drive_pending_session_status(&mut self) -> bool {
+    pub(in crate::features) fn drive_pending_session_status(&mut self) -> bool {
         let Some((name, requested_at)) = self.session.start_pending_status_source() else {
             self.shell.runtime.last_pending_session_status_at = None;
             return false;
@@ -937,6 +910,30 @@ mod tests {
             // Nor during connect settle, where the phase is held either way.
             app.enter_connect_settle();
             assert_eq!(app.window_runtime_tick_delay(), RUNTIME_QUIET_TICK_INTERVAL);
+        });
+    }
+
+    /// A pending credential-prompt detection must not be stranded by the task parking.
+    ///
+    /// Detection is *marked* while output is being processed but is gated on the output
+    /// backlog clearing, so the cycle that marks it usually cannot also run it. If the
+    /// burst then ends, nothing further wakes the task -- which is the same failure
+    /// shape as a stranded burst tail, and why this flag is one of the things
+    /// `runtime_data_plane_work_remaining` reports.
+    #[test]
+    fn a_pending_credential_detection_keeps_the_drain_task_coming_back() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                !app.terminal.credential_autofill_detection_is_pending(),
+                "the fixture must start with nothing outstanding"
+            );
+            app.terminal.mark_credential_autofill_detection_for_test();
+            assert!(
+                app.runtime_data_plane_work_remaining_for_test(),
+                "a marked detection must keep the task on its paced re-arm rather than                  letting it park with the detection never run"
+            );
         });
     }
 

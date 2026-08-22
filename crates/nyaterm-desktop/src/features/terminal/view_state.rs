@@ -6,9 +6,7 @@ use std::time::Instant;
 use futures::channel::mpsc::UnboundedReceiver;
 
 use super::state::TerminalFeatureState;
-use crate::models::{
-    TerminalFrameSearchKey, TerminalViewState, terminal_frame_search_result_is_current,
-};
+use crate::models::TerminalViewState;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::features) struct TerminalFrameQueueMetrics {
@@ -225,31 +223,6 @@ impl TerminalFeatureState {
                     .as_ref()
                     .is_some_and(|snapshot| snapshot.cursor.blinking)
             })
-        })
-    }
-
-    pub(in crate::features) fn visible_live_snapshot_missing<'a>(
-        &self,
-        session_ids: impl IntoIterator<Item = &'a str>,
-    ) -> bool {
-        session_ids.into_iter().any(|session_id| {
-            self.view
-                .views
-                .get(session_id)
-                .is_some_and(|view| view.frame_snapshot.is_none() && view.scroll_offset == 0)
-        })
-    }
-
-    pub(in crate::features) fn search_refresh_is_due(
-        &self,
-        session_id: &str,
-        key: &TerminalFrameSearchKey,
-    ) -> bool {
-        self.view.views.get(session_id).is_some_and(|view| {
-            view.pending_search_key.as_ref() != Some(key)
-                && !view.search_result.as_ref().is_some_and(|result| {
-                    terminal_frame_search_result_is_current(result, key, view.screen_revision)
-                })
         })
     }
 
