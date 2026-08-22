@@ -599,6 +599,20 @@ impl NyaTermApp {
         let desired_geometry =
             self.desired_terminal_resize_geometry_for_session_hint(geometry_session_hint);
         let build_context = self.ssh_session_config_build_context();
+        let multiplex_key = match &connection.config {
+            ConnectionType::Ssh {
+                host,
+                port,
+                username,
+                ..
+            } => Some(format!(
+                "{}@{}:{}",
+                username.trim(),
+                host.trim().to_ascii_lowercase(),
+                port
+            )),
+            _ => None,
+        };
         let request_id = self.register_pending_session_start(
             PendingSessionStartRegistration {
                 connection_name: connection_name.clone(),
@@ -612,7 +626,7 @@ impl NyaTermApp {
                 insert_index,
                 seed_output,
                 startup_command,
-                multiplex_key: None,
+                multiplex_key,
                 source_connection_id,
                 reconnect_session_id,
                 workspace_split,
@@ -634,19 +648,23 @@ impl NyaTermApp {
                     &mut Vec::new(),
                     &build_context,
                 )?;
-                config.deferred_pty = true;
+                // Open the PTY as soon as the registration barrier is released. The terminal
+                // surface sends its actual viewport resize after layout; waiting for that command
+                // here adds a fixed startup delay before the first remote bytes can be read.
+                config.deferred_pty = false;
                 if let Some(geometry) = desired_geometry {
                     config.cols = geometry.cols;
                     config.rows = geometry.rows;
                     config.pixel_width = geometry.pixel_width;
                     config.pixel_height = geometry.pixel_height;
                 }
-                let session_info = session_manager
-                    .create_ssh_session(config.clone())
+                let (session_info, multiplex, ssh_start_handle) = session_manager
+                    .create_ssh_session_with_shared_handle_deferred(config.clone())
                     .map_err(|error| error.to_string())?;
                 Ok(SessionStartSuccess {
                     session_info,
-                    multiplex_handle: None,
+                    multiplex_handle: Some(multiplex),
+                    ssh_start_handle: Some(ssh_start_handle),
                     launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
                 })
             })();
@@ -865,7 +883,7 @@ pub(in crate::features) fn build_ssh_session_config_with_context(
             .map(map_ssh_algorithm_preferences),
         sftp: map_sftp_settings(&connection.sftp),
         terminal_shell_integration: context.terminal_shell_integration,
-        deferred_pty: true,
+        deferred_pty: false,
         keep_alive_interval_secs: context.keep_alive_interval_secs,
         cols: 80,
         rows: 24,
