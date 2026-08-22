@@ -462,23 +462,13 @@ impl NyaTermApp {
             .visible_layout_cache_stats(self.visible_terminal_session_ids())
     }
 
-    pub(in crate::features) fn drive_idle_lock(
+    /// Put the screen into its locked state. Whether it is *time* to is decided by
+    /// `shell::idle_lock`, which owns the deadline.
+    pub(in crate::features) fn lock_screen_for_idle(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.security.screen_locked()
-            || !self.settings.summary().enable_screen_lock
-            || self.settings.summary().idle_lock_minutes == 0
-        {
-            return false;
-        }
-        let idle_for = self.security.screen_lock_idle_for();
-        let lock_after =
-            Duration::from_secs(u64::from(self.settings.summary().idle_lock_minutes) * 60);
-        if idle_for < lock_after {
-            return false;
-        }
         let lock_status = if self.settings.summary().has_master_password {
             "Enter the master password to unlock.".to_string()
         } else {

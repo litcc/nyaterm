@@ -242,7 +242,6 @@ impl NyaTermApp {
                 render_requests_output_pressure = idle.render_request_output_pressure,
                 pending_focus_ms = idle.pending_focus.as_millis(),
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
-                idle_lock_ms = idle.idle_lock.as_millis(),
                 visual_runtime_ms = visual.duration.as_millis(),
                 notify_ms = notify_duration.as_millis(),
                 queued_events = self.shell.runtime.session_event_queued_events,
@@ -505,9 +504,6 @@ impl NyaTermApp {
         dirty |= self.drive_remote_auto_refresh(window, cx);
         result.remote_refresh = stage_started_at.elapsed();
 
-        let stage_started_at = Instant::now();
-        dirty |= self.drive_idle_lock(window, cx);
-        result.idle_lock = stage_started_at.elapsed();
         result.dirty = dirty;
         result
     }

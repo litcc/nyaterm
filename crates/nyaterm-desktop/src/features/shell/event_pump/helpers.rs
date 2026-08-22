@@ -105,7 +105,6 @@ pub(super) struct RuntimeIdlePlaneResult {
     pub(super) render_request_output_pressure: bool,
     pub(super) pending_focus: Duration,
     pub(super) remote_refresh: Duration,
-    pub(super) idle_lock: Duration,
 }
 
 pub(super) struct RuntimeVisualPlaneResult {

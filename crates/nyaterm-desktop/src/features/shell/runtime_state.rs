@@ -90,6 +90,8 @@ pub(super) struct ShellRuntimeState {
     header_status_clock_armed: bool,
     /// True while the "still connecting" status clock task is alive.
     pending_session_status_clock_armed: bool,
+    /// True while the idle screen-lock clock task is alive.
+    idle_lock_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -165,6 +167,7 @@ impl Default for ShellRuntimeState {
             cursor_blink_clock_armed: false,
             header_status_clock_armed: false,
             pending_session_status_clock_armed: false,
+            idle_lock_clock_armed: false,
         }
     }
 }
@@ -250,6 +253,14 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_pending_session_status_clock_armed(&mut self, armed: bool) {
         self.runtime.pending_session_status_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn idle_lock_clock_is_armed(&self) -> bool {
+        self.runtime.idle_lock_clock_armed
+    }
+
+    pub(in crate::features) fn set_idle_lock_clock_armed(&mut self, armed: bool) {
+        self.runtime.idle_lock_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {
