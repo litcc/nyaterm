@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use gpui::{App, Bounds, Context, FontFeatures, FontWeight, Pixels, Point, px};
@@ -178,42 +179,37 @@ impl NyaTermApp {
         }
 
         let mut candidates = Vec::<ResolvedAppearanceFont>::new();
-        candidates.extend(
-            configured_font
-                .fallback_families
-                .iter()
-                .map(|family| configured_font.with_primary_family(family)),
-        );
+        let mut seen_families = HashSet::new();
+        let mut add_candidate = |candidate: ResolvedAppearanceFont| {
+            let family = candidate.family.trim().to_ascii_lowercase();
+            if !family.is_empty() && seen_families.insert(family) {
+                candidates.push(candidate);
+            }
+        };
+        // Preserve the user's fallback order before applying platform defaults.
+        for family in &configured_font.fallback_families {
+            add_candidate(configured_font.with_primary_family(family));
+        }
+        for family in self.settings.terminal_font_options() {
+            add_candidate(self.gpui_terminal_font_for_family(family));
+        }
         #[cfg(target_os = "macos")]
-        candidates.extend(
-            ["Menlo", "Monaco", "SF Mono"]
-                .into_iter()
-                .map(|family| self.gpui_terminal_font_for_family(family)),
-        );
+        for family in ["Menlo", "Monaco", "SF Mono"] {
+            add_candidate(self.gpui_terminal_font_for_family(family));
+        }
         #[cfg(target_os = "windows")]
-        candidates.extend(
-            ["Consolas", "Cascadia Mono"]
-                .into_iter()
-                .map(|family| self.gpui_terminal_font_for_family(family)),
-        );
+        for family in ["Consolas", "Cascadia Mono"] {
+            add_candidate(self.gpui_terminal_font_for_family(family));
+        }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        candidates.extend(
-            ["DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"]
-                .into_iter()
-                .map(|family| self.gpui_terminal_font_for_family(family)),
-        );
-        candidates.extend(
-            self.settings
-                .terminal_font_options()
-                .iter()
-                .map(|family| self.gpui_terminal_font_for_family(family)),
-        );
-        candidates.extend(
-            text_system
-                .all_font_names()
-                .into_iter()
-                .map(|family| self.gpui_terminal_font_for_family(&family)),
-        );
+        for family in ["DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"] {
+            add_candidate(self.gpui_terminal_font_for_family(family));
+        }
+        // Enumerate the system only after preferred candidates. The result is
+        // still evaluated once and then retained by font_metrics_cache.
+        for family in text_system.all_font_names() {
+            add_candidate(self.gpui_terminal_font_for_family(&family));
+        }
 
         for candidate in candidates {
             if let Some(width) = measure_terminal_font(text_system, &candidate, size, weight) {
