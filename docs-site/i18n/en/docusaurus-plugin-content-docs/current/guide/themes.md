@@ -15,16 +15,35 @@ In **Settings → Appearance**, you can configure these separately:
 
 If you just want a quick theme switch, you can also use **View → Theme** from the top menu.
 
-NyaTerm ships a built-in high-contrast theme named **Nya High Contrast**, which is well suited for accessibility, bright environments, or screen sharing where stronger contrast helps readability. You can select it like any other UI theme from **Settings → Appearance** or the **View → Theme** top menu.
+The theme list includes two high-contrast themes, suited for accessibility, bright environments, or screen sharing:
+
+- **Nya HC** — high contrast on a dark base
+- **Nya HC White** — high contrast on a light base
+
+Select them like any other UI theme from **Settings → Appearance** or the **View → Theme** top menu.
+
+## Minimum contrast
+
+**Settings → Appearance → Minimum contrast** automatically adjusts the terminal foreground color when it sits too close to the background, so a remote program's color choices stay readable under your current theme. Available steps:
+
+| Step | Meaning |
+|------|---------|
+| Off | No adjustment; colors render exactly as the remote sends them |
+| Slight boost | At least 3:1 contrast |
+| Recommended: WCAG AA | At least 4.5:1 contrast |
+| High contrast: WCAG AAA | At least 7:1 contrast |
+| Maximum | At least 21:1 contrast, i.e. forced to pure black or white |
+
+It only affects how terminal output is rendered; it does not change the theme's own color definitions.
 
 ## Background image
 
-In **Settings → Appearance**, the main window can now use a local wallpaper. The controls are easiest to follow by their exact UI names:
+In **Settings → Appearance**, the main window can use a local wallpaper:
 
-- `Background Image` — choose the local file rendered behind the main workspace
-- `Image Sizing` — choose how the image is shown with `cover`, `contain`, `stretch`, or `tile`
-- `Image Opacity` — control how strongly the wallpaper shows through the theme
-- `Background Content Opacity` — control how translucent workspace panels and content surfaces become
+- **Background Image** — choose the local file rendered behind the main workspace
+- **Image Sizing** — choose how the image is shown with `cover`, `contain`, `stretch`, or `tile`
+- **Image Opacity** — control how strongly the wallpaper shows through the theme
+- **Background Content Opacity** — control how translucent workspace panels and content surfaces become; lower values make the wallpaper more visible
 
 This only affects the main window workspace. Settings and child windows stay solid so forms, dialogs, and secondary windows remain readable.
 
@@ -36,15 +55,11 @@ In **Settings → Appearance**, you can adjust:
 - **Terminal font size**
 - **UI font size**
 
-NyaTerm includes these built-in fonts:
+The default font family is `JetBrains Mono, Noto Sans SC Variable, Inter`: the terminal falls back to `JetBrains Mono` and the UI falls back to `Inter`.
 
-- `JetBrains Mono`
-- `Noto Sans SC Variable`
-- `Inter`
+These are **font names, not font files shipped with the app**. NyaTerm resolves them from your system-installed fonts, so on a machine without `JetBrains Mono` the terminal falls back to the platform's default monospace font. If you want this exact stack, install the fonts yourself.
 
-System-installed fonts are also listed so you can extend the fallback chain.
-
-System font discovery now runs asynchronously, so you may briefly see `Loading system fonts...` when opening the font picker. That simply means the app is still collecting installed fonts in the background.
+The font picker lists system-installed fonts so you can build a fallback chain, and the terminal font dropdown only offers families that measure as monospace. System font discovery runs asynchronously, so you may briefly see `Loading system fonts...` when opening the picker; you can still type a font name in the meantime.
 
 ## Cursor
 

@@ -8,9 +8,17 @@ sidebar_position: 1
 
 NyaTerm supports the following operating systems:
 
-- **Windows** 10/11 (64-bit)
-- **macOS** 12+ (Intel & Apple Silicon)
-- **Linux** (Ubuntu 20.04+, Fedora 36+, Arch Linux, and similar distributions)
+- **Windows** 10/11 (x64 / ARM64)
+- **macOS** 12+ (Intel / Apple Silicon)
+- **Linux** (x64 / ARM64; Ubuntu 20.04+, Fedora 36+, Arch Linux, and similar distributions)
+
+NyaTerm renders natively on the GPU through GPUI, so it has graphics requirements:
+
+- **Linux**: a working Vulkan driver (for example `libvulkan1` and `mesa-vulkan-drivers`) plus an X11 or Wayland session. The application will not start without a Vulkan driver
+- **macOS**: uses Metal, which ships with the system
+- **Windows**: uses the system graphics driver; usually nothing extra is needed
+
+NyaTerm is a desktop client, not a terminal multiplexer, so it is not applicable on a headless SSH-only server.
 
 ## Download and install
 

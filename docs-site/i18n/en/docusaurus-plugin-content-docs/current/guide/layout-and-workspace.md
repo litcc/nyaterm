@@ -39,24 +39,17 @@ This makes NyaTerm a good fit for separating:
 - Different projects
 - Different task phases
 
-## Command Palette and session quick switcher
+## Command Palette
 
-The **Command Palette** helps you find app actions, session entry points, and common workspace workflows. Open it from the top menu or keyboard shortcut, then filter by keyword.
+The **Command Palette** is a searchable overlay opened with `Ctrl / Cmd + Shift + S` (labeled **Open Command Palette** in settings). It searches three kinds of entries:
 
-It is useful for:
+- **Active sessions** — tabs you already have open
+- **Pending sessions** — sessions that were started but have not connected yet, including the failure reason
+- **Saved connections** — entries from your connection list; selecting one starts the connection
 
-- Opening or switching to an existing session
-- Creating new SSH or Local Terminal sessions
-- Finding settings, panel toggles, lock actions, and other app-level commands
-- Staying keyboard-first while navigating the workspace
+Use the arrow keys to select and Enter to open. When you have many tabs and connections open, this is the fastest way to navigate.
 
-### Session quick switcher
-
-When you have many tabs and connections open, the session quick switcher is the fastest way to navigate. It is a command-palette-style searchable dialog that you open via its keyboard shortcut or activity-bar entry.
-
-- Search across saved connections and local sessions by name
-- Open or switch to a session with the keyboard or mouse
-- Use the built-in shortcut to create a new SSH session right from the dialog
+The palette only searches sessions and connections. It does **not** contain app-level actions such as opening settings, toggling panels, or locking the screen — those live in the top menu and keyboard shortcuts.
 
 ## Split panes
 
@@ -113,11 +106,11 @@ The right side is mainly for live state and navigation:
 - Saved connections
 - Active sessions
 - Command history
-- Resource monitor, GPU monitor, process manager, and Docker manager (SSH sessions)
+- Resource Monitor, NVIDIA GPU Monitor, Ascend NPU Monitor, Process Manager, and Docker Manager (SSH sessions)
 
 If your workflow is "pick a connection, then inspect live state," this split feels natural.
 
-The GPU monitor, process manager, and Docker manager panels are off by default; enable them per panel in **Settings → Terminal**. When a panel is disabled its activity-bar icon is hidden, and monitor panels only bind to a genuinely active SSH session.
+The five monitoring panels only make sense for SSH sessions, and each is shown or hidden by its own toggle in **Settings → Terminal**; turning a toggle off also hides its activity-bar icon. Resource Monitor, Process Manager, and Docker Manager are on by default; the two accelerator panels are off. See [Terminal Features → Remote host monitoring panels](./terminal#remote-host-monitoring-panels).
 
 The **AI Assistant** panel can use the active pane as context to generate commands, explain output or selected text, analyze errors, and create approved quick commands.
 

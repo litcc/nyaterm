@@ -8,9 +8,17 @@ sidebar_position: 1
 
 NyaTerm 支持以下操作系统：
 
-- **Windows** 10/11 (64-bit)
-- **macOS** 12+ (Intel & Apple Silicon)
-- **Linux**（Ubuntu 20.04+、Fedora 36+、Arch Linux 等）
+- **Windows** 10/11（x64 / ARM64）
+- **macOS** 12+（Intel / Apple Silicon）
+- **Linux**（x64 / ARM64；Ubuntu 20.04+、Fedora 36+、Arch Linux 等）
+
+NyaTerm 用 GPUI 做原生 GPU 渲染，因此对图形环境有要求：
+
+- **Linux**：需要可用的 Vulkan 驱动（例如 `libvulkan1` 和 `mesa-vulkan-drivers`），以及 X11 或 Wayland 会话。缺少 Vulkan 驱动时应用无法启动
+- **macOS**：使用 Metal，系统自带
+- **Windows**：使用系统图形驱动，通常无需额外安装
+
+如果你在纯 SSH 的无头服务器上，NyaTerm 不适用——它是桌面客户端，不是终端复用器。
 
 ## 下载安装
 

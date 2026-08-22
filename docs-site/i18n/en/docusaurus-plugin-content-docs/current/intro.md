@@ -83,7 +83,7 @@ NyaTerm currently supports six session types:
 
 ### Cloud Sync
 
-- Sync NyaTerm's portable configuration data through **WebDAV**, **S3-compatible** storage, Gist, or drive providers
+- Seven remote storage backends: **WebDAV**, **S3-compatible** storage, **Gitee Snippet**, **GitHub Gist**, **Google Drive**, **OneDrive**, and **AliyunDrive**
 - Configure a master password in **Settings → Security** before using **Settings → Cloud Sync**
 - Support startup checks, debounced auto-push after supported local changes, and manual push / pull
 - Resolve snapshot-level conflicts from the settings page or the in-workspace history panel when both local and remote state changed

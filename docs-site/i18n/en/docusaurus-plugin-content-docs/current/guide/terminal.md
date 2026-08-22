@@ -29,15 +29,18 @@ In **Settings → Interaction**, you can also adjust:
 
 ### Scrollback, fonts, and zoom
 
-- The default scrollback buffer keeps **5000 lines**
+- The default scrollback buffer keeps **5000 lines**, adjustable from **100 to 100000**
 - You can customize font family, font size, normal font weight, bold font weight, cursor style, and cursor blink
 - Use the menu or keyboard shortcuts to zoom in, zoom out, or reset zoom; the terminal root coordinates zoom handling so nested workspaces do not process it twice
 - **Hardware acceleration** is enabled by default; you can toggle it manually in **Settings → Terminal** when diagnosing rendering or driver issues
 
 ### Paste and input compatibility
 
-- Terminal settings can control image path pasting, which is useful when you want to pass screenshot or local image paths to command-line tools
+- **Multi-line paste prompt** is on by default. Pasting multi-line text first opens a review window where you can paste directly, send line by line, or cancel
+- Terminal settings can control image path pasting, so you can pass screenshot or local image paths to command-line tools
+- **Allow OSC 52 clipboard writes** controls whether remote applications can write to your local clipboard through terminal output. It lets remote tmux or vim copy straight to your machine, at the cost of giving remote processes the ability to write your local clipboard
 - On macOS, enable the IME compatibility option in **Settings → Interaction** if composition text, candidate windows, or special key behavior feels wrong
+- On macOS, enable **Treat Option as Meta/Alt** in **Settings → Interaction** if you want `Option+f` to send `ESC` plus the key instead of typing `ƒ`
 - In interactive programs such as vim, less, or top, NyaTerm suppresses command suggestions so history completions do not interfere with the program's own input handling
 
 ## Command history and suggestions
@@ -85,6 +88,50 @@ The amount of inline output is controlled by `Terminal Output Lines` in **Settin
 - Set it to `0` to disable inline terminal previews
 - This setting changes the AI workflow feedback, not the underlying shell execution itself
 
+### Command cards and risk control
+
+Commands returned by AI can be shown as structured cards carrying a risk level. **Settings → AI** decides:
+
+- Which risk levels may execute without approval
+- Whether command risk checking is enabled
+- Whether generated commands may be saved as quick commands
+- Whether AI history is recorded
+
+### Providers and models
+
+AI capabilities support:
+
+- Built-in provider configuration
+- Custom **OpenAI Compatible** providers
+- Per-model enable / disable
+- A default model selection
+- Context line limits and request timeouts
+
+If you plan to use this in production or on a restricted network, configure provider, model, and risk thresholds in **Settings → AI** first.
+
+See [AI Assistant](./ai-assistant) for the full feature description.
+
+## Command risk assessment
+
+NyaTerm can assess risk in real time as you type a command manually, and shows a prompt when a rule matches:
+
+- Risk level
+- Why it matched
+- A safer alternative suggestion
+
+Local rules use four tiers, and they classify by command *shape* rather than command name:
+
+| Level | Examples |
+|-------|----------|
+| Critical | `rm -rf /`, `mkfs`, `wipefs`, `dd` to a block device, fork bombs, `shutdown` / `reboot` / `poweroff`, stopping sshd |
+| High | anything starting with `sudo`, `rm -r` / `rm -f`, `chmod -R` / `chown -R`, package installs and removals, `docker rm` / `system prune`, `kubectl delete` / `drain` / `apply`, `git reset --hard` |
+| Medium | bare `chmod` / `chown`, redirects `>` / `>>`, `cp` / `mv` / `mkdir` / `touch`, `git pull` / `merge`, `npm run`; anything matching no rule also lands here |
+| Low | read-only diagnostics such as `ls`, `cat`, `ps`, `df`, `docker ps`, `kubectl get`, `git status` |
+
+Note that `chmod` and `chown` are only medium on their own — the recursive `-R` flag is what raises them to high. Likewise `rm -rf /` and an ordinary `rm -rf ./build` are not the same tier.
+
+You can proceed anyway or use the suggested alternative. This requires **Command risk checking** in **Settings → AI**.
+
 ## Optional terminal enhancements
 
 These features are intentionally opt-in rather than enabled all at once.
@@ -111,6 +158,14 @@ Notes:
 - First enable **Action Links** in **Settings → Terminal**
 - Opening a link requires **Ctrl / Cmd + click** to avoid conflicts with normal text selection
 - The three matcher groups can be enabled or disabled separately
+
+### Terminal row zebra stripes
+
+**Terminal row zebra stripes** is off by default. Enabling it highlights the shell input region and the row you click, which helps locate the current input position in dense output.
+
+### Low latency mode
+
+**Low latency mode** is off by default. Enabling it temporarily skips command suggestions, keyword highlighting, and action-link enrichment to keep terminal input and scrolling on the shortest path. Useful during high-throughput output or on high-latency links, at the cost of disabling the other enhancements on this page while it is on.
 
 ### Keyword highlighting
 
@@ -174,18 +229,30 @@ Terminal output is processed in batches before the screen is updated. This helps
 
 For SSH sessions, you can configure a Keep-Alive interval in **Settings → Terminal**:
 
-- Default is **30 seconds**
+- Default is **30 seconds**, adjustable from **0 to 600 seconds**
 - Set it to `0` to disable it
 - Useful for reducing idle disconnects on long-lived sessions
 
+The same group also has a **Keep-alive mode** with **Disabled**, **Compatible**, and **Strict**. The current SSH runtime gives **Strict** the same transport behavior as **Compatible**; the option only records configuration intent.
+
 ### Remote host monitoring panels
 
-NyaTerm provides four right-side monitoring panels for SSH sessions: **Resource Monitor**, **GPU Monitor**, **Process Manager**, and **Docker Manager**. They share some behavior:
+NyaTerm provides five right-side monitoring panels for SSH sessions: **Resource Monitor**, **NVIDIA GPU Monitor**, **Ascend NPU Monitor**, **Process Manager**, and **Docker Manager**. They share some behavior:
 
 - They only make sense for an **SSH session**, and bind only to a genuinely active SSH session
 - Each is shown or hidden by its own toggle in **Settings → Terminal**; turning a toggle off also hides its activity-bar icon
-- GPU, process, and Docker panels accept **3 to 120 seconds**; the resource-monitor panel separately accepts **1 to 60 seconds**
+- GPU, NPU, process, and Docker panels accept **3 to 120 seconds**; the resource-monitor panel separately accepts **1 to 60 seconds**
 - A panel stops refreshing after several consecutive polling failures, to avoid repeatedly hitting an unsupported host
+
+Default toggle states are below. Note that Process Manager and Docker Manager are **on by default**:
+
+| Panel | Setting | Default | Default interval |
+|-------|---------|---------|------------------|
+| Resource Monitor | Show remote resource info | On | 3 s |
+| NVIDIA GPU Monitor | Show NVIDIA GPU Monitor | Off | 3 s |
+| Ascend NPU Monitor | Show Ascend NPU Monitor | Off | 3 s |
+| Process Manager | Show Process Manager | On | 5 s |
+| Docker Manager | Show Docker Manager | On | 10 s |
 
 #### Resource Monitor
 
@@ -204,9 +271,9 @@ The panel displays:
 - Memory usage
 - Network throughput
 
-#### GPU Monitor
+#### NVIDIA GPU Monitor
 
-The **GPU Monitor** panel shows NVIDIA GPU status on the remote host. It is off by default; enable **Show GPU Monitor** in **Settings → Terminal** (default poll interval 3 seconds).
+The **NVIDIA GPU Monitor** panel shows NVIDIA GPU status on the remote host. It is off by default; enable **Show NVIDIA GPU Monitor** in **Settings → Terminal**.
 
 The panel displays:
 
@@ -217,9 +284,22 @@ The panel displays:
 
 If the remote host has no NVIDIA GPU or is missing `nvidia-smi`, the panel shows a matching empty state.
 
+#### Ascend NPU Monitor
+
+The **Ascend NPU Monitor** panel shows Ascend NPU status on the remote host. It is off by default; enable **Show Ascend NPU Monitor** in **Settings → Terminal**.
+
+The panel displays:
+
+- Driver version and CANN version
+- Summary: NPU count, highest AI Core utilization, memory usage, highest temperature
+- Per device: device index, Physical ID, Bus ID, AI Core utilization, memory usage, temperature, and power draw
+- A searchable NPU compute process list
+
+If the remote host returns no Ascend NPU information, the panel shows a matching empty state.
+
 #### Process Manager
 
-The **Process Manager** panel shows a live process list from the remote host. It is off by default; enable **Show Process Manager** in **Settings → Terminal** (default poll interval 5 seconds).
+The **Process Manager** panel shows a live process list from the remote host. It is **on by default**; turn off **Show Process Manager** in **Settings → Terminal** to hide it.
 
 Key capabilities:
 
@@ -232,7 +312,7 @@ If the remote host does not support process queries, the panel shows a distinct 
 
 #### Docker Manager
 
-The **Docker Manager** panel manages Docker on the remote host. It is off by default; enable **Show Docker Manager** in **Settings → Terminal** (default poll interval 10 seconds).
+The **Docker Manager** panel manages Docker on the remote host. It is **on by default**; turn off **Show Docker Manager** in **Settings → Terminal** to hide it.
 
 Key capabilities:
 

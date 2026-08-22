@@ -19,7 +19,7 @@ Understanding the differences helps explain why some panels or enhancements only
 
 | Session Type | Typical scenario | Key capabilities |
 |--------------|------------------|------------------|
-| SSH | Remote Linux / Unix administration | SFTP, OTP, resource / GPU / process / Docker monitoring, proxy, jump host, tunnels, algorithm preferences |
+| SSH | Remote Linux / Unix administration | SFTP, OTP, resource / NVIDIA GPU / Ascend NPU / process / Docker monitoring, proxy, jump host, tunnels, algorithm preferences |
 | Local Terminal | Local shell work, scripts, builds | Shared terminal UI, command history, split panes |
 | Telnet | Legacy devices, lab environments, compatibility troubleshooting | Terminal workspace features with `Backspace Mode`, but not SSH-only features |
 | Serial | Routers, switches, boards, embedded debug ports | Serial port settings, `Backspace Mode`, and terminal workspace features |
@@ -33,7 +33,7 @@ SSH is the most capable session type in NyaTerm. It is the best fit when you nee
 - Log in to remote Linux / Unix hosts
 - Browse and transfer remote files
 - Use OTP, jump hosts, or proxies
-- Watch remote resource, GPU, process, and Docker monitoring
+- Watch remote resource, NVIDIA GPU, Ascend NPU, process, and Docker monitoring
 - Configure port tunnels
 - Fine-tune negotiated SSH algorithms
 

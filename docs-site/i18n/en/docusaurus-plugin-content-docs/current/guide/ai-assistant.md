@@ -64,24 +64,33 @@ AI commands are displayed as structured cards with:
 - Execute or approval actions
 - Save-as-quick-command option
 
-### Risk levels
+### How the risk level is decided
 
-| Level | Meaning | Default behavior |
-|------|---------|------------------|
-| Low | Read-only or information-query commands | Can be auto-executed |
-| Medium | File or configuration changes | Depends on settings |
-| High | Deletion, permission changes, and similar impact | Requires approval |
-| Critical | Destructive patterns such as `chmod`, `chown`, or `rm -rf` | Requires confirmation text |
+The risk level is not the model's call alone. NyaTerm takes the **higher** of the model's self-reported level and the **local rule verdict** as the effective level, so a model that underestimates risk still gets stopped by local rules. The command card lists both sources.
 
-In **Settings → AI**, you can configure:
+The local tiers are documented in [Terminal Features → Command risk assessment](./terminal#command-risk-assessment). Note that tiers classify by command shape, not command name: bare `chmod` / `chown` is medium and only becomes high with `-R`; `rm -rf /` is critical while `rm -rf ./build` is high.
 
-- Highest risk level that may auto-execute
-- Whether risk checks are enabled
-- Whether generated commands can be saved as quick commands
+### Command execution policy
+
+The effective level decides whether a command may run, together with **Command execution policy** in **Settings → AI → Agent Settings**:
+
+| Policy | Behavior |
+|--------|----------|
+| Confirm before execution | Every command needs your confirmation |
+| Fully automatic | No confirmation; commands run directly |
+| Smart approval | Runs automatically when the effective level is at or below **Smart mode auto-execute ceiling**, otherwise waits for approval |
+
+**Smart approval** has one hard rule: **critical risk always requires manual confirmation**, even with the auto-execute ceiling raised to its maximum.
+
+**Settings → AI** also configures:
+
+- **Smart mode auto-execute ceiling**
+- Whether command risk checking is enabled
+- Whether generated commands may be saved as quick commands
 
 ### Safer alternatives
 
-When AI detects a high-risk command, it may also provide a safer alternative command.
+When a command is judged high risk, AI may also provide a safer alternative command.
 
 ## Recent output and inline terminal output
 

@@ -17,8 +17,13 @@ nyaterm-app
             ├─ nyaterm-terminal-gpui     terminal layout, input, and painting
             ├─ nyaterm-terminal          terminal state machine and snapshots
             ├─ nyaterm-transport         PTY, SSH, SFTP, and other protocols
+            ├─ nyaterm-remote-desktop    RDP/VNC session management and helper IPC
             ├─ nyaterm-store             redb, transactions, compatibility readers
             └─ nyaterm-core              pure models, formats, and policies
+
+  separate processes (IPC only; never linked into the application)
+       ├─ nyaterm-rdp-helper            IronRDP decoding
+       └─ nyaterm-vnc-helper            vnc-rs decoding
 ```
 
 The main responsibilities are:
@@ -33,6 +38,9 @@ The main responsibilities are:
 | `nyaterm-transport` | PTY, SSH, Telnet, Serial, SFTP, tunnels, remote operations, and transfer protocols |
 | `nyaterm-store` | redb persistence, transactions, encryption adapters, and compatibility readers |
 | `nyaterm-core` | Domain models, compatibility formats, parsing, policies, and pure logic |
+| `nyaterm-remote-desktop` | UI-independent RDP/VNC session management, framebuffer and input models, certificate policy, clipboard state, and the helper IPC contracts |
+| `nyaterm-rdp-helper` | Isolated IronRDP helper process |
+| `nyaterm-vnc-helper` | Isolated VNC helper process; owns the forked `vnc-rs` decoders, the reconnect ladder, and the server-facing policy gates |
 | `nyaterm-otp` | HOTP/TOTP compatibility implementation |
 
 ## Startup
@@ -91,9 +99,23 @@ nyaterm-terminal-gpui layout, input, and painting
 
 Schema-neutral contracts such as configuration models, backup formats, cloud-sync documents, and encryption policies live in `nyaterm-core`. Database implementation and legacy-data readers live in `nyaterm-store`. Existing table names, keys, field names, encryption prefixes, `.nya` backups, and Dragonfly fallbacks are compatibility boundaries.
 
+## RDP / VNC process isolation
+
+The RDP and VNC protocol decoders parse **server-controlled bytes**, so they live in no crate the application links. Each runs in its own helper process and talks to the application through the typed IPC protocol in `nyaterm-remote-desktop`.
+
+What that boundary means:
+
+- A decoder crash cannot take the application down. Both helpers must translate a decoder panic into a fatal IPC error rather than dying silently
+- `nyaterm-remote-desktop` owns no decoder. It handles session management, framebuffer and input models, certificate policy, and clipboard state
+- The VNC server-facing policy gates (`view_only`, `shared`, clipboard enablement) must stay enforced in the helper, not only in the application
+- The application resolves helper paths beside its own executable; `NYATERM_RDP_HELPER` / `NYATERM_VNC_HELPER` override that
+
+Both helper crates carry a `tests/lifecycle.rs` covering the handshake, an ordinary disconnect, and crash/hang reaping. Keep both in step when the IPC contract changes.
+
 ## Dependency rules
 
-- `nyaterm-core`, `nyaterm-terminal`, and `nyaterm-transport` stay independent of GPUI.
+- `nyaterm-core`, `nyaterm-terminal`, `nyaterm-transport`, and `nyaterm-remote-desktop` stay independent of GPUI.
+- Protocol decoders that parse server-controlled bytes live only in the helper crates, never in a crate the application links.
 - Desktop features use `nyaterm-ui` for ordinary inputs, selects, menus, switches, and dialogs.
 - Modules use normal Rust module trees and explicit imports.
 - New features prefer an existing focused feature state; add an authoritative Entity only when an independent lifecycle requires one.

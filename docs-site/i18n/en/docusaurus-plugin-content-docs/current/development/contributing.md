@@ -20,6 +20,7 @@ Thank you for your interest in contributing to NyaTerm.
 - Terminal state and snapshots belong in `nyaterm-terminal`; GPUI terminal painting belongs in `nyaterm-terminal-gpui`.
 - GPUI state, views, and background coordination belong in `nyaterm-desktop`.
 - Shared GPUI controls and theme integration belong in `nyaterm-ui`.
+- RDP/VNC session management, input models, and IPC contracts belong in `nyaterm-remote-desktop`; protocol decoders belong only in `nyaterm-rdp-helper` and `nyaterm-vnc-helper`.
 
 Cross-crate changes keep adapters small and explicit, with one authoritative owner for each value.
 
@@ -82,6 +83,14 @@ For docs-site changes, keep the Chinese source under `docs-site/docs/` and the E
 ```bash
 pnpm --dir docs-site build
 ```
+
+## Changing third-party dependencies
+
+The third-party dependencies NyaTerm patches are not in this repository. Each is a patch series on a fork under [github.com/nyakang](https://github.com/nyakang) on branch `nyaterm`. The workflow is documented in [Development Setup → Changing third-party dependencies](./setup#changing-third-party-dependencies).
+
+In short: commit to the fork branch and push, then bump the pinned revision in the root `Cargo.toml`; keep the patch series split by concern; record the reason and the validation performed on the patch commit and in that branch's `NYATERM.md`. Note the fork branch and revision in your PR description.
+
+**Do not edit `temp/`.** Those are read-only copies that are never compiled — editing them has no effect and produces no error.
 
 ## Security and compatibility
 

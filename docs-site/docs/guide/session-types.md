@@ -19,7 +19,7 @@ NyaTerm 不只是 SSH 客户端，而是一个把多类终端与远程桌面工�
 
 | 会话类型 | 典型场景 | 支持的增强能力 |
 |----------|----------|----------------|
-| SSH | Linux / Unix 服务器远程运维 | SFTP、OTP、资源 / GPU / 进程 / Docker 监控、代理、跳板机、隧道、算法偏好 |
+| SSH | Linux / Unix 服务器远程运维 | SFTP、OTP、资源 / NVIDIA GPU / Ascend NPU / 进程 / Docker 监控、代理、跳板机、隧道、算法偏好 |
 | 本地终端 | 本地 shell、脚本调试、构建命令 | 共享同一套终端 UI、命令历史、分屏 |
 | Telnet | 旧设备、实验环境、兼容性排障 | 终端工作区能力，支持 `Backspace Mode`，但不包含 SSH 专属特性 |
 | 串口 | 路由器、交换机、板卡、嵌入式调试口 | 串口参数配置、`Backspace Mode` 与终端工作区能力 |
@@ -33,7 +33,7 @@ SSH 是当前能力最完整的会话类型，适合：
 - 登录远程 Linux / Unix 主机
 - 浏览和传输远程文件
 - 使用 OTP、跳板机、代理
-- 查看远程资源、GPU、进程与 Docker 监控
+- 查看远程资源、NVIDIA GPU、Ascend NPU、进程与 Docker 监控
 - 配置端口隧道
 - 精细控制 SSH 协商算法
 
