@@ -236,6 +236,8 @@ struct StatsPaneState {
     pub data: Option<RemoteStats>,
     pub status: String,
     pub cpu_expanded: bool,
+    /// Bumped by every mutation that changes what `stats_presentation` returns.
+    revision: u64,
 }
 
 /// How a GPU/NPU overview exposes its process list for filtering and sorting.
@@ -256,6 +258,8 @@ pub(in crate::features) trait AcceleratorProcessList {
 struct AcceleratorPaneState<Data: AcceleratorProcessList, Event> {
     job: RemoteJobState<Event>,
     pub data: Option<Data>,
+    /// Bumped by every mutation that changes what `*_presentation` returns.
+    revision: u64,
     data_generation: u64,
     derived: Option<AcceleratorDerivedCache<Data::Process>>,
     pub status: String,
@@ -385,6 +389,7 @@ impl RemoteOpsFeatureState {
                 data: None,
                 status: "start an SSH session to inspect remote stats".to_string(),
                 cpu_expanded: false,
+                revision: 0,
             },
             gpu: AcceleratorPaneState::new("start an SSH session to inspect NVIDIA GPU"),
             npu: AcceleratorPaneState::new("start an SSH session to inspect Ascend NPU"),
@@ -472,6 +477,29 @@ impl RemoteOpsFeatureState {
         self.process.set_sort_columns(columns)
     }
 
+    /// Revision of what `stats_presentation` would return.
+    ///
+    /// Bumped by every mutation that changes it. A panel stores the revision of the
+    /// snapshot it holds; the flush pushes a new one only when they differ, and the
+    /// panel render asserts they match so a missed flush boundary is loud.
+    /// `#[cfg(test)]` until the flush consumes it, which is the next commit. The
+    /// counter itself is maintained in production code; only the readers are test-only,
+    /// so the invariant is under test before anything depends on it.
+    #[cfg(test)]
+    pub(in crate::features) fn stats_revision(&self) -> u64 {
+        self.stats.revision()
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn gpu_revision(&self) -> u64 {
+        self.gpu.revision()
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn npu_revision(&self) -> u64 {
+        self.npu.revision()
+    }
+
     pub(in crate::features) fn stats_presentation(&self) -> StatsPresentationState {
         StatsPresentationState {
             data: self.stats.data.clone(),
@@ -527,7 +555,7 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn set_stats_status(&mut self, status: impl Into<String>) {
-        self.stats.status = status.into();
+        self.stats.set_status(status);
     }
 
     pub(in crate::features) fn gpu_status(&self) -> &str {
@@ -535,7 +563,7 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn set_gpu_status(&mut self, status: impl Into<String>) {
-        self.gpu.status = status.into();
+        self.gpu.set_status(status);
     }
 
     pub(in crate::features) fn npu_status(&self) -> &str {
@@ -543,7 +571,7 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn set_npu_status(&mut self, status: impl Into<String>) {
-        self.npu.status = status.into();
+        self.npu.set_status(status);
     }
 
     pub(in crate::features) fn loaded_process_count(&self) -> Option<usize> {
@@ -936,13 +964,13 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn apply_stats(&mut self, stats: RemoteStats) {
-        self.stats.data = Some(stats);
+        self.stats.apply_data(stats);
     }
 
     pub(in crate::features) fn record_stats_refresh_failure(&mut self) -> u8 {
         let failures = self.stats.record_refresh_failure();
         if failures >= 3 {
-            self.stats.data = None;
+            self.stats.clear_data();
         }
         failures
     }
@@ -1669,6 +1697,31 @@ fn sort_processes(
 }
 
 impl StatsPaneState {
+    /// Record that the presentation changed.
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    #[cfg(test)]
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn apply_data(&mut self, stats: RemoteStats) {
+        self.data = Some(stats);
+        self.touch();
+    }
+
+    fn clear_data(&mut self) {
+        self.data = None;
+        self.touch();
+    }
+
+    fn set_status(&mut self, status: impl Into<String>) {
+        self.status = status.into();
+        self.touch();
+    }
+
     pub(in crate::features) fn is_pending(&self) -> bool {
         self.job.is_pending()
     }
@@ -1703,9 +1756,11 @@ impl StatsPaneState {
 
     pub(super) fn reset_refresh_failures(&mut self) {
         self.job.reset_refresh_failures();
+        self.touch();
     }
 
     pub(super) fn record_refresh_failure(&mut self) -> u8 {
+        self.touch();
         self.job.record_refresh_failure(false)
     }
 
@@ -1716,6 +1771,7 @@ impl StatsPaneState {
         } else {
             "collapsed per-core CPU usage".to_string()
         };
+        self.touch();
     }
 
     fn reset_for_session_switch(&mut self) {
@@ -1730,6 +1786,7 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
         Self {
             job: RemoteJobState::new(),
             data: None,
+            revision: 0,
             data_generation: 0,
             derived: None,
             status: status.to_string(),
@@ -1755,12 +1812,28 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
         self.reconcile();
     }
 
+    /// Record that the presentation changed.
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    #[cfg(test)]
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn set_status(&mut self, status: impl Into<String>) {
+        self.status = status.into();
+        self.touch();
+    }
+
     /// Bring the derived process list and the scroll offset back in step.
     fn reconcile(&mut self) {
         let total = self.derived_items().len();
         self.process_list_offset = self
             .process_list_offset
             .min(max_list_offset(total, ACCELERATOR_PROCESS_VIEWPORT_ROWS));
+        self.touch();
     }
 
     /// The filtered, sorted process list, without recomputing.
@@ -1823,10 +1896,12 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
 
     fn mark_unavailable(&mut self, session_id: String) {
         self.unavailable_sessions.insert(session_id);
+        self.touch();
     }
 
     fn clear_unavailable(&mut self, session_id: &str) {
         self.unavailable_sessions.remove(session_id);
+        self.touch();
     }
 
     fn apply_search(&mut self, text: String, status: &str) {
@@ -1840,11 +1915,13 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
         if !self.expanded_devices.remove(&key) {
             self.expanded_devices.insert(key);
         }
+        self.touch();
     }
 
     fn retain_expanded_devices(&mut self, active_devices: &HashSet<String>) {
         self.expanded_devices
             .retain(|key| active_devices.contains(key));
+        self.touch();
     }
 
     fn set_process_offset(&mut self, offset: usize) -> bool {
@@ -1852,6 +1929,7 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
             return false;
         }
         self.process_list_offset = offset;
+        self.touch();
         true
     }
 
@@ -1873,9 +1951,11 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
 
     fn reset_refresh_failures(&mut self) {
         self.job.reset_refresh_failures();
+        self.touch();
     }
 
     fn record_refresh_failure(&mut self) -> u8 {
+        self.touch();
         self.job.record_refresh_failure(false)
     }
 
@@ -1979,7 +2059,7 @@ mod tests {
     use nyaterm_transport::{
         DockerContainer, DockerContainerDetails, DockerImage, RemoteDockerOverview, RemoteGpu,
         RemoteGpuOverview, RemoteGpuProcess, RemoteNpu, RemoteNpuOverview, RemoteNpuProcess,
-        RemoteProcess,
+        RemoteProcess, RemoteStats,
     };
 
     use super::{
@@ -2653,6 +2733,121 @@ mod tests {
         assert!(
             !state.set_process_sort_columns(narrow),
             "an unchanged width must not report a change"
+        );
+    }
+
+    /// Every mutation that changes a pane presentation must bump that pane revision,
+    /// and must not bump another pane.
+    ///
+    /// The flush compares this counter to decide whether to build and push a snapshot,
+    /// so a mutator that changes the presentation without bumping it would leave the
+    /// panel showing stale data with nothing to detect it. Each pane is asserted
+    /// individually rather than in a loop, because the point is coverage of the
+    /// mutators, and a loop would hide which one stopped bumping.
+    #[test]
+    fn presentation_mutations_bump_only_their_own_pane_revision() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+
+        let expect_bump = |state: &mut RemoteOpsFeatureState,
+                           what: &str,
+                           mutate: &dyn Fn(&mut RemoteOpsFeatureState)| {
+            let before = (
+                state.stats_revision(),
+                state.gpu_revision(),
+                state.npu_revision(),
+            );
+            mutate(state);
+            let after = (
+                state.stats_revision(),
+                state.gpu_revision(),
+                state.npu_revision(),
+            );
+            assert_ne!(before, after, "{what} must bump a revision");
+            after
+        };
+
+        // Stats.
+        let mut previous = (
+            state.stats_revision(),
+            state.gpu_revision(),
+            state.npu_revision(),
+        );
+        for (what, mutate) in [
+            (
+                "apply_stats",
+                &(|state: &mut RemoteOpsFeatureState| state.apply_stats(RemoteStats::default()))
+                    as &dyn Fn(&mut RemoteOpsFeatureState),
+            ),
+            ("set_stats_status", &|state: &mut RemoteOpsFeatureState| {
+                state.set_stats_status("loading")
+            }),
+            (
+                "toggle_stats_cpu_expanded",
+                &|state: &mut RemoteOpsFeatureState| state.toggle_stats_cpu_expanded(),
+            ),
+            (
+                "record_stats_refresh_failure",
+                &|state: &mut RemoteOpsFeatureState| {
+                    state.record_stats_refresh_failure();
+                },
+            ),
+            (
+                "reset_stats_refresh_failures",
+                &|state: &mut RemoteOpsFeatureState| state.reset_stats_refresh_failures(),
+            ),
+        ] {
+            let after = expect_bump(&mut state, what, mutate);
+            assert_eq!(
+                (after.1, after.2),
+                (previous.1, previous.2),
+                "{what} must not disturb the GPU or NPU panes"
+            );
+            previous = after;
+        }
+
+        // GPU, and the NPU pane must not move with it.
+        let after = expect_bump(
+            &mut state,
+            "apply_gpu",
+            &|state: &mut RemoteOpsFeatureState| {
+                state.apply_gpu("session", RemoteGpuOverview::default())
+            },
+        );
+        assert_eq!(after.2, previous.2, "apply_gpu must not touch the NPU pane");
+        previous = after;
+
+        for (what, mutate) in [
+            (
+                "apply_gpu_search",
+                &(|state: &mut RemoteOpsFeatureState| state.apply_gpu_search("q".to_string()))
+                    as &dyn Fn(&mut RemoteOpsFeatureState),
+            ),
+            (
+                "toggle_gpu_device_expanded",
+                &|state: &mut RemoteOpsFeatureState| {
+                    state.toggle_gpu_device_expanded("0".to_string())
+                },
+            ),
+            ("set_gpu_status", &|state: &mut RemoteOpsFeatureState| {
+                state.set_gpu_status("loading")
+            }),
+        ] {
+            let after = expect_bump(&mut state, what, mutate);
+            assert_eq!(after.2, previous.2, "{what} must not touch the NPU pane");
+            previous = after;
+        }
+
+        // NPU.
+        let after = expect_bump(
+            &mut state,
+            "apply_npu",
+            &|state: &mut RemoteOpsFeatureState| {
+                state.apply_npu("session", RemoteNpuOverview::default())
+            },
+        );
+        assert_eq!(
+            after.0, previous.0,
+            "apply_npu must not touch the stats pane"
         );
     }
 }
