@@ -857,8 +857,9 @@ impl Render for NyaTermApp {
         // enable, whether an SSH session is active -- changes alongside a repaint, and
         // no single event covers all four.
         self.sync_remote_panel_demand(cx);
-        // The transfer browser's cwd sync is the last thing on the shell-wide clock.
-        self.ensure_remote_refresh_clock(cx);
+        // The transfer browser's cwd sync, likewise armed here because the browser
+        // being open changes alongside a repaint.
+        self.ensure_transfer_cwd_sync_clock(cx);
         FULL_SHELL_PAINT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let full_shell_paint_count = self.shell.note_full_shell_paint();
         let root_started_at = Instant::now();

@@ -1,7 +1,6 @@
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
-pub(super) const TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS: u32 = 3;
 pub(super) const SESSION_EVENT_DRAIN_BATCH: usize = 256;
 pub(super) const SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET: usize = 32 * 1024;
 pub(super) const SESSION_EVENT_DRAIN_PRESSURE_OUTPUT_BUDGET: usize = 8 * 1024;

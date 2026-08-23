@@ -285,7 +285,8 @@ impl NyaTermApp {
     /// which panels settings enable, whether a session with an SSH config is active --
     /// changes alongside a repaint, and there is no single event that covers all four.
     /// Enumerating the mutation sites instead would mean a new one silently leaving a
-    /// panel unrefreshed, which is exactly the bug `C1` fixed.
+    /// panel unrefreshed -- which is the bug `3904c69b` fixed, where the one call site
+    /// ran before any session existed and so never armed anything.
     ///
     /// Cheap enough to run per paint: one settings read, one rendered-panel test per
     /// kind, and five `Option::is_some` compares that do nothing unless demand
@@ -654,7 +655,7 @@ mod tests {
     ///
     /// Every other test here calls `sync_remote_panel_demand` directly, and all of them
     /// keep passing with the call removed from `render` -- checked, not assumed. That is
-    /// the same gap that let `C1`'s dead clock through: they prove the mechanism and
+    /// the same gap that let `3904c69b`'s dead clock through: they prove the mechanism and
     /// say nothing about the wiring. This one drives a real paint instead.
     ///
     /// It never advances the clock, so no refresh is submitted and nothing connects;

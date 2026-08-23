@@ -3,24 +3,22 @@ use std::time::{Duration, Instant};
 use futures::{FutureExt as _, StreamExt as _};
 use gpui::{Context, Window};
 
-use crate::features::remote::remote_refresh_due;
 use crate::features::shell::event_pump::helpers::{
     PENDING_SESSION_STILL_CONNECTING_AFTER, PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW,
     RuntimeDataPlaneDrain, RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE,
-    TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision,
-    connect_settle_active, connect_settle_deadline, pending_session_status_message,
-    remote_refresh_should_defer, runtime_background_should_defer_terminal_frames,
-    runtime_data_plane_wake_delay, runtime_output_pressure_active_from_counts,
-    runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
-    terminal_frame_apply_should_defer, terminal_input_idle_remaining_delay,
-    terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
-    window_geometry_churn_active,
+    TITLE_DRAG_ACTIVE_HOLD, TerminalFrameApplyDecision, connect_settle_active,
+    connect_settle_deadline, pending_session_status_message, remote_refresh_should_defer,
+    runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
+    runtime_output_pressure_active_from_counts, runtime_ui_notify_allowed,
+    terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
+    terminal_input_idle_remaining_delay, terminal_user_scroll_frame_apply_pending,
+    viewport_change_terminal_session_ids, window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, session::credential_prompt_target, session::keyboard_interactive_prompt_target,
     text_inputs::TextInputSetup,
 };
-use crate::models::{HeaderStatusMode, NavItem};
+use crate::models::HeaderStatusMode;
 
 mod bridge;
 mod helpers;
@@ -571,34 +569,6 @@ impl NyaTermApp {
         }
         self.shell.set_status(message);
         true
-    }
-
-    /// Sync the transfer browser's cwd if its interval has come due.
-    ///
-    /// The five polling panels used to be here too; each now owns its own clock
-    /// (`features/pages/remote/panels.rs`). This is what is left, and `C6` gives it a
-    /// home of its own under `features/transfers`.
-    pub(super) fn drive_remote_auto_refresh(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.session.active_ssh_config().is_none() {
-            return false;
-        }
-        if self.remote_refresh_is_deferred() {
-            return false;
-        }
-
-        if self.current_left_panel() == Some(NavItem::Transfers)
-            && self.transfer_browser_auto_sync_cwd_enabled()
-            && !self.transfer_sync_cwd_job_running()
-            && remote_refresh_due(
-                self.transfer.browser_auto_sync_cwd_last_at(),
-                TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS,
-            )
-        {
-            self.transfer.mark_browser_auto_sync_cwd(Instant::now());
-            self.start_transfer_sync_cwd_job(cx);
-            return true;
-        }
-        false
     }
 
     /// Whether a due remote refresh must wait for the app to fall calm.

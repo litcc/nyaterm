@@ -90,8 +90,6 @@ pub(super) struct ShellRuntimeState {
     post_start_work_clock_armed: bool,
     /// True while the drop-highlight clock task is alive.
     drop_hover_clock_armed: bool,
-    /// True while the remote-panel auto-refresh clock task is alive.
-    remote_refresh_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -163,7 +161,6 @@ impl Default for ShellRuntimeState {
             terminal_recovery_clock_armed: false,
             post_start_work_clock_armed: false,
             drop_hover_clock_armed: false,
-            remote_refresh_clock_armed: false,
         }
     }
 }
@@ -289,14 +286,6 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_drop_hover_clock_armed(&mut self, armed: bool) {
         self.runtime.drop_hover_clock_armed = armed;
-    }
-
-    pub(in crate::features) fn remote_refresh_clock_is_armed(&self) -> bool {
-        self.runtime.remote_refresh_clock_armed
-    }
-
-    pub(in crate::features) fn set_remote_refresh_clock_armed(&mut self, armed: bool) {
-        self.runtime.remote_refresh_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {
