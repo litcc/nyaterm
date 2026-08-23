@@ -243,6 +243,12 @@ impl NyaTermApp {
                 store.save_terminal_settings(&settings)?;
                 store.save_interaction_settings(&settings)?;
                 store.save_general_settings(&settings)?;
+                // The header-status mode and visibility are edited on the General tab
+                // but stored by the UI-layout writer, which is otherwise driven by
+                // layout gestures through `persist_ui_layout`. Without this the draft's
+                // choice is never written, and the `load_app_settings_summary` below
+                // hands the stale value straight back to `apply_gpui_settings`.
+                store.save_ui_layout_settings(&settings)?;
                 store.save_diagnostics_settings(&settings)?;
                 store.save_screen_lock_settings(&settings)?;
                 store.save_recording_settings(&settings)?;
@@ -432,4 +438,142 @@ fn drive_validation_error(
         return Some("Drive client secret is required");
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::features::settings::SettingsSaveKind;
+    use crate::models::HeaderStatusMode;
+
+    /// A real store runtime, because these tests are about what reaches disk.
+    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        // A uuid rather than a clock reading: these tests run in parallel and
+        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
+        // which would share one config dir and so one settings database.
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-settings-draft-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    fn stored_header_status(
+        app: &gpui::Entity<NyaTermApp>,
+        cx: &mut TestAppContext,
+    ) -> (String, bool) {
+        let summary = cx
+            .update_entity(app, |app, _| {
+                app.store_blocking_client()
+                    .request_fn(nyaterm_store::StoreDomain::Settings, |store| {
+                        store.load_app_settings_summary()
+                    })
+            })
+            .expect("load stored settings");
+        (
+            summary.ui_header_status_mode,
+            summary.ui_header_status_visible,
+        )
+    }
+
+    /// Applying a draft must write the header-status mode it changed.
+    ///
+    /// `persist_header_status_settings` deliberately defers while a draft is open,
+    /// telling the user to apply settings to persist. Apply then reloads the summary
+    /// from the store and replaces the in-memory one wholesale, so a value its save
+    /// batch failed to write comes back as whatever is still on disk -- which is the
+    /// reported symptom: the header reverts the instant settings are applied.
+    ///
+    /// **The assertion is on disk, not on the summary.** In this harness the store
+    /// reply is not delivered inside `run_until_parked`, so the in-memory summary keeps
+    /// the value the draft set and an assertion on it passes whether or not anything
+    /// was written -- which it did, before the disk check was added. Disk is also the
+    /// more fundamental property: a value that never lands there is lost at the next
+    /// launch regardless of what this session shows.
+    ///
+    /// `DateTime` rather than `Session`, because `session` is the stored default -- a
+    /// test that set the mode to the default could not tell a successful apply from a
+    /// dropped one.
+    #[test]
+    fn applying_a_draft_persists_the_header_status_mode() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        assert_eq!(
+            stored_header_status(&app, &mut cx),
+            ("session".to_string(), true),
+            "fixture baseline"
+        );
+
+        cx.update_entity(&app, |app, cx| {
+            app.begin_settings_draft();
+            app.set_header_status_mode(HeaderStatusMode::DateTime, cx);
+            assert_eq!(
+                app.settings.summary().ui_header_status_mode,
+                "datetime",
+                "the draft changes the in-memory summary immediately"
+            );
+            app.apply_settings_draft(false, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            stored_header_status(&app, &mut cx),
+            ("datetime".to_string(), true),
+            "apply must write the header status, not leave the stored value behind for \
+             its own reload to restore"
+        );
+    }
+
+    /// And must write a header status turned back on from hidden.
+    ///
+    /// This is the direction the bug was reported in: the header reads as "hidden"
+    /// again the moment settings are applied. Seeded through the store so the stale
+    /// on-disk value is genuinely `false` rather than the `true` default, which is what
+    /// makes the revert visible at all.
+    #[test]
+    fn applying_a_draft_persists_a_header_status_turned_back_on() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            // No draft open, so this takes the immediate-persist path.
+            app.set_header_status_visible(false, cx);
+            app.queue_settings_save(SettingsSaveKind::UiLayout, cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            stored_header_status(&app, &mut cx),
+            ("session".to_string(), false),
+            "the seed must reach disk, or there is no stale value to revert to"
+        );
+
+        cx.update_entity(&app, |app, cx| {
+            app.begin_settings_draft();
+            app.set_header_status_mode(HeaderStatusMode::Host, cx);
+            app.apply_settings_draft(false, cx);
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            stored_header_status(&app, &mut cx),
+            ("host".to_string(), true),
+            "apply must write the header back on, not leave it hidden on disk"
+        );
+    }
 }
