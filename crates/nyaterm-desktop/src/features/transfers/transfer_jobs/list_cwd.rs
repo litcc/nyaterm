@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use gpui::{Context, Window};
+use gpui::Context;
 use nyaterm_transport::SftpCwdFollowMode;
 
 use crate::features::NyaTermApp;
@@ -163,11 +163,7 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn start_transfer_sync_cwd_job(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::features) fn start_transfer_sync_cwd_job(&mut self, cx: &mut Context<Self>) {
         if self.transfer_sync_cwd_job_running() {
             self.transfer.browser.status = "remote cwd sync already running".to_string();
             cx.notify();

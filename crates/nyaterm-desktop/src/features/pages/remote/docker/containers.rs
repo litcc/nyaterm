@@ -246,9 +246,9 @@ fn docker_container_row(
                         .child(div().flex_none().child(short.clone())),
                 ),
         )
-        .on_click(cx.listener(move |this, _, window, cx| {
+        .on_click(cx.listener(move |this, _, _window, cx| {
             this.remote_ops.close_docker_container_menu();
-            this.load_docker_details(details_id.clone(), window, cx);
+            this.load_docker_details(details_id.clone(), cx);
         }))
         .child(
             div().absolute().top(px(8.)).right(px(6.)).child(

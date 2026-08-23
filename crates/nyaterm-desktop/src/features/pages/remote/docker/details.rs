@@ -183,8 +183,8 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                 palette,
                 format!("docker-details-refresh-{}", compact_id(&container_id)),
                 labels.refresh.clone(),
-                cx.listener(move |this, _, window, cx| {
-                    this.load_docker_details(container_id.clone(), window, cx);
+                cx.listener(move |this, _, _window, cx| {
+                    this.load_docker_details(container_id.clone(), cx);
                 }),
             ))
             .child(small_button(

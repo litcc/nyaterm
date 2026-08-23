@@ -3,17 +3,18 @@ use std::time::{Duration, Instant};
 use futures::{FutureExt as _, StreamExt as _};
 use gpui::{Context, Window};
 
+use crate::features::remote::remote_refresh_due;
 use crate::features::shell::event_pump::helpers::{
     PENDING_SESSION_STILL_CONNECTING_AFTER, PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW,
     RuntimeDataPlaneDrain, RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE,
     TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision,
     connect_settle_active, connect_settle_deadline, pending_session_status_message,
-    remote_refresh_due, remote_refresh_should_defer,
-    runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
-    runtime_output_pressure_active_from_counts, runtime_ui_notify_allowed,
-    terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
-    terminal_input_idle_remaining_delay, terminal_user_scroll_frame_apply_pending,
-    viewport_change_terminal_session_ids, window_geometry_churn_active,
+    remote_refresh_should_defer, runtime_background_should_defer_terminal_frames,
+    runtime_data_plane_wake_delay, runtime_output_pressure_active_from_counts,
+    runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
+    terminal_frame_apply_should_defer, terminal_input_idle_remaining_delay,
+    terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
+    window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, session::credential_prompt_target, session::keyboard_interactive_prompt_target,
@@ -572,11 +573,15 @@ impl NyaTermApp {
         true
     }
 
-    pub(super) fn drive_remote_auto_refresh(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    /// Refresh whatever is due, for the shell-wide clock.
+    ///
+    /// Each pane's condition now lives on the pane
+    /// (`features/remote/remote_runtime/auto_refresh.rs`); what is left here is the
+    /// visibility test and the deferral gate. Processes and Docker used to share one
+    /// `if / else if`, which was harmless while `current_right_panel` could only name
+    /// one of them and wrong as soon as a multi-open stack could show both -- they are
+    /// independent now.
+    pub(super) fn drive_remote_auto_refresh(&mut self, cx: &mut Context<Self>) -> bool {
         if self.session.active_ssh_config().is_none() {
             return false;
         }
@@ -588,70 +593,20 @@ impl NyaTermApp {
         let left_panel = self.current_left_panel();
         let right_panel = self.current_right_panel();
 
-        if (right_panel == Some(NavItem::Stats) || self.header_status_needs_remote_stats())
-            && self.settings.summary().ui_show_remote_stats
-            && !self.remote_ops.stats_is_pending()
-            && remote_refresh_due(
-                self.remote_ops.stats_last_refresh_at(),
-                self.settings.summary().ui_remote_stats_interval.max(1),
-            )
-        {
-            self.refresh_stats(window, cx);
-            dirty = true;
+        if right_panel == Some(NavItem::Stats) || self.header_status_needs_remote_stats() {
+            dirty |= self.refresh_stats_if_due(cx);
         }
-
-        if (right_panel == Some(NavItem::GpuMonitor) || self.header_status_needs_gpu())
-            && self.settings.summary().ui_show_gpu_monitor
-            && !self.remote_ops.gpu_is_pending()
-            && remote_refresh_due(
-                self.remote_ops.gpu_last_refresh_at(),
-                self.settings.summary().ui_gpu_monitor_interval.max(1),
-            )
-        {
-            self.refresh_gpu_auto(window, cx);
-            dirty = true;
+        if right_panel == Some(NavItem::GpuMonitor) || self.header_status_needs_gpu() {
+            dirty |= self.refresh_gpu_if_due(cx);
         }
-
-        if (right_panel == Some(NavItem::AscendNpuMonitor) || self.header_status_needs_npu())
-            && self.settings.summary().ui_show_ascend_npu_monitor
-            && !self.remote_ops.npu_is_pending()
-            && remote_refresh_due(
-                self.remote_ops.npu_last_refresh_at(),
-                self.settings
-                    .summary()
-                    .ui_ascend_npu_monitor_interval
-                    .max(1),
-            )
-        {
-            self.refresh_npu_auto(window, cx);
-            dirty = true;
+        if right_panel == Some(NavItem::AscendNpuMonitor) || self.header_status_needs_npu() {
+            dirty |= self.refresh_npu_if_due(cx);
         }
-
-        if right_panel == Some(NavItem::Processes)
-            && self.settings.summary().ui_show_process_manager
-            && !self.remote_ops.process_is_pending()
-            && remote_refresh_due(
-                self.remote_ops.process_last_refresh_at(),
-                self.settings.summary().ui_process_manager_interval.max(3),
-            )
-        {
-            self.refresh_processes(window, cx);
-            dirty = true;
-        } else if right_panel == Some(NavItem::Docker)
-            && self.settings.summary().ui_show_docker_manager
-            && !self.remote_ops.docker_is_pending()
-        {
-            let interval = self.settings.summary().ui_docker_manager_interval.max(3);
-            if remote_refresh_due(self.remote_ops.docker_last_refresh_at(), interval) {
-                self.refresh_docker(window, cx);
-                dirty = true;
-            } else if let Some((container_id, last_refresh_at)) =
-                self.remote_ops.docker_details_refresh()
-                && remote_refresh_due(Some(last_refresh_at), interval)
-            {
-                self.load_docker_details(container_id, window, cx);
-                dirty = true;
-            }
+        if right_panel == Some(NavItem::Processes) {
+            dirty |= self.refresh_processes_if_due(cx);
+        }
+        if right_panel == Some(NavItem::Docker) {
+            dirty |= self.refresh_docker_if_due(cx);
         }
 
         if left_panel == Some(NavItem::Transfers)
@@ -663,7 +618,7 @@ impl NyaTermApp {
             )
         {
             self.transfer.mark_browser_auto_sync_cwd(Instant::now());
-            self.start_transfer_sync_cwd_job(window, cx);
+            self.start_transfer_sync_cwd_job(cx);
             dirty = true;
         }
         dirty

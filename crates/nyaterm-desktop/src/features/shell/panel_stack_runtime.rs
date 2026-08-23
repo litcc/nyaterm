@@ -771,8 +771,8 @@ impl NyaTermApp {
                         "icons/fe/refresh.svg",
                         t!("resourceMonitor.refresh"),
                         can_refresh,
-                        cx.listener(|this, _, window, cx| {
-                            this.refresh_stats(window, cx);
+                        cx.listener(|this, _, _window, cx| {
+                            this.refresh_stats(cx);
                         }),
                     )
                     .into_any_element(),
@@ -789,8 +789,8 @@ impl NyaTermApp {
                         "icons/fe/refresh.svg",
                         t!("resourceMonitor.refresh"),
                         can_refresh,
-                        cx.listener(|this, _, window, cx| {
-                            this.refresh_gpu(window, cx);
+                        cx.listener(|this, _, _window, cx| {
+                            this.refresh_gpu(cx);
                         }),
                     )
                     .into_any_element(),
@@ -807,8 +807,8 @@ impl NyaTermApp {
                         "icons/fe/refresh.svg",
                         t!("resourceMonitor.refresh"),
                         can_refresh,
-                        cx.listener(|this, _, window, cx| {
-                            this.refresh_npu(window, cx);
+                        cx.listener(|this, _, _window, cx| {
+                            this.refresh_npu(cx);
                         }),
                     )
                     .into_any_element(),
@@ -825,8 +825,8 @@ impl NyaTermApp {
                         "icons/fe/refresh.svg",
                         t!("common.refresh"),
                         can_refresh,
-                        cx.listener(|this, _, window, cx| {
-                            this.refresh_processes(window, cx);
+                        cx.listener(|this, _, _window, cx| {
+                            this.refresh_processes(cx);
                         }),
                     )
                     .into_any_element(),
@@ -850,8 +850,8 @@ impl NyaTermApp {
                             "icons/fe/refresh.svg",
                             t!("common.refresh"),
                             can_refresh,
-                            cx.listener(|this, _, window, cx| {
-                                this.refresh_docker(window, cx);
+                            cx.listener(|this, _, _window, cx| {
+                                this.refresh_docker(cx);
                             }),
                         ))
                         .child(

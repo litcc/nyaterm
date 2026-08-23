@@ -14,11 +14,7 @@ use super::helpers::{
 };
 
 impl NyaTermApp {
-    pub(in crate::features) fn refresh_docker(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::features) fn refresh_docker(&mut self, cx: &mut Context<Self>) {
         let Some(config) = self.session.active_ssh_config_owned() else {
             self.remote_ops
                 .set_docker_status("start an SSH session before inspecting Docker");
@@ -113,7 +109,6 @@ impl NyaTermApp {
     pub(in crate::features) fn load_docker_details(
         &mut self,
         container_id: String,
-        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(config) = self.session.active_ssh_config_owned() else {

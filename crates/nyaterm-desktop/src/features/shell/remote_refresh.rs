@@ -47,10 +47,12 @@ impl NyaTermApp {
                 cx.background_executor()
                     .timer(REMOTE_REFRESH_POLL_INTERVAL)
                     .await;
-                // `update_in`: each refresh submits a remote job, which needs the
-                // window.
-                let Ok(keep_running) = this.update_in(cx, |this, window, cx| {
-                    if this.drive_remote_auto_refresh(window, cx) {
+                // `update`, not `update_in`: nothing on this path needs the window.
+                // With `update_in` a missing window broke the loop *without* clearing
+                // the armed flag, which left the flag stuck true and the clock unable
+                // to ever re-arm.
+                let Ok(keep_running) = this.update(cx, |this, cx| {
+                    if this.drive_remote_auto_refresh(cx) {
                         cx.notify();
                     }
                     let running = this.remote_panels_need_refresh();

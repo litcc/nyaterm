@@ -1,5 +1,5 @@
 use futures::StreamExt as _;
-use gpui::{Context, Window};
+use gpui::Context;
 use nyaterm_transport::{RemoteGpuOverview, RemoteGpuService, RemoteNpuOverview, RemoteNpuService};
 
 use crate::features::{NyaTermApp, runtime_jobs::GpuJobResult, runtime_jobs::NpuJobResult};
@@ -33,24 +33,15 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn refresh_gpu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.refresh_gpu_with_mode(false, window, cx);
+    pub(in crate::features) fn refresh_gpu(&mut self, cx: &mut Context<Self>) {
+        self.refresh_gpu_with_mode(false, cx);
     }
 
-    pub(in crate::features) fn refresh_gpu_auto(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.refresh_gpu_with_mode(true, window, cx);
+    pub(in crate::features) fn refresh_gpu_auto(&mut self, cx: &mut Context<Self>) {
+        self.refresh_gpu_with_mode(true, cx);
     }
 
-    fn refresh_gpu_with_mode(
-        &mut self,
-        skip_unavailable: bool,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn refresh_gpu_with_mode(&mut self, skip_unavailable: bool, cx: &mut Context<Self>) {
         let Some(config) = self.session.active_ssh_config_owned() else {
             self.remote_ops
                 .set_gpu_status("start an SSH session before inspecting GPU");
@@ -153,24 +144,15 @@ impl NyaTermApp {
         true
     }
 
-    pub(in crate::features) fn refresh_npu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.refresh_npu_with_mode(false, window, cx);
+    pub(in crate::features) fn refresh_npu(&mut self, cx: &mut Context<Self>) {
+        self.refresh_npu_with_mode(false, cx);
     }
 
-    pub(in crate::features) fn refresh_npu_auto(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.refresh_npu_with_mode(true, window, cx);
+    pub(in crate::features) fn refresh_npu_auto(&mut self, cx: &mut Context<Self>) {
+        self.refresh_npu_with_mode(true, cx);
     }
 
-    fn refresh_npu_with_mode(
-        &mut self,
-        skip_unavailable: bool,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn refresh_npu_with_mode(&mut self, skip_unavailable: bool, cx: &mut Context<Self>) {
         let Some(config) = self.session.active_ssh_config_owned() else {
             self.remote_ops
                 .set_npu_status("start an SSH session before inspecting NPU");

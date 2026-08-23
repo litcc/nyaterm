@@ -333,12 +333,6 @@ pub(super) fn session_event_drain_should_yield(
     has_pending_events || transport_queued_events > 0 || transport_queued_output_bytes > 0
 }
 
-pub(super) fn remote_refresh_due(last_refresh_at: Option<Instant>, interval_seconds: u32) -> bool {
-    last_refresh_at.is_none_or(|last_refresh_at| {
-        last_refresh_at.elapsed() >= Duration::from_secs(u64::from(interval_seconds))
-    })
-}
-
 /// Whether a due remote refresh should be held back.
 ///
 /// These are the three holds the idle plane applied through

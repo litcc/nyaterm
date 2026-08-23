@@ -1,16 +1,12 @@
 use futures::StreamExt as _;
-use gpui::{Context, Window};
+use gpui::Context;
 use nyaterm_transport::RemoteStatsService;
 
 use crate::features::NyaTermApp;
 use crate::features::runtime_jobs::StatsJobResult;
 
 impl NyaTermApp {
-    pub(in crate::features) fn refresh_stats(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::features) fn refresh_stats(&mut self, cx: &mut Context<Self>) {
         let Some(config) = self.session.active_ssh_config_owned() else {
             self.remote_ops
                 .set_stats_status("start an SSH session before inspecting stats");

@@ -245,7 +245,6 @@ impl NyaTermApp {
 
     pub(in crate::features::pages::transfers) fn toggle_transfer_browser_auto_sync_cwd(
         &mut self,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(connection_id) = self.active_transfer_browser_connection_id() else {
@@ -267,7 +266,7 @@ impl NyaTermApp {
         self.transfer.reset_browser_auto_sync_cwd();
         self.persist_transfer_browser_ui_settings(cx);
         if enabled {
-            self.start_transfer_sync_cwd_job(window, cx);
+            self.start_transfer_sync_cwd_job(cx);
         } else {
             cx.notify();
         }

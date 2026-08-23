@@ -667,8 +667,8 @@ impl NyaTermApp {
                                     t!("fileExplorer.cwdTrackingUnavailable")
                                 },
                                 cwd_tracking_available,
-                                cx.listener(|this, _, window, cx| {
-                                    this.start_transfer_sync_cwd_job(window, cx);
+                                cx.listener(|this, _, _window, cx| {
+                                    this.start_transfer_sync_cwd_job(cx);
                                 }),
                             ))
                             .child(compact_transfer_footer_button_active(
@@ -682,8 +682,8 @@ impl NyaTermApp {
                                 },
                                 auto_sync_cwd,
                                 cwd_tracking_available,
-                                cx.listener(|this, _, window, cx| {
-                                    this.toggle_transfer_browser_auto_sync_cwd(window, cx);
+                                cx.listener(|this, _, _window, cx| {
+                                    this.toggle_transfer_browser_auto_sync_cwd(cx);
                                 }),
                             ))
                             .child(compact_transfer_footer_button(

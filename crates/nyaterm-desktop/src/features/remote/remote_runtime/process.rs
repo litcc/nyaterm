@@ -144,11 +144,7 @@ impl NyaTermApp {
         );
     }
 
-    pub(in crate::features) fn refresh_processes(
-        &mut self,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::features) fn refresh_processes(&mut self, cx: &mut Context<Self>) {
         let Some(config) = self.session.active_ssh_config_owned() else {
             self.remote_ops
                 .set_process_status("start an SSH session before listing processes");
