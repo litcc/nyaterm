@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use nyaterm_core::{Group, SavedConnection, natural_compare};
 
@@ -409,15 +409,31 @@ pub(super) fn select_connection_ids(
 /// filter puts the tree back the way the user left it. `applied_query` makes the
 /// auto-expand one-shot per keyword, so collapsing an auto-opened group during a
 /// search sticks instead of springing back on the next keystroke.
+/// What the auto-expand has already been applied for.
+///
+/// The query alone is not enough. Which groups match a *fixed* query changes
+/// whenever the catalog does -- a store reload, a drag into a folder, a rename --
+/// so keying the guard on the query meant those newly matching groups never
+/// expanded and their matches stayed hidden behind a collapsed folder.
+///
+/// One consequence worth naming: a folder the user collapsed by hand while the
+/// query stood still re-expands once the matching set moves. That is the same
+/// thing an edit to the query has always done, and it beats hiding a match.
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct AppliedSearchExpansion {
+    query: String,
+    matching: BTreeSet<String>,
+}
+
 pub(super) fn sync_connection_search_expansion(
     expanded_group_ids: &mut HashSet<String>,
     search_expanded_base: &mut Option<HashSet<String>>,
-    applied_query: &mut Option<String>,
+    applied: &mut Option<AppliedSearchExpansion>,
     query: &str,
     matching_group_ids: impl IntoIterator<Item = String>,
 ) -> bool {
     if query.is_empty() {
-        *applied_query = None;
+        *applied = None;
         let Some(base) = search_expanded_base.take() else {
             return false;
         };
@@ -431,14 +447,18 @@ pub(super) fn sync_connection_search_expansion(
     if search_expanded_base.is_none() {
         *search_expanded_base = Some(expanded_group_ids.clone());
     }
-    if applied_query.as_deref() == Some(query) {
+    let next = AppliedSearchExpansion {
+        query: query.to_string(),
+        matching: matching_group_ids.into_iter().collect(),
+    };
+    if applied.as_ref() == Some(&next) {
         return false;
     }
-    *applied_query = Some(query.to_string());
 
     let mut changed = false;
-    for group_id in matching_group_ids {
-        changed |= expanded_group_ids.insert(group_id);
+    for group_id in &next.matching {
+        changed |= expanded_group_ids.insert(group_id.clone());
     }
+    *applied = Some(next);
     changed
 }

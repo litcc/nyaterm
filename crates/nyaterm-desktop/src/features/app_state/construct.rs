@@ -163,7 +163,7 @@ impl NyaTermApp {
         let app_entity = cx.entity();
         let remote_panels =
             crate::features::pages::remote::RemotePanels::new(app_entity.downgrade(), cx);
-        let connection_panel = cx.new(|cx| ConnectionPanel::new(app_entity, cx));
+        let connection_panel = cx.new(|_| ConnectionPanel::new(app_entity.downgrade()));
 
         Self {
             stores,

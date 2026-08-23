@@ -248,9 +248,16 @@ pub struct NyaDropdownMenu {
     max_width: Option<Pixels>,
     max_height: Option<Pixels>,
     scrollable: bool,
-    items: Vec<NyaMenuItem>,
+    items: DropdownItemsBuilder,
     on_trigger: Option<MenuClickHandler>,
 }
+
+/// Built when the menu opens, not when the trigger renders.
+///
+/// A menu whose items are values has to rebuild every item -- and every click
+/// handler hanging off one -- on every frame that draws the trigger, however
+/// rarely anyone opens it.
+type DropdownItemsBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<NyaMenuItem>>;
 
 impl NyaDropdownMenu {
     pub fn new(id: impl Into<SharedString>) -> Self {
@@ -267,7 +274,7 @@ impl NyaDropdownMenu {
             max_width: None,
             max_height: None,
             scrollable: false,
-            items: Vec::new(),
+            items: Rc::new(|_, _| Vec::new()),
             on_trigger: None,
         }
     }
@@ -327,8 +334,22 @@ impl NyaDropdownMenu {
         self
     }
 
+    /// Build the items when the menu opens.
+    ///
+    /// Prefer this wherever the items are derived from application state: the
+    /// trigger renders on every frame, and this keeps that frame free of the
+    /// items and their handlers.
+    pub fn items_dynamic(
+        mut self,
+        builder: impl Fn(&mut Window, &mut App) -> Vec<NyaMenuItem> + 'static,
+    ) -> Self {
+        self.items = Rc::new(builder);
+        self
+    }
+
     pub fn items(mut self, items: impl IntoIterator<Item = NyaMenuItem>) -> Self {
-        self.items = items.into_iter().collect();
+        let items: Vec<_> = items.into_iter().collect();
+        self.items = Rc::new(move |_, _| items.clone());
         self
     }
 
@@ -361,17 +382,20 @@ impl RenderOnce for NyaDropdownMenu {
         }
         trigger = trigger.selected(self.selected);
 
-        let items = self.items;
+        let items_builder = self.items;
         let min_width = self.min_width;
         let max_width = self.max_width;
         let max_height = self.max_height;
-        // A long flat menu should scroll rather than overflow the window. Submenus
-        // cannot render inside a scrolling popup, so auto-enable only when no item
-        // opens one; an explicit scrollable(true) still wins.
-        let scrollable = self.scrollable || items.iter().all(|item| item.children().is_none());
+        let force_scrollable = self.scrollable;
         trigger.disabled(self.disabled).dropdown_menu_with_anchor(
             self.anchor.component_anchor(),
             move |menu, window, cx| {
+                let items = items_builder(window, cx);
+                // A long flat menu should scroll rather than overflow the window.
+                // Submenus cannot render inside a scrolling popup, so auto-enable
+                // only when no item opens one; an explicit scrollable(true) wins.
+                let scrollable =
+                    force_scrollable || items.iter().all(|item| item.children().is_none());
                 let menu = menu
                     .when_some(min_width, |menu, width| menu.min_w(width))
                     .when_some(max_width, |menu, width| menu.max_w(width))

@@ -783,8 +783,7 @@ impl NyaTermApp {
                         .iter()
                         .find(|connection| connection.id == saved_id)
                         .cloned();
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     let Some(saved) = saved else {
                         this.set_connection_editor_error(
                             "saved connection was not returned by storage".to_string(),

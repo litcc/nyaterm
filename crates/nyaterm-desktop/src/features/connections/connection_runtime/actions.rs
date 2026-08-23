@@ -57,8 +57,7 @@ impl NyaTermApp {
             |this, event, cx| match event.outcome {
                 Ok(sessions) => {
                     this.connection_state.clear_list_runtime_state();
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     this.shell
                         .set_status(t!("savedConnections.clearAllSuccess").to_string());
                     this.settings
@@ -155,8 +154,7 @@ impl NyaTermApp {
                 Ok(sessions) => {
                     this.connection_state
                         .remove_list_connection_references(&connection_id);
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     this.shell.set_status(format!("deleted connection {label}"));
                     cx.notify();
                 }
@@ -243,8 +241,7 @@ impl NyaTermApp {
                 Ok(sessions) => {
                     this.connection_state
                         .remove_list_group_references(&group_id);
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     this.shell
                         .set_status(format!("deleted connection group {label}"));
                     cx.notify();
@@ -450,8 +447,7 @@ impl NyaTermApp {
                         this.connection_state
                             .remove_list_connection_references(&connection.id);
                     }
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     this.shell
                         .set_status(format!("deleted {} connection(s)", selected.len()));
                     cx.notify();

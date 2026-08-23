@@ -360,8 +360,7 @@ impl NyaTermApp {
             }),
             move |this, event, cx| match event.outcome {
                 Ok(sessions) => {
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     on_success(this, cx);
                     cx.notify();
                 }
@@ -395,8 +394,7 @@ impl NyaTermApp {
             }),
             move |this, event, cx| match event.outcome {
                 Ok(sessions) => {
-                    this.connection_state
-                        .replace_loaded(sessions.connections, sessions.groups);
+                    this.apply_loaded_sessions(sessions);
                     on_success(this, cx);
                     cx.notify();
                 }

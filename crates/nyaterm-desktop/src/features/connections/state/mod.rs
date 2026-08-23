@@ -2,6 +2,7 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -12,7 +13,7 @@ use nyaterm_ui::NyaWindowHandle;
 
 use super::catalog::ConnectionCatalogState;
 use super::connection_runtime::ConnectionEditorToggle;
-use super::interaction::{ConnectionDragKind, ConnectionDropPosition, ConnectionDropTarget};
+use super::interaction::{ConnectionDropPosition, ConnectionDropTarget};
 use crate::features::NyaTermApp;
 use crate::features::pages::connections::list::{
     ConnectionListRow, ConnectionSection, connection_sections, flatten_connection_rows,
@@ -55,7 +56,7 @@ use self::editor_logic::{
     toggle_connection_editor_flag,
 };
 use self::list_logic::{
-    clear_connection_list_runtime_state, clear_selected_connection_ids,
+    AppliedSearchExpansion, clear_connection_list_runtime_state, clear_selected_connection_ids,
     connection_drop_position_for_target, cycle_connection_sort_mode,
     remove_connection_list_references, remove_group_list_references,
     retain_loaded_connection_references, retain_loaded_group_list_references,
@@ -96,12 +97,15 @@ pub(in crate::features) struct ConnectionListModelStats {
 
 #[derive(Clone)]
 pub(in crate::features) struct ConnectionListModelSnapshot {
-    pub rows: Vec<ConnectionListRow>,
+    /// Shared, because a cache hit hands this straight back to a caller and the
+    /// panel then holds it for as long as the snapshot lives. As a `Vec` that was
+    /// a deep copy of every row on every read.
+    pub rows: Arc<[ConnectionListRow]>,
     pub widest_row: Option<usize>,
     pub stats: ConnectionListModelStats,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ConnectionListSectionKey {
     connections_revision: u64,
     groups_revision: u64,
@@ -111,8 +115,13 @@ struct ConnectionListSectionKey {
     sort_mode: ConnectionSortMode,
 }
 
-#[derive(Clone, Eq, PartialEq)]
-struct ConnectionListRowsKey {
+/// The flat-row cache key, also the backbone of the panel snapshot key.
+///
+/// Complete by construction for what it covers: the catalog keeps its vectors
+/// private behind two mutators that both bump, and the four list revisions are
+/// bumped by the only methods that can change what they stand for.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::features) struct ConnectionListRowsKey {
     section_key: ConnectionListSectionKey,
     expanded_groups_revision: u64,
     group_editor_revision: u64,
@@ -150,9 +159,17 @@ struct ConnectionListState {
     expanded_group_ids: HashSet<String>,
     /// Expansion to restore once the filter box empties again.
     search_expanded_base: Option<HashSet<String>>,
-    /// Filter text the auto-expand has already been applied for.
-    search_applied_query: Option<String>,
-    selected_ids: HashSet<String>,
+    /// Query and matching-group set the auto-expand has already been applied for.
+    search_applied: Option<AppliedSearchExpansion>,
+    /// Behind an `Arc` so the panel snapshot's change signal is the pointer.
+    ///
+    /// Every mutation below goes through `Arc::make_mut`, and the snapshot always
+    /// holds a clone, so the refcount at mutation time is never 1 and `make_mut`
+    /// is obliged to allocate. `Arc::ptr_eq` is therefore an O(1) signal that no
+    /// mutator has to remember to maintain -- the representation carries it. It
+    /// errs toward a spurious rebuild (a no-op write still moves the pointer),
+    /// never toward a missed one.
+    selected_ids: Arc<HashSet<String>>,
     last_selected_id: Option<String>,
     /// What the last right-click landed on, read by the list's single context
     /// menu when it builds its items.
@@ -248,8 +265,8 @@ impl ConnectionFeatureState {
                     .cloned()
                     .collect(),
                 search_expanded_base: None,
-                search_applied_query: None,
-                selected_ids: HashSet::new(),
+                search_applied: None,
+                selected_ids: Arc::new(HashSet::new()),
                 last_selected_id: None,
                 context_target: ConnectionListContextTarget::default(),
                 search_revision: 0,
@@ -300,6 +317,47 @@ impl ConnectionFeatureState {
 
     pub fn groups(&self) -> &[Group] {
         self.catalog.groups()
+    }
+
+    /// The current flat-row key, for the panel snapshot.
+    ///
+    /// Cheap: revisions and the filter text, no model build. Read it *after*
+    /// `connection_list_model`, which is what settles the search expansion the
+    /// key reads.
+    pub(in crate::features) fn list_rows_key(&self) -> ConnectionListRowsKey {
+        ConnectionListRowsKey {
+            section_key: ConnectionListSectionKey {
+                connections_revision: self.catalog.connections_revision(),
+                groups_revision: self.catalog.groups_revision(),
+                search_revision: self.list.search_revision,
+                sort_revision: self.list.sort_revision,
+                query: self.list.search_query(),
+                sort_mode: self.list.sort_mode(),
+            },
+            expanded_groups_revision: self.list.expanded_groups_revision,
+            group_editor_revision: self.group_editor.revision,
+        }
+    }
+
+    pub(in crate::features) fn list_selection(&self) -> Arc<HashSet<String>> {
+        self.list.selected_ids.clone()
+    }
+
+    /// The expanded set as the snapshot holds it.
+    ///
+    /// A fresh `Arc` each time: this set is small and only read through the
+    /// snapshot, and it is already covered by `expanded_groups_revision`, so it
+    /// needs no pointer identity of its own.
+    pub(in crate::features) fn list_expanded_groups_arc(&self) -> Arc<HashSet<String>> {
+        Arc::new(self.list.expanded_group_ids.clone())
+    }
+
+    pub(in crate::features) fn list_hovered_group_id(&self) -> Option<String> {
+        self.list.hovered_group_id.clone()
+    }
+
+    pub(in crate::features) fn list_drop_target(&self) -> Option<ConnectionDropTarget> {
+        self.list.drop_target.clone()
     }
 
     pub fn connection_by_id(&self, connection_id: &str) -> Option<&SavedConnection> {
@@ -397,7 +455,7 @@ impl ConnectionFeatureState {
             widest_ms,
         };
         let snapshot = ConnectionListModelSnapshot {
-            rows,
+            rows: rows.into(),
             widest_row,
             stats,
         };
@@ -486,22 +544,6 @@ impl ConnectionFeatureState {
         self.list.expanded_group_ids()
     }
 
-    pub fn list_group_is_expanded(&self, group_id: Option<&str>) -> bool {
-        self.list.group_is_expanded(group_id)
-    }
-
-    pub fn list_group_is_hovered(&self, group_id: Option<&str>) -> bool {
-        self.list.group_is_hovered(group_id)
-    }
-
-    pub fn list_drop_position_for_kind_target(
-        &self,
-        kind: ConnectionDragKind,
-        target_id: Option<&str>,
-    ) -> Option<ConnectionDropPosition> {
-        self.list.drop_position_for_kind_target(kind, target_id)
-    }
-
     pub fn select_list_connection(
         &mut self,
         connection_id: String,
@@ -527,10 +569,6 @@ impl ConnectionFeatureState {
 
     pub fn list_keyboard_active_connection_id(&self) -> Option<&str> {
         self.list.keyboard_active_connection_id()
-    }
-
-    pub fn list_connection_is_keyboard_active(&self, connection_id: &str) -> bool {
-        self.list.connection_is_keyboard_active(connection_id)
     }
 
     pub fn set_list_keyboard_active_connection_id(&mut self, connection_id: Option<String>) {
@@ -1131,12 +1169,6 @@ impl ConnectionFeatureState {
         self.group_editor.bump_revision();
     }
 
-    pub fn group_editor_is_renaming(&self, group_id: &str) -> bool {
-        self.group_editor.draft.as_ref().is_some_and(|draft| {
-            draft.mode == ConnectionGroupEditorMode::Rename && draft.id.as_deref() == Some(group_id)
-        })
-    }
-
     pub fn set_group_editor_error(&mut self, error: String) -> bool {
         let changed = self.group_editor.set_error(error);
         if changed {
@@ -1316,7 +1348,7 @@ impl ConnectionFeatureState {
         self.editor.group_select_trigger_bounds = None;
         let expanded_before = self.list.expanded_group_ids.clone();
         select_saved_connection_after_editor_save(
-            &mut self.list.selected_ids,
+            Arc::make_mut(&mut self.list.selected_ids),
             &mut self.list.last_selected_id,
             &mut self.list.expanded_group_ids,
             connection_id,
@@ -1378,26 +1410,6 @@ impl ConnectionListState {
         &self.expanded_group_ids
     }
 
-    pub fn group_is_expanded(&self, group_id: Option<&str>) -> bool {
-        group_id
-            .map(|id| self.expanded_group_ids.contains(id))
-            .unwrap_or(true)
-    }
-
-    pub fn group_is_hovered(&self, group_id: Option<&str>) -> bool {
-        group_id.is_some_and(|id| self.hovered_group_id.as_deref() == Some(id))
-    }
-
-    pub fn drop_position_for_kind_target(
-        &self,
-        kind: ConnectionDragKind,
-        target_id: Option<&str>,
-    ) -> Option<ConnectionDropPosition> {
-        self.drop_target.as_ref().and_then(|target| {
-            (target.kind == kind && target.id.as_deref() == target_id).then_some(target.position)
-        })
-    }
-
     pub fn select_connection(
         &mut self,
         connection_id: String,
@@ -1406,7 +1418,7 @@ impl ConnectionListState {
         range: bool,
     ) -> usize {
         select_connection_ids(
-            &mut self.selected_ids,
+            Arc::make_mut(&mut self.selected_ids),
             &mut self.last_selected_id,
             connection_id,
             visible_ids,
@@ -1416,13 +1428,17 @@ impl ConnectionListState {
     }
 
     pub fn select_only(&mut self, connection_id: String) {
-        self.selected_ids.clear();
-        self.selected_ids.insert(connection_id.clone());
+        let selected = Arc::make_mut(&mut self.selected_ids);
+        selected.clear();
+        selected.insert(connection_id.clone());
         self.last_selected_id = Some(connection_id);
     }
 
     pub fn clear_selection(&mut self) {
-        clear_selected_connection_ids(&mut self.selected_ids, &mut self.last_selected_id);
+        clear_selected_connection_ids(
+            Arc::make_mut(&mut self.selected_ids),
+            &mut self.last_selected_id,
+        );
     }
 
     pub fn cycle_sort_mode(&mut self) -> ConnectionSortMode {
@@ -1437,10 +1453,6 @@ impl ConnectionListState {
 
     pub fn keyboard_active_connection_id(&self) -> Option<&str> {
         self.keyboard_active_connection_id.as_deref()
-    }
-
-    pub fn connection_is_keyboard_active(&self, connection_id: &str) -> bool {
-        self.keyboard_active_connection_id.as_deref() == Some(connection_id)
     }
 
     pub fn set_keyboard_active_connection_id(&mut self, connection_id: Option<String>) {
@@ -1485,7 +1497,7 @@ impl ConnectionListState {
         sync_connection_search_expansion(
             &mut self.expanded_group_ids,
             &mut self.search_expanded_base,
-            &mut self.search_applied_query,
+            &mut self.search_applied,
             query,
             matching_group_ids,
         )
@@ -1509,11 +1521,11 @@ impl ConnectionListState {
 
     pub fn clear_runtime_state(&mut self) {
         self.search_expanded_base = None;
-        self.search_applied_query = None;
+        self.search_applied = None;
         self.keyboard_active_connection_id = None;
         let expanded_before = self.expanded_group_ids.clone();
         clear_connection_list_runtime_state(
-            &mut self.selected_ids,
+            Arc::make_mut(&mut self.selected_ids),
             &mut self.last_selected_id,
             &mut self.expanded_group_ids,
             &mut self.drop_target,
@@ -1526,7 +1538,7 @@ impl ConnectionListState {
 
     pub fn remove_connection_references(&mut self, connection_id: &str) {
         remove_connection_list_references(
-            &mut self.selected_ids,
+            Arc::make_mut(&mut self.selected_ids),
             &mut self.last_selected_id,
             &mut self.drop_target,
             connection_id,
@@ -1555,7 +1567,7 @@ impl ConnectionListState {
             base.retain(|id| group_ids.contains(id));
         }
         retain_loaded_connection_references(
-            &mut self.selected_ids,
+            Arc::make_mut(&mut self.selected_ids),
             &mut self.last_selected_id,
             &mut self.drop_target,
             connection_ids,

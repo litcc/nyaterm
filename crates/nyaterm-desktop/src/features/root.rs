@@ -64,6 +64,9 @@ impl NyaTermApp {
 
     pub(crate) fn start_after_window_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_component_theme(cx);
+        // The connections panel renders from a snapshot, so it needs one before its
+        // first paint. Later ones come from store replies and panel interactions.
+        self.flush_connection_panel_snapshot(cx);
         self.refresh_window_render_inputs(window, cx);
         self.queue_cloud_sync_history_refresh(None, cx);
         self.queue_wallpaper_refresh(cx);

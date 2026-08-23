@@ -1,2 +1,2 @@
 mod sessions;
-mod shell;
+pub(in crate::features::layout) mod shell;

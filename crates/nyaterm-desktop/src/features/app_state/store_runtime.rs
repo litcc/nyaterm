@@ -48,7 +48,14 @@ impl NyaTermApp {
             Ok(task) => {
                 cx.spawn(async move |this, cx| {
                     let event = task.await;
-                    let _ = this.update(cx, |this, cx| apply(this, event, cx));
+                    let _ = this.update(cx, |this, cx| {
+                        apply(this, event, cx);
+                        // Every async reply lands here, after the whole handler body
+                        // has run. Handlers that mutate list state *after* swapping
+                        // the catalog therefore still flush fresh state, which a
+                        // flush inside `apply_loaded_sessions` could not promise.
+                        this.flush_connection_panel_snapshot(cx);
+                    });
                 })
                 .detach();
                 true

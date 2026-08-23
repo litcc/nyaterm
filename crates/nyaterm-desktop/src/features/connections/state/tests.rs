@@ -115,6 +115,46 @@ fn search_expansion_lets_a_folder_stay_collapsed_within_one_keyword() {
 }
 
 #[test]
+fn search_expansion_reopens_when_the_catalog_moves_under_a_fixed_query() {
+    let mut expanded = HashSet::new();
+    let mut base = None;
+    let mut applied = None;
+
+    assert!(sync_connection_search_expansion(
+        &mut expanded,
+        &mut base,
+        &mut applied,
+        "prod",
+        ["one".to_string()],
+    ));
+
+    // Nothing typed, but the catalog moved: a store reload or a drag into a
+    // folder made "two" match as well. Guarding on the query alone left this
+    // folder collapsed forever and its match unreachable.
+    assert!(sync_connection_search_expansion(
+        &mut expanded,
+        &mut base,
+        &mut applied,
+        "prod",
+        ["one".to_string(), "two".to_string()],
+    ));
+    assert_eq!(
+        expanded,
+        HashSet::from(["one".to_string(), "two".to_string()])
+    );
+
+    // A catalog change that does not move the matching set is still a no-op, so
+    // the fix does not cost the collapsed-folder behaviour above.
+    assert!(!sync_connection_search_expansion(
+        &mut expanded,
+        &mut base,
+        &mut applied,
+        "prod",
+        ["two".to_string(), "one".to_string()],
+    ));
+}
+
+#[test]
 fn clear_selected_connection_ids_clears_selection_and_anchor() {
     let mut selected_ids = HashSet::from(["one".to_string(), "two".to_string()]);
     let mut last_selected_id = Some("two".to_string());

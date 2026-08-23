@@ -12,7 +12,7 @@ use crate::models::{NavItem, PanelSide};
 /// size and takes it from here instead. `size_full` is correct because the parent already
 /// constrains the panel: `single_side_panel` puts the body in
 /// `div().flex_1().min_h_0().overflow_hidden()`.
-fn cached_panel_style() -> gpui::StyleRefinement {
+pub(in crate::features) fn cached_panel_style() -> gpui::StyleRefinement {
     gpui::StyleRefinement::default().size_full()
 }
 
@@ -60,7 +60,11 @@ impl NyaTermApp {
             NavItem::Tunnels => self.tunnels_view(cx).into_any_element(),
             NavItem::SecurityAuth => self.security_auth_panel(cx).into_any_element(),
             NavItem::SyncBackupHistory => self.sync_backup_history_panel(cx).into_any_element(),
-            NavItem::Connections => self.connection_panel.clone().into_any_element(),
+            NavItem::Connections => self
+                .connection_panel
+                .clone()
+                .cached(cached_panel_style())
+                .into_any_element(),
             NavItem::AiAssistant => self.ai_assistant_panel(cx).into_any_element(),
             NavItem::ActiveSessions => {
                 let model = self.active_sessions_panel_model();

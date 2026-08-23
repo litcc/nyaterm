@@ -26,7 +26,7 @@ use nyaterm_ui::{
 #[derive(Clone)]
 pub(in crate::features) enum ConnectionListRow {
     Separator,
-    GroupHeader(ConnectionSection),
+    GroupHeader(ConnectionSectionHeader),
     InlineGroupEditor {
         parent_id: Option<String>,
         depth: usize,
@@ -102,7 +102,7 @@ fn append_connection_section_rows(
         .get(&section.group_id)
         .cloned()
         .unwrap_or_default();
-    rows.push(ConnectionListRow::GroupHeader(section.clone()));
+    rows.push(ConnectionListRow::GroupHeader(section.header()));
     let expanded = section
         .group_id
         .as_ref()
@@ -140,6 +140,38 @@ fn append_connection_section_rows(
             connection_id: connection.id,
             depth: section.depth + 1,
         });
+    }
+}
+
+/// What a flat group-header row needs, without the group's connections.
+///
+/// `ConnectionSection` carries every `SavedConnection` filed under it, and a row
+/// used to embed a whole one. The flat list only ever draws the header, so those
+/// vectors rode along into a row list that is cloned on every read -- a copy
+/// proportional to the catalog for data no row reads. This carries the header
+/// fields, plus the one thing the header needed the vector for.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::features) struct ConnectionSectionHeader {
+    pub(in crate::features) group_id: Option<String>,
+    pub(in crate::features) label: String,
+    pub(in crate::features) is_root: bool,
+    pub(in crate::features) depth: usize,
+    pub(in crate::features) total_count: usize,
+    pub(in crate::features) has_child_groups: bool,
+    pub(in crate::features) is_empty: bool,
+}
+
+impl ConnectionSection {
+    pub(in crate::features) fn header(&self) -> ConnectionSectionHeader {
+        ConnectionSectionHeader {
+            group_id: self.group_id.clone(),
+            label: self.label.clone(),
+            is_root: self.is_root,
+            depth: self.depth,
+            total_count: self.total_count,
+            has_child_groups: self.has_child_groups,
+            is_empty: self.connections.is_empty(),
+        }
     }
 }
 
@@ -1140,7 +1172,7 @@ pub(super) fn icon_action_button_styled(
 
 pub(super) fn connection_detail_rows(
     connection: &SavedConnection,
-    all_connections: &[SavedConnection],
+    all_connections: &HashMap<String, SavedConnection>,
     proxies: &[ProxyConfig],
 ) -> Vec<(&'static str, String)> {
     let description = connection
@@ -1316,7 +1348,7 @@ pub(super) fn connection_detail_rows(
 
 pub(super) fn format_jump_host_chain(
     connection: &SavedConnection,
-    all_connections: &[SavedConnection],
+    by_id: &HashMap<String, SavedConnection>,
 ) -> String {
     let Some(mut jump_id) = connection
         .network
@@ -1325,10 +1357,6 @@ pub(super) fn format_jump_host_chain(
     else {
         return "—".to_string();
     };
-    let by_id: std::collections::HashMap<&str, &SavedConnection> = all_connections
-        .iter()
-        .map(|item| (item.id.as_str(), item))
-        .collect();
     let mut seen = std::collections::HashSet::new();
     seen.insert(connection.id.clone());
     let mut labels = Vec::new();
