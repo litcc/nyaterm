@@ -90,6 +90,9 @@ impl NyaTermApp {
         // The restored panel width decides which process-table sort columns exist, and
         // nothing has resized yet, so this is where the initial value goes in.
         self.reconcile_remote_process_sort_columns();
+        // The first snapshot. Nothing has mutated yet, so no boundary has fired, and a
+        // panel with no snapshot renders empty.
+        self.flush_remote_panel_snapshots(cx);
         self.ensure_cursor_blink_clock(cx);
         self.ensure_header_status_clock(cx);
         self.ensure_idle_lock_clock(cx);

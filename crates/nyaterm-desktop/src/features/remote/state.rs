@@ -485,17 +485,14 @@ impl RemoteOpsFeatureState {
     /// `#[cfg(test)]` until the flush consumes it, which is the next commit. The
     /// counter itself is maintained in production code; only the readers are test-only,
     /// so the invariant is under test before anything depends on it.
-    #[cfg(test)]
     pub(in crate::features) fn stats_revision(&self) -> u64 {
         self.stats.revision()
     }
 
-    #[cfg(test)]
     pub(in crate::features) fn gpu_revision(&self) -> u64 {
         self.gpu.revision()
     }
 
-    #[cfg(test)]
     pub(in crate::features) fn npu_revision(&self) -> u64 {
         self.npu.revision()
     }
@@ -1702,7 +1699,6 @@ impl StatsPaneState {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    #[cfg(test)]
     fn revision(&self) -> u64 {
         self.revision
     }
@@ -1825,7 +1821,6 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    #[cfg(test)]
     fn revision(&self) -> u64 {
         self.revision
     }

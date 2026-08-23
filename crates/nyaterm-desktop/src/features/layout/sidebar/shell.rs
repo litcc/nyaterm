@@ -6,6 +6,16 @@ use crate::features::NyaTermApp;
 use crate::features::pages::remote::RemoteMonitorKind;
 use crate::models::{NavItem, PanelSide};
 
+/// Layout for a cached panel subtree.
+///
+/// `Entity::cached` skips rendering the contents to measure them, so it needs a definite
+/// size and takes it from here instead. `size_full` is correct because the parent already
+/// constrains the panel: `single_side_panel` puts the body in
+/// `div().flex_1().min_h_0().overflow_hidden()`.
+fn cached_panel_style() -> gpui::StyleRefinement {
+    gpui::StyleRefinement::default().size_full()
+}
+
 impl NyaTermApp {
     pub(in crate::features) fn sidebar(
         &mut self,
@@ -61,6 +71,7 @@ impl NyaTermApp {
                 .remote_panels
                 .entity(RemoteMonitorKind::Stats)
                 .clone()
+                .cached(cached_panel_style())
                 .into_any_element(),
             NavItem::Stats => crate::features::inspector::disabled_inspector_panel(
                 palette,
@@ -71,6 +82,7 @@ impl NyaTermApp {
                 .remote_panels
                 .entity(RemoteMonitorKind::Gpu)
                 .clone()
+                .cached(cached_panel_style())
                 .into_any_element(),
             NavItem::GpuMonitor => crate::features::inspector::disabled_inspector_panel(
                 palette,
@@ -81,6 +93,7 @@ impl NyaTermApp {
                 .remote_panels
                 .entity(RemoteMonitorKind::Npu)
                 .clone()
+                .cached(cached_panel_style())
                 .into_any_element(),
             NavItem::AscendNpuMonitor => crate::features::inspector::disabled_inspector_panel(
                 palette,

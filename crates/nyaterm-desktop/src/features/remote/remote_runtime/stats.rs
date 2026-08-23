@@ -75,6 +75,9 @@ impl NyaTermApp {
                         if this.apply_stats_event(event, cx) {
                             cx.notify();
                         }
+                        // Flush boundary: a reply changed the pane, so its panel
+                        // gets the snapshot now rather than at the next paint.
+                        this.flush_remote_panel_snapshots(cx);
                     })
                     .is_err()
                 {

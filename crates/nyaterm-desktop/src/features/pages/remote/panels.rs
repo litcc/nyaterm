@@ -27,14 +27,23 @@
 //! child view of the app is repainted by the app's own paint and a
 //! `cx.observe(&app, ..)` would buy nothing but coupling.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, Context, Entity, IntoElement, Render, Task, WeakEntity, Window, div, prelude::*,
+    AnyElement, Context, Entity, IntoElement, Render, Rgba, Task, WeakEntity, Window, div,
+    prelude::*,
 };
+use nyaterm_transport::{RemoteGpuProcess, RemoteNpuProcess};
+use nyaterm_ui::NyaInputState;
+use rust_i18n::t;
 
+use super::stats_view::{gpu_panel, npu_panel, stats_panel};
 use crate::features::NyaTermApp;
+use crate::features::remote::{GpuPresentationState, NpuPresentationState, StatsPresentationState};
+use crate::features::text_inputs::TextInputSetup;
 use crate::models::NavItem;
+use crate::theme::ThemePalette;
 
 /// How often a polling panel asks whether its own interval has come due.
 ///
@@ -76,6 +85,50 @@ impl RemoteMonitorKind {
     }
 }
 
+/// Colours a polling panel needs, already resolved.
+///
+/// The views used to call `theme_palette()` and `shell_transparent_color(..)` on the app
+/// while rendering. Resolving them into the snapshot is what lets a panel render without
+/// touching `NyaTermApp` at all -- and that matters beyond tidiness, because GPUI records
+/// every entity read during a view's render as a dependency of that view. One app read
+/// here would re-dirty the panel on every unrelated `app.notify()` and undo the whole
+/// point.
+#[derive(Clone, Copy, PartialEq)]
+pub(in crate::features) struct PanelChrome {
+    pub palette: ThemePalette,
+    /// `shell_transparent_color(palette.surface)`, the only such colour these three use.
+    pub transparent_surface: Rgba,
+}
+
+/// Everything a Stats/GPU/NPU panel renders from.
+///
+/// Carries the pane revision it was built at, so a flush can skip a panel that is already
+/// current and a boundary-time assertion can confirm none was left behind.
+pub(in crate::features) struct RemoteMonitorSnapshot {
+    revision: u64,
+    chrome: PanelChrome,
+    has_session: bool,
+    data: RemoteMonitorData,
+}
+
+pub(in crate::features) enum RemoteMonitorData {
+    Stats(StatsPresentationState),
+    Gpu {
+        state: GpuPresentationState,
+        processes: Arc<[RemoteGpuProcess]>,
+        /// The search field's state entity, owned by the app's input registry and handed
+        /// over so the panel can build the element without asking for it. Reading this
+        /// entity during render is *wanted*: typing notifies it, which invalidates this
+        /// panel and nothing else.
+        search: Entity<NyaInputState>,
+    },
+    Npu {
+        state: NpuPresentationState,
+        processes: Arc<[RemoteNpuProcess]>,
+        search: Entity<NyaInputState>,
+    },
+}
+
 /// One remote polling panel.
 pub(in crate::features) struct RemoteMonitorPanel {
     kind: RemoteMonitorKind,
@@ -92,6 +145,9 @@ pub(in crate::features) struct RemoteMonitorPanel {
     /// to remember to check, and it is why there is no separate `demand: bool`: the
     /// task's existence *is* the demand, so the two cannot disagree.
     clock: Option<Task<()>>,
+    /// What this panel renders from, for the kinds moved off the app. `None` for
+    /// Processes and Docker, which still delegate.
+    snapshot: Option<RemoteMonitorSnapshot>,
     /// Paints of *this entity*, so a test can tell the entity route apart from the
     /// inline views it replaced. Both register the same search-input ids, so no
     /// externally visible side effect distinguishes them.
@@ -100,11 +156,52 @@ pub(in crate::features) struct RemoteMonitorPanel {
 }
 
 impl RemoteMonitorPanel {
+    /// Which pane kinds render from a snapshot rather than through the app.
+    ///
+    /// Processes and Docker still delegate.
+    pub(in crate::features::pages::remote) const SNAPSHOT_KINDS: [RemoteMonitorKind; 3] = [
+        RemoteMonitorKind::Stats,
+        RemoteMonitorKind::Gpu,
+        RemoteMonitorKind::Npu,
+    ];
+
+    /// Run `f` against the app, then flush whatever snapshot it invalidated.
+    ///
+    /// Every panel-initiated mutation goes through here, which makes the panel its own
+    /// flush boundary: no callback has to remember a separate step. Called from event
+    /// handlers, never from render.
+    pub(in crate::features::pages::remote) fn with_app<R: Default>(
+        &self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut NyaTermApp, &mut Context<NyaTermApp>) -> R,
+    ) -> R {
+        let Some(app) = self.app.upgrade() else {
+            return R::default();
+        };
+        app.update(cx, |app, cx| {
+            let result = f(app, cx);
+            app.flush_remote_panel_snapshots(cx);
+            result
+        })
+    }
+
+    /// The pane revision this panel last received, if any.
+    pub(in crate::features::pages::remote) fn snapshot_revision(&self) -> Option<u64> {
+        self.snapshot.as_ref().map(|snapshot| snapshot.revision)
+    }
+
+    fn set_snapshot(&mut self, snapshot: RemoteMonitorSnapshot, cx: &mut Context<Self>) {
+        self.snapshot = Some(snapshot);
+        // Notifies this panel only. The app is untouched, so nothing else repaints.
+        cx.notify();
+    }
+
     fn new(kind: RemoteMonitorKind, app: WeakEntity<NyaTermApp>) -> Self {
         Self {
             kind,
             app,
             clock: None,
+            snapshot: None,
             #[cfg(test)]
             paint_count: 0,
         }
@@ -143,7 +240,11 @@ impl RemoteMonitorPanel {
                 //
                 // No error to handle: the strong handle from `upgrade` keeps the app
                 // alive for the call, and a released app ends the loop above.
-                app.update(cx, |app, cx| app.refresh_remote_monitor_if_due(kind, cx));
+                app.update(cx, |app, cx| {
+                    app.refresh_remote_monitor_if_due(kind, cx);
+                    // Flush boundary: submitting a refresh changes the pane status.
+                    app.flush_remote_panel_snapshots(cx);
+                });
             }
         }));
     }
@@ -167,17 +268,54 @@ impl Render for RemoteMonitorPanel {
         {
             self.paint_count += 1;
         }
+        // Snapshot kinds render with **zero** `NyaTermApp` access, diagnostics included:
+        // GPUI records every entity read during a view's render as a dependency of that
+        // view, so one app read here would re-dirty this panel on every unrelated
+        // `app.notify()`.
+        if Self::SNAPSHOT_KINDS.contains(&self.kind) {
+            let Some(snapshot) = self.snapshot.as_ref() else {
+                // Nothing pushed yet; the next boundary fills it in.
+                return div().into_any_element();
+            };
+            let chrome = snapshot.chrome;
+            let has_session = snapshot.has_session;
+            return match &snapshot.data {
+                RemoteMonitorData::Stats(state) => {
+                    let state = state.clone();
+                    stats_panel(chrome, has_session, state, cx)
+                }
+                RemoteMonitorData::Gpu {
+                    state,
+                    processes,
+                    search,
+                } => {
+                    let (state, processes, search) =
+                        (state.clone(), processes.clone(), search.clone());
+                    gpu_panel(chrome, has_session, state, processes, search, cx)
+                }
+                RemoteMonitorData::Npu {
+                    state,
+                    processes,
+                    search,
+                } => {
+                    let (state, processes, search) =
+                        (state.clone(), processes.clone(), search.clone());
+                    npu_panel(chrome, has_session, state, processes, search, cx)
+                }
+            };
+        }
         let Some(app) = self.app.upgrade() else {
             return div().into_any_element();
         };
         let kind = self.kind;
         app.update(cx, |app, cx| -> AnyElement {
             match kind {
-                RemoteMonitorKind::Stats => app.stats_view(cx).into_any_element(),
-                RemoteMonitorKind::Gpu => app.gpu_view(cx).into_any_element(),
-                RemoteMonitorKind::Npu => app.npu_view(cx).into_any_element(),
                 RemoteMonitorKind::Processes => app.processes_view(cx).into_any_element(),
                 RemoteMonitorKind::Docker => app.docker_view(cx).into_any_element(),
+                // Handled above, from the snapshot.
+                RemoteMonitorKind::Stats | RemoteMonitorKind::Gpu | RemoteMonitorKind::Npu => {
+                    div().into_any_element()
+                }
             }
         })
     }
@@ -225,6 +363,116 @@ impl RemotePanels {
 }
 
 impl NyaTermApp {
+    /// Push a fresh snapshot to every panel whose pane has moved on.
+    ///
+    /// **Never called from `render`.** The boundaries are the three event drains, a
+    /// settings apply, `sync_remote_panels_after_activation` for a session switch, the
+    /// panel's own refresh clock, and `RemoteMonitorPanel::with_app` for anything the
+    /// panel initiates. GPUI runs `flush_effects` when the outermost `update` finishes,
+    /// so a mutation and the panel update it causes land in the same cycle, before any
+    /// paint.
+    ///
+    /// Cheap when nothing changed: one `u64` compare per kind.
+    pub(in crate::features) fn flush_remote_panel_snapshots(&mut self, cx: &mut Context<Self>) {
+        for kind in RemoteMonitorPanel::SNAPSHOT_KINDS {
+            let revision = self.remote_monitor_revision(kind);
+            let panel = self.remote_panels.entity(kind).clone();
+            if panel.read(cx).snapshot_revision() == Some(revision) {
+                continue;
+            }
+            let snapshot = self.build_remote_monitor_snapshot(kind, revision, cx);
+            panel.update(cx, |panel, cx| panel.set_snapshot(snapshot, cx));
+        }
+
+        // Freshness, asserted here rather than in render -- a render-time app read would
+        // be recorded as a dependency and defeat the isolation this exists to provide.
+        // This catches a flush that is itself wrong: a kind missing from the loop, or a
+        // snapshot built for the wrong pane. It cannot catch a *missed boundary*, since a
+        // boundary never reached never runs it; that is what the freshness tests cover.
+        #[cfg(debug_assertions)]
+        for kind in RemoteMonitorPanel::SNAPSHOT_KINDS {
+            debug_assert_eq!(
+                self.remote_panels.entity(kind).read(cx).snapshot_revision(),
+                Some(self.remote_monitor_revision(kind)),
+                "flush left a panel behind its pane"
+            );
+        }
+    }
+
+    fn remote_monitor_revision(&self, kind: RemoteMonitorKind) -> u64 {
+        match kind {
+            RemoteMonitorKind::Stats => self.remote_ops.stats_revision(),
+            RemoteMonitorKind::Gpu => self.remote_ops.gpu_revision(),
+            RemoteMonitorKind::Npu => self.remote_ops.npu_revision(),
+            // Not snapshotted; unreachable through SNAPSHOT_KINDS.
+            RemoteMonitorKind::Processes | RemoteMonitorKind::Docker => 0,
+        }
+    }
+
+    fn panel_chrome(&self) -> PanelChrome {
+        let palette = self.theme_palette();
+        PanelChrome {
+            transparent_surface: self.shell_transparent_color(palette.surface),
+            palette,
+        }
+    }
+
+    fn build_remote_monitor_snapshot(
+        &mut self,
+        kind: RemoteMonitorKind,
+        revision: u64,
+        cx: &mut Context<Self>,
+    ) -> RemoteMonitorSnapshot {
+        let chrome = self.panel_chrome();
+        let has_session = self.session.active_ssh_config().is_some();
+        let data = match kind {
+            RemoteMonitorKind::Stats => {
+                RemoteMonitorData::Stats(self.remote_ops.stats_presentation())
+            }
+            RemoteMonitorKind::Gpu => {
+                let state = self.remote_ops.gpu_presentation();
+                let processes = self.remote_ops.derived_gpu_processes();
+                // The registry hands back the existing entity after the first call, so
+                // the seed only applies when the field is created.
+                let search = self.text_input(
+                    "remote.gpu.filter",
+                    &state.search_draft.clone(),
+                    TextInputSetup::placeholder(t!("gpuMonitor.search")),
+                    cx,
+                );
+                RemoteMonitorData::Gpu {
+                    state,
+                    processes,
+                    search,
+                }
+            }
+            RemoteMonitorKind::Npu => {
+                let state = self.remote_ops.npu_presentation();
+                let processes = self.remote_ops.derived_npu_processes();
+                let search = self.text_input(
+                    "remote.npu.filter",
+                    &state.search_draft.clone(),
+                    TextInputSetup::placeholder(t!("ascendNpuMonitor.search")),
+                    cx,
+                );
+                RemoteMonitorData::Npu {
+                    state,
+                    processes,
+                    search,
+                }
+            }
+            RemoteMonitorKind::Processes | RemoteMonitorKind::Docker => {
+                unreachable!("only snapshot kinds are built")
+            }
+        };
+        RemoteMonitorSnapshot {
+            revision,
+            chrome,
+            has_session,
+            data,
+        }
+    }
+
     /// Refresh one pane if its interval is due and the app is calm enough.
     ///
     /// The two gates are the ones the shell-wide clock applied to all five at once, so
@@ -701,6 +949,257 @@ mod tests {
             armed,
             vec![RemoteMonitorKind::Gpu],
             "a paint with the GPU panel open must arm exactly that panel's clock"
+        );
+    }
+}
+
+#[cfg(test)]
+mod isolation_tests {
+    use gpui::{
+        AppContext as _, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
+        VisualTestContext, div,
+    };
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
+    use nyaterm_transport::{LocalSessionConfig, RemoteGpuOverview, RemoteStats, SshSessionConfig};
+
+    use super::RemoteMonitorKind;
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::models::{NavItem, SessionLaunchConfig, SessionRuntimeMetadata};
+
+    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        // A uuid rather than a clock reading: these tests run in parallel and Windows'
+        // ~15ms clock granularity lets a nanosecond timestamp repeat, which would share
+        // one config dir and so one settings database.
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-panel-isolation-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    struct AppHost {
+        app: gpui::Entity<NyaTermApp>,
+    }
+
+    impl Render for AppHost {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div().size_full().child(self.app.clone())
+        }
+    }
+
+    fn paints(app: &gpui::Entity<NyaTermApp>, cx: &gpui::App) -> [usize; 3] {
+        let count = |kind| {
+            app.read(cx)
+                .remote_panels
+                .entity(kind)
+                .read(cx)
+                .paint_count()
+        };
+        [
+            count(RemoteMonitorKind::Stats),
+            count(RemoteMonitorKind::Gpu),
+            count(RemoteMonitorKind::Npu),
+        ]
+    }
+
+    /// Open the three panels on an SSH session and paint until things settle.
+    fn hosted(cx: &mut TestAppContext) -> (gpui::Entity<NyaTermApp>, &mut VisualTestContext) {
+        let app = app(cx);
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_remote_stats = true;
+            summary.ui_show_gpu_monitor = true;
+            summary.ui_show_ascend_npu_monitor = true;
+            app.settings.replace_summary(summary);
+            app.session.register_session_metadata(
+                "ssh-a",
+                SessionRuntimeMetadata {
+                    ssh_config: Some(SshSessionConfig::default()),
+                    ssh_multiplex_key: None,
+                    source_connection_id: None,
+                    ai_execution_profile: AiExecutionProfile::Posix,
+                    launch_config: SessionLaunchConfig::Local(LocalSessionConfig::default()),
+                    disconnected: false,
+                },
+            );
+            app.activate_session_id("ssh-a", cx);
+            app.open_or_toggle_panel(NavItem::Stats, cx);
+            app.flush_remote_panel_snapshots(cx);
+        });
+        let host_app = app.clone();
+        let (_, vcx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
+        let vcx: &mut VisualTestContext = vcx;
+        vcx.run_until_parked();
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                app.update(cx, |_, cx| cx.notify());
+                _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        (app, vcx)
+    }
+
+    /// An `app.notify()` that changed nothing in a panel must not re-run its render.
+    ///
+    /// This is the whole point of the batch, and it is only true because the panel render
+    /// makes **zero** `NyaTermApp` accesses: GPUI records every entity read during a
+    /// view's render as a dependency of that view, so one app read -- diagnostics included
+    /// -- would put the panel in `window.dirty_views` on every notify and the cached
+    /// subtree would never be reused.
+    ///
+    /// It is also the `.cached()` measurement. If caching does not engage under the
+    /// current parent sizing, content mask and text style, this fails.
+    #[test]
+    fn an_unrelated_app_notify_does_not_re_render_the_snapshot_panels() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+
+        let before = vcx.update(|_, cx| paints(&app, cx));
+        assert!(
+            before[0] > 0,
+            "the Stats panel must have painted at least once, or this test proves nothing"
+        );
+        for _ in 0..5 {
+            vcx.update(|window, cx| {
+                // Nothing about the remote panes changed; this is the shape of a terminal
+                // output frame or a status text update.
+                app.update(cx, |_, cx| cx.notify());
+                _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        let after = vcx.update(|_, cx| paints(&app, cx));
+
+        assert_eq!(
+            before, after,
+            "five unrelated app notifies must not re-render any snapshot panel"
+        );
+    }
+
+    /// A stats mutation reaches its panel in the same update cycle, with no extra paint.
+    ///
+    /// The snapshot arrives synchronously: the flush runs inside the same outer `update`
+    /// as the mutation, so the revision matches before anything draws. The repaint that
+    /// follows is a consequence of the panel's own notify, not a precondition for
+    /// freshness.
+    #[test]
+    fn a_stats_mutation_reaches_its_panel_without_an_extra_root_paint() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+
+        let revision = vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.remote_ops.apply_stats(RemoteStats::default());
+                app.remote_ops.set_stats_status("loaded stats");
+                // The boundary an event drain would use.
+                app.flush_remote_panel_snapshots(cx);
+                app.remote_ops.stats_revision()
+            })
+        });
+
+        let delivered = vcx.update(|_, cx| {
+            app.read(cx)
+                .remote_panels
+                .entity(RemoteMonitorKind::Stats)
+                .read(cx)
+                .snapshot_revision()
+        });
+        assert_eq!(
+            delivered,
+            Some(revision),
+            "the snapshot must be current before any paint"
+        );
+    }
+
+    /// A GPU mutation must not re-render Stats or NPU.
+    #[test]
+    fn a_gpu_mutation_does_not_re_render_stats_or_npu() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+
+        let before = vcx.update(|_, cx| paints(&app, cx));
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.remote_ops.apply_gpu(
+                    "ssh-a",
+                    RemoteGpuOverview {
+                        available: true,
+                        ..Default::default()
+                    },
+                );
+                app.flush_remote_panel_snapshots(cx);
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+        let after = vcx.update(|_, cx| paints(&app, cx));
+
+        assert_eq!(
+            (after[0], after[2]),
+            (before[0], before[2]),
+            "a GPU refresh must leave the Stats and NPU panels alone"
+        );
+    }
+
+    /// Typing in the GPU search field invalidates the GPU panel and nothing else.
+    ///
+    /// The panel holds the field's `Entity<NyaInputState>` from its snapshot, so reading
+    /// it during render makes the panel a dependent of that entity -- which is the wanted
+    /// direction of coupling. No app render is involved.
+    #[test]
+    fn typing_in_the_gpu_search_invalidates_only_that_panel() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        // The GPU panel has to be the one on screen for its search field to be built.
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.open_or_toggle_panel(NavItem::GpuMonitor, cx);
+                app.flush_remote_panel_snapshots(cx);
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+
+        let before = vcx.update(|_, cx| paints(&app, cx));
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                // What the field's subscription does on a keystroke.
+                app.remote_ops.apply_gpu_search("py".to_string());
+                app.flush_remote_panel_snapshots(cx);
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+        let after = vcx.update(|_, cx| paints(&app, cx));
+
+        assert!(
+            after[1] > before[1],
+            "the GPU panel must re-render for its own search change"
+        );
+        assert_eq!(
+            (after[0], after[2]),
+            (before[0], before[2]),
+            "and the other two must not"
         );
     }
 }

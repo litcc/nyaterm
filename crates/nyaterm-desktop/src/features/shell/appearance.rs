@@ -39,6 +39,8 @@ impl NyaTermApp {
     ) {
         self.settings.replace_summary(settings);
         self.invalidate_paint_theme_caches();
+        // Flush boundary: the theme and wallpaper feed `PanelChrome`.
+        self.flush_remote_panel_snapshots(cx);
         self.queue_wallpaper_refresh(cx);
     }
 

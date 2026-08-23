@@ -12,14 +12,20 @@ use nyaterm_transport::{
 };
 use nyaterm_ui::NyaScrollable;
 
+use std::sync::Arc;
+
+use super::panels::{PanelChrome, RemoteMonitorKind, RemoteMonitorPanel};
+use crate::features::remote::StatsPresentationState;
 use crate::features::remote::{
     ACCELERATOR_PROCESS_VIEWPORT_ROWS, GpuPresentationState, NpuPresentationState, max_list_offset,
 };
 use crate::features::{
-    NyaTermApp, formatting::format_rate, formatting::format_uptime, shell::gpui_code_font_family,
-    text_inputs::TextInputSetup, transfers::format_file_size, view_widgets::stats_progress_bar,
+    formatting::format_rate, formatting::format_uptime, shell::gpui_code_font_family,
+    transfers::format_file_size, view_widgets::stats_progress_bar,
 };
 use crate::widgets::empty_panel;
+use gpui::Entity;
+use nyaterm_ui::{NyaInputState, NyaSearchInput};
 
 use super::process::usage_color;
 
@@ -29,96 +35,106 @@ struct ResourceRowPosition {
     last: bool,
 }
 
-impl NyaTermApp {
-    pub(in crate::features) fn stats_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let stats_state = self.remote_ops.stats_presentation();
-        let palette = self.theme_palette();
-        if self.session.active_ssh_config().is_none() {
-            return div()
-                .size_full()
-                .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(t!("panel.resourceMonitorNoSession"), palette));
-        }
-        let Some(stats) = stats_state.data else {
-            let message = if stats_state.pending {
-                t!("common.loading")
-            } else if stats_state.status.contains("failed") {
-                t!("panel.resourceMonitorError")
-            } else {
-                t!("common.loading")
-            };
-            return div()
-                .size_full()
-                .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(message, palette));
+/// The Stats panel, rendered from a snapshot.
+///
+/// Takes no `NyaTermApp`. GPUI records every entity read during a view's render as a
+/// dependency of that view, so a single app read here would re-dirty this panel on every
+/// unrelated `app.notify()` -- which is exactly what the snapshot exists to prevent.
+pub(in crate::features::pages::remote) fn stats_panel(
+    chrome: PanelChrome,
+    has_session: bool,
+    stats_state: StatsPresentationState,
+    cx: &mut Context<RemoteMonitorPanel>,
+) -> gpui::AnyElement {
+    let palette = chrome.palette;
+    if !has_session {
+        return div()
+            .size_full()
+            .bg(chrome.transparent_surface)
+            .child(empty_panel(t!("panel.resourceMonitorNoSession"), palette))
+            .into_any_element();
+    }
+    let Some(stats) = stats_state.data else {
+        let message = if stats_state.pending {
+            t!("common.loading")
+        } else if stats_state.status.contains("failed") {
+            t!("panel.resourceMonitorError")
+        } else {
+            t!("common.loading")
         };
+        return div()
+            .size_full()
+            .bg(chrome.transparent_surface)
+            .child(empty_panel(message, palette))
+            .into_any_element();
+    };
 
-        let memory_total = stats.memory.used.saturating_add(stats.memory.available);
-        let memory_percent = if memory_total > 0 {
-            stats.memory.used as f64 / memory_total as f64 * 100.
-        } else {
-            0.
-        };
-        let system_label = t!("resourceMonitor.system").to_string();
-        let hostname_label = t!("resourceMonitor.hostname").to_string();
-        let arch_label = t!("resourceMonitor.arch").to_string();
-        let os_label = t!("resourceMonitor.os").to_string();
-        let uptime_label = t!("resourceMonitor.uptime").to_string();
-        let cpu_label = t!("resourceMonitor.cpu").to_string();
-        let cpu_average_label = t!("resourceMonitor.cpuAvgUsage").to_string();
-        let load_1_label = t!("resourceMonitor.Load1").to_string();
-        let load_5_label = t!("resourceMonitor.Load5").to_string();
-        let load_15_label = t!("resourceMonitor.Load15").to_string();
-        let memory_label = t!("resourceMonitor.memory").to_string();
-        let available_label = t!("resourceMonitor.available").to_string();
-        let cached_label = t!("resourceMonitor.cached").to_string();
-        let network_label = t!("resourceMonitor.network").to_string();
-        let disk_label = t!("resourceMonitor.disk").to_string();
+    let memory_total = stats.memory.used.saturating_add(stats.memory.available);
+    let memory_percent = if memory_total > 0 {
+        stats.memory.used as f64 / memory_total as f64 * 100.
+    } else {
+        0.
+    };
+    let system_label = t!("resourceMonitor.system").to_string();
+    let hostname_label = t!("resourceMonitor.hostname").to_string();
+    let arch_label = t!("resourceMonitor.arch").to_string();
+    let os_label = t!("resourceMonitor.os").to_string();
+    let uptime_label = t!("resourceMonitor.uptime").to_string();
+    let cpu_label = t!("resourceMonitor.cpu").to_string();
+    let cpu_average_label = t!("resourceMonitor.cpuAvgUsage").to_string();
+    let load_1_label = t!("resourceMonitor.Load1").to_string();
+    let load_5_label = t!("resourceMonitor.Load5").to_string();
+    let load_15_label = t!("resourceMonitor.Load15").to_string();
+    let memory_label = t!("resourceMonitor.memory").to_string();
+    let available_label = t!("resourceMonitor.available").to_string();
+    let cached_label = t!("resourceMonitor.cached").to_string();
+    let network_label = t!("resourceMonitor.network").to_string();
+    let disk_label = t!("resourceMonitor.disk").to_string();
 
-        let mut network_rows = div().flex().flex_col();
-        if stats.networks.is_empty() {
-            network_rows = network_rows.child(resource_empty_value(palette));
-        } else {
-            let total = stats.networks.len();
-            for (index, network) in stats.networks.iter().enumerate() {
-                network_rows = network_rows.child(resource_network_row(
-                    palette,
-                    &network.nic,
-                    network.tx_bytes_per_sec,
-                    network.rx_bytes_per_sec,
-                    ResourceRowPosition {
-                        first: index == 0,
-                        last: index + 1 == total,
-                    },
-                ));
-            }
+    let mut network_rows = div().flex().flex_col();
+    if stats.networks.is_empty() {
+        network_rows = network_rows.child(resource_empty_value(palette));
+    } else {
+        let total = stats.networks.len();
+        for (index, network) in stats.networks.iter().enumerate() {
+            network_rows = network_rows.child(resource_network_row(
+                palette,
+                &network.nic,
+                network.tx_bytes_per_sec,
+                network.rx_bytes_per_sec,
+                ResourceRowPosition {
+                    first: index == 0,
+                    last: index + 1 == total,
+                },
+            ));
         }
+    }
 
-        let mut disk_rows = div().flex().flex_col();
-        if stats.disks.is_empty() {
-            disk_rows = disk_rows.child(resource_empty_value(palette));
-        } else {
-            let total = stats.disks.len();
-            for (index, disk) in stats.disks.iter().enumerate() {
-                disk_rows = disk_rows.child(resource_disk_row(
-                    palette,
-                    &disk.mount,
-                    disk.total,
-                    disk.available,
-                    disk.use_percent,
-                    available_label.clone(),
-                    ResourceRowPosition {
-                        first: index == 0,
-                        last: index + 1 == total,
-                    },
-                ));
-            }
+    let mut disk_rows = div().flex().flex_col();
+    if stats.disks.is_empty() {
+        disk_rows = disk_rows.child(resource_empty_value(palette));
+    } else {
+        let total = stats.disks.len();
+        for (index, disk) in stats.disks.iter().enumerate() {
+            disk_rows = disk_rows.child(resource_disk_row(
+                palette,
+                &disk.mount,
+                disk.total,
+                disk.available,
+                disk.use_percent,
+                available_label.clone(),
+                ResourceRowPosition {
+                    first: index == 0,
+                    last: index + 1 == total,
+                },
+            ));
         }
+    }
 
-        div()
+    div()
             .size_full()
             .overflow_hidden()
-            .bg(self.shell_transparent_color(palette.surface))
+            .bg(chrome.transparent_surface)
             .child(
                 div()
                     .id(SharedString::from("stats-scroll"))
@@ -344,89 +360,105 @@ impl NyaTermApp {
                     .child(resource_section_card(palette, network_label, network_rows))
                     .child(resource_section_card(palette, disk_label, disk_rows)),
             )
-    }
+            .into_any_element()
+}
 
-    pub(in crate::features) fn gpu_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let gpu_state = self.remote_ops.gpu_presentation();
-        let gpu_search_input = self
-            .search_input_box(
-                "remote.gpu.filter",
-                &gpu_state.search_draft.clone(),
-                TextInputSetup::placeholder(t!("gpuMonitor.search")),
-                cx,
-            )
-            .into_any_element();
-        if self.session.active_ssh_config().is_none() {
-            return div()
-                .size_full()
-                .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(t!("gpuMonitor.noSession"), palette));
-        }
-        let content = match gpu_state.data.as_ref() {
-            Some(overview) if overview.available && !overview.gpus.is_empty() => {
-                rich_gpu_panel(self, palette, overview, &gpu_state, gpu_search_input, cx)
-            }
-            Some(overview) if !overview.available => {
-                empty_panel(t!("gpuMonitor.unavailable"), palette).into_any_element()
-            }
-            Some(_) => empty_panel(t!("gpuMonitor.noGpus"), palette).into_any_element(),
-            None => {
-                let message = if gpu_state.pending || !gpu_state.status.contains("failed") {
-                    t!("common.loading")
-                } else {
-                    t!("gpuMonitor.error")
-                };
-                empty_panel(message, palette).into_any_element()
-            }
-        };
-        div()
+/// The GPU panel, rendered from a snapshot. See `stats_panel` on why there is no app.
+pub(in crate::features::pages::remote) fn gpu_panel(
+    chrome: PanelChrome,
+    has_session: bool,
+    gpu_state: GpuPresentationState,
+    processes: Arc<[RemoteGpuProcess]>,
+    search: Entity<NyaInputState>,
+    cx: &mut Context<RemoteMonitorPanel>,
+) -> gpui::AnyElement {
+    let palette = chrome.palette;
+    // Built from the handle the snapshot carries. Reading that entity here is wanted:
+    // typing notifies it, which invalidates this panel and nothing else.
+    let gpu_search_input = NyaSearchInput::new("remote.gpu.filter", &search).into_any_element();
+    if !has_session {
+        return div()
             .size_full()
-            .overflow_hidden()
-            .bg(self.shell_transparent_color(palette.surface))
-            .child(content)
+            .bg(chrome.transparent_surface)
+            .child(empty_panel(t!("gpuMonitor.noSession"), palette))
+            .into_any_element();
     }
+    let content = match gpu_state.data.as_ref() {
+        Some(overview) if overview.available && !overview.gpus.is_empty() => rich_gpu_panel(
+            palette,
+            overview,
+            &gpu_state,
+            processes,
+            gpu_search_input,
+            cx,
+        ),
+        Some(overview) if !overview.available => {
+            empty_panel(t!("gpuMonitor.unavailable"), palette).into_any_element()
+        }
+        Some(_) => empty_panel(t!("gpuMonitor.noGpus"), palette).into_any_element(),
+        None => {
+            let message = if gpu_state.pending || !gpu_state.status.contains("failed") {
+                t!("common.loading")
+            } else {
+                t!("gpuMonitor.error")
+            };
+            empty_panel(message, palette).into_any_element()
+        }
+    };
+    div()
+        .size_full()
+        .overflow_hidden()
+        .bg(chrome.transparent_surface)
+        .child(content)
+        .into_any_element()
+}
 
-    pub(in crate::features) fn npu_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let npu_state = self.remote_ops.npu_presentation();
-        let npu_search_input = self
-            .search_input_box(
-                "remote.npu.filter",
-                &npu_state.search_draft.clone(),
-                TextInputSetup::placeholder(t!("ascendNpuMonitor.search")),
-                cx,
-            )
-            .into_any_element();
-        if self.session.active_ssh_config().is_none() {
-            return div()
-                .size_full()
-                .bg(self.shell_transparent_color(palette.surface))
-                .child(empty_panel(t!("ascendNpuMonitor.noSession"), palette));
-        }
-        let content = match npu_state.data.as_ref() {
-            Some(overview) if overview.available && !overview.npus.is_empty() => {
-                rich_npu_panel(self, palette, overview, &npu_state, npu_search_input, cx)
-            }
-            Some(overview) if !overview.available => {
-                empty_panel(t!("ascendNpuMonitor.unavailable"), palette).into_any_element()
-            }
-            Some(_) => empty_panel(t!("ascendNpuMonitor.noNpus"), palette).into_any_element(),
-            None => {
-                let message = if npu_state.pending || !npu_state.status.contains("failed") {
-                    t!("common.loading")
-                } else {
-                    t!("ascendNpuMonitor.error")
-                };
-                empty_panel(message, palette).into_any_element()
-            }
-        };
-        div()
+/// The NPU panel, rendered from a snapshot. See `stats_panel` on why there is no app.
+pub(in crate::features::pages::remote) fn npu_panel(
+    chrome: PanelChrome,
+    has_session: bool,
+    npu_state: NpuPresentationState,
+    processes: Arc<[RemoteNpuProcess]>,
+    search: Entity<NyaInputState>,
+    cx: &mut Context<RemoteMonitorPanel>,
+) -> gpui::AnyElement {
+    let palette = chrome.palette;
+    let npu_search_input = NyaSearchInput::new("remote.npu.filter", &search).into_any_element();
+    if !has_session {
+        return div()
             .size_full()
-            .overflow_hidden()
-            .bg(self.shell_transparent_color(palette.surface))
-            .child(content)
+            .bg(chrome.transparent_surface)
+            .child(empty_panel(t!("ascendNpuMonitor.noSession"), palette))
+            .into_any_element();
     }
+    let content = match npu_state.data.as_ref() {
+        Some(overview) if overview.available && !overview.npus.is_empty() => rich_npu_panel(
+            palette,
+            overview,
+            &npu_state,
+            processes,
+            npu_search_input,
+            cx,
+        ),
+        Some(overview) if !overview.available => {
+            empty_panel(t!("ascendNpuMonitor.unavailable"), palette).into_any_element()
+        }
+        Some(_) => empty_panel(t!("ascendNpuMonitor.noNpus"), palette).into_any_element(),
+        None => {
+            let message = if npu_state.pending || !npu_state.status.contains("failed") {
+                t!("common.loading")
+            } else {
+                t!("ascendNpuMonitor.error")
+            };
+            empty_panel(message, palette).into_any_element()
+        }
+    };
+    div()
+        .size_full()
+        .overflow_hidden()
+        .bg(chrome.transparent_surface)
+        .child(content)
+        .into_any_element()
 }
 
 const ACCELERATOR_PROCESS_ROW_HEIGHT_PX: f32 = 56.;
@@ -452,18 +484,17 @@ struct NpuSummary {
 }
 
 fn rich_gpu_panel(
-    app: &mut NyaTermApp,
     palette: crate::theme::ThemePalette,
     overview: &RemoteGpuOverview,
     state: &GpuPresentationState,
+    processes: Arc<[RemoteGpuProcess]>,
     search_input: gpui::AnyElement,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::AnyElement {
     let summary = build_gpu_summary(overview);
     let normalized_query = state.search_draft.trim().to_ascii_lowercase();
     // Filtered, sorted and offset-clamped by `RemoteOpsFeatureState`, which reconciles
     // them when the overview or the query changes. This pass only reads them.
-    let processes = app.remote_ops.derived_gpu_processes();
     let total_processes = processes.len();
     let offset = state.process_list_offset;
     let (visible_processes, pad_top, pad_bottom) = accelerator_visible_window(&processes, offset);
@@ -528,12 +559,13 @@ fn rich_gpu_panel(
             } else {
                 t!("gpuMonitor.noMatches")
             },
-            cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+            cx.listener(move |panel, event: &ScrollWheelEvent, _, cx| {
                 handle_accelerator_process_scroll(
                     event,
                     total_processes,
                     offset,
-                    |next| this.remote_ops.set_gpu_process_offset(next),
+                    RemoteMonitorKind::Gpu,
+                    panel,
                     cx,
                 );
             }),
@@ -542,18 +574,17 @@ fn rich_gpu_panel(
 }
 
 fn rich_npu_panel(
-    app: &mut NyaTermApp,
     palette: crate::theme::ThemePalette,
     overview: &RemoteNpuOverview,
     state: &NpuPresentationState,
+    processes: Arc<[RemoteNpuProcess]>,
     search_input: gpui::AnyElement,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::AnyElement {
     let summary = build_npu_summary(overview);
     let normalized_query = state.search_draft.trim().to_ascii_lowercase();
     // Filtered, sorted and offset-clamped by `RemoteOpsFeatureState`, which reconciles
     // them when the overview or the query changes. This pass only reads them.
-    let processes = app.remote_ops.derived_npu_processes();
     let total_processes = processes.len();
     let offset = state.process_list_offset;
     let (visible_processes, pad_top, pad_bottom) = accelerator_visible_window(&processes, offset);
@@ -618,12 +649,13 @@ fn rich_npu_panel(
             } else {
                 t!("ascendNpuMonitor.noMatches")
             },
-            cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
+            cx.listener(move |panel, event: &ScrollWheelEvent, _, cx| {
                 handle_accelerator_process_scroll(
                     event,
                     total_processes,
                     offset,
-                    |next| this.remote_ops.set_npu_process_offset(next),
+                    RemoteMonitorKind::Npu,
+                    panel,
                     cx,
                 );
             }),
@@ -673,7 +705,7 @@ fn gpu_card(
     gpu: &RemoteGpu,
     expanded: bool,
     key: String,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let gpu_utilization = gpu.utilization_gpu_percent.unwrap_or(0.);
     let memory_percent = percent_from_parts(gpu.memory_used_mb, gpu.memory_total_mb);
@@ -684,8 +716,9 @@ fn gpu_card(
         expanded,
         key.clone(),
         "gpu-card",
-        cx.listener(move |this, _, _, cx| {
-            this.toggle_gpu_device_expanded(key.clone(), cx);
+        cx.listener(move |panel, _, _, cx| {
+            let key = key.clone();
+            panel.with_app(cx, move |app, cx| app.toggle_gpu_device_expanded(key, cx));
         }),
         div()
             .flex()
@@ -773,7 +806,7 @@ fn npu_card(
     npu: &RemoteNpu,
     expanded: bool,
     key: String,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let aicore_utilization = npu.utilization_aicore_percent.unwrap_or(0.);
     let memory_percent = percent_from_parts(npu.memory_used_mb, npu.memory_total_mb);
@@ -784,8 +817,9 @@ fn npu_card(
         expanded,
         key.clone(),
         "npu-card",
-        cx.listener(move |this, _, _, cx| {
-            this.toggle_npu_device_expanded(key.clone(), cx);
+        cx.listener(move |panel, _, _, cx| {
+            let key = key.clone();
+            panel.with_app(cx, move |app, cx| app.toggle_npu_device_expanded(key, cx));
         }),
         div()
             .flex()
@@ -1258,8 +1292,9 @@ fn handle_accelerator_process_scroll(
     event: &ScrollWheelEvent,
     total: usize,
     current: usize,
-    mut set_offset: impl FnMut(usize) -> bool,
-    cx: &mut Context<NyaTermApp>,
+    kind: RemoteMonitorKind,
+    panel: &RemoteMonitorPanel,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) {
     let max_offset = max_list_offset(total, ACCELERATOR_PROCESS_VIEWPORT_ROWS);
     if max_offset == 0 {
@@ -1272,9 +1307,19 @@ fn handle_accelerator_process_scroll(
     let next = (current as f32 - delta_rows)
         .round()
         .clamp(0., max_offset as f32) as usize;
-    if set_offset(next) {
+    // The offset write and the snapshot flush happen on the event, not in render.
+    let moved = panel.with_app(cx, move |app, cx| {
+        let moved = match kind {
+            RemoteMonitorKind::Gpu => app.remote_ops.set_gpu_process_offset(next),
+            _ => app.remote_ops.set_npu_process_offset(next),
+        };
+        if moved {
+            cx.notify();
+        }
+        moved
+    });
+    if moved {
         cx.stop_propagation();
-        cx.notify();
     }
 }
 
@@ -1762,7 +1807,7 @@ fn cpu_core_summary(
     per_core: &[f64],
     expanded: bool,
     cpu_label: String,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::Div {
     let visible_count = if expanded {
         per_core.len()
@@ -1786,8 +1831,10 @@ fn cpu_core_summary(
             .text_color(rgb(palette.text_muted))
             .cursor_pointer()
             .hover(|this| this.bg(rgb(palette.input)))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.toggle_stats_cpu_expanded(cx);
+            // The panel hops to the app on the event, never during render, and
+            // `with_app` flushes the snapshot the mutation invalidated.
+            .on_click(cx.listener(|panel, _, _, cx| {
+                panel.with_app(cx, |app, cx| app.toggle_stats_cpu_expanded(cx));
             }))
             .child(
                 svg()
