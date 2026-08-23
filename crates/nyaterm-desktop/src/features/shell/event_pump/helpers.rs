@@ -78,11 +78,6 @@ pub(super) struct RuntimeIdlePlaneResult {
     pub(super) remote_refresh: Duration,
 }
 
-pub(super) struct RuntimeVisualPlaneResult {
-    pub(super) dirty: bool,
-    pub(super) duration: Duration,
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct SessionEventDrainBudget {
     pub(super) max_events: usize,

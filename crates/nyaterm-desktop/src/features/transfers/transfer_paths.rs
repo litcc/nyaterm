@@ -492,6 +492,7 @@ impl NyaTermApp {
         if self.transfer.set_browser_external_drop_hover(hover) {
             cx.notify();
         }
+        self.ensure_drop_hover_clock(cx);
     }
 
     pub(in crate::features) fn handle_transfer_browser_external_file_drop(

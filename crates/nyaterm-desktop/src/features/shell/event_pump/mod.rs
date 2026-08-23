@@ -581,17 +581,10 @@ impl NyaTermApp {
         if !self.runtime_quiet_tick_allowed() {
             return true;
         }
-        self.window_runtime_quiet_tick_has_due_work()
-    }
-
-    fn window_runtime_quiet_tick_has_due_work(&self) -> bool {
-        if self.terminal.terminal_file_drop_hover_is_pending() {
-            return true;
-        }
-        if self.transfer.browser_external_drop_hover_is_pending() {
-            return true;
-        }
-        self.visible_terminal_performance_recovery_due()
+        // Nothing is left that the tick alone would notice: every remaining concern
+        // owns a clock or a wake. What keeps the tick alive is the idle plane's
+        // `drive_remote_auto_refresh`, which Phase 4 moves onto the panel entities.
+        false
     }
 
     pub(in crate::features) fn visible_terminal_performance_recovery_due(&self) -> bool {

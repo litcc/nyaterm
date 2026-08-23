@@ -3,9 +3,9 @@ use std::time::Instant;
 use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
-    RUNTIME_TICK_SLOW_THRESHOLD, RuntimeIdlePlaneResult, RuntimeVisualPlaneResult,
-    TERMINAL_PERF_HEARTBEAT_INTERVAL, connect_settle_active, diagnostic_log_due,
-    runtime_idle_plane_allowed, runtime_ui_notify_allowed, window_geometry_churn_active,
+    RUNTIME_TICK_SLOW_THRESHOLD, RuntimeIdlePlaneResult, TERMINAL_PERF_HEARTBEAT_INTERVAL,
+    connect_settle_active, diagnostic_log_due, runtime_idle_plane_allowed,
+    runtime_ui_notify_allowed, window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, terminal::full_shell_paint_count, terminal::terminal_surface_paint_count,
@@ -66,11 +66,6 @@ impl NyaTermApp {
                 || self.header_status_needs_npu()))
             || self.current_left_panel() == Some(NavItem::Transfers);
         if calm_tick && !remote_panels_need_poll && !self.ai.has_background_work() {
-            // During connect settle, skip blink notifies so first frames stay free.
-            if !connect_settle_active(self.shell.runtime.connect_settle_until, now) {
-                let visual = self.drive_runtime_visual_plane(cx);
-                dirty |= visual.dirty;
-            }
             if dirty {
                 cx.notify();
             }
@@ -79,9 +74,6 @@ impl NyaTermApp {
 
         let idle = self.drive_runtime_idle_plane(window, cx);
         dirty |= idle.dirty;
-
-        let visual = self.drive_runtime_visual_plane(cx);
-        dirty |= visual.dirty;
 
         let visual_dirty = dirty;
         let notify_started_at = Instant::now();
@@ -117,7 +109,6 @@ impl NyaTermApp {
                 total_ms = tick_duration.as_millis(),
                 render_requests_output_pressure = idle.render_request_output_pressure,
                 remote_refresh_ms = idle.remote_refresh.as_millis(),
-                visual_runtime_ms = visual.duration.as_millis(),
                 notify_ms = notify_duration.as_millis(),
                 queued_events = self.shell.runtime.session_event_queued_events,
                 queued_output_bytes = self.shell.runtime.session_event_queued_output_bytes,
@@ -193,7 +184,6 @@ impl NyaTermApp {
                     output_pressure,
                     visual_dirty,
                     tick_ms = tick_duration.as_millis(),
-                    visual_runtime_ms = visual.duration.as_millis(),
                     notify_ms = notify_duration.as_millis(),
                     queued_session_events = self.shell.runtime.session_event_queued_events,
                     queued_session_output_bytes =
@@ -257,27 +247,5 @@ impl NyaTermApp {
 
         result.dirty = dirty;
         result
-    }
-
-    pub(super) fn drive_runtime_visual_plane(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> RuntimeVisualPlaneResult {
-        let visual_stage_started_at = Instant::now();
-        let mut dirty = false;
-        // Cursor blink is owned by `shell::cursor_blink` and recovery accounting by
-        // `shell::terminal_recovery`, each on its own deadline. What is left here is
-        // the drop-hover clear, which polls `has_active_drag` on purpose: it is how a
-        // drag that ends *without* a drop on our element gets noticed.
-        if !cx.has_active_drag() && self.terminal.clear_terminal_file_drop_hover() {
-            dirty = true;
-        }
-        if !cx.has_active_drag() && self.transfer.set_browser_external_drop_hover(false) {
-            dirty = true;
-        }
-        RuntimeVisualPlaneResult {
-            dirty,
-            duration: visual_stage_started_at.elapsed(),
-        }
     }
 }

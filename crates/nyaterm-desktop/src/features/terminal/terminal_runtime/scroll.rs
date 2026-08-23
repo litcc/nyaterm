@@ -1013,6 +1013,9 @@ impl NyaTermApp {
         if self.terminal.set_terminal_file_drop_hover(session_id) {
             cx.notify();
         }
+        // A drag can end without a drop on this element, and only `has_active_drag`
+        // reports that; the clock watches for it while the highlight is up.
+        self.ensure_drop_hover_clock(cx);
     }
 
     pub(in crate::features) fn clear_terminal_file_drop_hover_for_session(
