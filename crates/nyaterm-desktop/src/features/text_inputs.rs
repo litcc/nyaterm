@@ -285,22 +285,7 @@ impl NyaTermApp {
         let id = id.into();
         let palette = self.theme_palette();
         let field = self.number_input(id.clone(), seed, setup, cx);
-        div()
-            .id(id)
-            .w(px(ORDINARY_NUMBER_INPUT_WIDTH_PX))
-            .max_w_full()
-            .h(px(NYA_FORM_CONTROL_HEIGHT_PX))
-            .min_w_0()
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .text_xs()
-                    .text_color(rgb(palette.text))
-                    .child(NyaNumberInput::new(&field)),
-            )
+        number_input_box_from_state(id, palette, field)
     }
 
     /// Push a value the runtime changed back into its input.
@@ -601,6 +586,34 @@ fn parse_u32_input(text: &str) -> Option<u32> {
 
 fn parse_u64_input(text: &str) -> Option<u64> {
     text.trim().parse::<u64>().ok()
+}
+
+/// The number-input box, built from a state entity the caller already holds.
+///
+/// Split out of `number_input_box` so a panel rendering from a snapshot can build the box
+/// without reaching for the app -- the app creates the entity at flush time and hands the
+/// handle over.
+pub(in crate::features) fn number_input_box_from_state(
+    id: SharedString,
+    palette: crate::theme::ThemePalette,
+    field: Entity<NyaNumberInputState>,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .w(px(ORDINARY_NUMBER_INPUT_WIDTH_PX))
+        .max_w_full()
+        .h(px(NYA_FORM_CONTROL_HEIGHT_PX))
+        .min_w_0()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .text_xs()
+                .text_color(rgb(palette.text))
+                .child(NyaNumberInput::new(&field)),
+        )
 }
 
 #[cfg(test)]

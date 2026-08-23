@@ -11,6 +11,6 @@ pub(in crate::features) use remote_runtime::remote_refresh_due;
 mod state;
 
 pub(in crate::features) use state::{
-    DockerDerivedItems, GpuPresentationState, NpuPresentationState, ProcessSortColumns,
-    RemoteOpsFeatureFocus, RemoteOpsFeatureState, StatsPresentationState,
+    DockerDerivedItems, GpuPresentationState, NpuPresentationState, ProcessPresentationState,
+    ProcessSortColumns, RemoteOpsFeatureFocus, RemoteOpsFeatureState, StatsPresentationState,
 };

@@ -7,7 +7,8 @@ use gpui::{
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::RemoteProcess;
 
-use crate::features::{NyaTermApp, transfers::format_file_size};
+use super::super::panels::RemoteMonitorPanel;
+use crate::features::transfers::format_file_size;
 use crate::theme::ThemePalette;
 use crate::widgets::small_button;
 
@@ -31,7 +32,7 @@ pub(in crate::features::pages::remote) fn process_details(
     labels: ProcessDetailLabels,
     nice_input: Option<gpui::AnyElement>,
     on_copy_command: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::AnyElement {
     let command = if process.command_line.trim().is_empty() {
         process.command.clone()
@@ -197,11 +198,13 @@ pub(in crate::features::pages::remote) fn process_details(
                         } else {
                             80.
                         }))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                            if event.keystroke.key.as_str() == "enter" {
-                                cx.stop_propagation();
-                                this.apply_process_nice_draft(window, cx);
-                            }
+                        .on_key_down(cx.listener(|panel, event: &KeyDownEvent, window, cx| {
+                            panel.with_app(cx, |this, cx| {
+                                if event.keystroke.key.as_str() == "enter" {
+                                    cx.stop_propagation();
+                                    this.apply_process_nice_draft(window, cx);
+                                }
+                            });
                         }))
                         .children(nice_input),
                 )
@@ -209,8 +212,10 @@ pub(in crate::features::pages::remote) fn process_details(
                     palette,
                     format!("process-nice-apply-{pid}"),
                     labels.apply_nice.clone(),
-                    cx.listener(move |this, _, window, cx| {
-                        this.apply_process_nice_draft(window, cx);
+                    cx.listener(move |panel, _, window, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            this.apply_process_nice_draft(window, cx);
+                        });
                     }),
                 )),
         )

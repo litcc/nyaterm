@@ -180,6 +180,8 @@ pub(in crate::features) enum DockerDerivedItems {
 struct ProcessPaneState {
     job: RemoteJobState<ProcessJobResult>,
     pub items: Arc<[RemoteProcess]>,
+    /// Bumped by every mutation that changes what `process_presentation` returns.
+    revision: u64,
     data_generation: u64,
     derived: Option<ProcessDerivedCache>,
     /// Which sort keys the current panel width can show a column for.
@@ -371,6 +373,7 @@ impl RemoteOpsFeatureState {
             process: ProcessPaneState {
                 job: RemoteJobState::new(),
                 items: Arc::from([]),
+                revision: 0,
                 data_generation: 0,
                 derived: None,
                 sort_columns: ProcessSortColumns::default(),
@@ -485,6 +488,10 @@ impl RemoteOpsFeatureState {
     /// `#[cfg(test)]` until the flush consumes it, which is the next commit. The
     /// counter itself is maintained in production code; only the readers are test-only,
     /// so the invariant is under test before anything depends on it.
+    pub(in crate::features) fn process_revision(&self) -> u64 {
+        self.process.revision()
+    }
+
     pub(in crate::features) fn stats_revision(&self) -> u64 {
         self.stats.revision()
     }
@@ -544,7 +551,7 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn set_process_status(&mut self, status: impl Into<String>) {
-        self.process.status = status.into();
+        self.process.set_status(status);
     }
 
     pub(in crate::features) fn stats_status(&self) -> &str {
@@ -767,19 +774,15 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn toggle_process_menu(&mut self, pid: u32) {
-        self.process.menu_pid = (self.process.menu_pid != Some(pid)).then_some(pid);
+        self.process.toggle_menu(pid);
     }
 
     pub(in crate::features) fn close_process_menu(&mut self) {
-        self.process.menu_pid = None;
+        self.process.close_menu();
     }
 
     pub(in crate::features) fn set_process_list_offset(&mut self, offset: usize) -> bool {
-        if self.process.list_offset == offset {
-            return false;
-        }
-        self.process.list_offset = offset;
-        true
+        self.process.set_list_offset(offset)
     }
 
     pub(in crate::features) fn apply_process_nice_input(&mut self, text: String) {
@@ -1443,6 +1446,9 @@ impl ProcessPaneState {
     }
 
     pub(super) fn begin_job(&mut self, session_id: String) -> RemoteJobTicket<ProcessJobResult> {
+        // `pending` is part of the presentation, so starting and finishing a job moves the
+        // revision. A status change happens to accompany both today, which masked it.
+        self.touch();
         self.job.begin(session_id)
     }
 
@@ -1455,6 +1461,7 @@ impl ProcessPaneState {
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
+        self.touch();
         self.job.complete_if_matches(job_id, session_id)
     }
 
@@ -1499,6 +1506,7 @@ impl ProcessPaneState {
     }
 
     pub(in crate::features) fn toggle_selection(&mut self, pid: u32) {
+        self.touch();
         self.menu_pid = None;
         self.selected_pid = (self.selected_pid != Some(pid)).then_some(pid);
         self.nice_draft = "0".to_string();
@@ -1512,19 +1520,20 @@ impl ProcessPaneState {
         } else {
             digits
         };
+        self.touch();
     }
 
     pub(in crate::features) fn validated_nice_draft(&mut self) -> Option<(u32, i32)> {
         let Some(pid) = self.selected_pid else {
-            self.status = "select a process before applying nice".to_string();
+            self.set_status("select a process before applying nice");
             return None;
         };
         let Ok(nice) = self.nice_draft.trim().parse::<i32>() else {
-            self.status = "nice must be an integer from -20 to 19".to_string();
+            self.set_status("nice must be an integer from -20 to 19");
             return None;
         };
         if !(-20..=19).contains(&nice) {
-            self.status = "nice must be between -20 and 19".to_string();
+            self.set_status("nice must be between -20 and 19");
             return None;
         }
         Some((pid, nice))
@@ -1556,6 +1565,39 @@ impl ProcessPaneState {
         self.reconcile();
     }
 
+    /// Record that the presentation changed.
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn set_status(&mut self, status: impl Into<String>) {
+        self.status = status.into();
+        self.touch();
+    }
+
+    fn toggle_menu(&mut self, pid: u32) {
+        self.menu_pid = (self.menu_pid != Some(pid)).then_some(pid);
+        self.touch();
+    }
+
+    fn close_menu(&mut self) {
+        self.menu_pid = None;
+        self.touch();
+    }
+
+    fn set_list_offset(&mut self, offset: usize) -> bool {
+        if self.list_offset == offset {
+            return false;
+        }
+        self.list_offset = offset;
+        self.touch();
+        true
+    }
+
     /// Bring the derived list, the sort key and the scroll offset back in step.
     ///
     /// Called by every mutator that changes one of their inputs, so a reader never has
@@ -1576,6 +1618,7 @@ impl ProcessPaneState {
         self.list_offset = self
             .list_offset
             .min(max_list_offset(total, PROCESS_VIEWPORT_ROWS));
+        self.touch();
     }
 
     fn set_sort_columns(&mut self, columns: ProcessSortColumns) -> bool {

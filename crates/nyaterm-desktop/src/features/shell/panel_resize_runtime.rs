@@ -86,6 +86,9 @@ impl NyaTermApp {
             // follow. Mid-drag rather than on release, which is when render used to do
             // it.
             self.reconcile_remote_process_sort_columns();
+            // Flush boundary: the width is part of the snapshot key, and it changes here
+            // without any pane revision moving.
+            self.flush_remote_panel_snapshots(cx);
         }
         match side {
             PanelResizeSide::Left => {
