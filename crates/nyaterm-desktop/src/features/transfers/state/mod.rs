@@ -36,6 +36,12 @@ pub(in crate::features) struct TransferFeatureState {
     editor: TransferEditorFeatureState,
     external_sync: TransferExternalSyncState,
     panel: TransferPanelState,
+    /// How many times the event drain has entered GPUI.
+    ///
+    /// The coalescing test needs the batch count, not the event count: the point
+    /// it proves is that the first is bounded while the second is not.
+    #[cfg(test)]
+    ui_batch_count: usize,
 }
 
 /// Focus handles the transfer feature needs at construction time.
@@ -227,6 +233,8 @@ impl TransferFeatureState {
     ) -> Self {
         let (tx, rx) = unbounded();
         Self {
+            #[cfg(test)]
+            ui_batch_count: 0,
             file_ops: TransferFileOpsState::new(),
             queue: TransferQueueState::new(tx, rx, focus.queue),
             paths: TransferPathState::new(remote_path, local_path, duplicate_policy),
@@ -314,6 +322,16 @@ impl TransferFeatureState {
     pub(in crate::features) fn enqueue_transfer_job(&mut self, mut job: TransferJobState) {
         job.ensure_presentation_fields();
         self.queue.enqueue(job);
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn note_ui_batch(&mut self) {
+        self.ui_batch_count += 1;
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn ui_batch_count(&self) -> usize {
+        self.ui_batch_count
     }
 
     pub(in crate::features) fn transfer_event_sender(&self) -> UnboundedSender<TransferJobResult> {

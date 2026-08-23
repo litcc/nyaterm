@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::time::Duration;
 
-use futures::StreamExt as _;
+use futures::{FutureExt as _, StreamExt as _, select_biased};
 use gpui::{Context, Window};
 use nyaterm_core::{AiAction, truncate_preview};
 use nyaterm_transport::{
@@ -16,6 +17,13 @@ use crate::models::{
     TransferBrowserPathMenuState, TransferExternalSyncPromptState, TransferJobEvent,
     TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobStatus,
 };
+
+/// How long the event drain holds a progress batch open before entering GPUI.
+///
+/// One frame at 60Hz. This is the consumer-side bound that makes the UI update
+/// rate independent of how many transfers are running; the 50ms throttle in
+/// `TransferProgressEventSender` is per job and cannot provide that on its own.
+const TRANSFER_UI_COALESCE_WINDOW: Duration = Duration::from_millis(16);
 
 type ExternalEditorSyncStart = (Option<String>, String, String, Option<String>, PathBuf);
 
@@ -130,10 +138,58 @@ impl NyaTermApp {
             return;
         };
         cx.spawn(async move |this, cx| {
-            while let Some(event) = rx.next().await {
+            while let Some(first) = rx.next().await {
+                // Progress is already throttled per job at the source, but each job
+                // gets its own 50ms phase and those phases stagger, so N concurrent
+                // transfers wake this loop ~20N times a second. Draining only what is
+                // already queued does not help: each wake finds one event and an empty
+                // tail. Holding the batch open for a bounded window is what makes the
+                // UI rate independent of the job count.
+                //
+                // One frame, not the source's 50ms: a second UI update inside the same
+                // frame cannot be seen, and a longer window would make a lone transfer
+                // visibly chunkier than it is today.
+                let mut batch = vec![first];
+                if batch
+                    .iter()
+                    .all(|event| matches!(event.event, TransferJobEvent::Progress(_)))
+                {
+                    let mut timer = cx
+                        .background_executor()
+                        .timer(TRANSFER_UI_COALESCE_WINDOW)
+                        .fuse();
+                    loop {
+                        select_biased! {
+                            queued = rx.next().fuse() => {
+                                let Some(event) = queued else { break };
+                                // Anything that is not progress ends the batch now.
+                                // `Finished` carries the directory listing, the resolved
+                                // home dir, the synced cwd and editor payloads, and it
+                                // drives the follow-up jobs and dialogs those open;
+                                // delaying a lifecycle transition to smooth a progress
+                                // bar is the wrong trade.
+                                let terminal =
+                                    !matches!(event.event, TransferJobEvent::Progress(_));
+                                batch.push(event);
+                                if terminal {
+                                    break;
+                                }
+                            }
+                            _ = timer => break,
+                        }
+                    }
+                }
+
                 if this
                     .update_in(cx, |this, window, cx| {
-                        if this.apply_transfer_event(event, window, cx) {
+                        // One transaction, one notify, however many events it took.
+                        #[cfg(test)]
+                        this.transfer.note_ui_batch();
+                        let mut dirty = false;
+                        for event in batch {
+                            dirty |= this.apply_transfer_event(event, window, cx);
+                        }
+                        if dirty {
                             cx.notify();
                         }
                     })
@@ -1037,15 +1093,253 @@ fn transfer_navigation_job_is_stale(
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::time::Duration;
 
+    use gpui::{
+        AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+        TestAppContext, VisualTestContext, div,
+    };
+    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
     use nyaterm_transport::SftpTransferProgress;
 
-    use crate::models::{TransferJobEvent, TransferJobKind, TransferJobOutput};
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::models::{
+        TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
+        TransferJobStatus,
+    };
 
     use super::{
-        transfer_event_needs_browser_context, transfer_event_needs_ui_refresh,
-        transfer_navigation_job_is_stale,
+        TRANSFER_UI_COALESCE_WINDOW, transfer_event_needs_browser_context,
+        transfer_event_needs_ui_refresh, transfer_navigation_job_is_stale,
     };
+
+    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        // A uuid rather than a clock reading: these tests run in parallel and
+        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
+        // which would share one config dir and so one settings database.
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-transfer-drain-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    /// The drain reaches the app through `update_in`, which resolves the window the
+    /// app is displayed in. That mapping is only populated by a draw, so these tests
+    /// need a real window that reads the app -- not just the entity.
+    struct AppHost {
+        app: Entity<NyaTermApp>,
+    }
+
+    impl Render for AppHost {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let armed = self.app.read(cx).transfer.transfer_jobs().len();
+            div().size_full().child(format!("{armed}"))
+        }
+    }
+
+    fn hosted(cx: &mut TestAppContext) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
+        let app = app(cx);
+        let host_app = app.clone();
+        let (_, vcx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
+        let vcx: &mut VisualTestContext = vcx;
+        vcx.run_until_parked();
+        (app, vcx)
+    }
+
+    fn running_job(id: &str) -> TransferJobState {
+        TransferJobState {
+            id: id.to_string(),
+            session_id: None,
+            kind: TransferJobKind::Download {
+                remote_path: format!("/remote/{id}"),
+                raw_path_token: None,
+                local_path: PathBuf::from(format!("/local/{id}")),
+            },
+            status: TransferJobStatus::Running,
+            detail: String::new(),
+            created_at_ms: 0,
+            display_name: String::new(),
+            entries: Vec::new(),
+            summary: None,
+            progress: None,
+            control: None,
+        }
+    }
+
+    fn progress(id: &str, bytes: u64) -> TransferJobResult {
+        TransferJobResult {
+            id: id.to_string(),
+            event: TransferJobEvent::Progress(SftpTransferProgress {
+                remote_path: format!("/remote/{id}"),
+                local_path: PathBuf::from(format!("/local/{id}")),
+                bytes_transferred: bytes,
+                total_bytes: Some(1_000_000),
+                item_count_completed: None,
+                item_count_total: None,
+            }),
+        }
+    }
+
+    /// The span every case is simulated over. Ten coalescing windows.
+    const STRESS_SPAN: Duration = Duration::from_millis(160);
+    /// What one job's source-side throttle emits at.
+    const SOURCE_PERIOD: Duration = Duration::from_millis(50);
+    const STRESS_STEP: Duration = Duration::from_millis(1);
+
+    /// Run `producers` jobs over a *fixed* simulated span, each emitting at the
+    /// source throttle period but phase-shifted so their events never coincide.
+    ///
+    /// Returns (GPUI batches, events sent). The span is deliberately held constant
+    /// while the producer count varies: that is the only way the batch count can be
+    /// shown to track the window rather than the number of transfers.
+    fn stress(cx: &mut TestAppContext, producers: usize) -> (usize, usize) {
+        let (app, vcx) = hosted(cx);
+        let sender = vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                for index in 0..producers {
+                    app.transfer
+                        .enqueue_transfer_job(running_job(&format!("job-{index}")));
+                }
+                app.start_transfer_event_drain(cx);
+                app.transfer.transfer_event_sender()
+            })
+        });
+        vcx.run_until_parked();
+
+        // Phase offsets spread the producers evenly inside one source period, so no
+        // two ever fire on the same millisecond. Sending them all at one instant
+        // would only prove that same-instant bursts collapse.
+        let offsets: Vec<u128> = (0..producers)
+            .map(|index| (SOURCE_PERIOD.as_millis() * index as u128) / producers.max(1) as u128)
+            .collect();
+        let period = SOURCE_PERIOD.as_millis();
+        let mut sent = 0;
+        let mut elapsed = 0u128;
+        while elapsed < STRESS_SPAN.as_millis() {
+            for (index, offset) in offsets.iter().enumerate() {
+                if elapsed >= *offset && (elapsed - offset).is_multiple_of(period) {
+                    let _ = sender
+                        .unbounded_send(progress(&format!("job-{index}"), elapsed as u64 * 100));
+                    sent += 1;
+                }
+            }
+            vcx.executor().advance_clock(STRESS_STEP);
+            vcx.run_until_parked();
+            elapsed += STRESS_STEP.as_millis();
+        }
+        vcx.executor()
+            .advance_clock(TRANSFER_UI_COALESCE_WINDOW * 2);
+        vcx.run_until_parked();
+
+        let batches = vcx.update(|_, cx| app.read(cx).transfer.ui_batch_count());
+        (batches, sent)
+    }
+
+    /// The property that matters: the UI update rate is bounded by the coalescing
+    /// window, not by how many transfers are running.
+    ///
+    /// Eight phase-shifted producers push eight times the events of one over the
+    /// *same* simulated span. Per-event entry into GPUI would put that factor of
+    /// eight straight into the batch count; the window is what stops it.
+    #[test]
+    fn the_ui_update_rate_does_not_scale_with_the_number_of_transfers() {
+        let mut cx = TestAppContext::single();
+        let (one_batch, one_sent) = stress(&mut cx, 1);
+        let (many_batch, many_sent) = stress(&mut cx, 8);
+
+        // The bound: a span of N windows cannot produce more than about N batches,
+        // whatever the producer count. One batch of slack for the trailing flush.
+        let bound =
+            (STRESS_SPAN.as_millis() / TRANSFER_UI_COALESCE_WINDOW.as_millis()) as usize + 1;
+
+        assert!(one_batch > 0, "the drain must have run at all");
+        // Not exactly 8x: the producers with the largest phase offsets fit one fewer
+        // emission inside a fixed span. A real multiple is the point, not a precise one.
+        assert!(
+            many_sent >= one_sent * 5,
+            "the stress case must actually push several times the events ({many_sent} vs {one_sent})"
+        );
+        assert!(
+            one_batch <= bound,
+            "one producer: {one_batch} batches exceeds the {bound}-window bound"
+        );
+        assert!(
+            many_batch <= bound,
+            "eight staggered producers sent {many_sent} events in {many_batch} GPUI batches, \
+             over a span that bounds them at {bound}. The batch count is tracking the \
+             producer count, not the window"
+        );
+        assert!(
+            many_batch < many_sent,
+            "coalescing did nothing: {many_batch} batches for {many_sent} events"
+        );
+    }
+
+    /// Coalescing must not delay a lifecycle transition. `Finished` carries the
+    /// directory listing, the resolved home dir and editor payloads, and opens the
+    /// follow-up jobs and dialogs that depend on them.
+    #[test]
+    fn a_terminal_event_ends_the_batch_without_waiting_for_the_window() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let sender = vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.transfer.enqueue_transfer_job(running_job("job-0"));
+                app.start_transfer_event_drain(cx);
+                app.transfer.transfer_event_sender()
+            })
+        });
+        vcx.run_until_parked();
+
+        let _ = sender.unbounded_send(progress("job-0", 1_000));
+        let _ = sender.unbounded_send(TransferJobResult {
+            id: "job-0".to_string(),
+            event: TransferJobEvent::Finished(Err("boom".to_string())),
+        });
+        // Deliberately less than the window: the batch must have closed on the
+        // terminal event rather than sitting out the remaining time.
+        vcx.executor()
+            .advance_clock(TRANSFER_UI_COALESCE_WINDOW / 4);
+        vcx.run_until_parked();
+
+        vcx.update(|_, cx| {
+            let app = app.read(cx);
+            assert!(
+                app.transfer.ui_batch_count() > 0,
+                "the terminal event must have been applied before the window elapsed"
+            );
+            let status = app
+                .transfer
+                .transfer_jobs()
+                .iter()
+                .find(|job| job.id == "job-0")
+                .map(|job| job.status);
+            assert_eq!(
+                status,
+                Some(TransferJobStatus::Failed),
+                "the failure must have landed, not still be queued"
+            );
+        });
+    }
 
     #[test]
     fn superseded_transfer_navigation_result_is_stale_per_session() {
