@@ -573,14 +573,11 @@ impl NyaTermApp {
         true
     }
 
-    /// Refresh whatever is due, for the shell-wide clock.
+    /// Sync the transfer browser's cwd if its interval has come due.
     ///
-    /// Each pane's condition now lives on the pane
-    /// (`features/remote/remote_runtime/auto_refresh.rs`); what is left here is the
-    /// visibility test and the deferral gate. Processes and Docker used to share one
-    /// `if / else if`, which was harmless while `current_right_panel` could only name
-    /// one of them and wrong as soon as a multi-open stack could show both -- they are
-    /// independent now.
+    /// The five polling panels used to be here too; each now owns its own clock
+    /// (`features/pages/remote/panels.rs`). This is what is left, and `C6` gives it a
+    /// home of its own under `features/transfers`.
     pub(super) fn drive_remote_auto_refresh(&mut self, cx: &mut Context<Self>) -> bool {
         if self.session.active_ssh_config().is_none() {
             return false;
@@ -589,27 +586,7 @@ impl NyaTermApp {
             return false;
         }
 
-        let mut dirty = false;
-        let left_panel = self.current_left_panel();
-        let right_panel = self.current_right_panel();
-
-        if right_panel == Some(NavItem::Stats) || self.header_status_needs_remote_stats() {
-            dirty |= self.refresh_stats_if_due(cx);
-        }
-        if right_panel == Some(NavItem::GpuMonitor) || self.header_status_needs_gpu() {
-            dirty |= self.refresh_gpu_if_due(cx);
-        }
-        if right_panel == Some(NavItem::AscendNpuMonitor) || self.header_status_needs_npu() {
-            dirty |= self.refresh_npu_if_due(cx);
-        }
-        if right_panel == Some(NavItem::Processes) {
-            dirty |= self.refresh_processes_if_due(cx);
-        }
-        if right_panel == Some(NavItem::Docker) {
-            dirty |= self.refresh_docker_if_due(cx);
-        }
-
-        if left_panel == Some(NavItem::Transfers)
+        if self.current_left_panel() == Some(NavItem::Transfers)
             && self.transfer_browser_auto_sync_cwd_enabled()
             && !self.transfer_sync_cwd_job_running()
             && remote_refresh_due(
@@ -619,9 +596,9 @@ impl NyaTermApp {
         {
             self.transfer.mark_browser_auto_sync_cwd(Instant::now());
             self.start_transfer_sync_cwd_job(cx);
-            dirty = true;
+            return true;
         }
-        dirty
+        false
     }
 
     /// Whether a due remote refresh must wait for the app to fall calm.

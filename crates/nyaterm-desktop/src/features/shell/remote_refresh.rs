@@ -71,25 +71,16 @@ impl NyaTermApp {
         .detach();
     }
 
-    /// Whether any remote panel or header mode currently wants periodic refreshing.
+    /// Whether the transfer browser currently wants its cwd synced.
     ///
-    /// Lifted from the runtime tick, which computed exactly this to decide whether its
-    /// calm branch could skip the idle plane.
+    /// This was "does any remote panel want refreshing", and it no longer asks about
+    /// the five panels: each owns its own clock, armed by
+    /// `sync_remote_panel_demand`. What is left needs no session term of its own --
+    /// `drive_remote_auto_refresh` checks that -- but keeping it here means a closed
+    /// transfer browser retires the clock rather than waking every second to find
+    /// nothing.
     pub(in crate::features) fn remote_panels_need_refresh(&self) -> bool {
-        (self.session.active_ssh_config().is_some()
-            && (matches!(
-                self.current_right_panel(),
-                Some(
-                    NavItem::Stats
-                        | NavItem::GpuMonitor
-                        | NavItem::AscendNpuMonitor
-                        | NavItem::Processes
-                        | NavItem::Docker
-                )
-            ) || self.header_status_needs_remote_stats()
-                || self.header_status_needs_gpu()
-                || self.header_status_needs_npu()))
-            || self.current_left_panel() == Some(NavItem::Transfers)
+        self.current_left_panel() == Some(NavItem::Transfers)
     }
 }
 

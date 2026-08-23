@@ -851,12 +851,13 @@ impl Render for NyaTermApp {
         // locks. Costs one bool compare when it is already running, and arming
         // redundantly is harmless -- the clock just re-checks and defers.
         self.ensure_idle_lock_clock(cx);
-        // Which panel is open, whether the header wants a metric, and whether a
-        // session with an SSH config is active all change alongside a repaint, so
-        // this is the one place guaranteed to see every input the arm predicate
-        // reads. It was previously armed from `start_after_window_open`, which runs
-        // exactly once -- before any session exists -- so the predicate was false
-        // and the clock never started at all.
+        // Each polling panel owns its own refresh clock; this starts the ones that are
+        // wanted and stops the rest. `render` because every input it reads -- which
+        // panels are on screen, what the header is showing, which panels settings
+        // enable, whether an SSH session is active -- changes alongside a repaint, and
+        // no single event covers all four.
+        self.sync_remote_panel_demand(cx);
+        // The transfer browser's cwd sync is the last thing on the shell-wide clock.
         self.ensure_remote_refresh_clock(cx);
         FULL_SHELL_PAINT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let full_shell_paint_count = self.shell.note_full_shell_paint();

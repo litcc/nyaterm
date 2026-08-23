@@ -142,6 +142,57 @@ impl NyaTermApp {
         ordered
     }
 
+    /// Whether `item`'s panel is on screen right now.
+    ///
+    /// Mirrors the branches of `side_panel_stack`, which is the thing that decides what
+    /// actually gets built: an exclusive overlay takes its whole side; an empty open
+    /// list falls back to the current panel and then to the side's first entry; and
+    /// otherwise a single-entry list or single-panel mode shows the first id while a
+    /// multi-open stack shows all of them.
+    ///
+    /// Deliberately *not* mirrored: `has_*_activity_items`, the narrow-viewport overlay
+    /// modes, and the mobile drawers from `root.rs`. Those can also stop a side being
+    /// laid out, but the predicate this replaced consulted only `current_*_panel`, so
+    /// including them would be a separate behaviour change rather than a faithful move.
+    pub(in crate::features) fn panel_is_rendered(&self, item: NavItem) -> bool {
+        let Some(side) = self.panel_side_for_item(item) else {
+            return false;
+        };
+        let side_open = match side {
+            PanelSide::Left => self.left_side_open(),
+            PanelSide::Right => self.right_side_open(),
+        };
+        if !side_open {
+            return false;
+        }
+        // `side_open_panel_ids` does not check collapse, so the test above is what
+        // stops a collapsed side reporting its remembered active panel as visible.
+        if let Some(overlay) = self.side_overlay_panel(side) {
+            return overlay == item;
+        }
+        let open_ids = self.side_open_panel_ids(side);
+        if open_ids.is_empty() {
+            let fallback = match side {
+                PanelSide::Left => self.current_left_panel(),
+                PanelSide::Right => self.current_right_panel(),
+            }
+            .or_else(|| {
+                self.shell
+                    .chrome
+                    .activity_bar_layout
+                    .first_panel_on_side(side)
+            });
+            return fallback == Some(item);
+        }
+        if !self.shell.panels.multi_open || open_ids.len() == 1 {
+            return open_ids
+                .first()
+                .and_then(|id| NavItem::from_persistence_id(id))
+                == Some(item);
+        }
+        open_ids.iter().any(|id| id == item.persistence_id())
+    }
+
     pub(in crate::features) fn side_overlay_panel(&self, side: PanelSide) -> Option<NavItem> {
         if !self.shell.panels.multi_open {
             return None;

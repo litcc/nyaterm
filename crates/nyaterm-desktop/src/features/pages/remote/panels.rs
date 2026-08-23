@@ -27,9 +27,23 @@
 //! child view of the app is repainted by the app's own paint and a
 //! `cx.observe(&app, ..)` would buy nothing but coupling.
 
-use gpui::{AnyElement, Context, Entity, IntoElement, Render, WeakEntity, Window, div, prelude::*};
+use std::time::Duration;
+
+use gpui::{
+    AnyElement, Context, Entity, IntoElement, Render, Task, WeakEntity, Window, div, prelude::*,
+};
 
 use crate::features::NyaTermApp;
+use crate::models::NavItem;
+
+/// How often a polling panel asks whether its own interval has come due.
+///
+/// The per-panel intervals are user settings in whole seconds floored at one, so a
+/// one-second clock is exactly as fine as the finest thing it can service. This is
+/// the cadence the one shell-wide clock used, kept unchanged; what moved is who owns
+/// it. Sleeping straight to the next due moment instead would mean a settings change
+/// mid-sleep landing up to a whole interval late.
+const REMOTE_PANEL_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Which of the five polling panels an entity is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +55,27 @@ pub(in crate::features) enum RemoteMonitorKind {
     Docker,
 }
 
+impl RemoteMonitorKind {
+    pub(in crate::features) const ALL: [RemoteMonitorKind; 5] = [
+        RemoteMonitorKind::Stats,
+        RemoteMonitorKind::Gpu,
+        RemoteMonitorKind::Npu,
+        RemoteMonitorKind::Processes,
+        RemoteMonitorKind::Docker,
+    ];
+
+    /// The nav item whose panel shows this metric.
+    pub(in crate::features) fn nav_item(self) -> NavItem {
+        match self {
+            RemoteMonitorKind::Stats => NavItem::Stats,
+            RemoteMonitorKind::Gpu => NavItem::GpuMonitor,
+            RemoteMonitorKind::Npu => NavItem::AscendNpuMonitor,
+            RemoteMonitorKind::Processes => NavItem::Processes,
+            RemoteMonitorKind::Docker => NavItem::Docker,
+        }
+    }
+}
+
 /// One remote polling panel.
 pub(in crate::features) struct RemoteMonitorPanel {
     kind: RemoteMonitorKind,
@@ -49,6 +84,14 @@ pub(in crate::features) struct RemoteMonitorPanel {
     /// `ConnectionPanel` does today. The app always outlives the panels it owns, so
     /// the upgrade below only fails during teardown.
     app: WeakEntity<NyaTermApp>,
+    /// The refresh schedule, and the only record of whether this panel is wanted.
+    ///
+    /// A `Task` cancels when dropped, so `None` is not merely a flag saying the panel
+    /// should not poll -- it is the poll being gone. That makes "an inactive panel
+    /// does not poll" a property of the type rather than of a predicate somebody has
+    /// to remember to check, and it is why there is no separate `demand: bool`: the
+    /// task's existence *is* the demand, so the two cannot disagree.
+    clock: Option<Task<()>>,
     /// Paints of *this entity*, so a test can tell the entity route apart from the
     /// inline views it replaced. Both register the same search-input ids, so no
     /// externally visible side effect distinguishes them.
@@ -61,9 +104,53 @@ impl RemoteMonitorPanel {
         Self {
             kind,
             app,
+            clock: None,
             #[cfg(test)]
             paint_count: 0,
         }
+    }
+
+    /// Start or stop this panel's refresh schedule.
+    ///
+    /// Idempotent, and cheap in the steady state: one `Option::is_some` compare. The
+    /// caller reconciles every paint, so this is called far more often than it acts.
+    ///
+    /// No `cx.notify()` on either edge -- nothing this panel renders depends on
+    /// whether it is polling, and notifying from the app's own paint would ask for a
+    /// frame that has nothing new in it.
+    fn set_demand(&mut self, demand: bool, cx: &mut Context<Self>) {
+        if demand == self.clock.is_some() {
+            return;
+        }
+        if !demand {
+            // Dropping the task cancels it.
+            self.clock = None;
+            return;
+        }
+        let kind = self.kind;
+        let app = self.app.clone();
+        self.clock = Some(cx.spawn(async move |_panel, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(REMOTE_PANEL_POLL_INTERVAL)
+                    .await;
+                let Some(app) = app.upgrade() else {
+                    break;
+                };
+                // The app owns the decision: whether the interval is due, whether a
+                // job is already in flight, and whether the app is calm enough to
+                // submit one. This clock only decides *when to ask*.
+                //
+                // No error to handle: the strong handle from `upgrade` keeps the app
+                // alive for the call, and a released app ends the loop above.
+                app.update(cx, |app, cx| app.refresh_remote_monitor_if_due(kind, cx));
+            }
+        }));
+    }
+
+    #[cfg(test)]
+    fn is_polling(&self) -> bool {
+        self.clock.is_some()
     }
 
     #[cfg(test)]
@@ -131,6 +218,84 @@ impl RemotePanels {
             RemoteMonitorKind::Npu => &self.npu,
             RemoteMonitorKind::Processes => &self.processes,
             RemoteMonitorKind::Docker => &self.docker,
+        }
+    }
+}
+
+impl NyaTermApp {
+    /// Refresh one pane if its interval is due and the app is calm enough.
+    ///
+    /// The two gates are the ones the shell-wide clock applied to all five at once, so
+    /// a panel-owned clock still honours them: no session means nothing to poll, and a
+    /// deferral means come back next beat rather than submit now.
+    pub(in crate::features) fn refresh_remote_monitor_if_due(
+        &mut self,
+        kind: RemoteMonitorKind,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.session.active_ssh_config().is_none() {
+            return false;
+        }
+        if self.remote_refresh_is_deferred() {
+            return false;
+        }
+        match kind {
+            RemoteMonitorKind::Stats => self.refresh_stats_if_due(cx),
+            RemoteMonitorKind::Gpu => self.refresh_gpu_if_due(cx),
+            RemoteMonitorKind::Npu => self.refresh_npu_if_due(cx),
+            RemoteMonitorKind::Processes => self.refresh_processes_if_due(cx),
+            RemoteMonitorKind::Docker => self.refresh_docker_if_due(cx),
+        }
+    }
+
+    /// Whether anything currently wants this metric kept fresh.
+    ///
+    /// Two sources of demand, not one. A panel being on screen is the obvious one; the
+    /// header status bar is the other, and it can be showing stats, GPU or NPU with
+    /// that panel closed. Treating only the panel as demand would stop the header
+    /// updating, which is the case the "armed on mount, dropped on unmount" sketch of
+    /// this design missed -- and the reason the panel entities are owned for the app's
+    /// whole life rather than created when shown.
+    ///
+    /// The settings flag is checked here as well as by `panel_body`, because a panel
+    /// switched off in settings renders a placeholder rather than nothing, and a
+    /// placeholder must not poll.
+    pub(in crate::features) fn remote_monitor_demand(&self, kind: RemoteMonitorKind) -> bool {
+        let summary = self.settings.summary();
+        let shown = self.panel_is_rendered(kind.nav_item());
+        match kind {
+            RemoteMonitorKind::Stats => {
+                (shown || self.header_status_needs_remote_stats()) && summary.ui_show_remote_stats
+            }
+            RemoteMonitorKind::Gpu => {
+                (shown || self.header_status_needs_gpu()) && summary.ui_show_gpu_monitor
+            }
+            RemoteMonitorKind::Npu => {
+                (shown || self.header_status_needs_npu()) && summary.ui_show_ascend_npu_monitor
+            }
+            RemoteMonitorKind::Processes => shown && summary.ui_show_process_manager,
+            RemoteMonitorKind::Docker => shown && summary.ui_show_docker_manager,
+        }
+    }
+
+    /// Start the clocks for panels that are wanted and stop the rest.
+    ///
+    /// Called from `render`, for the same reason `ensure_idle_lock_clock` is: every
+    /// input this reads -- which panels are on screen, what the header is showing,
+    /// which panels settings enable, whether a session with an SSH config is active --
+    /// changes alongside a repaint, and there is no single event that covers all four.
+    /// Enumerating the mutation sites instead would mean a new one silently leaving a
+    /// panel unrefreshed, which is exactly the bug `C1` fixed.
+    ///
+    /// Cheap enough to run per paint: one settings read, one rendered-panel test per
+    /// kind, and five `Option::is_some` compares that do nothing unless demand
+    /// actually flipped.
+    pub(in crate::features) fn sync_remote_panel_demand(&mut self, cx: &mut Context<Self>) {
+        let session_active = self.session.active_ssh_config().is_some();
+        for kind in RemoteMonitorKind::ALL {
+            let demand = session_active && self.remote_monitor_demand(kind);
+            let panel = self.remote_panels.entity(kind).clone();
+            panel.update(cx, |panel, cx| panel.set_demand(demand, cx));
         }
     }
 }
@@ -328,5 +493,211 @@ mod tests {
                 painted(RemoteMonitorKind::Processes),
             )
         })
+    }
+
+    /// Give the app an active session carrying an SSH config.
+    ///
+    /// `active_ssh_config` reads the active session's metadata, so this is the whole
+    /// requirement. The host is empty because none of these tests advance the clock,
+    /// so no refresh is ever submitted and nothing tries to connect.
+    fn activate_ssh_session(app: &Entity<NyaTermApp>, cx: &mut TestAppContext) {
+        cx.update_entity(app, |app, _| {
+            app.session.register_session_metadata(
+                "remote-panel-test",
+                crate::models::SessionRuntimeMetadata {
+                    ssh_config: Some(nyaterm_transport::SshSessionConfig::default()),
+                    ssh_multiplex_key: None,
+                    source_connection_id: None,
+                    ai_execution_profile: nyaterm_core::AiExecutionProfile::Posix,
+                    launch_config: crate::models::SessionLaunchConfig::Local(
+                        nyaterm_transport::LocalSessionConfig::default(),
+                    ),
+                    disconnected: false,
+                },
+            );
+            app.session
+                .select_active_session("remote-panel-test".to_string());
+        });
+    }
+
+    fn polling(app: &Entity<NyaTermApp>, cx: &mut TestAppContext) -> Vec<RemoteMonitorKind> {
+        cx.update_entity(app, |app, cx| {
+            RemoteMonitorKind::ALL
+                .into_iter()
+                .filter(|kind| app.remote_panels.entity(*kind).read(cx).is_polling())
+                .collect()
+        })
+    }
+
+    /// The state the app spends nearly all of its life in: nothing polls.
+    #[test]
+    fn nothing_polls_without_a_panel_or_a_session() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| app.sync_remote_panel_demand(cx));
+        assert_eq!(polling(&app, &mut cx), Vec::new());
+    }
+
+    /// An open panel polls, and only that one.
+    ///
+    /// The session is required: demand is gated on an active SSH config, so a panel
+    /// open with no session still costs nothing.
+    #[test]
+    fn an_open_panel_polls_and_its_neighbours_do_not() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_gpu_monitor = true;
+            app.settings.replace_summary(summary);
+            app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
+            app.sync_remote_panel_demand(cx);
+        });
+        assert_eq!(
+            polling(&app, &mut cx),
+            Vec::new(),
+            "no session means nothing to poll, however many panels are open"
+        );
+
+        activate_ssh_session(&app, &mut cx);
+        cx.update_entity(&app, |app, cx| app.sync_remote_panel_demand(cx));
+        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Gpu]);
+    }
+
+    /// Closing the panel must drop the clock, not merely mark it unwanted.
+    ///
+    /// This is the success criterion for the whole extraction: an inactive panel does
+    /// not poll. It holds because the `Task` handle *is* the demand -- dropping it
+    /// cancels the loop -- so there is no flag that can disagree with reality.
+    #[test]
+    fn closing_a_panel_drops_its_clock() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        activate_ssh_session(&app, &mut cx);
+        cx.update_entity(&app, |app, cx| {
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_gpu_monitor = true;
+            app.settings.replace_summary(summary);
+            app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
+            app.sync_remote_panel_demand(cx);
+        });
+        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Gpu]);
+
+        cx.update_entity(&app, |app, cx| {
+            // Toggling the same panel again closes it, which is what the activity bar
+            // does.
+            app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
+            app.sync_remote_panel_demand(cx);
+        });
+        assert_eq!(polling(&app, &mut cx), Vec::new());
+    }
+
+    /// The header status bar keeps stats polling with the Stats panel closed.
+    ///
+    /// This is the case that decided the design. "Armed on mount, dropped on unmount"
+    /// would stop the header updating as soon as its panel closed, because the header
+    /// is a second, independent consumer of the same metric. It works because the
+    /// entity is owned for the app's whole life and its demand is not "am I visible"
+    /// but "does anything want this".
+    #[test]
+    fn the_header_keeps_a_metric_polling_with_its_panel_closed() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        activate_ssh_session(&app, &mut cx);
+        cx.update_entity(&app, |app, cx| {
+            let mut summary = app.settings.summary().clone();
+            summary.ui_header_status_visible = true;
+            summary.ui_header_status_mode = crate::models::HeaderStatusMode::Resources
+                .persistence_id()
+                .to_string();
+            app.settings.replace_summary(summary);
+            app.sync_remote_panel_demand(cx);
+        });
+        assert!(
+            !cx.update_entity(&app, |app, _| {
+                app.panel_is_rendered(crate::models::NavItem::Stats)
+            }),
+            "the Stats panel must be closed for this test to mean anything"
+        );
+        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Stats]);
+
+        // Switch the header away and the last consumer is gone.
+        cx.update_entity(&app, |app, cx| {
+            let mut summary = app.settings.summary().clone();
+            summary.ui_header_status_mode = crate::models::HeaderStatusMode::Session
+                .persistence_id()
+                .to_string();
+            app.settings.replace_summary(summary);
+            app.sync_remote_panel_demand(cx);
+        });
+        assert_eq!(polling(&app, &mut cx), Vec::new());
+    }
+
+    /// A panel switched off in settings renders a placeholder, and a placeholder must
+    /// not poll.
+    #[test]
+    fn a_panel_disabled_in_settings_does_not_poll() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        activate_ssh_session(&app, &mut cx);
+        cx.update_entity(&app, |app, cx| {
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_gpu_monitor = false;
+            app.settings.replace_summary(summary);
+            app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
+            app.sync_remote_panel_demand(cx);
+        });
+        assert_eq!(polling(&app, &mut cx), Vec::new());
+    }
+
+    /// A paint must arm the clock, with nothing calling the reconcile by hand.
+    ///
+    /// Every other test here calls `sync_remote_panel_demand` directly, and all of them
+    /// keep passing with the call removed from `render` -- checked, not assumed. That is
+    /// the same gap that let `C1`'s dead clock through: they prove the mechanism and
+    /// say nothing about the wiring. This one drives a real paint instead.
+    ///
+    /// It never advances the clock, so no refresh is submitted and nothing connects;
+    /// arming is all that is being asserted.
+    #[test]
+    fn a_paint_arms_the_clock_for_an_open_panel() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        activate_ssh_session(&app, &mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_gpu_monitor = true;
+            app.settings.replace_summary(summary);
+            app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
+        });
+        assert_eq!(
+            polling(&app, &mut cx),
+            Vec::new(),
+            "nothing has painted yet, so no clock can be armed"
+        );
+
+        let host_app = app.clone();
+        let (_, cx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+
+        let armed = cx.update(|_, cx| {
+            RemoteMonitorKind::ALL
+                .into_iter()
+                .filter(|kind| {
+                    app.read(cx)
+                        .remote_panels
+                        .entity(*kind)
+                        .read(cx)
+                        .is_polling()
+                })
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            armed,
+            vec![RemoteMonitorKind::Gpu],
+            "a paint with the GPU panel open must arm exactly that panel's clock"
+        );
     }
 }
