@@ -95,9 +95,6 @@ impl NyaTermApp {
         // point.
         self.ensure_pending_focus_clock(cx);
         self.ensure_post_start_work_clock(cx);
-        // Which panel is open, and whether an SSH session is active, change only
-        // alongside a repaint -- so this is where the refresh clock starts.
-        self.ensure_remote_refresh_clock(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()
@@ -854,6 +851,13 @@ impl Render for NyaTermApp {
         // locks. Costs one bool compare when it is already running, and arming
         // redundantly is harmless -- the clock just re-checks and defers.
         self.ensure_idle_lock_clock(cx);
+        // Which panel is open, whether the header wants a metric, and whether a
+        // session with an SSH config is active all change alongside a repaint, so
+        // this is the one place guaranteed to see every input the arm predicate
+        // reads. It was previously armed from `start_after_window_open`, which runs
+        // exactly once -- before any session exists -- so the predicate was false
+        // and the clock never started at all.
+        self.ensure_remote_refresh_clock(cx);
         FULL_SHELL_PAINT_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let full_shell_paint_count = self.shell.note_full_shell_paint();
         let root_started_at = Instant::now();
