@@ -180,6 +180,32 @@ mod tests {
         });
     }
 
+    /// A connect that is still settling must defer a refresh, not cancel it.
+    ///
+    /// `enter_connect_settle` is what a session start calls, so this drives the same
+    /// state the real path produces. The deferral is deliberately not visible in
+    /// `remote_panels_need_refresh`: the panel still wants its data, so the clock
+    /// stays armed and asks again on the next poll rather than retiring.
+    #[test]
+    fn a_settling_connect_defers_without_retiring_the_clock() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        open_transfers_panel(&app, &mut cx);
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                !app.remote_refresh_is_deferred(),
+                "a calm app defers nothing"
+            );
+            app.enter_connect_settle();
+            assert!(app.remote_refresh_is_deferred());
+            assert!(
+                app.remote_panels_need_refresh(),
+                "deferral must not look like the panel no longer wanting data, or the \
+                 clock would retire instead of asking again"
+            );
+        });
+    }
+
     /// A repaint must arm the clock, because a repaint is the only signal that sees
     /// every input the predicate reads.
     ///

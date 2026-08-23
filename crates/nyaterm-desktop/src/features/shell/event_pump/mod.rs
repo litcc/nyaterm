@@ -8,12 +8,12 @@ use crate::features::shell::event_pump::helpers::{
     RuntimeDataPlaneDrain, RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE,
     TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision,
     connect_settle_active, connect_settle_deadline, pending_session_status_message,
-    remote_refresh_due, runtime_background_should_defer_terminal_frames,
-    runtime_data_plane_wake_delay, runtime_output_pressure_active_from_counts,
-    runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
-    terminal_frame_apply_should_defer, terminal_input_idle_remaining_delay,
-    terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
-    window_geometry_churn_active,
+    remote_refresh_due, remote_refresh_should_defer,
+    runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
+    runtime_output_pressure_active_from_counts, runtime_ui_notify_allowed,
+    terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
+    terminal_input_idle_remaining_delay, terminal_user_scroll_frame_apply_pending,
+    viewport_change_terminal_session_ids, window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, session::credential_prompt_target, session::keyboard_interactive_prompt_target,
@@ -580,6 +580,9 @@ impl NyaTermApp {
         if self.session.active_ssh_config().is_none() {
             return false;
         }
+        if self.remote_refresh_is_deferred() {
+            return false;
+        }
 
         let mut dirty = false;
         let left_panel = self.current_left_panel();
@@ -664,6 +667,19 @@ impl NyaTermApp {
             dirty = true;
         }
         dirty
+    }
+
+    /// Whether a due remote refresh must wait for the app to fall calm.
+    ///
+    /// Reads the same three holds the idle plane read, from the same places, so this
+    /// is the pre-`15994ef6` behaviour restored rather than a new policy.
+    pub(in crate::features) fn remote_refresh_is_deferred(&self) -> bool {
+        let now = Instant::now();
+        remote_refresh_should_defer(
+            self.runtime_output_pressure_active(),
+            window_geometry_churn_active(self.shell.viewport.last_change_at, now),
+            connect_settle_active(self.shell.runtime.connect_settle_until, now),
+        )
     }
 
     pub(in crate::features) fn header_status_needs_gpu(&self) -> bool {

@@ -339,6 +339,29 @@ pub(super) fn remote_refresh_due(last_refresh_at: Option<Instant>, interval_seco
     })
 }
 
+/// Whether a due remote refresh should be held back.
+///
+/// These are the three holds the idle plane applied through
+/// `runtime_idle_plane_allowed`, which `15994ef6` deleted along with the plane. By
+/// that commit the plane's only remaining stage *was* the remote refresh, so this
+/// gate was the remote refresh's own deferral rather than something it merely
+/// inherited -- dropping it was an unremarked side effect of deleting the tick.
+///
+/// It is worth keeping for what each term protects. Submitting a host poll opens an
+/// SSH channel and spawns a thread: not while the terminal is drowning in output,
+/// not while the window is mid-drag or mid-resize, and not in the moments right
+/// after a connect, when the session is still settling.
+///
+/// This defers rather than retires. The panel still wants its data, so the clock
+/// stays armed and simply asks again on the next poll.
+pub(super) fn remote_refresh_should_defer(
+    output_pressure: bool,
+    geometry_busy: bool,
+    connect_settle: bool,
+) -> bool {
+    output_pressure || geometry_busy || connect_settle
+}
+
 pub(super) fn terminal_output_dropped_marker(bytes: usize) -> String {
     format!("\r\n[nyaterm: dropped {bytes} queued output byte(s)]\r\n")
 }
@@ -371,16 +394,16 @@ mod tests {
         SESSION_EVENT_DRAIN_SLOW_CHUNK, SESSION_EVENT_DRAIN_SLOW_TOTAL,
         SESSION_EVENT_DRAIN_WALL_BUDGET, TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL, UI_PAINT_THROTTLE,
         WINDOW_GEOMETRY_CHURN_HOLD, connect_settle_active, connect_settle_deadline,
-        pending_session_status_message, runtime_background_should_defer_terminal_frames,
-        runtime_data_plane_wake_delay, runtime_output_pressure_active_from_counts,
-        runtime_ui_notify_allowed, session_event_backlog_active, session_event_drain_budget,
-        session_event_drain_is_slow, session_event_drain_should_yield,
-        session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
-        terminal_frame_apply_should_defer, terminal_frame_backlog_active_from_counts,
-        terminal_input_idle_remaining_delay, terminal_log_plain_text,
-        terminal_output_dropped_marker, terminal_render_work_pressure_active,
-        terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
-        window_geometry_churn_active,
+        pending_session_status_message, remote_refresh_should_defer,
+        runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
+        runtime_output_pressure_active_from_counts, runtime_ui_notify_allowed,
+        session_event_backlog_active, session_event_drain_budget, session_event_drain_is_slow,
+        session_event_drain_should_yield, session_event_input_wake_drain_budget,
+        terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
+        terminal_frame_backlog_active_from_counts, terminal_input_idle_remaining_delay,
+        terminal_log_plain_text, terminal_output_dropped_marker,
+        terminal_render_work_pressure_active, terminal_user_scroll_frame_apply_pending,
+        viewport_change_terminal_session_ids, window_geometry_churn_active,
     };
 
     #[test]
@@ -478,6 +501,19 @@ mod tests {
             Some(now - Duration::from_millis(1)),
             now
         ));
+    }
+
+    /// Any one hold defers, and a calm app defers nothing.
+    ///
+    /// Each term is asserted on its own because each was reachable on its own: an
+    /// otherwise-idle app can be under output pressure, mid-resize, or inside the
+    /// connect-settle hold independently of the other two.
+    #[test]
+    fn any_single_hold_defers_a_remote_refresh() {
+        assert!(!remote_refresh_should_defer(false, false, false));
+        assert!(remote_refresh_should_defer(true, false, false));
+        assert!(remote_refresh_should_defer(false, true, false));
+        assert!(remote_refresh_should_defer(false, false, true));
     }
 
     #[test]
