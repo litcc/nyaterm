@@ -5,7 +5,8 @@ use gpui::{
 use nyaterm_transport::RemoteDockerOverview;
 use nyaterm_ui::{NyaTabItem, NyaTabs};
 
-use crate::features::{NyaTermApp, shell::gpui_code_font_family};
+use super::super::panels::RemoteMonitorPanel;
+use crate::features::shell::gpui_code_font_family;
 use crate::models::DockerTab;
 use crate::theme::ThemePalette;
 
@@ -100,7 +101,7 @@ pub(in crate::features::pages::remote) fn docker_tab_bar(
     labels: DockerTabBarLabels,
     panel_width: f32,
     menu_open: bool,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette, menu_bg, ..
@@ -181,11 +182,13 @@ pub(in crate::features::pages::remote) fn docker_tab_bar(
                 .selected_index_if_visible(
                     visible_tabs.iter().position(|(tab, _)| *tab == active_tab),
                 )
-                .on_select(cx.listener(move |this, index: &usize, _, cx| {
-                    let Some(tab) = visible_tab_values.get(*index).copied() else {
-                        return;
-                    };
-                    this.set_docker_tab(tab, cx);
+                .on_select(cx.listener(move |panel, index: &usize, _, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        let Some(tab) = visible_tab_values.get(*index).copied() else {
+                            return;
+                        };
+                        this.set_docker_tab(tab, cx);
+                    });
                 })),
         ),
     );
@@ -198,8 +201,10 @@ pub(in crate::features::pages::remote) fn docker_tab_bar(
                     "docker-tab-more",
                     more_label,
                     menu_open || more_active,
-                    cx.listener(|this, _, _, cx| {
-                        this.toggle_docker_tab_menu(cx);
+                    cx.listener(|panel, _, _, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            this.toggle_docker_tab_menu(cx);
+                        });
                     }),
                 )),
         );
@@ -228,8 +233,10 @@ pub(in crate::features::pages::remote) fn docker_tab_bar(
                     label.clone(),
                     active_tab == tab,
                     compose_disabled,
-                    cx.listener(move |this, _, _, cx| {
-                        this.set_docker_tab(tab, cx);
+                    cx.listener(move |panel, _, _, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            this.set_docker_tab(tab, cx);
+                        });
                     }),
                 ));
             }

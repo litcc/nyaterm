@@ -137,6 +137,8 @@ pub(in crate::features) struct RemoteOpsFeatureFocus {}
 struct DockerPaneState {
     job: RemoteJobState<DockerJobResult>,
     pub overview: Option<Arc<RemoteDockerOverview>>,
+    /// Bumped by every mutation that changes what `docker_presentation` returns.
+    revision: u64,
     data_generation: u64,
     derived: Option<DockerDerivedCache>,
     pub status: String,
@@ -352,6 +354,7 @@ impl RemoteOpsFeatureState {
             docker: DockerPaneState {
                 job: RemoteJobState::new(),
                 overview: None,
+                revision: 0,
                 data_generation: 0,
                 derived: None,
                 status: "start an SSH session to inspect Docker".to_string(),
@@ -492,6 +495,10 @@ impl RemoteOpsFeatureState {
         self.process.revision()
     }
 
+    pub(in crate::features) fn docker_revision(&self) -> u64 {
+        self.docker.revision()
+    }
+
     pub(in crate::features) fn stats_revision(&self) -> u64 {
         self.stats.revision()
     }
@@ -544,6 +551,7 @@ impl RemoteOpsFeatureState {
 
     pub(in crate::features) fn set_docker_status(&mut self, status: impl Into<String>) {
         self.docker.status = status.into();
+        self.docker.touch();
     }
 
     pub(in crate::features) fn process_status(&self) -> &str {
@@ -671,6 +679,7 @@ impl RemoteOpsFeatureState {
             self.docker.container_menu_id = None;
             self.docker.compose_menu_id = None;
         }
+        self.docker.touch();
     }
 
     pub(in crate::features) fn toggle_docker_header_menu(&mut self) {
@@ -680,6 +689,7 @@ impl RemoteOpsFeatureState {
             self.docker.container_menu_id = None;
             self.docker.compose_menu_id = None;
         }
+        self.docker.touch();
     }
 
     pub(in crate::features) fn close_docker_menus(&mut self) {
@@ -687,6 +697,7 @@ impl RemoteOpsFeatureState {
         self.docker.header_menu_open = false;
         self.docker.container_menu_id = None;
         self.docker.compose_menu_id = None;
+        self.docker.touch();
     }
 
     pub(in crate::features) fn docker_menus_open(&self) -> bool {
@@ -701,10 +712,12 @@ impl RemoteOpsFeatureState {
             self.docker.header_menu_open = false;
             self.docker.compose_menu_id = None;
         }
+        self.docker.touch();
     }
 
     pub(in crate::features) fn close_docker_container_menu(&mut self) {
         self.docker.container_menu_id = None;
+        self.docker.touch();
     }
 
     pub(in crate::features) fn toggle_docker_compose_menu(&mut self, id: String) {
@@ -715,10 +728,12 @@ impl RemoteOpsFeatureState {
             self.docker.header_menu_open = false;
             self.docker.container_menu_id = None;
         }
+        self.docker.touch();
     }
 
     pub(in crate::features) fn close_docker_compose_menu(&mut self) {
         self.docker.compose_menu_id = None;
+        self.docker.touch();
     }
 
     pub(in crate::features) fn apply_docker_search(&mut self, text: String) {
@@ -730,6 +745,7 @@ impl RemoteOpsFeatureState {
             return false;
         }
         self.docker.list_offset = offset;
+        self.docker.touch();
         true
     }
 
@@ -738,6 +754,7 @@ impl RemoteOpsFeatureState {
             return false;
         }
         self.docker.resource_list_offset = offset;
+        self.docker.touch();
         true
     }
 
@@ -757,6 +774,7 @@ impl RemoteOpsFeatureState {
         }
         expanded.insert(key.clone());
         self.docker.status = format!("expanded compose project {project_name}");
+        self.docker.touch();
         !self.docker.compose_services.contains_key(&key)
             && !self.docker.compose_service_errors.contains_key(&key)
     }
@@ -830,6 +848,7 @@ impl RemoteOpsFeatureState {
         self.docker.status = status;
         self.docker.details = None;
         self.docker.details_container_id = None;
+        self.docker.touch();
     }
 
     pub(in crate::features) fn start_docker_details(
@@ -840,6 +859,7 @@ impl RemoteOpsFeatureState {
         self.docker.details_container_id = Some(container_id);
         self.docker.details_last_refresh_at = Some(Instant::now());
         self.docker.status = status;
+        self.docker.touch();
     }
 
     pub(in crate::features) fn apply_docker_overview(&mut self, overview: RemoteDockerOverview) {
@@ -853,10 +873,12 @@ impl RemoteOpsFeatureState {
     ) {
         self.docker.details = Some(details);
         self.docker.details_container_id = Some(container_id);
+        self.docker.touch();
     }
 
     pub(in crate::features) fn clear_compose_service_error(&mut self, key: &str) {
         Arc::make_mut(&mut self.docker.compose_service_errors).remove(key);
+        self.docker.touch();
     }
 
     pub(in crate::features) fn set_compose_services(
@@ -866,11 +888,13 @@ impl RemoteOpsFeatureState {
     ) {
         Arc::make_mut(&mut self.docker.compose_service_errors).remove(&key);
         Arc::make_mut(&mut self.docker.compose_services).insert(key, services);
+        self.docker.touch();
     }
 
     pub(in crate::features) fn set_compose_service_error(&mut self, key: String, error: String) {
         Arc::make_mut(&mut self.docker.compose_services).remove(&key);
         Arc::make_mut(&mut self.docker.compose_service_errors).insert(key, error);
+        self.docker.touch();
     }
 
     pub(in crate::features) fn reset_docker_refresh_failures(&mut self) {
@@ -1134,6 +1158,7 @@ impl DockerPaneState {
     }
 
     pub(super) fn begin_job(&mut self, session_id: String) -> RemoteJobTicket<DockerJobResult> {
+        self.touch();
         self.job.begin(session_id)
     }
 
@@ -1146,6 +1171,7 @@ impl DockerPaneState {
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
+        self.touch();
         self.job.complete_if_matches(job_id, session_id)
     }
 
@@ -1180,6 +1206,7 @@ impl DockerPaneState {
 
     pub(in crate::features) fn toggle_tab_menu(&mut self) {
         self.tab_menu_open = !self.tab_menu_open;
+        self.touch();
     }
 
     pub(in crate::features) fn apply_search(&mut self, text: String) {
@@ -1195,6 +1222,7 @@ impl DockerPaneState {
         self.details_container_id = None;
         self.details_last_refresh_at = None;
         self.status = "container details closed".to_string();
+        self.touch();
     }
 
     pub(in crate::features) fn apply_overview(&mut self, overview: RemoteDockerOverview) {
@@ -1233,6 +1261,21 @@ impl DockerPaneState {
         self.reconcile();
     }
 
+    /// Record that the presentation changed.
+    ///
+    /// `pub(super)` because seventeen mutators on `RemoteOpsFeatureState` write Docker
+    /// fields directly -- menus, offsets, details and compose state. Routing all of them
+    /// through pane methods would be a larger change than this batch wants; what
+    /// guarantees completeness either way is
+    /// `docker_presentation_mutations_bump_the_revision`, which drives every one.
+    pub(super) fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// The tab actually shown, which is not always the stored one.
     ///
     /// Compose falls back to Containers when the host has no compose support. That
@@ -1269,6 +1312,7 @@ impl DockerPaneState {
             // The compose list is not virtualised, so it has no offset to clamp.
             DockerDerivedItems::Compose(_) => {}
         }
+        self.touch();
     }
 
     fn clamp_resource_offset(&mut self, total: usize) {
@@ -2912,5 +2956,206 @@ mod tests {
         assert_ne!(after.0, previous.0, "the stats revision must advance");
         assert_ne!(after.1, previous.1, "the GPU revision must advance");
         assert_ne!(after.2, previous.2, "the NPU revision must advance");
+    }
+
+    /// Every Docker mutation must bump the Docker pane revision, and no other pane's.
+    ///
+    /// Seventeen mutators on `RemoteOpsFeatureState` write Docker fields directly -- menus,
+    /// offsets, details, compose state -- so nothing structural stops one from being added
+    /// without a touch. This drives every one of them; it is what makes the counter
+    /// trustworthy rather than the field access pattern.
+    #[test]
+    fn docker_presentation_mutations_bump_the_revision() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        state.apply_docker_overview(RemoteDockerOverview {
+            available: true,
+            containers: vec![docker_container("c0", "name")],
+            images: (0..40)
+                .map(|index| docker_image(&format!("i{index}"), "repo"))
+                .collect(),
+            ..Default::default()
+        });
+
+        type Mutation = Box<dyn Fn(&mut RemoteOpsFeatureState)>;
+        let mutations: Vec<(&str, Mutation)> = vec![
+            (
+                "set_docker_status",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.set_docker_status("x")),
+            ),
+            (
+                "apply_docker_search",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.apply_docker_search("q".to_string())),
+            ),
+            (
+                "set_docker_tab",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.set_docker_tab(DockerTab::Images)),
+            ),
+            (
+                "toggle_docker_tab_menu",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.toggle_docker_tab_menu()),
+            ),
+            (
+                "toggle_docker_header_menu",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.toggle_docker_header_menu()),
+            ),
+            (
+                "close_docker_menus",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.close_docker_menus();
+                }),
+            ),
+            (
+                "toggle_docker_container_menu",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.toggle_docker_container_menu("c0".to_string())
+                }),
+            ),
+            (
+                "close_docker_container_menu",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.close_docker_container_menu()),
+            ),
+            (
+                "toggle_docker_compose_menu",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.toggle_docker_compose_menu("k".to_string())
+                }),
+            ),
+            (
+                "close_docker_compose_menu",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.close_docker_compose_menu()),
+            ),
+            (
+                "set_docker_resource_offset",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.set_docker_resource_offset(5);
+                }),
+            ),
+            (
+                "toggle_compose_project",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.toggle_compose_project("k".to_string(), "proj");
+                }),
+            ),
+            (
+                "start_docker_container_action",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.start_docker_container_action("acting".to_string())
+                }),
+            ),
+            (
+                "start_docker_details",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.start_docker_details("c0".to_string(), "loading".to_string())
+                }),
+            ),
+            (
+                "apply_docker_details",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.apply_docker_details("c0".to_string(), DockerContainerDetails::default())
+                }),
+            ),
+            (
+                "close_docker_details",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.close_docker_details()),
+            ),
+            (
+                "set_compose_services",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.set_compose_services("k".to_string(), Vec::new())
+                }),
+            ),
+            (
+                "set_compose_service_error",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.set_compose_service_error("k".to_string(), "boom".to_string())
+                }),
+            ),
+            (
+                "clear_compose_service_error",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.clear_compose_service_error("k")),
+            ),
+            (
+                "begin_docker_job",
+                Box::new(|s: &mut RemoteOpsFeatureState| {
+                    s.begin_docker_job("session".to_string());
+                }),
+            ),
+            (
+                "clear_docker_overview",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.clear_docker_overview()),
+            ),
+            (
+                "reset_for_session_switch",
+                Box::new(|s: &mut RemoteOpsFeatureState| s.reset_for_session_switch()),
+            ),
+        ];
+
+        for (label, mutate) in mutations {
+            let before = (
+                state.docker_revision(),
+                state.stats_revision(),
+                state.process_revision(),
+            );
+            mutate(&mut state);
+            let after = (
+                state.docker_revision(),
+                state.stats_revision(),
+                state.process_revision(),
+            );
+            assert_ne!(
+                before.0, after.0,
+                "{label} changes the Docker presentation and must bump its revision"
+            );
+            if label != "reset_for_session_switch" {
+                assert_eq!(
+                    (after.1, after.2),
+                    (before.1, before.2),
+                    "{label} must not disturb the stats or process panes"
+                );
+            }
+        }
+    }
+
+    /// The failure ladder clears the overview at three, and that clear has to bump.
+    ///
+    /// `record_docker_refresh_failure` returning >= 3 is what makes the caller call
+    /// `clear_docker_overview`, so the two are only correct together: a bump on the record
+    /// but not the clear would leave a panel showing containers the pane no longer has.
+    #[test]
+    fn the_docker_failure_ladder_clears_the_overview_and_bumps() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        state.apply_docker_overview(RemoteDockerOverview {
+            available: true,
+            containers: vec![docker_container("c0", "name")],
+            ..Default::default()
+        });
+        assert!(state.docker_presentation().overview.is_some());
+
+        // The failure count is deliberately *not* part of the Docker presentation --
+        // unlike the accelerator panes, whose title-bar readout carries it -- so recording
+        // a failure changes nothing rendered and must not bump. What is rendered is the
+        // overview, which the third failure drops.
+        let revision = state.docker_revision();
+        let mut failures = 0;
+        for _ in 0..3 {
+            failures = state.record_docker_refresh_failure();
+        }
+        assert_eq!(failures, 3, "three failures is the documented threshold");
+        assert_eq!(
+            state.docker_revision(),
+            revision,
+            "a failure streak alone changes nothing on screen"
+        );
+
+        state.clear_docker_overview();
+        assert!(
+            state.docker_presentation().overview.is_none(),
+            "the overview is dropped once the streak reaches three"
+        );
+        assert_ne!(
+            state.docker_revision(),
+            revision,
+            "and the clear must bump, or the panel keeps rendering stale containers"
+        );
     }
 }

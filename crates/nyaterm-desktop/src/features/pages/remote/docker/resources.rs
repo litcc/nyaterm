@@ -6,8 +6,9 @@ use nyaterm_core::truncate_preview;
 use nyaterm_transport::{DockerImage, DockerNetwork, DockerVolume};
 use nyaterm_ui::NyaScrollable;
 
+use super::super::panels::RemoteMonitorPanel;
 use crate::features::remote::DOCKER_RESOURCE_VIEWPORT_ROWS;
-use crate::features::{NyaTermApp, formatting::compact_id, shell::gpui_code_font_family};
+use crate::features::{formatting::compact_id, shell::gpui_code_font_family};
 use crate::models::{DockerConfirmAction, DockerConfirmState};
 use crate::theme::ThemePalette;
 use crate::widgets::{empty_panel, svg_icon_button};
@@ -22,7 +23,7 @@ pub(in crate::features::pages::remote) fn docker_images_panel(
     images: &[DockerImage],
     list_offset: usize,
     labels: DockerLabels,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     if images.is_empty() {
         return docker_resource_empty(palette, "Images", labels.no_matches.clone());
@@ -55,20 +56,22 @@ pub(in crate::features::pages::remote) fn docker_images_panel(
                 "icons/fe/delete.svg",
                 14.,
                 palette,
-                cx.listener(move |this, _, window, cx| {
-                    this.request_docker_confirm(
-                        DockerConfirmState {
-                            title: row_labels.confirm_action_title.to_string(),
-                            detail: row_labels
-                                .confirm_description(&row_labels.remove_image, &label),
-                            action: DockerConfirmAction::ImageRemove {
-                                image_id: image_id.clone(),
-                                force: false,
+                cx.listener(move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.request_docker_confirm(
+                            DockerConfirmState {
+                                title: row_labels.confirm_action_title.to_string(),
+                                detail: row_labels
+                                    .confirm_description(&row_labels.remove_image, &label),
+                                action: DockerConfirmAction::ImageRemove {
+                                    image_id: image_id.clone(),
+                                    force: false,
+                                },
                             },
-                        },
-                        window,
-                        cx,
-                    );
+                            window,
+                            cx,
+                        );
+                    });
                 }),
             )),
         );
@@ -84,7 +87,7 @@ pub(in crate::features::pages::remote) fn docker_volumes_panel(
     volumes: &[DockerVolume],
     list_offset: usize,
     labels: DockerLabels,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     if volumes.is_empty() {
         return docker_resource_empty(palette, "Volumes", labels.no_matches.clone());
@@ -111,20 +114,22 @@ pub(in crate::features::pages::remote) fn docker_volumes_panel(
                 "icons/fe/delete.svg",
                 14.,
                 palette,
-                cx.listener(move |this, _, window, cx| {
-                    this.request_docker_confirm(
-                        DockerConfirmState {
-                            title: row_labels.confirm_action_title.to_string(),
-                            detail: row_labels
-                                .confirm_description(&row_labels.remove_volume, &volume_name),
-                            action: DockerConfirmAction::VolumeRemove {
-                                volume_name: volume_name.clone(),
-                                force: false,
+                cx.listener(move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.request_docker_confirm(
+                            DockerConfirmState {
+                                title: row_labels.confirm_action_title.to_string(),
+                                detail: row_labels
+                                    .confirm_description(&row_labels.remove_volume, &volume_name),
+                                action: DockerConfirmAction::VolumeRemove {
+                                    volume_name: volume_name.clone(),
+                                    force: false,
+                                },
                             },
-                        },
-                        window,
-                        cx,
-                    );
+                            window,
+                            cx,
+                        );
+                    });
                 }),
             )),
         );
@@ -140,7 +145,7 @@ pub(in crate::features::pages::remote) fn docker_networks_panel(
     networks: &[DockerNetwork],
     list_offset: usize,
     labels: DockerLabels,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     if networks.is_empty() {
         return docker_resource_empty(palette, "Networks", labels.no_matches.clone());
@@ -173,19 +178,21 @@ pub(in crate::features::pages::remote) fn docker_networks_panel(
                 "icons/fe/delete.svg",
                 14.,
                 palette,
-                cx.listener(move |this, _, window, cx| {
-                    this.request_docker_confirm(
-                        DockerConfirmState {
-                            title: row_labels.confirm_action_title.to_string(),
-                            detail: row_labels
-                                .confirm_description(&row_labels.remove_network, &name),
-                            action: DockerConfirmAction::NetworkRemove {
-                                network_id: network_id.clone(),
+                cx.listener(move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.request_docker_confirm(
+                            DockerConfirmState {
+                                title: row_labels.confirm_action_title.to_string(),
+                                detail: row_labels
+                                    .confirm_description(&row_labels.remove_network, &name),
+                                action: DockerConfirmAction::NetworkRemove {
+                                    network_id: network_id.clone(),
+                                },
                             },
-                        },
-                        window,
-                        cx,
-                    );
+                            window,
+                            cx,
+                        );
+                    });
                 }),
             )),
         );
@@ -231,7 +238,7 @@ pub(in crate::features::pages::remote) fn docker_resource_panel(
     count: usize,
     rows: impl IntoElement,
     _scroll_offset: usize,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::AnyElement {
     // Tauri resource tabs: full-height virtual list + wheel offset.
     let _ = title;
@@ -245,24 +252,26 @@ pub(in crate::features::pages::remote) fn docker_resource_panel(
         .overflow_hidden()
         .flex()
         .flex_col()
-        .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
-            let max_offset = total_for_scroll
-                .saturating_sub(DOCKER_RESOURCE_VIEWPORT_ROWS.min(total_for_scroll));
-            if max_offset == 0 {
-                return;
-            }
-            let delta_rows = match event.delta {
-                ScrollDelta::Lines(delta) => delta.y,
-                ScrollDelta::Pixels(delta) => f32::from(delta.y) / DOCKER_RESOURCE_ROW_PX,
-            };
-            let current = this.remote_ops.docker_presentation().resource_list_offset;
-            let next = (current as f32 - delta_rows)
-                .round()
-                .clamp(0., max_offset as f32) as usize;
-            if this.remote_ops.set_docker_resource_offset(next) {
-                cx.stop_propagation();
-                cx.notify();
-            }
+        .on_scroll_wheel(cx.listener(move |panel, event: &ScrollWheelEvent, _, cx| {
+            panel.with_app(cx, |this, cx| {
+                let max_offset = total_for_scroll
+                    .saturating_sub(DOCKER_RESOURCE_VIEWPORT_ROWS.min(total_for_scroll));
+                if max_offset == 0 {
+                    return;
+                }
+                let delta_rows = match event.delta {
+                    ScrollDelta::Lines(delta) => delta.y,
+                    ScrollDelta::Pixels(delta) => f32::from(delta.y) / DOCKER_RESOURCE_ROW_PX,
+                };
+                let current = this.remote_ops.docker_presentation().resource_list_offset;
+                let next = (current as f32 - delta_rows)
+                    .round()
+                    .clamp(0., max_offset as f32) as usize;
+                if this.remote_ops.set_docker_resource_offset(next) {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            });
         }))
         .child(
             div()

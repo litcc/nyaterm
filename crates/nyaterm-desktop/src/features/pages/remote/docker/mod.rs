@@ -9,7 +9,6 @@ use crate::theme::ThemePalette;
 
 #[derive(Clone)]
 pub(in crate::features::pages::remote) struct DockerLabels {
-    pub search: Cow<'static, str>,
     pub no_session: Cow<'static, str>,
     pub error: Cow<'static, str>,
     pub unavailable: Cow<'static, str>,

@@ -5,10 +5,11 @@ use gpui::{
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::DockerContainer;
 
+use super::super::panels::RemoteMonitorPanel;
 use crate::features::remote::DOCKER_VIEWPORT_ROWS;
 use crate::features::{
-    NyaTermApp, formatting::compact_id, formatting::docker_state_color,
-    formatting::docker_state_rank, shell::gpui_code_font_family,
+    formatting::compact_id, formatting::docker_state_color, formatting::docker_state_rank,
+    shell::gpui_code_font_family,
 };
 use crate::models::{DockerConfirmAction, DockerConfirmState};
 use crate::theme::ThemePalette;
@@ -29,7 +30,7 @@ pub(in crate::features::pages::remote) struct DockerContainersPanelState<'a> {
 pub(in crate::features::pages::remote) fn docker_containers_panel(
     context: DockerRenderContext,
     state: DockerContainersPanelState<'_>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -133,23 +134,25 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
         .overflow_hidden()
         .flex()
         .flex_col()
-        .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
-            let max_offset = total.saturating_sub(DOCKER_VIEWPORT_ROWS.min(total));
-            if max_offset == 0 {
-                return;
-            }
-            let delta_rows = match event.delta {
-                ScrollDelta::Lines(delta) => delta.y,
-                ScrollDelta::Pixels(delta) => f32::from(delta.y) / DOCKER_ROW_PX,
-            };
-            let current = this.remote_ops.docker_presentation().list_offset;
-            let next = (current as f32 - delta_rows)
-                .round()
-                .clamp(0., max_offset as f32) as usize;
-            if this.remote_ops.set_docker_list_offset(next) {
-                cx.stop_propagation();
-                cx.notify();
-            }
+        .on_scroll_wheel(cx.listener(move |panel, event: &ScrollWheelEvent, _, cx| {
+            panel.with_app(cx, |this, cx| {
+                let max_offset = total.saturating_sub(DOCKER_VIEWPORT_ROWS.min(total));
+                if max_offset == 0 {
+                    return;
+                }
+                let delta_rows = match event.delta {
+                    ScrollDelta::Lines(delta) => delta.y,
+                    ScrollDelta::Pixels(delta) => f32::from(delta.y) / DOCKER_ROW_PX,
+                };
+                let current = this.remote_ops.docker_presentation().list_offset;
+                let next = (current as f32 - delta_rows)
+                    .round()
+                    .clamp(0., max_offset as f32) as usize;
+                if this.remote_ops.set_docker_list_offset(next) {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            });
         }))
         .child(rows)
         .into_any_element()
@@ -159,7 +162,7 @@ fn docker_container_row(
     context: DockerRenderContext,
     container: DockerContainer,
     menu_open: bool,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -246,9 +249,11 @@ fn docker_container_row(
                         .child(div().flex_none().child(short.clone())),
                 ),
         )
-        .on_click(cx.listener(move |this, _, _window, cx| {
-            this.remote_ops.close_docker_container_menu();
-            this.load_docker_details(details_id.clone(), cx);
+        .on_click(cx.listener(move |panel, _, _window, cx| {
+            panel.with_app(cx, |this, cx| {
+                this.remote_ops.close_docker_container_menu();
+                this.load_docker_details(details_id.clone(), cx);
+            });
         }))
         .child(
             div().absolute().top(px(8.)).right(px(6.)).child(
@@ -259,11 +264,13 @@ fn docker_container_row(
                         "icons/session/more.svg",
                         14.,
                         palette,
-                        cx.listener(move |this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.remote_ops
-                                .toggle_docker_container_menu(menu_id.clone());
-                            cx.notify();
+                        cx.listener(move |panel, _, _, cx| {
+                            panel.with_app(cx, |this, cx| {
+                                cx.stop_propagation();
+                                this.remote_ops
+                                    .toggle_docker_container_menu(menu_id.clone());
+                                cx.notify();
+                            });
                         }),
                     ))
                     .when(menu_open, |this| {
@@ -284,7 +291,7 @@ fn docker_container_action_menu(
     container_id: String,
     container_name: String,
     running: bool,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -322,9 +329,11 @@ fn docker_container_action_menu(
             format!("docker-menu-logs-{short}"),
             labels.logs.clone(),
             false,
-            cx.listener(move |this, _, _, cx| {
-                this.remote_ops.close_docker_container_menu();
-                this.send_docker_container_logs_to_terminal(logs_id.clone(), cx);
+            cx.listener(move |panel, _, _, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    this.send_docker_container_logs_to_terminal(logs_id.clone(), cx);
+                });
             }),
         ))
         .child(docker_menu_item(
@@ -332,9 +341,11 @@ fn docker_container_action_menu(
             format!("docker-menu-enter-{short}"),
             labels.enter.clone(),
             !running,
-            cx.listener(move |this, _, _, cx| {
-                this.remote_ops.close_docker_container_menu();
-                this.enter_docker_container_terminal(enter_id.clone(), cx);
+            cx.listener(move |panel, _, _, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    this.enter_docker_container_terminal(enter_id.clone(), cx);
+                });
             }),
         ))
         .child(docker_menu_separator(palette))
@@ -343,9 +354,11 @@ fn docker_container_action_menu(
             format!("docker-menu-start-{short}"),
             labels.start.clone(),
             running,
-            cx.listener(move |this, _, window, cx| {
-                this.remote_ops.close_docker_container_menu();
-                this.docker_container_action(start_id.clone(), "start", window, cx);
+            cx.listener(move |panel, _, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    this.docker_container_action(start_id.clone(), "start", window, cx);
+                });
             }),
         ))
         .child(docker_menu_item(
@@ -353,9 +366,11 @@ fn docker_container_action_menu(
             format!("docker-menu-stop-{short}"),
             labels.stop.clone(),
             !running,
-            cx.listener(move |this, _, window, cx| {
-                this.remote_ops.close_docker_container_menu();
-                this.docker_container_action(stop_id.clone(), "stop", window, cx);
+            cx.listener(move |panel, _, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    this.docker_container_action(stop_id.clone(), "stop", window, cx);
+                });
             }),
         ))
         .child(docker_menu_item(
@@ -363,9 +378,11 @@ fn docker_container_action_menu(
             format!("docker-menu-restart-{short}"),
             labels.restart.clone(),
             false,
-            cx.listener(move |this, _, window, cx| {
-                this.remote_ops.close_docker_container_menu();
-                this.docker_container_action(restart_id.clone(), "restart", window, cx);
+            cx.listener(move |panel, _, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_container_menu();
+                    this.docker_container_action(restart_id.clone(), "restart", window, cx);
+                });
             }),
         ))
         .child(docker_menu_separator(palette))
@@ -376,25 +393,27 @@ fn docker_container_action_menu(
             !running,
             cx.listener({
                 let kill_labels = labels.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_container_menu();
-                    let target = if kill_name.trim().is_empty() {
-                        compact_id(&kill_id)
-                    } else {
-                        kill_name.clone()
-                    };
-                    this.request_docker_confirm(
-                        DockerConfirmState {
-                            title: kill_labels.confirm_action_title.to_string(),
-                            detail: kill_labels.confirm_description(&kill_labels.kill, &target),
-                            action: DockerConfirmAction::ContainerAction {
-                                container_id: kill_id.clone(),
-                                action: "kill",
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_container_menu();
+                        let target = if kill_name.trim().is_empty() {
+                            compact_id(&kill_id)
+                        } else {
+                            kill_name.clone()
+                        };
+                        this.request_docker_confirm(
+                            DockerConfirmState {
+                                title: kill_labels.confirm_action_title.to_string(),
+                                detail: kill_labels.confirm_description(&kill_labels.kill, &target),
+                                action: DockerConfirmAction::ContainerAction {
+                                    container_id: kill_id.clone(),
+                                    action: "kill",
+                                },
                             },
-                        },
-                        window,
-                        cx,
-                    );
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))
@@ -405,26 +424,28 @@ fn docker_container_action_menu(
             false,
             cx.listener({
                 let remove_labels = labels.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_container_menu();
-                    let target = if remove_name.trim().is_empty() {
-                        compact_id(&remove_id)
-                    } else {
-                        remove_name.clone()
-                    };
-                    this.request_docker_confirm(
-                        DockerConfirmState {
-                            title: remove_labels.confirm_action_title.to_string(),
-                            detail: remove_labels
-                                .confirm_description(&remove_labels.delete, &target),
-                            action: DockerConfirmAction::ContainerAction {
-                                container_id: remove_id.clone(),
-                                action: "remove",
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_container_menu();
+                        let target = if remove_name.trim().is_empty() {
+                            compact_id(&remove_id)
+                        } else {
+                            remove_name.clone()
+                        };
+                        this.request_docker_confirm(
+                            DockerConfirmState {
+                                title: remove_labels.confirm_action_title.to_string(),
+                                detail: remove_labels
+                                    .confirm_description(&remove_labels.delete, &target),
+                                action: DockerConfirmAction::ContainerAction {
+                                    container_id: remove_id.clone(),
+                                    action: "remove",
+                                },
                             },
-                        },
-                        window,
-                        cx,
-                    );
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))

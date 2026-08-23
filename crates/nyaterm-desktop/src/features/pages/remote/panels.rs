@@ -30,22 +30,21 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{
-    AnyElement, Context, Entity, IntoElement, Render, Rgba, Task, WeakEntity, Window, div,
-    prelude::*,
-};
+use gpui::{Context, Entity, IntoElement, Render, Rgba, Task, WeakEntity, Window, div, prelude::*};
 use nyaterm_transport::{RemoteGpuProcess, RemoteNpuProcess, RemoteProcess};
 use nyaterm_ui::{NyaInputState, NyaNumberInputOptions, NyaNumberInputState};
 use rust_i18n::t;
 
+use super::docker_view::docker_panel;
 use super::process_view::processes_panel;
 use super::stats_view::{gpu_panel, npu_panel, stats_panel};
 use crate::features::NyaTermApp;
 use crate::features::remote::{
-    GpuPresentationState, NpuPresentationState, ProcessPresentationState, StatsPresentationState,
+    DockerDerivedItems, DockerPresentationState, GpuPresentationState, NpuPresentationState,
+    ProcessPresentationState, StatsPresentationState,
 };
 use crate::features::text_inputs::TextInputSetup;
-use crate::models::NavItem;
+use crate::models::{DockerTab, NavItem};
 use crate::theme::ThemePalette;
 
 /// How often a polling panel asks whether its own interval has come due.
@@ -101,8 +100,13 @@ pub(in crate::features) struct PanelChrome {
     pub palette: ThemePalette,
     /// `shell_transparent_color(palette.surface)`.
     pub transparent_surface: Rgba,
-    /// `shell_surface_color(palette.surface)`, which the process row menus sit on.
+    /// `shell_surface_color(palette.surface)`, which the process and Docker row menus
+    /// sit on.
     pub surface: Rgba,
+    /// `shell_surface_color(palette.bg)`, the Docker confirm dialog's ground.
+    pub dialog_surface: Rgba,
+    /// `shell_transparent_color(palette.section_header)`, the Docker section headers.
+    pub transparent_section_header: Rgba,
 }
 
 /// Everything a Stats/GPU/NPU panel renders from.
@@ -117,9 +121,14 @@ pub(in crate::features) struct RemoteMonitorSnapshot {
 /// Everything outside the pane data that a snapshot depends on.
 ///
 /// The pane revision alone is not enough: the theme, whether a session is active, and the
-/// right-panel width all change the rendered output without touching `remote_ops`. Keying
-/// on all of them means a flush notices any of them, so the theme and resize boundaries
-/// are a safety net rather than the only thing standing between a change and the screen.
+/// right-panel width all change the rendered output without touching `remote_ops`, so a
+/// flush keyed on the revision alone would skip a panel that needs rebuilding.
+///
+/// **This is a safety net for a flush that runs, not a replacement for the boundaries.**
+/// A boundary that is never reached never compares anything, so a missed boundary is still
+/// a stale panel -- which is why the freshness tests drive each one rather than trusting
+/// the key. The explicit boundary list stays the discipline; the key only stops a flush
+/// from concluding "nothing changed" when something outside the pane did.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct RemoteMonitorKey {
     revision: u64,
@@ -153,6 +162,19 @@ pub(in crate::features) enum RemoteMonitorData {
         /// Only built while a process is selected, and keyed per pid.
         nice: Option<Entity<NyaNumberInputState>>,
     },
+    /// Boxed because it is far the largest variant -- `DockerPresentationState` alone
+    /// carries fourteen fields including an inline `Option<DockerContainerDetails>` -- and
+    /// leaving it unboxed makes every variant pay for it. One allocation per Docker
+    /// snapshot build is the cheaper side of that trade.
+    Docker(Box<DockerSnapshot>),
+}
+
+pub(in crate::features) struct DockerSnapshot {
+    state: DockerPresentationState,
+    /// The filtered list for the effective tab; every variant is already `Arc`-backed.
+    derived: DockerDerivedItems,
+    effective_tab: DockerTab,
+    search: Entity<NyaInputState>,
 }
 
 /// One remote polling panel.
@@ -185,11 +207,13 @@ impl RemoteMonitorPanel {
     /// Which pane kinds render from a snapshot rather than through the app.
     ///
     /// Processes and Docker still delegate.
-    pub(in crate::features::pages::remote) const SNAPSHOT_KINDS: [RemoteMonitorKind; 4] = [
+    /// Every kind renders from a snapshot now; nothing delegates through the app.
+    pub(in crate::features::pages::remote) const SNAPSHOT_KINDS: [RemoteMonitorKind; 5] = [
         RemoteMonitorKind::Stats,
         RemoteMonitorKind::Gpu,
         RemoteMonitorKind::Npu,
         RemoteMonitorKind::Processes,
+        RemoteMonitorKind::Docker,
     ];
 
     /// Run `f` against the app, then flush whatever snapshot it invalidated.
@@ -358,22 +382,30 @@ impl Render for RemoteMonitorPanel {
                         cx,
                     )
                 }
+                RemoteMonitorData::Docker(docker) => {
+                    let (state, derived, effective_tab, search) = (
+                        docker.state.clone(),
+                        docker.derived.clone(),
+                        docker.effective_tab,
+                        docker.search.clone(),
+                    );
+                    docker_panel(
+                        chrome,
+                        has_session,
+                        state,
+                        derived,
+                        effective_tab,
+                        panel_width,
+                        search,
+                        cx,
+                    )
+                }
             };
         }
-        let Some(app) = self.app.upgrade() else {
-            return div().into_any_element();
-        };
-        let kind = self.kind;
-        app.update(cx, |app, cx| -> AnyElement {
-            match kind {
-                RemoteMonitorKind::Docker => app.docker_view(cx).into_any_element(),
-                // Handled above, from the snapshot.
-                RemoteMonitorKind::Stats
-                | RemoteMonitorKind::Gpu
-                | RemoteMonitorKind::Npu
-                | RemoteMonitorKind::Processes => div().into_any_element(),
-            }
-        })
+        // Every kind is a snapshot kind now, so this is unreachable in practice; it
+        // stays as the empty case rather than a panic because a panel with no snapshot
+        // yet is a legitimate transient state.
+        div().into_any_element()
     }
 }
 
@@ -461,15 +493,18 @@ impl NyaTermApp {
             RemoteMonitorKind::Gpu => self.remote_ops.gpu_revision(),
             RemoteMonitorKind::Npu => self.remote_ops.npu_revision(),
             RemoteMonitorKind::Processes => self.remote_ops.process_revision(),
-            // Not snapshotted; unreachable through SNAPSHOT_KINDS.
-            RemoteMonitorKind::Docker => 0,
+            RemoteMonitorKind::Docker => self.remote_ops.docker_revision(),
         };
         RemoteMonitorKey {
             revision,
             chrome: self.panel_chrome(),
             has_session: self.session.active_ssh_config().is_some(),
             panel_width: match kind {
-                RemoteMonitorKind::Processes => self.shell.right_panel_width(),
+                // Both read the width: the process table for its columns and row heights,
+                // Docker for its compose layout.
+                RemoteMonitorKind::Processes | RemoteMonitorKind::Docker => {
+                    self.shell.right_panel_width()
+                }
                 _ => 0.,
             },
         }
@@ -480,6 +515,8 @@ impl NyaTermApp {
         PanelChrome {
             transparent_surface: self.shell_transparent_color(palette.surface),
             surface: self.shell_surface_color(palette.surface),
+            dialog_surface: self.shell_surface_color(palette.bg),
+            transparent_section_header: self.shell_transparent_color(palette.section_header),
             palette,
         }
     }
@@ -552,7 +589,23 @@ impl NyaTermApp {
                     nice,
                 }
             }
-            RemoteMonitorKind::Docker => unreachable!("only snapshot kinds are built"),
+            RemoteMonitorKind::Docker => {
+                let state = self.remote_ops.docker_presentation();
+                let derived = self.remote_ops.derived_docker_items();
+                let effective_tab = self.remote_ops.docker_effective_tab();
+                let search = self.text_input(
+                    "remote.docker.filter",
+                    &state.search_draft.clone(),
+                    TextInputSetup::placeholder(t!("dockerManager.search")),
+                    cx,
+                );
+                RemoteMonitorData::Docker(Box::new(DockerSnapshot {
+                    state,
+                    derived,
+                    effective_tab,
+                    search,
+                }))
+            }
         };
         RemoteMonitorSnapshot { key, data }
     }
@@ -1049,7 +1102,7 @@ mod isolation_tests {
     use super::RemoteMonitorKind;
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
-    use crate::models::{NavItem, SessionLaunchConfig, SessionRuntimeMetadata};
+    use crate::models::{DockerTab, NavItem, SessionLaunchConfig, SessionRuntimeMetadata};
 
     fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and Windows'
@@ -1542,6 +1595,266 @@ mod isolation_tests {
                     0,
                     "three rows cannot be scrolled, so the next wheel event steps from the \
                      top instead of jumping back from 60"
+                );
+            });
+        });
+    }
+
+    /// Open the Docker panel on an SSH session, with an overview, and settle.
+    fn hosted_docker(
+        cx: &mut TestAppContext,
+    ) -> (gpui::Entity<NyaTermApp>, &mut VisualTestContext) {
+        let app = app(cx);
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_docker_manager = true;
+            app.settings.replace_summary(summary);
+            app.session.register_session_metadata(
+                "ssh-a",
+                SessionRuntimeMetadata {
+                    ssh_config: Some(SshSessionConfig::default()),
+                    ssh_multiplex_key: None,
+                    source_connection_id: None,
+                    ai_execution_profile: AiExecutionProfile::Posix,
+                    launch_config: SessionLaunchConfig::Local(LocalSessionConfig::default()),
+                    disconnected: false,
+                },
+            );
+            app.activate_session_id("ssh-a", cx);
+            app.open_or_toggle_panel(NavItem::Docker, cx);
+            app.remote_ops.apply_docker_overview(docker_overview(3));
+            app.flush_remote_panel_snapshots(cx);
+        });
+        let host_app = app.clone();
+        let (_, vcx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
+        let vcx: &mut VisualTestContext = vcx;
+        vcx.run_until_parked();
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                app.update(cx, |_, cx| cx.notify());
+                _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        (app, vcx)
+    }
+
+    fn docker_overview(containers: usize) -> nyaterm_transport::RemoteDockerOverview {
+        nyaterm_transport::RemoteDockerOverview {
+            available: true,
+            compose_available: true,
+            containers: (0..containers)
+                .map(|index| nyaterm_transport::DockerContainer {
+                    id: format!("c{index}"),
+                    name: format!("name{index}"),
+                    image: "image".to_string(),
+                    status: "Up".to_string(),
+                    state: "running".to_string(),
+                    ports: String::new(),
+                    created_at: String::new(),
+                    size: String::new(),
+                    stats: None,
+                })
+                .collect(),
+            images: (0..30)
+                .map(|index| nyaterm_transport::DockerImage {
+                    id: format!("i{index}"),
+                    repository: "repo".to_string(),
+                    tag: "latest".to_string(),
+                    size: String::new(),
+                    created_since: String::new(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn docker_paints(app: &gpui::Entity<NyaTermApp>, cx: &gpui::App) -> usize {
+        app.read(cx)
+            .remote_panels
+            .entity(RemoteMonitorKind::Docker)
+            .read(cx)
+            .paint_count()
+    }
+
+    /// An `app.notify()` that changed nothing in the Docker pane must not re-render it.
+    #[test]
+    fn an_unrelated_app_notify_does_not_re_render_docker() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted_docker(&mut cx);
+
+        let before = vcx.update(|_, cx| docker_paints(&app, cx));
+        assert!(
+            before > 0,
+            "the Docker panel must have painted at least once, or this proves nothing"
+        );
+        for _ in 0..5 {
+            vcx.update(|window, cx| {
+                app.update(cx, |_, cx| cx.notify());
+                _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        assert_eq!(
+            vcx.update(|_, cx| docker_paints(&app, cx)),
+            before,
+            "five unrelated app notifies must not re-render the Docker panel"
+        );
+    }
+
+    /// A Docker mutation reaches its panel before anything draws.
+    #[test]
+    fn a_docker_mutation_reaches_its_panel_without_an_extra_root_paint() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted_docker(&mut cx);
+
+        let revision = vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.remote_ops.apply_docker_overview(docker_overview(7));
+                app.flush_remote_panel_snapshots(cx);
+                app.remote_ops.docker_revision()
+            })
+        });
+        assert_eq!(
+            vcx.update(|_, cx| {
+                app.read(cx)
+                    .remote_panels
+                    .entity(RemoteMonitorKind::Docker)
+                    .read(cx)
+                    .snapshot_revision()
+            }),
+            Some(revision),
+            "the snapshot must be current before any paint"
+        );
+    }
+
+    /// A sibling pane's data must not re-render Docker.
+    #[test]
+    fn a_stats_mutation_does_not_re_render_docker() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted_docker(&mut cx);
+
+        let before = vcx.update(|_, cx| docker_paints(&app, cx));
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.remote_ops.apply_stats(RemoteStats::default());
+                app.flush_remote_panel_snapshots(cx);
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+        assert_eq!(
+            vcx.update(|_, cx| docker_paints(&app, cx)),
+            before,
+            "a stats refresh must leave the Docker panel alone"
+        );
+    }
+
+    /// Search, tab, menus and compose expansion each re-render only Docker.
+    #[test]
+    fn docker_interactions_update_only_the_docker_panel() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted_docker(&mut cx);
+
+        for (label, mutate) in [
+            (
+                "search",
+                &(|app: &mut NyaTermApp| app.remote_ops.apply_docker_search("name1".to_string()))
+                    as &dyn Fn(&mut NyaTermApp),
+            ),
+            ("tab", &|app: &mut NyaTermApp| {
+                app.remote_ops.set_docker_tab(DockerTab::Images)
+            }),
+            ("container menu", &|app: &mut NyaTermApp| {
+                app.remote_ops
+                    .toggle_docker_container_menu("c0".to_string())
+            }),
+            ("header menu", &|app: &mut NyaTermApp| {
+                app.remote_ops.toggle_docker_header_menu()
+            }),
+            ("compose project", &|app: &mut NyaTermApp| {
+                app.remote_ops
+                    .toggle_compose_project("k".to_string(), "proj");
+            }),
+        ] {
+            let before = vcx.update(|_, cx| (docker_paints(&app, cx), paints(&app, cx)));
+            vcx.update(|window, cx| {
+                app.update(cx, |app, cx| {
+                    mutate(app);
+                    app.flush_remote_panel_snapshots(cx);
+                });
+                _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+            let after = vcx.update(|_, cx| (docker_paints(&app, cx), paints(&app, cx)));
+            assert!(
+                after.0 > before.0,
+                "{label} must re-render the Docker panel"
+            );
+            assert_eq!(
+                after.1, before.1,
+                "{label} must not re-render Stats, GPU or NPU"
+            );
+        }
+    }
+
+    /// The compose fallback survives the move into the snapshot: a host without compose
+    /// support shows Containers even with Compose stored as the tab.
+    #[test]
+    fn the_compose_tab_falls_back_in_the_snapshot() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted_docker(&mut cx);
+
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.remote_ops.set_docker_tab(DockerTab::Compose);
+                app.flush_remote_panel_snapshots(cx);
+                assert_eq!(
+                    app.remote_ops.docker_effective_tab(),
+                    DockerTab::Compose,
+                    "the fixture host supports compose"
+                );
+
+                // A refresh from a host without compose support.
+                let mut overview = docker_overview(2);
+                overview.compose_available = false;
+                app.remote_ops.apply_docker_overview(overview);
+                app.flush_remote_panel_snapshots(cx);
+                assert_eq!(
+                    app.remote_ops.docker_effective_tab(),
+                    DockerTab::Containers,
+                    "compose is unavailable, so the effective tab falls back"
+                );
+            });
+        });
+    }
+
+    /// A shorter resource list clamps the stored offset, so the next wheel event steps.
+    #[test]
+    fn a_shorter_docker_resource_list_clamps_the_offset() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted_docker(&mut cx);
+
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.remote_ops.set_docker_tab(DockerTab::Images);
+                assert!(app.remote_ops.set_docker_resource_offset(14));
+                app.flush_remote_panel_snapshots(cx);
+                assert_eq!(
+                    app.remote_ops.docker_presentation().resource_list_offset,
+                    14
+                );
+
+                let mut overview = docker_overview(2);
+                overview.images.truncate(1);
+                app.remote_ops.apply_docker_overview(overview);
+                app.flush_remote_panel_snapshots(cx);
+                assert_eq!(
+                    app.remote_ops.docker_presentation().resource_list_offset,
+                    0,
+                    "one image cannot be scrolled, so the next wheel event steps from the \
+                     top instead of jumping back from 14"
                 );
             });
         });

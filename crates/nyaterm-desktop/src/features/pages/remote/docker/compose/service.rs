@@ -2,7 +2,8 @@ use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, 
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::DockerComposeService;
 
-use crate::features::{NyaTermApp, formatting::compact_id, shell::gpui_code_font_family};
+use super::super::super::panels::RemoteMonitorPanel;
+use crate::features::{formatting::compact_id, shell::gpui_code_font_family};
 use crate::widgets::{small_button, status_pill, svg_icon_button};
 
 use super::super::DockerRenderContext;
@@ -29,7 +30,7 @@ struct DockerComposeServiceRow {
 pub(super) fn docker_compose_services_panel(
     context: DockerRenderContext,
     panel: DockerComposeServicesPanel<'_>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -78,14 +79,16 @@ pub(super) fn docker_compose_services_panel(
                     cx.listener({
                         let project_name = project_name.clone();
                         let config_files = config_files.clone();
-                        move |this, _, window, cx| {
-                            this.remote_ops.close_docker_compose_menu();
-                            this.load_docker_compose_services(
-                                project_name.clone(),
-                                config_files.clone(),
-                                window,
-                                cx,
-                            );
+                        move |panel, _, window, cx| {
+                            panel.with_app(cx, |this, cx| {
+                                this.remote_ops.close_docker_compose_menu();
+                                this.load_docker_compose_services(
+                                    project_name.clone(),
+                                    config_files.clone(),
+                                    window,
+                                    cx,
+                                );
+                            });
                         }
                     }),
                 )),
@@ -137,7 +140,7 @@ pub(super) fn docker_compose_services_panel(
 fn docker_compose_service_row(
     context: DockerRenderContext,
     row: DockerComposeServiceRow,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -245,10 +248,12 @@ fn docker_compose_service_row(
                         palette,
                         cx.listener({
                             let menu_id = menu_id.clone();
-                            move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.remote_ops.toggle_docker_compose_menu(menu_id.clone());
-                                cx.notify();
+                            move |panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    cx.stop_propagation();
+                                    this.remote_ops.toggle_docker_compose_menu(menu_id.clone());
+                                    cx.notify();
+                                });
                             }
                         }),
                     ))

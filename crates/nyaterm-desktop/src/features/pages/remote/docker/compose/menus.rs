@@ -1,6 +1,6 @@
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px, rgb};
 
-use crate::features::NyaTermApp;
+use super::super::super::panels::RemoteMonitorPanel;
 use crate::models::{DockerConfirmAction, DockerConfirmState};
 use crate::theme::ThemePalette;
 
@@ -19,7 +19,7 @@ pub(super) fn docker_compose_project_action_menu(
     project_name: String,
     config_files: Option<String>,
     project_key: &str,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -52,15 +52,17 @@ pub(super) fn docker_compose_project_action_menu(
             cx.listener({
                 let project_name = project_name.clone();
                 let config_files = config_files.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_compose_menu();
-                    this.docker_compose_action(
-                        project_name.clone(),
-                        config_files.clone(),
-                        "up",
-                        window,
-                        cx,
-                    );
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_compose_menu();
+                        this.docker_compose_action(
+                            project_name.clone(),
+                            config_files.clone(),
+                            "up",
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))
@@ -72,15 +74,17 @@ pub(super) fn docker_compose_project_action_menu(
             cx.listener({
                 let project_name = project_name.clone();
                 let config_files = config_files.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_compose_menu();
-                    this.docker_compose_action(
-                        project_name.clone(),
-                        config_files.clone(),
-                        "restart",
-                        window,
-                        cx,
-                    );
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_compose_menu();
+                        this.docker_compose_action(
+                            project_name.clone(),
+                            config_files.clone(),
+                            "restart",
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))
@@ -90,21 +94,23 @@ pub(super) fn docker_compose_project_action_menu(
             format!("compose-down-{short}"),
             labels.down.clone(),
             false,
-            cx.listener(move |this, _, window, cx| {
-                this.remote_ops.close_docker_compose_menu();
-                this.request_docker_confirm(
-                    DockerConfirmState {
-                        title: labels.confirm_action_title.to_string(),
-                        detail: labels.confirm_description(&labels.down, &project_name),
-                        action: DockerConfirmAction::ComposeAction {
-                            project_name: project_name.clone(),
-                            config_files: config_files.clone(),
-                            action: "down",
+            cx.listener(move |panel, _, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_compose_menu();
+                    this.request_docker_confirm(
+                        DockerConfirmState {
+                            title: labels.confirm_action_title.to_string(),
+                            detail: labels.confirm_description(&labels.down, &project_name),
+                            action: DockerConfirmAction::ComposeAction {
+                                project_name: project_name.clone(),
+                                config_files: config_files.clone(),
+                                action: "down",
+                            },
                         },
-                    },
-                    window,
-                    cx,
-                );
+                        window,
+                        cx,
+                    );
+                });
             }),
         ))
 }
@@ -112,7 +118,7 @@ pub(super) fn docker_compose_project_action_menu(
 pub(super) fn docker_compose_service_action_menu(
     context: DockerRenderContext,
     menu: DockerComposeServiceMenu,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> impl IntoElement {
     let DockerRenderContext {
         palette,
@@ -153,14 +159,16 @@ pub(super) fn docker_compose_service_action_menu(
                 let project_name = project_name.clone();
                 let config_files = config_files.clone();
                 let service_name = service_name.clone();
-                move |this, _, _, cx| {
-                    this.remote_ops.close_docker_compose_menu();
-                    this.send_docker_compose_service_logs_to_terminal(
-                        project_name.clone(),
-                        config_files.clone(),
-                        service_name.clone(),
-                        cx,
-                    );
+                move |panel, _, _, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_compose_menu();
+                        this.send_docker_compose_service_logs_to_terminal(
+                            project_name.clone(),
+                            config_files.clone(),
+                            service_name.clone(),
+                            cx,
+                        );
+                    });
                 }
             }),
         ))
@@ -169,11 +177,13 @@ pub(super) fn docker_compose_service_action_menu(
             format!("compose-svc-enter-{short}"),
             labels.enter.clone(),
             !can_enter,
-            cx.listener(move |this, _, _, cx| {
-                this.remote_ops.close_docker_compose_menu();
-                if let Some(container_id) = running_container_id.clone() {
-                    this.enter_docker_container_terminal(container_id, cx);
-                }
+            cx.listener(move |panel, _, _, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.remote_ops.close_docker_compose_menu();
+                    if let Some(container_id) = running_container_id.clone() {
+                        this.enter_docker_container_terminal(container_id, cx);
+                    }
+                });
             }),
         ))
         .child(compose_menu_separator(palette))
@@ -186,16 +196,18 @@ pub(super) fn docker_compose_service_action_menu(
                 let project_name = project_name.clone();
                 let config_files = config_files.clone();
                 let service_name = service_name.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_compose_menu();
-                    this.docker_compose_service_action(
-                        project_name.clone(),
-                        config_files.clone(),
-                        service_name.clone(),
-                        "up",
-                        window,
-                        cx,
-                    );
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_compose_menu();
+                        this.docker_compose_service_action(
+                            project_name.clone(),
+                            config_files.clone(),
+                            service_name.clone(),
+                            "up",
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))
@@ -208,16 +220,18 @@ pub(super) fn docker_compose_service_action_menu(
                 let project_name = project_name.clone();
                 let config_files = config_files.clone();
                 let service_name = service_name.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_compose_menu();
-                    this.docker_compose_service_action(
-                        project_name.clone(),
-                        config_files.clone(),
-                        service_name.clone(),
-                        "stop",
-                        window,
-                        cx,
-                    );
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_compose_menu();
+                        this.docker_compose_service_action(
+                            project_name.clone(),
+                            config_files.clone(),
+                            service_name.clone(),
+                            "stop",
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))
@@ -230,16 +244,18 @@ pub(super) fn docker_compose_service_action_menu(
                 let project_name = project_name.clone();
                 let config_files = config_files.clone();
                 let service_name = service_name.clone();
-                move |this, _, window, cx| {
-                    this.remote_ops.close_docker_compose_menu();
-                    this.docker_compose_service_action(
-                        project_name.clone(),
-                        config_files.clone(),
-                        service_name.clone(),
-                        "restart",
-                        window,
-                        cx,
-                    );
+                move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.remote_ops.close_docker_compose_menu();
+                        this.docker_compose_service_action(
+                            project_name.clone(),
+                            config_files.clone(),
+                            service_name.clone(),
+                            "restart",
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }),
         ))

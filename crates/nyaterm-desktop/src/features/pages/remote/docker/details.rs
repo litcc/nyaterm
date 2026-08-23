@@ -3,9 +3,10 @@ use nyaterm_core::truncate_preview;
 use nyaterm_transport::{DockerContainer, DockerContainerDetails};
 use nyaterm_ui::NyaScrollable;
 
+use super::super::panels::RemoteMonitorPanel;
 use crate::features::{
-    NyaTermApp, formatting::compact_id, formatting::docker_state_color,
-    shell::gpui_code_font_family, view_widgets::modal_dialog_shell,
+    formatting::compact_id, formatting::docker_state_color, shell::gpui_code_font_family,
+    view_widgets::modal_dialog_shell,
 };
 use crate::theme::ThemePalette;
 use crate::widgets::{empty_panel, small_button, status_pill};
@@ -19,7 +20,7 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
     details: Option<DockerContainerDetails>,
     container: Option<DockerContainer>,
     labels: DockerLabels,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::AnyElement {
     let Some(details) = details else {
         let details_id = container_id
@@ -50,8 +51,10 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                             palette,
                             "docker-details-loading-close",
                             labels.close.clone(),
-                            cx.listener(|this, _, _, cx| {
-                                this.close_docker_details(cx);
+                            cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.close_docker_details(cx);
+                                });
                             }),
                         ))
                     }),
@@ -183,16 +186,20 @@ pub(in crate::features::pages::remote) fn docker_details_panel(
                 palette,
                 format!("docker-details-refresh-{}", compact_id(&container_id)),
                 labels.refresh.clone(),
-                cx.listener(move |this, _, _window, cx| {
-                    this.load_docker_details(container_id.clone(), cx);
+                cx.listener(move |panel, _, _window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.load_docker_details(container_id.clone(), cx);
+                    });
                 }),
             ))
             .child(small_button(
                 palette,
                 "docker-details-close",
                 labels.close.clone(),
-                cx.listener(|this, _, _, cx| {
-                    this.close_docker_details(cx);
+                cx.listener(|panel, _, _, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.close_docker_details(cx);
+                    });
                 }),
             ));
     }
@@ -572,7 +579,7 @@ fn docker_detail_line(
     display_value: String,
     copyable: bool,
     copy_label: impl Into<SharedString>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::Div {
     let label: SharedString = label.into();
     let copy_label: SharedString = copy_label.into();
@@ -608,8 +615,10 @@ fn docker_detail_line(
                 copy_label,
                 cx.listener({
                     let label = label.clone();
-                    move |this, _, _, cx| {
-                        this.copy_docker_text(copy_value.clone(), &label, cx);
+                    move |panel, _, _, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            this.copy_docker_text(copy_value.clone(), &label, cx);
+                        });
                     }
                 }),
             ))

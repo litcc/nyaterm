@@ -115,6 +115,7 @@ impl NyaTermApp {
                 .remote_panels
                 .entity(RemoteMonitorKind::Docker)
                 .clone()
+                .cached(cached_panel_style())
                 .into_any_element(),
             NavItem::Docker => crate::features::inspector::disabled_inspector_panel(
                 palette,
