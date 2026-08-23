@@ -3,6 +3,7 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, div, prelude::*, px, rgb};
 
 use crate::features::NyaTermApp;
+use crate::features::pages::remote::RemoteMonitorKind;
 use crate::models::{NavItem, PanelSide};
 
 impl NyaTermApp {
@@ -56,41 +57,51 @@ impl NyaTermApp {
                 self.active_sessions_panel(model, cx).into_any_element()
             }
             NavItem::CommandHistory => self.command_history_panel(cx).into_any_element(),
-            NavItem::Stats if self.settings.summary().ui_show_remote_stats => {
-                self.stats_view(cx).into_any_element()
-            }
+            NavItem::Stats if self.settings.summary().ui_show_remote_stats => self
+                .remote_panels
+                .entity(RemoteMonitorKind::Stats)
+                .clone()
+                .into_any_element(),
             NavItem::Stats => crate::features::inspector::disabled_inspector_panel(
                 palette,
                 t!("panel.resourceMonitorDisabled"),
             )
             .into_any_element(),
-            NavItem::GpuMonitor if self.settings.summary().ui_show_gpu_monitor => {
-                self.gpu_view(cx).into_any_element()
-            }
+            NavItem::GpuMonitor if self.settings.summary().ui_show_gpu_monitor => self
+                .remote_panels
+                .entity(RemoteMonitorKind::Gpu)
+                .clone()
+                .into_any_element(),
             NavItem::GpuMonitor => crate::features::inspector::disabled_inspector_panel(
                 palette,
                 t!("panel.gpuMonitorDisabled"),
             )
             .into_any_element(),
-            NavItem::AscendNpuMonitor if self.settings.summary().ui_show_ascend_npu_monitor => {
-                self.npu_view(cx).into_any_element()
-            }
+            NavItem::AscendNpuMonitor if self.settings.summary().ui_show_ascend_npu_monitor => self
+                .remote_panels
+                .entity(RemoteMonitorKind::Npu)
+                .clone()
+                .into_any_element(),
             NavItem::AscendNpuMonitor => crate::features::inspector::disabled_inspector_panel(
                 palette,
                 t!("panel.npuMonitorDisabled"),
             )
             .into_any_element(),
-            NavItem::Processes if self.settings.summary().ui_show_process_manager => {
-                self.processes_view(cx).into_any_element()
-            }
+            NavItem::Processes if self.settings.summary().ui_show_process_manager => self
+                .remote_panels
+                .entity(RemoteMonitorKind::Processes)
+                .clone()
+                .into_any_element(),
             NavItem::Processes => crate::features::inspector::disabled_inspector_panel(
                 palette,
                 t!("processManager.disabled"),
             )
             .into_any_element(),
-            NavItem::Docker if self.settings.summary().ui_show_docker_manager => {
-                self.docker_view(cx).into_any_element()
-            }
+            NavItem::Docker if self.settings.summary().ui_show_docker_manager => self
+                .remote_panels
+                .entity(RemoteMonitorKind::Docker)
+                .clone()
+                .into_any_element(),
             NavItem::Docker => crate::features::inspector::disabled_inspector_panel(
                 palette,
                 t!("dockerManager.disabled"),

@@ -161,6 +161,8 @@ impl NyaTermApp {
         let command_store = store_blocking.clone();
 
         let app_entity = cx.entity();
+        let remote_panels =
+            crate::features::pages::remote::RemotePanels::new(app_entity.downgrade(), cx);
         let connection_panel = cx.new(|cx| ConnectionPanel::new(app_entity, cx));
 
         Self {
@@ -256,6 +258,7 @@ impl NyaTermApp {
                 },
             ),
             remote_ops: RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {}),
+            remote_panels,
             remote_desktop: RemoteDesktopFeatureState::new(cx.focus_handle()),
             translation: TranslationFeatureState::new(translation_settings),
             update: UpdateFeatureState::new(),

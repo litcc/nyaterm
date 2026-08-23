@@ -5,6 +5,7 @@ use super::ai::AiFeatureState;
 use super::commands::CommandFeatureState;
 use super::connections::ConnectionFeatureState;
 use super::pages::connections::panel::ConnectionPanel;
+use super::pages::remote::RemotePanels;
 use super::panels::SendCommandFeatureState;
 use super::recording::RecordingFeatureState;
 use super::remote::RemoteOpsFeatureState;
@@ -42,6 +43,9 @@ pub struct NyaTermApp {
     pub(in crate::features) selects: SelectRegistry,
     pub(in crate::features) commands: CommandFeatureState,
     pub(in crate::features) remote_ops: RemoteOpsFeatureState,
+    /// The five polling panels. They own their refresh schedules; `remote_ops` stays
+    /// the authoritative owner of the data those schedules fetch.
+    pub(in crate::features) remote_panels: RemotePanels,
     pub(in crate::features) remote_desktop: RemoteDesktopFeatureState,
     pub(in crate::features) security: SecurityFeatureState,
     pub(in crate::features) settings: SettingsFeatureState,
