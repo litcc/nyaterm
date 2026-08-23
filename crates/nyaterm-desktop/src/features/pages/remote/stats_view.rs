@@ -12,7 +12,9 @@ use nyaterm_transport::{
 };
 use nyaterm_ui::NyaScrollable;
 
-use crate::features::remote::{GpuPresentationState, NpuPresentationState};
+use crate::features::remote::{
+    ACCELERATOR_PROCESS_VIEWPORT_ROWS, GpuPresentationState, NpuPresentationState, max_list_offset,
+};
 use crate::features::{
     NyaTermApp, formatting::format_rate, formatting::format_uptime, shell::gpui_code_font_family,
     text_inputs::TextInputSetup, transfers::format_file_size, view_widgets::stats_progress_bar,
@@ -429,7 +431,6 @@ impl NyaTermApp {
 
 const ACCELERATOR_PROCESS_ROW_HEIGHT_PX: f32 = 56.;
 const ACCELERATOR_PROCESS_LIST_MAX_HEIGHT_PX: f32 = 320.;
-const ACCELERATOR_PROCESS_VIEWPORT_ROWS: usize = 6;
 const ACCELERATOR_PROCESS_OVERSCAN: usize = 6;
 
 #[derive(Clone)]
@@ -460,19 +461,11 @@ fn rich_gpu_panel(
 ) -> gpui::AnyElement {
     let summary = build_gpu_summary(overview);
     let normalized_query = state.search_draft.trim().to_ascii_lowercase();
-    let mut processes = overview
-        .processes
-        .iter()
-        .filter(|process| gpu_process_matches(process, &normalized_query))
-        .cloned()
-        .collect::<Vec<_>>();
-    sort_gpu_processes(&mut processes);
-
+    // Filtered, sorted and offset-clamped by `RemoteOpsFeatureState`, which reconciles
+    // them when the overview or the query changes. This pass only reads them.
+    let processes = app.remote_ops.derived_gpu_processes();
     let total_processes = processes.len();
-    let max_offset =
-        total_processes.saturating_sub(ACCELERATOR_PROCESS_VIEWPORT_ROWS.min(total_processes));
-    let offset = state.process_list_offset.min(max_offset);
-    app.remote_ops.clamp_gpu_process_offset(max_offset);
+    let offset = state.process_list_offset;
     let (visible_processes, pad_top, pad_bottom) = accelerator_visible_window(&processes, offset);
     let list_height = accelerator_process_list_height(total_processes);
 
@@ -558,19 +551,11 @@ fn rich_npu_panel(
 ) -> gpui::AnyElement {
     let summary = build_npu_summary(overview);
     let normalized_query = state.search_draft.trim().to_ascii_lowercase();
-    let mut processes = overview
-        .processes
-        .iter()
-        .filter(|process| npu_process_matches(process, &normalized_query))
-        .cloned()
-        .collect::<Vec<_>>();
-    sort_npu_processes(&mut processes);
-
+    // Filtered, sorted and offset-clamped by `RemoteOpsFeatureState`, which reconciles
+    // them when the overview or the query changes. This pass only reads them.
+    let processes = app.remote_ops.derived_npu_processes();
     let total_processes = processes.len();
-    let max_offset =
-        total_processes.saturating_sub(ACCELERATOR_PROCESS_VIEWPORT_ROWS.min(total_processes));
-    let offset = state.process_list_offset.min(max_offset);
-    app.remote_ops.clamp_npu_process_offset(max_offset);
+    let offset = state.process_list_offset;
     let (visible_processes, pad_top, pad_bottom) = accelerator_visible_window(&processes, offset);
     let list_height = accelerator_process_list_height(total_processes);
 
@@ -1276,7 +1261,7 @@ fn handle_accelerator_process_scroll(
     mut set_offset: impl FnMut(usize) -> bool,
     cx: &mut Context<NyaTermApp>,
 ) {
-    let max_offset = total.saturating_sub(ACCELERATOR_PROCESS_VIEWPORT_ROWS.min(total));
+    let max_offset = max_list_offset(total, ACCELERATOR_PROCESS_VIEWPORT_ROWS);
     if max_offset == 0 {
         return;
     }
@@ -1351,61 +1336,6 @@ fn build_npu_summary(overview: &RemoteNpuOverview) -> NpuSummary {
         memory_total_mb: overview.npus.iter().map(|npu| npu.memory_total_mb).sum(),
         memory_used_mb: overview.npus.iter().map(|npu| npu.memory_used_mb).sum(),
     }
-}
-
-fn gpu_process_matches(process: &RemoteGpuProcess, query: &str) -> bool {
-    if query.is_empty() {
-        return true;
-    }
-    format!(
-        "{} {} {} {}",
-        process.pid,
-        process
-            .gpu_index
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        process.gpu_uuid,
-        process.process_name
-    )
-    .to_ascii_lowercase()
-    .contains(query)
-}
-
-fn npu_process_matches(process: &RemoteNpuProcess, query: &str) -> bool {
-    if query.is_empty() {
-        return true;
-    }
-    format!(
-        "{} {} {} {} {}",
-        process.pid, process.npu_index, process.chip_id, process.device_key, process.process_name
-    )
-    .to_ascii_lowercase()
-    .contains(query)
-}
-
-fn sort_gpu_processes(processes: &mut [RemoteGpuProcess]) {
-    processes.sort_by(|left, right| {
-        right
-            .used_memory_mb
-            .cmp(&left.used_memory_mb)
-            .then_with(|| {
-                left.gpu_index
-                    .unwrap_or(u32::MAX)
-                    .cmp(&right.gpu_index.unwrap_or(u32::MAX))
-            })
-            .then_with(|| left.pid.cmp(&right.pid))
-    });
-}
-
-fn sort_npu_processes(processes: &mut [RemoteNpuProcess]) {
-    processes.sort_by(|left, right| {
-        right
-            .used_memory_mb
-            .cmp(&left.used_memory_mb)
-            .then_with(|| left.npu_index.cmp(&right.npu_index))
-            .then_with(|| left.chip_id.cmp(&right.chip_id))
-            .then_with(|| left.pid.cmp(&right.pid))
-    });
 }
 
 fn gpu_device_key(index: u32, uuid: &str) -> String {
@@ -1915,15 +1845,9 @@ fn cpu_core_row(palette: crate::theme::ThemePalette, index: usize, usage: f64) -
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_transport::{
-        RemoteGpu, RemoteGpuOverview, RemoteGpuProcess, RemoteNpu, RemoteNpuOverview,
-        RemoteNpuProcess,
-    };
+    use nyaterm_transport::{RemoteGpu, RemoteGpuOverview, RemoteNpu, RemoteNpuOverview};
 
-    use super::{
-        build_gpu_summary, build_npu_summary, format_memory_mb, format_temperature,
-        gpu_process_matches, npu_process_matches, sort_gpu_processes, sort_npu_processes,
-    };
+    use super::{build_gpu_summary, build_npu_summary, format_memory_mb, format_temperature};
 
     fn gpu(index: u32, used: u64, total: u64, temp: Option<f64>, util: Option<f64>) -> RemoteGpu {
         RemoteGpu {
@@ -1970,89 +1894,6 @@ mod tests {
             hbm_used_mb: None,
             power_draw_w: None,
         }
-    }
-
-    #[test]
-    fn gpu_process_filter_and_sort_follow_tauri_rules() {
-        let mut processes = vec![
-            RemoteGpuProcess {
-                gpu_uuid: "gpu-b".to_string(),
-                gpu_index: Some(1),
-                pid: 20,
-                process_name: "python".to_string(),
-                used_memory_mb: 2048,
-            },
-            RemoteGpuProcess {
-                gpu_uuid: "gpu-a".to_string(),
-                gpu_index: Some(0),
-                pid: 10,
-                process_name: "worker".to_string(),
-                used_memory_mb: 4096,
-            },
-            RemoteGpuProcess {
-                gpu_uuid: "gpu-c".to_string(),
-                gpu_index: None,
-                pid: 5,
-                process_name: "python".to_string(),
-                used_memory_mb: 2048,
-            },
-        ];
-
-        assert!(gpu_process_matches(&processes[0], "python"));
-        assert!(gpu_process_matches(&processes[1], "10"));
-        assert!(gpu_process_matches(&processes[2], "gpu-c"));
-
-        sort_gpu_processes(&mut processes);
-        assert_eq!(
-            processes
-                .iter()
-                .map(|process| process.pid)
-                .collect::<Vec<_>>(),
-            [10, 20, 5]
-        );
-    }
-
-    #[test]
-    fn npu_process_filter_and_sort_follow_tauri_rules() {
-        let mut processes = vec![
-            RemoteNpuProcess {
-                npu_index: 1,
-                chip_id: 0,
-                device_key: "npu-b".to_string(),
-                pid: 30,
-                process_name: "train".to_string(),
-                used_memory_mb: 1024,
-            },
-            RemoteNpuProcess {
-                npu_index: 0,
-                chip_id: 1,
-                device_key: "npu-a".to_string(),
-                pid: 20,
-                process_name: "infer".to_string(),
-                used_memory_mb: 2048,
-            },
-            RemoteNpuProcess {
-                npu_index: 0,
-                chip_id: 0,
-                device_key: "npu-c".to_string(),
-                pid: 10,
-                process_name: "train".to_string(),
-                used_memory_mb: 2048,
-            },
-        ];
-
-        assert!(npu_process_matches(&processes[0], "train"));
-        assert!(npu_process_matches(&processes[1], "0 1"));
-        assert!(npu_process_matches(&processes[2], "npu-c"));
-
-        sort_npu_processes(&mut processes);
-        assert_eq!(
-            processes
-                .iter()
-                .map(|process| process.pid)
-                .collect::<Vec<_>>(),
-            [10, 20, 30]
-        );
     }
 
     #[test]

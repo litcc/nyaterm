@@ -3,7 +3,6 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, div, prelude::*, px, rgb};
 
 use crate::features::{NyaTermApp, remote::DockerDerivedItems, text_inputs::TextInputSetup};
-use crate::models::DockerTab;
 use crate::widgets::empty_panel;
 
 use super::docker::{
@@ -111,13 +110,12 @@ impl NyaTermApp {
                 .bg(self.shell_transparent_color(palette.surface))
                 .child(empty_panel(labels.unavailable.clone(), palette));
         }
-        let active_tab = if docker.tab == DockerTab::Compose && !overview.compose_available {
-            DockerTab::Containers
-        } else {
-            docker.tab
-        };
+        // Both the effective tab and the filtered list are resolved by
+        // `RemoteOpsFeatureState`, which recomputes them when the overview, the query
+        // or the tab changes. This pass only reads them.
+        let active_tab = self.remote_ops.docker_effective_tab();
         let query_empty = docker.search_draft.trim().is_empty();
-        let filtered = self.remote_ops.derived_docker_items(active_tab);
+        let filtered = self.remote_ops.derived_docker_items();
         let menu_bg = self.shell_surface_color(palette.surface);
         let dialog_bg = self.shell_surface_color(palette.bg);
         let render_context = DockerRenderContext {
@@ -126,66 +124,44 @@ impl NyaTermApp {
             labels: labels.clone(),
         };
         let docker_content = match filtered {
-            DockerDerivedItems::Containers(filtered) => {
-                const VIEWPORT_ROWS: usize = 16;
-                let max_offset = filtered
-                    .len()
-                    .saturating_sub(VIEWPORT_ROWS.min(filtered.len()));
-                docker.list_offset = self.remote_ops.clamp_docker_list_offset(max_offset);
-                docker_containers_panel(
-                    render_context.clone(),
-                    DockerContainersPanelState {
-                        has_snapshot: true,
-                        has_session: self.session.active_ssh_config().is_some(),
-                        docker_available: overview.available,
-                        filtered_containers: filtered.as_ref(),
-                        query_empty,
-                        open_menu_id: docker.container_menu_id.as_deref(),
-                        list_offset: docker.list_offset,
-                    },
-                    cx,
-                )
-                .into_any_element()
-            }
-            DockerDerivedItems::Images(filtered) => {
-                docker.resource_list_offset = self
-                    .remote_ops
-                    .clamp_docker_resource_offset(resource_max_offset(filtered.len()));
-                docker_images_panel(
-                    palette,
-                    filtered.as_ref(),
-                    docker.resource_list_offset,
-                    labels.clone(),
-                    cx,
-                )
-                .into_any_element()
-            }
-            DockerDerivedItems::Volumes(filtered) => {
-                docker.resource_list_offset = self
-                    .remote_ops
-                    .clamp_docker_resource_offset(resource_max_offset(filtered.len()));
-                docker_volumes_panel(
-                    palette,
-                    filtered.as_ref(),
-                    docker.resource_list_offset,
-                    labels.clone(),
-                    cx,
-                )
-                .into_any_element()
-            }
-            DockerDerivedItems::Networks(filtered) => {
-                docker.resource_list_offset = self
-                    .remote_ops
-                    .clamp_docker_resource_offset(resource_max_offset(filtered.len()));
-                docker_networks_panel(
-                    palette,
-                    filtered.as_ref(),
-                    docker.resource_list_offset,
-                    labels.clone(),
-                    cx,
-                )
-                .into_any_element()
-            }
+            DockerDerivedItems::Containers(filtered) => docker_containers_panel(
+                render_context.clone(),
+                DockerContainersPanelState {
+                    has_snapshot: true,
+                    has_session: self.session.active_ssh_config().is_some(),
+                    docker_available: overview.available,
+                    filtered_containers: filtered.as_ref(),
+                    query_empty,
+                    open_menu_id: docker.container_menu_id.as_deref(),
+                    list_offset: docker.list_offset,
+                },
+                cx,
+            )
+            .into_any_element(),
+            DockerDerivedItems::Images(filtered) => docker_images_panel(
+                palette,
+                filtered.as_ref(),
+                docker.resource_list_offset,
+                labels.clone(),
+                cx,
+            )
+            .into_any_element(),
+            DockerDerivedItems::Volumes(filtered) => docker_volumes_panel(
+                palette,
+                filtered.as_ref(),
+                docker.resource_list_offset,
+                labels.clone(),
+                cx,
+            )
+            .into_any_element(),
+            DockerDerivedItems::Networks(filtered) => docker_networks_panel(
+                palette,
+                filtered.as_ref(),
+                docker.resource_list_offset,
+                labels.clone(),
+                cx,
+            )
+            .into_any_element(),
             DockerDerivedItems::Compose(filtered) => docker_compose_panel(
                 render_context.clone(),
                 DockerComposePanelState {
@@ -276,9 +252,4 @@ impl NyaTermApp {
                 ))
             })
     }
-}
-
-fn resource_max_offset(total: usize) -> usize {
-    const VIEWPORT_ROWS: usize = 14;
-    total.saturating_sub(VIEWPORT_ROWS.min(total))
 }

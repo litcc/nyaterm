@@ -1,14 +1,12 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::features::pages::remote) enum ProcessDisplayMode {
+pub(in crate::features) enum ProcessDisplayMode {
     Compact,
     Narrow,
     Medium,
     Wide,
 }
 
-pub(in crate::features::pages::remote) fn process_display_mode(
-    panel_width: f32,
-) -> ProcessDisplayMode {
+pub(in crate::features) fn process_display_mode(panel_width: f32) -> ProcessDisplayMode {
     // Tauri getProcessDisplayMode thresholds.
     if panel_width > 0. && panel_width < 320. {
         ProcessDisplayMode::Compact

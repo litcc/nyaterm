@@ -81,6 +81,12 @@ impl NyaTermApp {
         let Some((side, width)) = self.shell.panels.update_resize(event.position.x) else {
             return;
         };
+        if side == PanelResizeSide::Right {
+            // The process table drops columns as it narrows, and its sort key has to
+            // follow. Mid-drag rather than on release, which is when render used to do
+            // it.
+            self.reconcile_remote_process_sort_columns();
+        }
         match side {
             PanelResizeSide::Left => {
                 self.shell
@@ -114,6 +120,7 @@ impl NyaTermApp {
     pub(in crate::features) fn apply_ui_layout_from_settings(&mut self) {
         self.shell.panels.left_width = self.settings.summary().ui_left_panel_width as f32;
         self.shell.panels.right_width = self.settings.summary().ui_right_panel_width as f32;
+        self.reconcile_remote_process_sort_columns();
         self.transfer
             .set_panel_height(self.settings.summary().ui_transfer_height as f32);
         self.shell.bottom_panel.quick_commands_height =

@@ -5,6 +5,7 @@ use gpui::{
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::DockerContainer;
 
+use crate::features::remote::DOCKER_VIEWPORT_ROWS;
 use crate::features::{
     NyaTermApp, formatting::compact_id, formatting::docker_state_color,
     formatting::docker_state_rank, shell::gpui_code_font_family,
@@ -96,7 +97,6 @@ pub(in crate::features::pages::remote) fn docker_containers_panel(
 
     // Tauri-like virtual list: fixed row slot, overscan window, spacer padding + wheel.
     const DOCKER_ROW_PX: f32 = 66.;
-    const DOCKER_VIEWPORT_ROWS: usize = 16;
     const DOCKER_OVERSCAN: usize = 6;
     let total = containers.len();
     let window_capacity = DOCKER_VIEWPORT_ROWS + DOCKER_OVERSCAN * 2;

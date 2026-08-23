@@ -9,6 +9,7 @@ use gpui::{
 use nyaterm_transport::{PROCESS_LIST_UNSUPPORTED_ERROR, RemoteProcess};
 use nyaterm_ui::NyaNumberInputOptions;
 
+use crate::features::remote::PROCESS_VIEWPORT_ROWS;
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::RemoteProcessSortKey;
 use crate::widgets::empty_panel;
@@ -24,7 +25,7 @@ impl NyaTermApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let mut process_state = self.remote_ops.process_presentation();
+        let process_state = self.remote_ops.process_presentation();
         let palette = self.theme_palette();
         // Built before the view, which reads `self` throughout: creating the
         // box needs it mutably.
@@ -77,22 +78,16 @@ impl NyaTermApp {
             copy_command: t!("processManager.copyCommand"),
             apply_nice: t!("processManager.applyNice"),
         };
-        // Responsive mode first so hidden columns do not keep invalid sort keys.
         let mode = process_display_mode(self.shell.right_panel_width());
-        process_state.sort_key = self.remote_ops.constrain_process_sort(
-            !matches!(
-                mode,
-                ProcessDisplayMode::Compact | ProcessDisplayMode::Narrow
-            ),
-            mode == ProcessDisplayMode::Wide,
-        );
-        process_state = self.remote_ops.process_presentation();
+        // The sort key arrives already constrained to the columns this width can show,
+        // and the list already filtered and sorted: `RemoteOpsFeatureState` reconciles
+        // both when the data, the query, the sort or the panel width changes. This pass
+        // only reads them.
         let filtered_processes = self.remote_ops.derived_processes();
 
         // Tauri-like virtual list: base row + expanded details height, spacer padding.
         let process_row_px = process_row_height_px(mode);
         let process_details_px = process_details_height_px(mode);
-        const PROCESS_VIEWPORT_ROWS: usize = 28;
         const PROCESS_OVERSCAN: usize = 8;
         let selected_pid = process_state.selected_pid;
         let row_height = |process: &RemoteProcess| -> f32 {
@@ -104,8 +99,6 @@ impl NyaTermApp {
         };
         let total_filtered = filtered_processes.len();
         let window_capacity = PROCESS_VIEWPORT_ROWS + PROCESS_OVERSCAN * 2;
-        let max_offset = total_filtered.saturating_sub(PROCESS_VIEWPORT_ROWS.min(total_filtered));
-        process_state.list_offset = self.remote_ops.clamp_process_list_offset(max_offset);
         let scroll_row = process_state.list_offset;
         let window_start = scroll_row.saturating_sub(PROCESS_OVERSCAN);
         let window_end = (window_start + window_capacity).min(total_filtered);

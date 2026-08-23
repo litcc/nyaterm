@@ -87,6 +87,9 @@ impl NyaTermApp {
         self.start_remote_desktop_event_drain(cx);
         self.start_prompt_activation_drain(cx);
         self.start_shell_persistence_debounce(cx);
+        // The restored panel width decides which process-table sort columns exist, and
+        // nothing has resized yet, so this is where the initial value goes in.
+        self.reconcile_remote_process_sort_columns();
         self.ensure_cursor_blink_clock(cx);
         self.ensure_header_status_clock(cx);
         self.ensure_idle_lock_clock(cx);

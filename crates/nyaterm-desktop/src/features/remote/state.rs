@@ -14,10 +14,14 @@ use std::time::Instant;
 use nyaterm_transport::{
     DockerComposeProject, DockerComposeService, DockerContainer, DockerContainerDetails,
     DockerImage, DockerNetwork, DockerVolume, RemoteDockerOverview, RemoteGpuOverview,
-    RemoteNpuOverview, RemoteProcess, RemoteStats,
+    RemoteGpuProcess, RemoteNpuOverview, RemoteNpuProcess, RemoteProcess, RemoteStats,
 };
 
 use crate::features::formatting::docker_compose_project_key;
+use crate::features::remote::list_window::{
+    ACCELERATOR_PROCESS_VIEWPORT_ROWS, DOCKER_RESOURCE_VIEWPORT_ROWS, DOCKER_VIEWPORT_ROWS,
+    PROCESS_VIEWPORT_ROWS, max_list_offset,
+};
 use crate::features::{
     runtime_jobs::DockerJobResult, runtime_jobs::GpuJobResult, runtime_jobs::NpuJobResult,
     runtime_jobs::ProcessJobResult, runtime_jobs::StatsJobResult,
@@ -178,6 +182,12 @@ struct ProcessPaneState {
     pub items: Arc<[RemoteProcess]>,
     data_generation: u64,
     derived: Option<ProcessDerivedCache>,
+    /// Which sort keys the current panel width can show a column for.
+    ///
+    /// Pushed by the app when the right panel is resized. Held here because the sort
+    /// key must be constrained to it whenever *either* changes, and the render pass is
+    /// no longer allowed to do that constraining itself.
+    sort_columns: ProcessSortColumns,
     pub snapshot_loaded: bool,
     pub status: String,
     pub search_draft: String,
@@ -187,6 +197,25 @@ struct ProcessPaneState {
     pub selected_pid: Option<u32>,
     pub menu_pid: Option<u32>,
     pub nice_draft: String,
+}
+
+/// Whether the process table is wide enough to sort by memory and by user.
+///
+/// Defaults to permissive, matching the widest layout: a narrow panel pushes the real
+/// values in before anything is shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::features) struct ProcessSortColumns {
+    pub allow_memory: bool,
+    pub allow_user: bool,
+}
+
+impl Default for ProcessSortColumns {
+    fn default() -> Self {
+        Self {
+            allow_memory: true,
+            allow_user: true,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -209,14 +238,42 @@ struct StatsPaneState {
     pub cpu_expanded: bool,
 }
 
-struct AcceleratorPaneState<Data, Event> {
+/// How a GPU/NPU overview exposes its process list for filtering and sorting.
+///
+/// The two overviews carry different process types with different match fields and
+/// different orderings, so this is the seam that lets one pane type derive both. The
+/// four implementations came out of `stats_view.rs`, where they ran inside the render
+/// pass -- which is why the accelerator panes had no derived cache at all and clamped
+/// their scroll offset against a count only the view knew.
+pub(in crate::features) trait AcceleratorProcessList {
+    type Process: Clone;
+
+    fn processes(&self) -> &[Self::Process];
+    fn process_matches(process: &Self::Process, normalized_query: &str) -> bool;
+    fn sort_processes(processes: &mut [Self::Process]);
+}
+
+struct AcceleratorPaneState<Data: AcceleratorProcessList, Event> {
     job: RemoteJobState<Event>,
     pub data: Option<Data>,
+    data_generation: u64,
+    derived: Option<AcceleratorDerivedCache<Data::Process>>,
     pub status: String,
     pub search_draft: String,
     pub expanded_devices: HashSet<String>,
     pub process_list_offset: usize,
     unavailable_sessions: HashSet<String>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct AcceleratorDerivedKey {
+    data_generation: u64,
+    normalized_query: String,
+}
+
+struct AcceleratorDerivedCache<Process> {
+    key: AcceleratorDerivedKey,
+    items: Arc<[Process]>,
 }
 
 #[derive(Clone)]
@@ -227,7 +284,6 @@ pub(in crate::features) struct DockerPresentationState {
     pub details_container_id: Option<String>,
     pub container_menu_id: Option<String>,
     pub compose_menu_id: Option<String>,
-    pub tab: DockerTab,
     pub tab_menu_open: bool,
     pub search_draft: String,
     pub compose_expanded: Arc<HashSet<String>>,
@@ -313,6 +369,7 @@ impl RemoteOpsFeatureState {
                 items: Arc::from([]),
                 data_generation: 0,
                 derived: None,
+                sort_columns: ProcessSortColumns::default(),
                 snapshot_loaded: false,
                 status: "ready".to_string(),
                 search_draft: String::new(),
@@ -352,7 +409,6 @@ impl RemoteOpsFeatureState {
             details_container_id: self.docker.details_container_id.clone(),
             container_menu_id: self.docker.container_menu_id.clone(),
             compose_menu_id: self.docker.compose_menu_id.clone(),
-            tab: self.docker.tab,
             tab_menu_open: self.docker.tab_menu_open,
             search_draft: self.docker.search_draft.clone(),
             compose_expanded: self.docker.compose_expanded.clone(),
@@ -364,11 +420,14 @@ impl RemoteOpsFeatureState {
         }
     }
 
-    pub(in crate::features) fn derived_docker_items(
-        &mut self,
-        tab: DockerTab,
-    ) -> DockerDerivedItems {
-        self.docker.derived_items(tab)
+    /// The filtered Docker list for the tab actually shown. Read-only.
+    pub(in crate::features) fn derived_docker_items(&self) -> DockerDerivedItems {
+        self.docker.derived()
+    }
+
+    /// The tab actually shown, which falls back from Compose when unsupported.
+    pub(in crate::features) fn docker_effective_tab(&self) -> DockerTab {
+        self.docker.effective_tab()
     }
 
     pub(in crate::features) fn process_presentation(&self) -> ProcessPresentationState {
@@ -387,8 +446,30 @@ impl RemoteOpsFeatureState {
         }
     }
 
-    pub(in crate::features) fn derived_processes(&mut self) -> Arc<[RemoteProcess]> {
-        self.process.derived_items()
+    /// The filtered, sorted process list. Read-only.
+    pub(in crate::features) fn derived_processes(&self) -> Arc<[RemoteProcess]> {
+        self.process.derived()
+    }
+
+    /// The filtered, sorted GPU process list. Read-only.
+    pub(in crate::features) fn derived_gpu_processes(&self) -> Arc<[RemoteGpuProcess]> {
+        self.gpu.derived()
+    }
+
+    /// The filtered, sorted NPU process list. Read-only.
+    pub(in crate::features) fn derived_npu_processes(&self) -> Arc<[RemoteNpuProcess]> {
+        self.npu.derived()
+    }
+
+    /// Tell the process table which sort columns the panel width can show.
+    ///
+    /// Returns whether anything changed, so the caller can skip a repaint. This is the
+    /// one input to the pane's invariant that the pane cannot observe for itself.
+    pub(in crate::features) fn set_process_sort_columns(
+        &mut self,
+        columns: ProcessSortColumns,
+    ) -> bool {
+        self.process.set_sort_columns(columns)
     }
 
     pub(in crate::features) fn stats_presentation(&self) -> StatsPresentationState {
@@ -612,22 +693,12 @@ impl RemoteOpsFeatureState {
         self.docker.apply_search(text);
     }
 
-    pub(in crate::features) fn clamp_docker_list_offset(&mut self, max: usize) -> usize {
-        self.docker.list_offset = self.docker.list_offset.min(max);
-        self.docker.list_offset
-    }
-
     pub(in crate::features) fn set_docker_list_offset(&mut self, offset: usize) -> bool {
         if self.docker.list_offset == offset {
             return false;
         }
         self.docker.list_offset = offset;
         true
-    }
-
-    pub(in crate::features) fn clamp_docker_resource_offset(&mut self, max: usize) -> usize {
-        self.docker.resource_list_offset = self.docker.resource_list_offset.min(max);
-        self.docker.resource_list_offset
     }
 
     pub(in crate::features) fn set_docker_resource_offset(&mut self, offset: usize) -> bool {
@@ -666,19 +737,6 @@ impl RemoteOpsFeatureState {
         self.process.toggle_sort(key);
     }
 
-    pub(in crate::features) fn constrain_process_sort(
-        &mut self,
-        allow_memory: bool,
-        allow_user: bool,
-    ) -> RemoteProcessSortKey {
-        if (!allow_user && self.process.sort_key == RemoteProcessSortKey::User)
-            || (!allow_memory && self.process.sort_key == RemoteProcessSortKey::Memory)
-        {
-            self.process.sort_key = RemoteProcessSortKey::Cpu;
-        }
-        self.process.sort_key
-    }
-
     pub(in crate::features) fn toggle_process_selection(&mut self, pid: u32) {
         self.process.toggle_selection(pid);
     }
@@ -689,11 +747,6 @@ impl RemoteOpsFeatureState {
 
     pub(in crate::features) fn close_process_menu(&mut self) {
         self.process.menu_pid = None;
-    }
-
-    pub(in crate::features) fn clamp_process_list_offset(&mut self, max: usize) -> usize {
-        self.process.list_offset = self.process.list_offset.min(max);
-        self.process.list_offset
     }
 
     pub(in crate::features) fn set_process_list_offset(&mut self, offset: usize) -> bool {
@@ -939,10 +992,6 @@ impl RemoteOpsFeatureState {
         self.gpu.toggle_device_expanded(key);
     }
 
-    pub(in crate::features) fn clamp_gpu_process_offset(&mut self, max: usize) -> usize {
-        self.gpu.clamp_process_offset(max)
-    }
-
     pub(in crate::features) fn set_gpu_process_offset(&mut self, offset: usize) -> bool {
         self.gpu.set_process_offset(offset)
     }
@@ -959,13 +1008,13 @@ impl RemoteOpsFeatureState {
             .map(|gpu| gpu_device_key(gpu.index, &gpu.uuid))
             .collect::<HashSet<_>>();
         self.gpu.retain_expanded_devices(&active_devices);
-        self.gpu.data = Some(overview);
+        self.gpu.apply_data(overview);
     }
 
     pub(in crate::features) fn record_gpu_refresh_failure(&mut self) -> u8 {
         let failures = self.gpu.record_refresh_failure();
         if failures >= 3 {
-            self.gpu.data = None;
+            self.gpu.clear_data();
         }
         failures
     }
@@ -1015,10 +1064,6 @@ impl RemoteOpsFeatureState {
         self.npu.toggle_device_expanded(key);
     }
 
-    pub(in crate::features) fn clamp_npu_process_offset(&mut self, max: usize) -> usize {
-        self.npu.clamp_process_offset(max)
-    }
-
     pub(in crate::features) fn set_npu_process_offset(&mut self, offset: usize) -> bool {
         self.npu.set_process_offset(offset)
     }
@@ -1035,13 +1080,13 @@ impl RemoteOpsFeatureState {
             .map(|npu| npu.device_key.clone())
             .collect::<HashSet<_>>();
         self.npu.retain_expanded_devices(&active_devices);
-        self.npu.data = Some(overview);
+        self.npu.apply_data(overview);
     }
 
     pub(in crate::features) fn record_npu_refresh_failure(&mut self) -> u8 {
         let failures = self.npu.record_refresh_failure();
         if failures >= 3 {
-            self.npu.data = None;
+            self.npu.clear_data();
         }
         failures
     }
@@ -1101,6 +1146,7 @@ impl DockerPaneState {
         self.tab = tab;
         self.list_offset = 0;
         self.resource_list_offset = 0;
+        self.reconcile();
         self.status = format!("Docker tab: {}", tab.label());
     }
 
@@ -1112,6 +1158,7 @@ impl DockerPaneState {
         self.search_draft = text;
         self.list_offset = 0;
         self.resource_list_offset = 0;
+        self.reconcile();
         self.status = "Docker search updated".to_string();
     }
 
@@ -1148,12 +1195,66 @@ impl DockerPaneState {
         self.overview = Some(Arc::new(overview));
         self.data_generation = self.data_generation.wrapping_add(1);
         self.derived = None;
+        self.reconcile();
     }
 
     fn clear_overview(&mut self) {
         self.overview = None;
         self.data_generation = self.data_generation.wrapping_add(1);
         self.derived = None;
+        self.reconcile();
+    }
+
+    /// The tab actually shown, which is not always the stored one.
+    ///
+    /// Compose falls back to Containers when the host has no compose support. That
+    /// fallback used to be computed in `docker_view` and passed into the derived
+    /// lookup, which is why the lookup took a tab argument at all; it belongs here
+    /// because the derived list has to be keyed on the tab that is really displayed.
+    fn effective_tab(&self) -> DockerTab {
+        let compose_available = self
+            .overview
+            .as_deref()
+            .is_some_and(|overview| overview.compose_available);
+        if self.tab == DockerTab::Compose && !compose_available {
+            DockerTab::Containers
+        } else {
+            self.tab
+        }
+    }
+
+    /// Bring the derived list and both scroll offsets back in step.
+    ///
+    /// Called by every mutator that changes the overview, the query or the tab. Cheap
+    /// to call redundantly: the recompute is keyed and the clamps are integer compares.
+    fn reconcile(&mut self) {
+        let items = self.derived_items(self.effective_tab());
+        match items {
+            DockerDerivedItems::Containers(items) => {
+                self.list_offset = self
+                    .list_offset
+                    .min(max_list_offset(items.len(), DOCKER_VIEWPORT_ROWS));
+            }
+            DockerDerivedItems::Images(items) => self.clamp_resource_offset(items.len()),
+            DockerDerivedItems::Volumes(items) => self.clamp_resource_offset(items.len()),
+            DockerDerivedItems::Networks(items) => self.clamp_resource_offset(items.len()),
+            // The compose list is not virtualised, so it has no offset to clamp.
+            DockerDerivedItems::Compose(_) => {}
+        }
+    }
+
+    fn clamp_resource_offset(&mut self, total: usize) {
+        self.resource_list_offset = self
+            .resource_list_offset
+            .min(max_list_offset(total, DOCKER_RESOURCE_VIEWPORT_ROWS));
+    }
+
+    /// The filtered list for the effective tab, without recomputing.
+    fn derived(&self) -> DockerDerivedItems {
+        self.derived
+            .as_ref()
+            .map(|cache| cache.items.clone())
+            .unwrap_or(DockerDerivedItems::Containers(Arc::from([])))
     }
 
     fn derived_items(&mut self, tab: DockerTab) -> DockerDerivedItems {
@@ -1346,6 +1447,7 @@ impl ProcessPaneState {
         self.menu_pid = None;
         self.nice_draft = "0".to_string();
         self.list_offset = 0;
+        self.reconcile();
     }
 
     pub(in crate::features) fn toggle_sort(&mut self, key: RemoteProcessSortKey) {
@@ -1363,6 +1465,7 @@ impl ProcessPaneState {
             };
         }
         self.list_offset = 0;
+        self.reconcile();
         self.status = format!(
             "sorted processes by {} {}",
             self.sort_key.label(),
@@ -1415,6 +1518,7 @@ impl ProcessPaneState {
         self.data_generation = self.data_generation.wrapping_add(1);
         self.derived = None;
         self.snapshot_loaded = true;
+        self.reconcile();
     }
 
     fn clear_data(&mut self) {
@@ -1424,6 +1528,48 @@ impl ProcessPaneState {
         self.snapshot_loaded = false;
         self.selected_pid = None;
         self.menu_pid = None;
+        self.reconcile();
+    }
+
+    /// Bring the derived list, the sort key and the scroll offset back in step.
+    ///
+    /// Called by every mutator that changes one of their inputs, so a reader never has
+    /// to trigger the recompute -- which is what the render pass used to do, by calling
+    /// `derived_items` and `clamp_*` through `&mut self` while building elements.
+    ///
+    /// Cheap to call redundantly: the recompute is keyed, so an unchanged key returns
+    /// the cached list and the clamp is two integer compares.
+    fn reconcile(&mut self) {
+        // Sort first: the derived list is keyed on the sort key, so constraining after
+        // recomputing would sort by a key the table cannot show.
+        if (!self.sort_columns.allow_user && self.sort_key == RemoteProcessSortKey::User)
+            || (!self.sort_columns.allow_memory && self.sort_key == RemoteProcessSortKey::Memory)
+        {
+            self.sort_key = RemoteProcessSortKey::Cpu;
+        }
+        let total = self.derived_items().len();
+        self.list_offset = self
+            .list_offset
+            .min(max_list_offset(total, PROCESS_VIEWPORT_ROWS));
+    }
+
+    fn set_sort_columns(&mut self, columns: ProcessSortColumns) -> bool {
+        if self.sort_columns == columns {
+            return false;
+        }
+        self.sort_columns = columns;
+        self.reconcile();
+        true
+    }
+
+    /// The filtered, sorted list, without recomputing.
+    ///
+    /// `reconcile` guarantees the cache is populated and current, so this is a read.
+    fn derived(&self) -> Arc<[RemoteProcess]> {
+        self.derived
+            .as_ref()
+            .map(|cache| cache.items.clone())
+            .unwrap_or_else(|| Arc::from([]))
     }
 
     fn derived_items(&mut self) -> Arc<[RemoteProcess]> {
@@ -1579,17 +1725,80 @@ impl StatsPaneState {
     }
 }
 
-impl<Data, Event> AcceleratorPaneState<Data, Event> {
+impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
     fn new(status: &str) -> Self {
         Self {
             job: RemoteJobState::new(),
             data: None,
+            data_generation: 0,
+            derived: None,
             status: status.to_string(),
             search_draft: String::new(),
             expanded_devices: HashSet::new(),
             process_list_offset: 0,
             unavailable_sessions: HashSet::new(),
         }
+    }
+
+    /// Replace the overview, keeping the derived list and offset in step.
+    fn apply_data(&mut self, data: Data) {
+        self.data = Some(data);
+        self.data_generation = self.data_generation.wrapping_add(1);
+        self.derived = None;
+        self.reconcile();
+    }
+
+    fn clear_data(&mut self) {
+        self.data = None;
+        self.data_generation = self.data_generation.wrapping_add(1);
+        self.derived = None;
+        self.reconcile();
+    }
+
+    /// Bring the derived process list and the scroll offset back in step.
+    fn reconcile(&mut self) {
+        let total = self.derived_items().len();
+        self.process_list_offset = self
+            .process_list_offset
+            .min(max_list_offset(total, ACCELERATOR_PROCESS_VIEWPORT_ROWS));
+    }
+
+    /// The filtered, sorted process list, without recomputing.
+    fn derived(&self) -> Arc<[Data::Process]> {
+        self.derived
+            .as_ref()
+            .map(|cache| cache.items.clone())
+            .unwrap_or_else(|| Arc::from([]))
+    }
+
+    fn derived_items(&mut self) -> Arc<[Data::Process]> {
+        let key = AcceleratorDerivedKey {
+            data_generation: self.data_generation,
+            normalized_query: self.search_draft.trim().to_ascii_lowercase(),
+        };
+        if let Some(cache) = self.derived.as_ref()
+            && cache.key == key
+        {
+            return cache.items.clone();
+        }
+        let mut items = self
+            .data
+            .as_ref()
+            .map(|data| {
+                data.processes()
+                    .iter()
+                    .filter(|process| Data::process_matches(process, &key.normalized_query))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Data::sort_processes(&mut items);
+        let items: Arc<[Data::Process]> = items.into();
+        self.derived = Some(AcceleratorDerivedCache {
+            key,
+            items: items.clone(),
+        });
+        items
     }
 
     fn is_pending(&self) -> bool {
@@ -1623,6 +1832,7 @@ impl<Data, Event> AcceleratorPaneState<Data, Event> {
     fn apply_search(&mut self, text: String, status: &str) {
         self.search_draft = text;
         self.process_list_offset = 0;
+        self.reconcile();
         self.status = status.to_string();
     }
 
@@ -1635,11 +1845,6 @@ impl<Data, Event> AcceleratorPaneState<Data, Event> {
     fn retain_expanded_devices(&mut self, active_devices: &HashSet<String>) {
         self.expanded_devices
             .retain(|key| active_devices.contains(key));
-    }
-
-    fn clamp_process_offset(&mut self, max: usize) -> usize {
-        self.process_list_offset = self.process_list_offset.min(max);
-        self.process_list_offset
     }
 
     fn set_process_offset(&mut self, offset: usize) -> bool {
@@ -1676,10 +1881,85 @@ impl<Data, Event> AcceleratorPaneState<Data, Event> {
 
     fn reset_for_session_switch(&mut self, status: &str) {
         self.job.reset_for_session_switch();
-        self.data = None;
         self.expanded_devices.clear();
         self.process_list_offset = 0;
+        self.clear_data();
         self.status = status.to_string();
+    }
+}
+
+impl AcceleratorProcessList for RemoteGpuOverview {
+    type Process = RemoteGpuProcess;
+
+    fn processes(&self) -> &[Self::Process] {
+        &self.processes
+    }
+
+    fn process_matches(process: &Self::Process, normalized_query: &str) -> bool {
+        if normalized_query.is_empty() {
+            return true;
+        }
+        format!(
+            "{} {} {} {}",
+            process.pid,
+            process
+                .gpu_index
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            process.gpu_uuid,
+            process.process_name
+        )
+        .to_ascii_lowercase()
+        .contains(normalized_query)
+    }
+
+    fn sort_processes(processes: &mut [Self::Process]) {
+        processes.sort_by(|left, right| {
+            right
+                .used_memory_mb
+                .cmp(&left.used_memory_mb)
+                .then_with(|| {
+                    left.gpu_index
+                        .unwrap_or(u32::MAX)
+                        .cmp(&right.gpu_index.unwrap_or(u32::MAX))
+                })
+                .then_with(|| left.pid.cmp(&right.pid))
+        });
+    }
+}
+
+impl AcceleratorProcessList for RemoteNpuOverview {
+    type Process = RemoteNpuProcess;
+
+    fn processes(&self) -> &[Self::Process] {
+        &self.processes
+    }
+
+    fn process_matches(process: &Self::Process, normalized_query: &str) -> bool {
+        if normalized_query.is_empty() {
+            return true;
+        }
+        format!(
+            "{} {} {} {} {}",
+            process.pid,
+            process.npu_index,
+            process.chip_id,
+            process.device_key,
+            process.process_name
+        )
+        .to_ascii_lowercase()
+        .contains(normalized_query)
+    }
+
+    fn sort_processes(processes: &mut [Self::Process]) {
+        processes.sort_by(|left, right| {
+            right
+                .used_memory_mb
+                .cmp(&left.used_memory_mb)
+                .then_with(|| left.npu_index.cmp(&right.npu_index))
+                .then_with(|| left.chip_id.cmp(&right.chip_id))
+                .then_with(|| left.pid.cmp(&right.pid))
+        });
     }
 }
 
@@ -1698,10 +1978,14 @@ mod tests {
 
     use nyaterm_transport::{
         DockerContainer, DockerContainerDetails, DockerImage, RemoteDockerOverview, RemoteGpu,
-        RemoteGpuOverview, RemoteNpu, RemoteNpuOverview, RemoteProcess,
+        RemoteGpuOverview, RemoteGpuProcess, RemoteNpu, RemoteNpuOverview, RemoteNpuProcess,
+        RemoteProcess,
     };
 
-    use super::{DockerDerivedItems, RemoteJobState, RemoteOpsFeatureFocus, RemoteOpsFeatureState};
+    use super::{
+        AcceleratorProcessList, DockerDerivedItems, ProcessSortColumns, RemoteJobState,
+        RemoteOpsFeatureFocus, RemoteOpsFeatureState,
+    };
     use crate::models::{DockerTab, RemoteProcessSortKey};
 
     fn process(pid: u32) -> RemoteProcess {
@@ -1717,6 +2001,16 @@ mod tests {
             elapsed: "00:01".to_string(),
             command: "sleep".to_string(),
             command_line: "sleep 10".to_string(),
+        }
+    }
+
+    fn gpu_process(pid: u32) -> RemoteGpuProcess {
+        RemoteGpuProcess {
+            gpu_uuid: "gpu".to_string(),
+            gpu_index: Some(0),
+            pid,
+            process_name: "proc".to_string(),
+            used_memory_mb: u64::from(pid),
         }
     }
 
@@ -1899,42 +2193,42 @@ mod tests {
             ..Default::default()
         });
 
-        let initial = derived_containers(state.derived_docker_items(DockerTab::Containers));
-        let reused = derived_containers(state.derived_docker_items(DockerTab::Containers));
+        let initial = derived_containers(state.derived_docker_items());
+        let reused = derived_containers(state.derived_docker_items());
         assert!(Arc::ptr_eq(&initial, &reused));
         assert_eq!(initial.len(), 2);
 
         state.apply_docker_search("alpha".to_string());
-        let searched = derived_containers(state.derived_docker_items(DockerTab::Containers));
+        let searched = derived_containers(state.derived_docker_items());
         assert!(!Arc::ptr_eq(&initial, &searched));
         assert_eq!(searched.len(), 1);
         assert_eq!(searched[0].id, "one");
 
         state.apply_docker_search("  ALPHA  ".to_string());
-        let normalized = derived_containers(state.derived_docker_items(DockerTab::Containers));
+        let normalized = derived_containers(state.derived_docker_items());
         assert!(Arc::ptr_eq(&searched, &normalized));
 
         state.set_docker_tab(DockerTab::Images);
-        let images = derived_images(state.derived_docker_items(DockerTab::Images));
+        let images = derived_images(state.derived_docker_items());
         assert_eq!(images.len(), 1);
         assert!(Arc::ptr_eq(
             &images,
-            &derived_images(state.derived_docker_items(DockerTab::Images)),
+            &derived_images(state.derived_docker_items()),
         ));
 
         state.set_docker_tab(DockerTab::Containers);
-        let before_refresh = derived_containers(state.derived_docker_items(DockerTab::Containers));
+        let before_refresh = derived_containers(state.derived_docker_items());
         state.apply_docker_overview(RemoteDockerOverview {
             available: true,
             containers: vec![docker_container("three", "alpha-new")],
             ..Default::default()
         });
-        let refreshed = derived_containers(state.derived_docker_items(DockerTab::Containers));
+        let refreshed = derived_containers(state.derived_docker_items());
         assert!(!Arc::ptr_eq(&before_refresh, &refreshed));
         assert_eq!(refreshed[0].id, "three");
 
         state.clear_docker_overview();
-        let cleared = derived_containers(state.derived_docker_items(DockerTab::Containers));
+        let cleared = derived_containers(state.derived_docker_items());
         assert!(!Arc::ptr_eq(&refreshed, &cleared));
         assert!(cleared.is_empty());
     }
@@ -2105,5 +2399,260 @@ mod tests {
         );
 
         assert!(!state.gpu_unavailable_for(session_id));
+    }
+
+    #[test]
+    /// Moved here with the four functions it exercises, which used to run inside
+    /// `stats_view`'s render pass.
+    fn gpu_process_filter_and_sort_follow_tauri_rules() {
+        let mut processes = vec![
+            RemoteGpuProcess {
+                gpu_uuid: "gpu-b".to_string(),
+                gpu_index: Some(1),
+                pid: 20,
+                process_name: "python".to_string(),
+                used_memory_mb: 2048,
+            },
+            RemoteGpuProcess {
+                gpu_uuid: "gpu-a".to_string(),
+                gpu_index: Some(0),
+                pid: 10,
+                process_name: "worker".to_string(),
+                used_memory_mb: 4096,
+            },
+            RemoteGpuProcess {
+                gpu_uuid: "gpu-c".to_string(),
+                gpu_index: None,
+                pid: 5,
+                process_name: "python".to_string(),
+                used_memory_mb: 2048,
+            },
+        ];
+
+        assert!(RemoteGpuOverview::process_matches(&processes[0], "python"));
+        assert!(RemoteGpuOverview::process_matches(&processes[1], "10"));
+        assert!(RemoteGpuOverview::process_matches(&processes[2], "gpu-c"));
+
+        RemoteGpuOverview::sort_processes(&mut processes);
+        assert_eq!(
+            processes
+                .iter()
+                .map(|process| process.pid)
+                .collect::<Vec<_>>(),
+            [10, 20, 5]
+        );
+    }
+
+    #[test]
+    fn npu_process_filter_and_sort_follow_tauri_rules() {
+        let mut processes = vec![
+            RemoteNpuProcess {
+                npu_index: 1,
+                chip_id: 0,
+                device_key: "npu-b".to_string(),
+                pid: 30,
+                process_name: "train".to_string(),
+                used_memory_mb: 1024,
+            },
+            RemoteNpuProcess {
+                npu_index: 0,
+                chip_id: 1,
+                device_key: "npu-a".to_string(),
+                pid: 20,
+                process_name: "infer".to_string(),
+                used_memory_mb: 2048,
+            },
+            RemoteNpuProcess {
+                npu_index: 0,
+                chip_id: 0,
+                device_key: "npu-c".to_string(),
+                pid: 10,
+                process_name: "train".to_string(),
+                used_memory_mb: 2048,
+            },
+        ];
+
+        assert!(RemoteNpuOverview::process_matches(&processes[0], "train"));
+        assert!(RemoteNpuOverview::process_matches(&processes[1], "0 1"));
+        assert!(RemoteNpuOverview::process_matches(&processes[2], "npu-c"));
+
+        RemoteNpuOverview::sort_processes(&mut processes);
+        assert_eq!(
+            processes
+                .iter()
+                .map(|process| process.pid)
+                .collect::<Vec<_>>(),
+            [10, 20, 30]
+        );
+    }
+
+    /// A shorter list must pull the stored scroll offset down on its own.
+    ///
+    /// This is the property the render pass used to provide, by calling
+    /// `clamp_process_list_offset` through `&mut self` while building rows. It matters
+    /// beyond tidiness because the scroll handler does relative arithmetic on the
+    /// *stored* offset: left at 60 against a 3-row list, the first wheel event would
+    /// jump instead of stepping.
+    #[test]
+    fn shorter_process_results_clamp_the_stored_offset_with_no_render() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        state.apply_processes((0..100).map(process).collect());
+        assert!(state.set_process_list_offset(60));
+        assert_eq!(state.process_presentation().list_offset, 60);
+
+        state.apply_processes((0..3).map(process).collect());
+
+        assert_eq!(
+            state.process_presentation().list_offset,
+            0,
+            "three rows cannot be scrolled, so the offset must come back to the top"
+        );
+        assert_eq!(state.derived_processes().len(), 3);
+    }
+
+    /// The same for Docker, whose two lists have different viewport heights.
+    #[test]
+    fn shorter_docker_results_clamp_the_stored_offsets_with_no_render() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        state.apply_docker_overview(RemoteDockerOverview {
+            available: true,
+            containers: (0..100)
+                .map(|index| docker_container(&format!("c{index}"), "name"))
+                .collect(),
+            images: (0..100)
+                .map(|index| docker_image(&format!("i{index}"), "repo"))
+                .collect(),
+            ..Default::default()
+        });
+        assert!(state.set_docker_list_offset(50));
+        state.set_docker_tab(DockerTab::Images);
+        assert!(state.set_docker_resource_offset(50));
+
+        state.apply_docker_overview(RemoteDockerOverview {
+            available: true,
+            containers: vec![docker_container("c0", "name")],
+            images: vec![docker_image("i0", "repo")],
+            ..Default::default()
+        });
+
+        let presentation = state.docker_presentation();
+        assert_eq!(
+            presentation.resource_list_offset, 0,
+            "the images list shrank to one row"
+        );
+        assert_eq!(
+            presentation.list_offset, 0,
+            "and set_docker_tab already zeroed the container offset, which this pins so \
+             a later change cannot quietly leave it stale"
+        );
+    }
+
+    /// And for a GPU card process list, which had no derived cache at all before: its
+    /// filtering ran inside `stats_view`, so only the view knew the row count.
+    #[test]
+    fn shorter_gpu_results_clamp_the_stored_offset_with_no_render() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        state.apply_gpu(
+            "session",
+            RemoteGpuOverview {
+                available: true,
+                processes: (1..=40).map(gpu_process).collect(),
+                ..Default::default()
+            },
+        );
+        assert!(state.set_gpu_process_offset(30));
+
+        state.apply_gpu(
+            "session",
+            RemoteGpuOverview {
+                available: true,
+                processes: (1..=2).map(gpu_process).collect(),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(state.gpu_presentation().process_list_offset, 0);
+        assert_eq!(state.derived_gpu_processes().len(), 2);
+    }
+
+    /// A query or sort change must leave the derived list correct for a reader holding
+    /// only `&self`.
+    ///
+    /// The accessor taking `&self` is the point: the old one took `&mut self` and
+    /// computed on demand, so the only reader that could see a fresh list was one able
+    /// to mutate -- which is why the render pass had to. The values are asserted too, so
+    /// a future change that makes the recompute lazy again fails here rather than merely
+    /// failing to compile.
+    #[test]
+    fn a_query_or_sort_change_leaves_the_derived_list_correct_for_a_reader() {
+        fn read(state: &RemoteOpsFeatureState) -> Vec<u32> {
+            state
+                .derived_processes()
+                .iter()
+                .map(|process| process.pid)
+                .collect()
+        }
+
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        let mut alpha = process(1);
+        alpha.command = "alpha".to_string();
+        let mut beta = process(2);
+        beta.command = "beta".to_string();
+        state.apply_processes(vec![alpha, beta]);
+        assert_eq!(read(&state).len(), 2);
+
+        state.apply_process_search("beta".to_string());
+        assert_eq!(read(&state), vec![2], "the query narrowed the list");
+
+        state.apply_process_search(String::new());
+        state.toggle_process_sort(RemoteProcessSortKey::Pid);
+        assert_eq!(read(&state), vec![1, 2], "ascending by pid");
+        state.toggle_process_sort(RemoteProcessSortKey::Pid);
+        assert_eq!(read(&state), vec![2, 1], "and reversed");
+    }
+
+    /// Narrowing the panel must move the sort key off a column that is gone.
+    ///
+    /// The width lives in the shell, so it is pushed in rather than observed. The
+    /// derived list has to follow, because the sort key is part of its cache key -- a
+    /// constrain that forgot to recompute would leave rows ordered by a hidden column.
+    #[test]
+    fn narrowing_the_panel_moves_the_sort_key_off_a_hidden_column() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        let mut low_memory = process(1);
+        low_memory.memory_percent = 1.0;
+        low_memory.cpu_percent = 9.0;
+        let mut high_memory = process(2);
+        high_memory.memory_percent = 9.0;
+        high_memory.cpu_percent = 1.0;
+        state.apply_processes(vec![low_memory, high_memory]);
+        state.toggle_process_sort(RemoteProcessSortKey::Memory);
+        assert_eq!(
+            state.process_presentation().sort_key,
+            RemoteProcessSortKey::Memory
+        );
+        assert_eq!(state.derived_processes()[0].pid, 2, "highest memory first");
+
+        // A narrow panel shows neither the memory nor the user column.
+        let narrow = ProcessSortColumns {
+            allow_memory: false,
+            allow_user: false,
+        };
+        assert!(state.set_process_sort_columns(narrow));
+
+        assert_eq!(
+            state.process_presentation().sort_key,
+            RemoteProcessSortKey::Cpu,
+            "memory is not sortable at this width"
+        );
+        assert_eq!(
+            state.derived_processes()[0].pid,
+            1,
+            "and the list is re-sorted by cpu, not left ordered by the hidden column"
+        );
+        assert!(
+            !state.set_process_sort_columns(narrow),
+            "an unchanged width must not report a change"
+        );
     }
 }

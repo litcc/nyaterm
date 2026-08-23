@@ -6,6 +6,7 @@ use nyaterm_core::truncate_preview;
 use nyaterm_transport::{DockerImage, DockerNetwork, DockerVolume};
 use nyaterm_ui::NyaScrollable;
 
+use crate::features::remote::DOCKER_RESOURCE_VIEWPORT_ROWS;
 use crate::features::{NyaTermApp, formatting::compact_id, shell::gpui_code_font_family};
 use crate::models::{DockerConfirmAction, DockerConfirmState};
 use crate::theme::ThemePalette;
@@ -14,7 +15,6 @@ use crate::widgets::{empty_panel, svg_icon_button};
 use super::DockerLabels;
 
 const DOCKER_RESOURCE_ROW_PX: f32 = 64.;
-const DOCKER_RESOURCE_VIEWPORT_ROWS: usize = 14;
 const DOCKER_RESOURCE_OVERSCAN: usize = 6;
 
 pub(in crate::features::pages::remote) fn docker_images_panel(
