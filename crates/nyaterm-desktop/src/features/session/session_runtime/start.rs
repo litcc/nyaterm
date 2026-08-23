@@ -422,8 +422,9 @@ impl NyaTermApp {
                                 .move_session_after(&session_id, &after_session_id);
                         }
                         self.persist_connection_used(connection.id.clone(), cx);
-                        self.activate_session_id(&session_id);
+                        self.activate_session_id(&session_id, cx);
                         self.apply_workspace_split_for_duplicate(
+                            cx,
                             workspace_split.clone(),
                             &session_id,
                         );
@@ -456,7 +457,7 @@ impl NyaTermApp {
                         if options.locked {
                             self.session.set_tab_locked(&session_id, true);
                         }
-                        self.activate_session_id(&session_id);
+                        self.activate_session_id(&session_id, cx);
                         self.shell.set_status(message);
                     }
                 }
@@ -527,8 +528,9 @@ impl NyaTermApp {
                                 .move_session_after(&session_id, &after_session_id);
                         }
                         self.persist_connection_used(connection.id.clone(), cx);
-                        self.activate_session_id(&session_id);
+                        self.activate_session_id(&session_id, cx);
                         self.apply_workspace_split_for_duplicate(
+                            cx,
                             workspace_split.clone(),
                             &session_id,
                         );
@@ -561,7 +563,7 @@ impl NyaTermApp {
                         if options.locked {
                             self.session.set_tab_locked(&session_id, true);
                         }
-                        self.activate_session_id(&session_id);
+                        self.activate_session_id(&session_id, cx);
                         self.shell.set_status(message);
                     }
                 }

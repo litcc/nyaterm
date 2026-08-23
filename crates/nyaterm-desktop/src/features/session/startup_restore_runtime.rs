@@ -457,7 +457,7 @@ impl NyaTermApp {
                     .map(|session| session.id)
                     .collect::<Vec<_>>();
                 if let Some(session_id) = ordered.get(index) {
-                    self.activate_session_id(session_id);
+                    self.activate_session_id(session_id, cx);
                     self.sync_workspace_split_from_active_tab();
                 }
             }
@@ -565,7 +565,7 @@ impl NyaTermApp {
                     self.session.set_tab_locked(&session_id, true);
                 }
                 if self.session.active_id().is_none() {
-                    self.activate_session_id(&session_id);
+                    self.activate_session_id(&session_id, cx);
                 }
                 return false;
             }
@@ -624,7 +624,7 @@ impl NyaTermApp {
                     self.session.set_tab_locked(&session_id, true);
                 }
                 if self.session.active_id().is_none() {
-                    self.activate_session_id(&session_id);
+                    self.activate_session_id(&session_id, cx);
                 }
                 return false;
             }

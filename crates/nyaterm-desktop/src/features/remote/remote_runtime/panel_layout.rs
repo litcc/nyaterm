@@ -9,12 +9,35 @@
 //! are actually shown -- but the panel width lives in `ShellFeatureState`. So the app
 //! pushes it in, from the three places it can change.
 
+use gpui::Context;
+
 use crate::features::NyaTermApp;
 use crate::features::remote::ProcessSortColumns;
 
 use crate::features::pages::remote::{ProcessDisplayMode, process_display_mode};
 
 impl NyaTermApp {
+    /// Re-sync the Remote panels' GPUI-facing state after the active session changed.
+    ///
+    /// Called from `activate_session_id`, immediately after
+    /// `reset_remote_runtime_for_session_switch`, so the reset and everything that has to
+    /// follow it land in one outer GPUI update transaction rather than waiting for a
+    /// paint.
+    ///
+    /// **Deliberately narrow.** This is for Remote-panel state that must follow the
+    /// active session, not a general activation side-effect bucket. Today that is refresh
+    /// demand: a panel's clock is armed on `(visible || the header wants it) && enabled in
+    /// settings && a session with an SSH config`, and the last term just changed --
+    /// switching to a non-SSH session has to drop the clocks. The snapshot flush will join
+    /// this helper, which is what keeps a future activation caller from switching sessions
+    /// while omitting either.
+    pub(in crate::features) fn sync_remote_panels_after_activation(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_remote_panel_demand(cx);
+    }
+
     /// Tell the process pane which sort columns the current panel width can show.
     ///
     /// Returns whether anything changed, so a caller mid-drag can skip a repaint.
@@ -45,7 +68,8 @@ mod tests {
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
-    use crate::models::RemoteProcessSortKey;
+    use crate::features::pages::remote::RemoteMonitorKind;
+    use crate::models::{NavItem, RemoteProcessSortKey};
 
     fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
@@ -69,6 +93,22 @@ mod tests {
             overlays: cx.new(|_| OverlayStore::default()),
         };
         cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    fn register_session(app: &mut NyaTermApp, session_id: &str, ssh: bool) {
+        app.session.register_session_metadata(
+            session_id,
+            crate::models::SessionRuntimeMetadata {
+                ssh_config: ssh.then(nyaterm_transport::SshSessionConfig::default),
+                ssh_multiplex_key: None,
+                source_connection_id: None,
+                ai_execution_profile: nyaterm_core::AiExecutionProfile::Posix,
+                launch_config: crate::models::SessionLaunchConfig::Local(
+                    nyaterm_transport::LocalSessionConfig::default(),
+                ),
+                disconnected: false,
+            },
+        );
     }
 
     fn process(pid: u32, cpu_percent: f64, memory_percent: f64) -> RemoteProcess {
@@ -127,6 +167,57 @@ mod tests {
                 app.remote_ops.derived_processes()[0].pid,
                 1,
                 "and the rows follow the new key"
+            );
+        });
+    }
+
+    /// A session switch must reconcile Remote-panel refresh demand inside the same
+    /// update, with no paint.
+    ///
+    /// Demand is `(visible || the header wants it) && enabled && a session with an SSH
+    /// config`. Before `activate_session_id` took `cx`, only `render` reconciled it, so a
+    /// switch to a non-SSH session left the panel clock running until something painted.
+    ///
+    /// **There is no `window.draw` in this test, and that is the assertion.** Every check
+    /// runs inside one `update_entity`, which is the same transaction the real switch
+    /// happens in.
+    #[test]
+    fn a_session_switch_reconciles_remote_panel_demand_without_a_paint() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            let mut summary = app.settings.summary().clone();
+            summary.ui_show_gpu_monitor = true;
+            app.settings.replace_summary(summary);
+            app.open_or_toggle_panel(NavItem::GpuMonitor, cx);
+
+            register_session(app, "ssh-a", true);
+            register_session(app, "local-b", false);
+
+            let gpu_polling = |app: &NyaTermApp, cx: &gpui::App| {
+                app.remote_panels
+                    .entity(RemoteMonitorKind::Gpu)
+                    .read(cx)
+                    .is_polling()
+            };
+
+            assert!(
+                !gpu_polling(app, cx),
+                "no session is active yet, so nothing polls"
+            );
+
+            app.activate_session_id("ssh-a", cx);
+            assert!(
+                gpu_polling(app, cx),
+                "activating an SSH session with the GPU panel open must arm its clock \
+                 here, not at the next paint"
+            );
+
+            app.activate_session_id("local-b", cx);
+            assert!(
+                !gpu_polling(app, cx),
+                "switching to a session with no SSH config must drop the clock in the \
+                 same update"
             );
         });
     }

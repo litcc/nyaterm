@@ -104,7 +104,7 @@ impl NyaTermApp {
             self.ai.reset_agent_runtime();
             self.sync_session_event_bridge_policy();
             if let Some(next_session_id) = self.session.next_session_after(&session_id) {
-                self.activate_session_id(&next_session_id);
+                self.activate_session_id(&next_session_id, cx);
                 self.shell.set_status(format!(
                     "session closed; active {}",
                     short_id(&next_session_id)
@@ -186,7 +186,7 @@ impl NyaTermApp {
                 .find(|id| self.session.has_session(id))
                 .or_else(|| self.session.next_session_after(&pane_id));
             if let Some(next_session_id) = next {
-                self.activate_session_id(&next_session_id);
+                self.activate_session_id(&next_session_id, cx);
             } else {
                 self.session.clear_active_session();
             }
@@ -200,6 +200,7 @@ impl NyaTermApp {
         &mut self,
         session_ids: Vec<String>,
         label: &'static str,
+        cx: &mut Context<Self>,
     ) {
         if session_ids.is_empty() {
             self.shell
@@ -254,7 +255,7 @@ impl NyaTermApp {
                 .cloned()
                 .or_else(|| live_ids.iter().next().cloned())
             {
-                self.activate_session_id(&next_session_id);
+                self.activate_session_id(&next_session_id, cx);
             } else {
                 self.session.clear_active_session();
                 self.terminal.view.output = String::from(INITIAL_TERMINAL_BANNER);
@@ -393,7 +394,7 @@ impl NyaTermApp {
             .into_iter()
             .map(|session| session.id)
             .collect::<Vec<_>>();
-        self.close_tab_roots_batch(roots, "active");
+        self.close_tab_roots_batch(roots, "active", cx);
         cx.notify();
     }
 
@@ -408,7 +409,7 @@ impl NyaTermApp {
             .filter_map(|session| (session.id != keep_session_id).then_some(session.id))
             .collect::<Vec<_>>();
         self.activate_session_id_with_surface_sync(&keep_session_id, cx);
-        self.close_tab_roots_batch(roots, "inactive");
+        self.close_tab_roots_batch(roots, "inactive", cx);
         cx.notify();
     }
 
@@ -432,11 +433,16 @@ impl NyaTermApp {
             .skip(anchor_index + 1)
             .map(|session| session.id)
             .collect::<Vec<_>>();
-        self.close_tab_roots_batch(roots, "right-side");
+        self.close_tab_roots_batch(roots, "right-side", cx);
         cx.notify();
     }
 
-    fn close_tab_roots_batch(&mut self, tab_roots: Vec<String>, label: &'static str) {
+    fn close_tab_roots_batch(
+        &mut self,
+        tab_roots: Vec<String>,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) {
         let mut skipped = 0usize;
         let mut close_ids = Vec::new();
         for tab_root in tab_roots {
@@ -448,7 +454,7 @@ impl NyaTermApp {
         }
         close_ids.sort();
         close_ids.dedup();
-        self.close_session_batch(close_ids, label);
+        self.close_session_batch(close_ids, label, cx);
         if skipped > 0 {
             self.shell
                 .set_status(format!("{} ({skipped})", t!("tabCtx.lockedTabsSkipped")));

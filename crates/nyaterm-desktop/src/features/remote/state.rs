@@ -1739,6 +1739,11 @@ impl StatsPaneState {
     }
 
     pub(super) fn begin_job(&mut self, session_id: String) -> RemoteJobTicket<StatsJobResult> {
+        // `pending` is part of the presentation, so starting and finishing a job
+        // moves the revision. Today a status change always accompanies both, which
+        // masked this; relying on that is exactly the fragility the counter exists
+        // to remove.
+        self.touch();
         self.job.begin(session_id)
     }
 
@@ -1751,6 +1756,7 @@ impl StatsPaneState {
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
+        self.touch();
         self.job.complete_if_matches(job_id, session_id)
     }
 
@@ -1936,6 +1942,7 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
     }
 
     fn begin_job(&mut self, session_id: String) -> RemoteJobTicket<Event> {
+        self.touch();
         self.job.begin(session_id)
     }
 
@@ -1948,6 +1955,7 @@ impl<Data: AcceleratorProcessList, Event> AcceleratorPaneState<Data, Event> {
     }
 
     fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
+        self.touch();
         self.job.complete_if_matches(job_id, session_id)
     }
 

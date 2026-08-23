@@ -441,6 +441,7 @@ impl NyaTermApp {
         &mut self,
         old_id: &str,
         new_id: &str,
+        cx: &mut Context<Self>,
     ) {
         self.session.start.clear_reconnect_failure(old_id);
         self.terminal
@@ -451,7 +452,7 @@ impl NyaTermApp {
         self.terminal.replace_terminal_window_tab_id(old_id, new_id);
         self.sync_input.replace_session_id(old_id, new_id);
         if self.session.active_id() == Some(old_id) {
-            self.activate_session_id(new_id);
+            self.activate_session_id(new_id, cx);
         }
         self.transfer.replace_session_id(old_id, new_id);
         if self.session.active_id() == Some(new_id)

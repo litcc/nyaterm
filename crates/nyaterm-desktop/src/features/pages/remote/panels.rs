@@ -148,8 +148,10 @@ impl RemoteMonitorPanel {
         }));
     }
 
+    /// Widened past this module so the session-activation boundary can assert that a
+    /// switch reconciles demand without a paint.
     #[cfg(test)]
-    fn is_polling(&self) -> bool {
+    pub(in crate::features) fn is_polling(&self) -> bool {
         self.clock.is_some()
     }
 

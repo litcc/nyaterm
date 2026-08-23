@@ -119,6 +119,7 @@ impl NyaTermApp {
 
     fn attach_workspace_split(
         &mut self,
+        cx: &mut Context<Self>,
         direction: WorkspaceSplitDirection,
         primary_session_id: String,
         secondary_session_id: String,
@@ -134,7 +135,7 @@ impl NyaTermApp {
             )
         {
             self.rebuild_session_tab_owners();
-            self.activate_session_id(&secondary_session_id);
+            self.activate_session_id(&secondary_session_id, cx);
             self.sync_workspace_split_from_active_tab();
             self.shell.navigation.selected_nav = NavItem::Workspace;
             self.shell.navigation.main_mode = MainMode::Workspace;
@@ -154,7 +155,7 @@ impl NyaTermApp {
         };
         self.shell.workspace.pane_roots.insert(tab_root, root);
         self.rebuild_session_tab_owners();
-        self.activate_session_id(&secondary_session_id);
+        self.activate_session_id(&secondary_session_id, cx);
         self.sync_workspace_split_from_active_tab();
         self.shell.navigation.selected_nav = NavItem::Workspace;
         self.shell.navigation.main_mode = MainMode::Workspace;
@@ -212,13 +213,14 @@ impl NyaTermApp {
 
     pub(in crate::features) fn apply_workspace_split_for_duplicate(
         &mut self,
+        cx: &mut Context<Self>,
         workspace_split: Option<(WorkspaceSplitDirection, String)>,
         new_session_id: &str,
     ) {
         let Some((direction, source_session_id)) = workspace_split else {
             return;
         };
-        self.attach_workspace_split(direction, source_session_id, new_session_id.to_string());
+        self.attach_workspace_split(cx, direction, source_session_id, new_session_id.to_string());
         self.shell.set_status(format!(
             "split {} pane duplicated",
             direction.label().to_lowercase()
@@ -480,6 +482,7 @@ impl NyaTermApp {
         &mut self,
         restored: WorkspacePaneNode,
         previously_active: Option<&str>,
+        cx: &mut Context<Self>,
     ) -> bool {
         if !restored.is_split() {
             return false;
@@ -496,7 +499,7 @@ impl NyaTermApp {
             .insert(first.clone(), restored);
         self.rebuild_session_tab_owners();
         if needs_activation {
-            self.activate_session_id(&first);
+            self.activate_session_id(&first, cx);
         }
         self.sync_workspace_split_from_active_tab();
         true
@@ -554,7 +557,7 @@ impl NyaTermApp {
                 let Some(restored) = WorkspacePaneNode::restore_layout(&layout, &ordered) else {
                     return;
                 };
-                if !this.apply_restored_workspace_pane_layout(restored, active.as_deref()) {
+                if !this.apply_restored_workspace_pane_layout(restored, active.as_deref(), cx) {
                     return;
                 }
                 this.shell.navigation.selected_nav = NavItem::Workspace;
@@ -667,7 +670,7 @@ mod restore_activation_tests {
     fn workspace_restore_switching_hosts_clears_the_remote_presentation() {
         let mut cx = TestAppContext::single();
         let app = app(&mut cx);
-        cx.update_entity(&app, |app, _| {
+        cx.update_entity(&app, |app, cx| {
             register_ssh_session(app, "host-a");
             register_ssh_session(app, "host-b");
             register_ssh_session(app, "host-c");
@@ -685,7 +688,7 @@ mod restore_activation_tests {
 
             // A layout that does not contain host A forces an activation.
             let restored = split("host-b", "host-c");
-            assert!(app.apply_restored_workspace_pane_layout(restored, Some("host-a")));
+            assert!(app.apply_restored_workspace_pane_layout(restored, Some("host-a"), cx));
 
             assert_eq!(
                 app.session.active_id(),
@@ -715,7 +718,7 @@ mod restore_activation_tests {
     fn workspace_restore_keeping_the_active_host_preserves_the_remote_presentation() {
         let mut cx = TestAppContext::single();
         let app = app(&mut cx);
-        cx.update_entity(&app, |app, _| {
+        cx.update_entity(&app, |app, cx| {
             register_ssh_session(app, "host-a");
             register_ssh_session(app, "host-b");
             app.session.select_active_session("host-a".to_string());
@@ -723,7 +726,7 @@ mod restore_activation_tests {
             let before = app.remote_ops.stats_revision();
 
             let restored = split("host-a", "host-b");
-            assert!(app.apply_restored_workspace_pane_layout(restored, Some("host-a")));
+            assert!(app.apply_restored_workspace_pane_layout(restored, Some("host-a"), cx));
 
             assert_eq!(app.session.active_id(), Some("host-a"));
             assert!(

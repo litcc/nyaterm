@@ -132,7 +132,17 @@ impl NyaTermApp {
         Some(details)
     }
 
-    pub(in crate::features) fn activate_session_id(&mut self, session_id: &str) -> Option<String> {
+    /// The canonical session-switch boundary.
+    ///
+    /// Takes `cx` so the switch and everything that must follow it land in one outer
+    /// GPUI update transaction. That is what stops a future caller switching sessions
+    /// while forgetting the Remote-panel resync: there is one place that knows, and it
+    /// is the place every switch already goes through.
+    pub(in crate::features) fn activate_session_id(
+        &mut self,
+        session_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
         self.session.start.clear_active_selection();
         self.shell.prepare_session_switch();
         // Session switch resets terminal-output credential autofill (Tauri XTerminal remount).
@@ -159,7 +169,11 @@ impl NyaTermApp {
         self.session.select_active_session(session_id);
         if switching_sessions {
             self.transfer.reset_transfer_queue_interaction();
+            // Reset stays `cx`-free: it is pure remote state. The GPUI-facing resync is
+            // the next line, so the ordering is reset -> resync -> (caller's surface
+            // sync) -> paint, all inside this transaction.
             self.reset_remote_runtime_for_session_switch();
+            self.sync_remote_panels_after_activation(cx);
         }
         // Keep workspace_split mirrored to the active tab's per-tab pane root.
         self.sync_workspace_split_from_active_tab();
@@ -211,7 +225,7 @@ impl NyaTermApp {
         session_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let previous_session_id = self.activate_session_id(session_id);
+        let previous_session_id = self.activate_session_id(session_id, cx);
         self.load_transfer_browser_for_active_session_if_needed(cx);
         self.sync_terminal_activation_surfaces(previous_session_id, session_id, cx);
     }

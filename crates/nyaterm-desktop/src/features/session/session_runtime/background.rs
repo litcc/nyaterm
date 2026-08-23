@@ -643,7 +643,7 @@ impl NyaTermApp {
                 if let Some(stale_id) = reconnect_session_id
                     && stale_id != session_id
                 {
-                    self.migrate_reconnected_session_state(&stale_id, &session_id);
+                    self.migrate_reconnected_session_state(&stale_id, &session_id, cx);
                     self.remove_session_state(&stale_id);
                     self.persist_workspace_pane_layout();
                     self.persist_terminal_window_layout();
@@ -653,7 +653,7 @@ impl NyaTermApp {
                     .start
                     .complete_success(was_active_pending, self.session.active_id().is_none());
                 if should_activate {
-                    self.activate_session_id(&session_id);
+                    self.activate_session_id(&session_id, cx);
                     self.load_transfer_browser_for_active_session_if_needed(cx);
                 }
                 // First connected frames often land with a login banner burst.
@@ -673,7 +673,7 @@ impl NyaTermApp {
                     self.recording
                         .schedule_auto_start(session_id.clone(), session_info.name.clone());
                 }
-                self.apply_workspace_split_for_duplicate(workspace_split, &session_id);
+                self.apply_workspace_split_for_duplicate(cx, workspace_split, &session_id);
                 if let Some(startup_command) = pending.and_then(|pending| pending.startup_command) {
                     self.schedule_startup_command(session_id.clone(), startup_command, cx);
                 }
