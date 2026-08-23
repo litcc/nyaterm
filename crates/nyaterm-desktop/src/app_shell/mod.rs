@@ -17,7 +17,7 @@ use nyaterm_ui::{
 };
 
 use crate::{
-    entities::{OverlayStore, StartupRestoreStore, UiStoreHandles, WindowRuntimeStore},
+    entities::{OverlayStore, StartupRestoreStore, UiStoreHandles},
     features::NyaTermApp,
 };
 
@@ -77,7 +77,6 @@ pub struct AppShell {
     app: Option<Entity<NyaTermApp>>,
     store_runtime: Option<StoreRuntime>,
     pending_bootstrap: Option<StoreTask<nyaterm_store::BootstrapSnapshot>>,
-    window_runtime: Entity<WindowRuntimeStore>,
     startup_restore: Entity<StartupRestoreStore>,
     overlays: Entity<OverlayStore>,
     _subscriptions: Vec<Subscription>,
@@ -114,7 +113,6 @@ impl AppShell {
             app: None,
             store_runtime: None,
             pending_bootstrap: None,
-            window_runtime: cx.new(|_| WindowRuntimeStore::default()),
             startup_restore,
             overlays,
             _subscriptions: subscriptions,
@@ -251,12 +249,6 @@ impl AppShell {
                 app.start_after_window_open(window, cx);
             });
         }
-
-        self.window_runtime.update(cx, |store, cx| {
-            if store.ensure_started(window, cx, app) {
-                cx.notify();
-            }
-        });
     }
 
     fn perform_native_menu_command(

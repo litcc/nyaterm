@@ -297,10 +297,6 @@ impl AiFeatureState {
         self.chat.pending
     }
 
-    pub(in crate::features) fn has_background_work(&self) -> bool {
-        self.chat.pending || self.agent.loop_state.is_some() || self.discovery.pending
-    }
-
     pub(in crate::features) fn chat_focus(&self) -> &FocusHandle {
         &self.chat.focus
     }

@@ -1,13 +1,4 @@
-use super::{OverlayStore, StartupRestoreStore, WindowRuntimeStore};
-
-#[test]
-fn window_runtime_store_starts_pump_once() {
-    let mut store = WindowRuntimeStore::default();
-
-    assert!(store.mark_started());
-    assert!(!store.mark_started());
-    assert!(store.pump_started());
-}
+use super::{OverlayStore, StartupRestoreStore};
 
 #[test]
 fn startup_restore_store_starts_after_window_open_once() {

@@ -95,6 +95,9 @@ impl NyaTermApp {
         // point.
         self.ensure_pending_focus_clock(cx);
         self.ensure_post_start_work_clock(cx);
+        // Which panel is open, and whether an SSH session is active, change only
+        // alongside a repaint -- so this is where the refresh clock starts.
+        self.ensure_remote_refresh_clock(cx);
         self.try_restore_open_tabs(window, cx);
         let pending_session_start = self.session.start_has_pending();
         let should_pump = !self.session.restore_is_complete()

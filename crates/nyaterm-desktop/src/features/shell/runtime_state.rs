@@ -9,7 +9,6 @@ use super::state::ShellFeatureState;
 
 /// GPUI event-pump, repaint and shell-persistence scheduling state.
 pub(super) struct ShellRuntimeState {
-    pub(super) event_pump_started: bool,
     pub(super) session_event_backlog_active: bool,
     pub(super) session_event_queued_events: usize,
     pub(super) session_event_queued_output_bytes: usize,
@@ -63,14 +62,6 @@ pub(super) struct ShellRuntimeState {
     pub(super) terminal_surface_frame_notify_count: u64,
     /// Output frames that also dirtied chrome (unread/effects).
     pub(super) terminal_chrome_frame_notify_count: u64,
-    /// Last periodic terminal performance heartbeat.
-    pub(super) last_terminal_perf_heartbeat_at: Option<Instant>,
-    pub(super) last_perf_full_shell_paint_count: u64,
-    pub(super) last_perf_surface_paint_count: u64,
-    pub(super) last_perf_surface_frame_notify_count: u64,
-    pub(super) last_perf_chrome_frame_notify_count: u64,
-    pub(super) last_perf_layout_cache_hits: u64,
-    pub(super) last_perf_layout_cache_misses: u64,
     /// Open-tabs / window-layout settings need a durable write.
     pub(super) open_tabs_persist_dirty: bool,
     pub(super) window_layout_persist_dirty: bool,
@@ -99,6 +90,8 @@ pub(super) struct ShellRuntimeState {
     post_start_work_clock_armed: bool,
     /// True while the drop-highlight clock task is alive.
     drop_hover_clock_armed: bool,
+    /// True while the remote-panel auto-refresh clock task is alive.
+    remote_refresh_clock_armed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -125,7 +118,6 @@ impl Default for ShellRuntimeState {
     fn default() -> Self {
         let (persist_wake, persist_wake_rx) = EventWake::new();
         Self {
-            event_pump_started: false,
             session_event_backlog_active: false,
             session_event_queued_events: 0,
             session_event_queued_output_bytes: 0,
@@ -155,13 +147,6 @@ impl Default for ShellRuntimeState {
             full_shell_paint_count: 0,
             terminal_surface_frame_notify_count: 0,
             terminal_chrome_frame_notify_count: 0,
-            last_terminal_perf_heartbeat_at: None,
-            last_perf_full_shell_paint_count: 0,
-            last_perf_surface_paint_count: 0,
-            last_perf_surface_frame_notify_count: 0,
-            last_perf_chrome_frame_notify_count: 0,
-            last_perf_layout_cache_hits: 0,
-            last_perf_layout_cache_misses: 0,
             open_tabs_persist_dirty: false,
             window_layout_persist_dirty: false,
             ui_layout_persist_pending: false,
@@ -178,6 +163,7 @@ impl Default for ShellRuntimeState {
             terminal_recovery_clock_armed: false,
             post_start_work_clock_armed: false,
             drop_hover_clock_armed: false,
+            remote_refresh_clock_armed: false,
         }
     }
 }
@@ -303,6 +289,14 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_drop_hover_clock_armed(&mut self, armed: bool) {
         self.runtime.drop_hover_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn remote_refresh_clock_is_armed(&self) -> bool {
+        self.runtime.remote_refresh_clock_armed
+    }
+
+    pub(in crate::features) fn set_remote_refresh_clock_armed(&mut self, armed: bool) {
+        self.runtime.remote_refresh_clock_armed = armed;
     }
 
     pub(in crate::features) fn toggle_cursor_blink_phase(&mut self) {

@@ -9,7 +9,6 @@
 mod handles;
 mod overlay;
 mod startup_restore;
-mod window_runtime;
 
 #[cfg(test)]
 mod tests;
@@ -17,4 +16,3 @@ mod tests;
 pub use handles::UiStoreHandles;
 pub use overlay::{OverlayStore, QuickSwitchState};
 pub use startup_restore::StartupRestoreStore;
-pub use window_runtime::WindowRuntimeStore;

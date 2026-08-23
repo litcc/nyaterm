@@ -13,9 +13,6 @@ pub(super) const SESSION_EVENT_INPUT_WAKE_WALL_BUDGET: Duration = Duration::from
 /// applies, so anything past this overran both.
 pub(super) const RUNTIME_DATA_PLANE_DRAIN_SLOW: Duration = Duration::from_millis(16);
 pub(super) const RUNTIME_IDLE_TICK_INTERVAL: Duration = Duration::from_millis(50);
-pub(super) const RUNTIME_QUIET_TICK_INTERVAL: Duration = Duration::from_millis(500);
-/// Match display frame pacing; 8ms stacked full ticks under pressure contended with window drag paints.
-pub(super) const RUNTIME_PRESSURE_TICK_INTERVAL: Duration = Duration::from_millis(16);
 /// After viewport size changes, hold pressure cadence for this long.
 pub(super) const WINDOW_GEOMETRY_CHURN_HOLD: Duration = Duration::from_millis(200);
 /// Window move drags may not resize the viewport, especially on Windows. Hold a
@@ -29,8 +26,6 @@ pub(in crate::features::shell) const CONNECT_SETTLE_HOLD: Duration = Duration::f
 pub(super) const UI_PAINT_THROTTLE: Duration = Duration::from_millis(33);
 pub(super) const TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL: Duration = Duration::from_millis(16);
 pub(super) const SLOW_DIAGNOSTIC_THROTTLE: Duration = Duration::from_secs(2);
-pub(super) const TERMINAL_PERF_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
-pub(super) const RUNTIME_TICK_SLOW_THRESHOLD: Duration = Duration::from_millis(40);
 pub(super) const SESSION_EVENT_DRAIN_SLOW_TOTAL: Duration = Duration::from_millis(20);
 pub(super) const SESSION_EVENT_DRAIN_SLOW_CHUNK: Duration = Duration::from_millis(8);
 pub(super) const PENDING_SESSION_STILL_CONNECTING_AFTER: Duration = Duration::from_secs(15);
@@ -71,13 +66,6 @@ pub(super) struct RuntimeDataPlaneDrain {
     pub(super) decision: TerminalFrameApplyDecision,
 }
 
-#[derive(Default)]
-pub(super) struct RuntimeIdlePlaneResult {
-    pub(super) dirty: bool,
-    pub(super) render_request_output_pressure: bool,
-    pub(super) remote_refresh: Duration,
-}
-
 #[derive(Clone, Copy)]
 pub(super) struct SessionEventDrainBudget {
     pub(super) max_events: usize,
@@ -90,17 +78,6 @@ pub(super) enum PendingSessionAuthWait {
     Credential { target: String },
     HostKey { host: String },
     Agent { target: String },
-}
-
-pub(super) fn diagnostic_log_due(
-    last_at: Option<Instant>,
-    now: Instant,
-    throttle: Duration,
-) -> bool {
-    last_at.is_none_or(|last_at| {
-        now.checked_duration_since(last_at)
-            .is_none_or(|elapsed| elapsed >= throttle)
-    })
 }
 
 pub(super) fn terminal_cell_metrics_refresh_needed(metrics: Option<(f32, f32)>) -> bool {
@@ -122,14 +99,6 @@ pub(super) fn pending_session_status_message(
             format!("waiting for SSH Agent approval for {target}")
         }
         None => format!("still connecting to {name}"),
-    }
-}
-
-pub(super) fn runtime_tick_interval_for_pressure(output_pressure: bool) -> Duration {
-    if output_pressure {
-        RUNTIME_PRESSURE_TICK_INTERVAL
-    } else {
-        RUNTIME_IDLE_TICK_INTERVAL
     }
 }
 
@@ -351,10 +320,6 @@ pub(in crate::features::shell::event_pump) fn terminal_render_work_pressure_acti
     runtime_output_pressure || pending_session_start
 }
 
-pub(super) fn runtime_idle_plane_allowed(runtime_output_pressure: bool) -> bool {
-    !runtime_output_pressure
-}
-
 pub(super) fn session_event_drain_should_yield(
     started_at: Instant,
     has_pending_events: bool,
@@ -401,15 +366,13 @@ mod tests {
 
     use super::{
         CONNECT_SETTLE_HOLD, PendingSessionAuthWait, RUNTIME_IDLE_TICK_INTERVAL,
-        RUNTIME_PRESSURE_TICK_INTERVAL, RuntimeOutputPressureCounts, SESSION_EVENT_DRAIN_BATCH,
+        RuntimeOutputPressureCounts, SESSION_EVENT_DRAIN_BATCH,
         SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET, SESSION_EVENT_DRAIN_PRESSURE_OUTPUT_BUDGET,
         SESSION_EVENT_DRAIN_SLOW_CHUNK, SESSION_EVENT_DRAIN_SLOW_TOTAL,
-        SESSION_EVENT_DRAIN_WALL_BUDGET, SLOW_DIAGNOSTIC_THROTTLE,
-        TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL, UI_PAINT_THROTTLE, WINDOW_GEOMETRY_CHURN_HOLD,
-        connect_settle_active, connect_settle_deadline, diagnostic_log_due,
+        SESSION_EVENT_DRAIN_WALL_BUDGET, TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL, UI_PAINT_THROTTLE,
+        WINDOW_GEOMETRY_CHURN_HOLD, connect_settle_active, connect_settle_deadline,
         pending_session_status_message, runtime_background_should_defer_terminal_frames,
-        runtime_data_plane_wake_delay, runtime_idle_plane_allowed,
-        runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
+        runtime_data_plane_wake_delay, runtime_output_pressure_active_from_counts,
         runtime_ui_notify_allowed, session_event_backlog_active, session_event_drain_budget,
         session_event_drain_is_slow, session_event_drain_should_yield,
         session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
@@ -441,23 +404,6 @@ mod tests {
         assert!(!escaped.contains('\x07'));
         assert!(!escaped.contains('\n'));
         assert!(escaped.contains("失败"));
-    }
-
-    #[test]
-    fn diagnostic_log_due_respects_throttle_window() {
-        let start = Instant::now();
-
-        assert!(diagnostic_log_due(None, start, SLOW_DIAGNOSTIC_THROTTLE));
-        assert!(!diagnostic_log_due(
-            Some(start),
-            start + Duration::from_millis(1999),
-            SLOW_DIAGNOSTIC_THROTTLE
-        ));
-        assert!(diagnostic_log_due(
-            Some(start),
-            start + SLOW_DIAGNOSTIC_THROTTLE,
-            SLOW_DIAGNOSTIC_THROTTLE
-        ));
     }
 
     #[test]
@@ -498,18 +444,6 @@ mod tests {
                 }),
             ),
             "waiting for SSH Agent approval for user@example:22"
-        );
-    }
-
-    #[test]
-    fn runtime_tick_interval_uses_fast_cadence_under_output_pressure() {
-        assert_eq!(
-            runtime_tick_interval_for_pressure(false),
-            RUNTIME_IDLE_TICK_INTERVAL
-        );
-        assert_eq!(
-            runtime_tick_interval_for_pressure(true),
-            RUNTIME_PRESSURE_TICK_INTERVAL
         );
     }
 
@@ -897,12 +831,6 @@ mod tests {
         assert!(!terminal_render_work_pressure_active(false, false));
         assert!(terminal_render_work_pressure_active(true, false));
         assert!(terminal_render_work_pressure_active(false, true));
-    }
-
-    #[test]
-    fn runtime_idle_plane_waits_for_output_calm() {
-        assert!(runtime_idle_plane_allowed(false));
-        assert!(!runtime_idle_plane_allowed(true));
     }
 
     #[test]

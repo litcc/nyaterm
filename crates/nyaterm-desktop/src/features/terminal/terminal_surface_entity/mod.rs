@@ -256,10 +256,6 @@ pub(in crate::features) fn terminal_surface_paint_count() -> u64 {
     TERMINAL_SURFACE_PAINT_COUNT.load(Ordering::Relaxed)
 }
 
-pub(in crate::features) fn full_shell_paint_count() -> u64 {
-    FULL_SHELL_PAINT_COUNT.load(Ordering::Relaxed)
-}
-
 /// Per-session GPUI entity that owns terminal grid paint state.
 ///
 /// Output frames notify this entity only; chrome (tabs/sidebars/status) stays

@@ -15,6 +15,7 @@ mod pending_focus;
 mod persistence_debounce;
 mod post_start_work;
 mod quick_switch_runtime;
+mod remote_refresh;
 mod runtime_state;
 mod state;
 mod status_clocks;

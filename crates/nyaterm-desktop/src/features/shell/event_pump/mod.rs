@@ -5,12 +5,11 @@ use gpui::{Context, Window};
 
 use crate::features::shell::event_pump::helpers::{
     PENDING_SESSION_STILL_CONNECTING_AFTER, PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW,
-    RUNTIME_IDLE_TICK_INTERVAL, RUNTIME_QUIET_TICK_INTERVAL, RuntimeDataPlaneDrain,
-    RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE, TITLE_DRAG_ACTIVE_HOLD,
-    TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision, connect_settle_active,
-    connect_settle_deadline, pending_session_status_message, remote_refresh_due,
-    runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
-    runtime_output_pressure_active_from_counts, runtime_tick_interval_for_pressure,
+    RuntimeDataPlaneDrain, RuntimeOutputPressureCounts, SLOW_DIAGNOSTIC_THROTTLE,
+    TITLE_DRAG_ACTIVE_HOLD, TRANSFER_AUTO_SYNC_CWD_INTERVAL_SECONDS, TerminalFrameApplyDecision,
+    connect_settle_active, connect_settle_deadline, pending_session_status_message,
+    remote_refresh_due, runtime_background_should_defer_terminal_frames,
+    runtime_data_plane_wake_delay, runtime_output_pressure_active_from_counts,
     runtime_ui_notify_allowed, terminal_cell_metrics_refresh_needed,
     terminal_frame_apply_should_defer, terminal_input_idle_remaining_delay,
     terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
@@ -42,7 +41,6 @@ pub(in crate::features) fn terminal_performance_pressure(
 }
 
 pub(super) use helpers::PENDING_SESSION_STATUS_INTERVAL;
-mod planes;
 mod session_events;
 
 use crate::features::terminal::terminal_runtime::{
@@ -495,13 +493,6 @@ impl NyaTermApp {
             .should_log(key, now, SLOW_DIAGNOSTIC_THROTTLE)
     }
 
-    pub(in crate::features) fn visible_terminal_layout_cache_stats(&self) -> (u64, u64) {
-        self.terminal
-            .visible_layout_cache_stats(self.visible_terminal_session_ids())
-    }
-
-    /// Put the screen into its locked state. Whether it is *time* to is decided by
-    /// `shell::idle_lock`, which owns the deadline.
     pub(in crate::features) fn lock_screen_for_idle(
         &mut self,
         window: &mut Window,
@@ -527,66 +518,6 @@ impl NyaTermApp {
         true
     }
 
-    pub(crate) fn mark_window_runtime_started(&mut self) {
-        self.shell.runtime.event_pump_started = true;
-    }
-
-    pub(crate) fn window_runtime_running(&self) -> bool {
-        self.shell.runtime.event_pump_started
-    }
-
-    pub(crate) fn window_runtime_tick_delay(&self) -> Duration {
-        // During recent viewport geometry churn (window resize/drag), prefer the
-        // idle cadence so full plane ticks do not stack on compositor paints.
-        let now = Instant::now();
-        if self.title_drag_active(now)
-            || window_geometry_churn_active(self.shell.viewport.last_change_at, now)
-        {
-            return RUNTIME_IDLE_TICK_INTERVAL;
-        }
-        if self.runtime_quiet_tick_allowed() {
-            return RUNTIME_QUIET_TICK_INTERVAL;
-        }
-        runtime_tick_interval_for_pressure(self.runtime_output_pressure_active())
-    }
-
-    pub(crate) fn window_runtime_tick_needs_update(&self, now: Instant) -> bool {
-        if !self.shell.runtime.event_pump_started {
-            return false;
-        }
-        if self
-            .shell
-            .runtime
-            .connect_settle_until
-            .is_some_and(|until| now >= until)
-        {
-            return true;
-        }
-        if self.title_drag_active(now) {
-            return true;
-        }
-
-        let output_pressure = self.runtime_output_pressure_active();
-        let connect_settle = connect_settle_active(self.shell.runtime.connect_settle_until, now);
-        if runtime_ui_notify_allowed(
-            false,
-            self.shell.runtime.pending_ui_notify,
-            false,
-            output_pressure || connect_settle,
-            self.shell.runtime.last_ui_notify_at,
-            now,
-        ) {
-            return true;
-        }
-        if !self.runtime_quiet_tick_allowed() {
-            return true;
-        }
-        // Nothing is left that the tick alone would notice: every remaining concern
-        // owns a clock or a wake. What keeps the tick alive is the idle plane's
-        // `drive_remote_auto_refresh`, which Phase 4 moves onto the panel entities.
-        false
-    }
-
     pub(in crate::features) fn visible_terminal_performance_recovery_due(&self) -> bool {
         self.terminal
             .visible_performance_recovery_due(self.visible_terminal_session_ids())
@@ -610,29 +541,6 @@ impl NyaTermApp {
             queued_terminal_frame_events: frame.event_count,
             queued_terminal_frame_output_bytes: frame.output_bytes,
         })
-    }
-
-    pub(in crate::features) fn runtime_quiet_tick_allowed(&self) -> bool {
-        !self.runtime_output_pressure_active()
-            && !self.session.start_has_pending()
-            && self.session.pending_events_are_empty()
-            && !self.session.event_bridge_has_pending_ui_work()
-            && !self.terminal_frame_backlog_active()
-            && !self.session.has_protocol_runtime_sessions()
-            && !self.session.prompt_has_pending_or_active_prompt()
-            && !self.ai.has_background_work()
-            && !((self.session.active_ssh_config().is_some()
-                && matches!(
-                    self.current_right_panel(),
-                    Some(
-                        NavItem::Stats
-                            | NavItem::GpuMonitor
-                            | NavItem::AscendNpuMonitor
-                            | NavItem::Processes
-                            | NavItem::Docker
-                    )
-                ))
-                || self.current_left_panel() == Some(NavItem::Transfers))
     }
 
     pub(in crate::features) fn drive_pending_session_status(&mut self) -> bool {
@@ -758,13 +666,13 @@ impl NyaTermApp {
         dirty
     }
 
-    fn header_status_needs_gpu(&self) -> bool {
+    pub(in crate::features) fn header_status_needs_gpu(&self) -> bool {
         self.settings.summary().ui_header_status_visible
             && HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode)
                 == HeaderStatusMode::Gpu
     }
 
-    fn header_status_needs_npu(&self) -> bool {
+    pub(in crate::features) fn header_status_needs_npu(&self) -> bool {
         self.settings.summary().ui_header_status_visible
             && HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode)
                 == HeaderStatusMode::Npu
@@ -814,8 +722,7 @@ mod tests {
     };
 
     use super::helpers::{
-        RUNTIME_QUIET_TICK_INTERVAL, SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET,
-        TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL,
+        SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET, TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL,
     };
 
     const SESSION_ID: &str = "event-pump-session";
@@ -831,8 +738,7 @@ mod tests {
         ))
     }
 
-    /// A workspace with one visible local session and nothing outstanding: the
-    /// state `runtime_quiet_tick_allowed` is meant to recognise.
+    /// A workspace with one visible local session and nothing outstanding.
     fn quiet_app_with_visible_session(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
         let root = unique_test_dir();
         let runtime = AppRuntime::from_parts_for_test(
@@ -868,45 +774,10 @@ mod tests {
                 .seed_session_view(SESSION_ID.to_string(), String::new(), "UTF-8");
             app.shell.show_workspace();
             // A fresh app starts with the terminal window layout restore
-            // outstanding, which is itself a reason to stay off the quiet cadence.
+            // outstanding; complete it so these tests start from a settled app.
             app.terminal.complete_terminal_windows_restore();
-            assert!(
-                app.runtime_quiet_tick_allowed(),
-                "fixture must start on the quiet cadence for these tests to mean anything"
-            );
         });
         app
-    }
-
-    /// The caret keeps its own cadence now, so the tick delay owes it nothing.
-    ///
-    /// This is the Phase 0 clamp's test, re-pointed. `1c3d9e85` had to make
-    /// `window_runtime_tick_delay` wake on the blink deadline, because a 500ms quiet
-    /// cadence against a 530ms interval stretched the visible half-period to roughly
-    /// 1000ms. With blink on its own timer the clamp is gone and the quiet cadence is
-    /// plainly the quiet cadence -- which is also what lets Phase 3 delete this
-    /// function without taking the caret with it. What the caret actually does is
-    /// asserted in `shell::cursor_blink`.
-    #[test]
-    fn the_quiet_tick_delay_no_longer_bends_around_the_blink_deadline() {
-        let mut cx = TestAppContext::single();
-        let app = quiet_app_with_visible_session(&mut cx);
-        cx.update_entity(&app, |app, _| {
-            let mut summary = app.settings.summary().clone();
-            summary.cursor_blink = true;
-            app.settings.replace_summary(summary);
-            assert!(!app.visible_terminal_session_ids().is_empty());
-
-            assert_eq!(
-                app.window_runtime_tick_delay(),
-                RUNTIME_QUIET_TICK_INTERVAL,
-                "blink has its own clock; the tick must not shorten its delay for it"
-            );
-
-            // Nor during connect settle, where the phase is held either way.
-            app.enter_connect_settle();
-            assert_eq!(app.window_runtime_tick_delay(), RUNTIME_QUIET_TICK_INTERVAL);
-        });
     }
 
     /// A pending credential-prompt detection must not be stranded by the task parking.
@@ -1079,28 +950,6 @@ mod tests {
                 app.cloud_sync.github_auth().message.as_deref(),
                 Some(rust_i18n::t!("settings.githubGistSlowDown").as_ref()),
                 "the polling event should already be applied"
-            );
-        });
-    }
-
-    /// The quiet cadence no longer has to know about persistence at all.
-    ///
-    /// `4644195a` had to add `ui_layout_persist_pending` to the gate because the idle
-    /// plane was the flag's only writer — the third time that defect shipped from
-    /// these three flags. Now they have their own debounce task, so a pending write
-    /// is *not* a reason to keep the runtime off the quiet cadence, and the gate has
-    /// one less thing to forget. The replacement coverage lives in
-    /// `shell::persistence_debounce`, which asserts the write actually happens with
-    /// no tick in the fixture at all.
-    #[test]
-    fn a_pending_ui_layout_save_no_longer_holds_the_quiet_cadence() {
-        let mut cx = TestAppContext::single();
-        let app = quiet_app_with_visible_session(&mut cx);
-        cx.update_entity(&app, |app, _| {
-            app.shell.mark_ui_layout_persist_pending();
-            assert!(
-                app.runtime_quiet_tick_allowed(),
-                "persistence has its own timer now; the gate must not be its keeper"
             );
         });
     }

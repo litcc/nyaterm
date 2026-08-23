@@ -269,19 +269,6 @@ fn terminal_should_apply_session_cwd(
 }
 
 impl NyaTermApp {
-    pub(in crate::features) fn active_terminal_scroll_offset(&self) -> usize {
-        if let Some(session_id) = self.session.active_id() {
-            self.terminal
-                .view
-                .views
-                .get(session_id)
-                .map(|view| view.scroll_offset)
-                .unwrap_or(0)
-        } else {
-            self.terminal.view.scroll_offset
-        }
-    }
-
     pub(in crate::features) fn active_terminal_display_offset(&self) -> usize {
         self.terminal_display_offset_for_session(self.session.active_id())
     }

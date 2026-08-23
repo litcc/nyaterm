@@ -254,10 +254,6 @@ impl SessionFeatureState {
         self.start.pending_status_source()
     }
 
-    pub(in crate::features) fn start_pending_count(&self) -> usize {
-        self.start.pending_count()
-    }
-
     pub(in crate::features) fn start_visible_tab_reservation_count(&self) -> usize {
         self.start.visible_tab_reservation_count()
     }
@@ -412,10 +408,6 @@ impl SessionFeatureState {
 
     pub(in crate::features) fn prompt_has_active_ssh_auth(&self) -> bool {
         self.prompts.has_active_ssh_auth()
-    }
-
-    pub(in crate::features) fn prompt_has_pending_or_active_prompt(&self) -> bool {
-        self.prompts.has_pending_or_active_prompt()
     }
 
     pub(in crate::features) fn prompt_focus_keyboard_interactive_response(
@@ -1648,15 +1640,6 @@ impl SessionPromptState {
             || self.active_agent_prompt.is_some()
     }
 
-    pub(in crate::features) fn has_pending_or_active_prompt(&self) -> bool {
-        self.has_active_ssh_auth()
-            || self.active_duplicate_prompt.is_some()
-            || self.host_key_prompts.has_pending()
-            || self.credential_prompts.has_pending()
-            || self.agent_prompts.has_pending()
-            || self.duplicate_prompts.has_pending()
-    }
-
     /// Install one wake across all four brokers, before any of them can be
     /// handed to a transport thread.
     fn new(otp_provider: Arc<NativeOtpProvider>, credential_focus: FocusHandle) -> Self {
@@ -2361,6 +2344,7 @@ impl SessionStartFeatureState {
         !self.failed.is_empty()
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn pending_count(&self) -> usize {
         self.pending.len()
     }

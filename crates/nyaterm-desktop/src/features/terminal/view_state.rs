@@ -167,22 +167,6 @@ impl TerminalFeatureState {
         }
     }
 
-    pub(in crate::features) fn visible_layout_cache_stats<'a>(
-        &self,
-        session_ids: impl IntoIterator<Item = &'a str>,
-    ) -> (u64, u64) {
-        session_ids
-            .into_iter()
-            .filter_map(|session_id| self.view.views.get(session_id))
-            .filter_map(|view| view.render_cache.layout_cache.lock().ok())
-            .fold((0u64, 0u64), |(hits, misses), cache| {
-                (
-                    hits.saturating_add(cache.hits),
-                    misses.saturating_add(cache.misses),
-                )
-            })
-    }
-
     pub(in crate::features) fn visible_performance_recovery_due<'a>(
         &self,
         session_ids: impl IntoIterator<Item = &'a str>,
