@@ -1776,8 +1776,10 @@ impl StatsPaneState {
 
     fn reset_for_session_switch(&mut self) {
         self.job.reset_for_session_switch();
-        self.data = None;
-        self.status = "start an SSH session to inspect remote stats".to_string();
+        // Through the touching methods, not the fields: a session switch changes the
+        // presentation, so it has to move the revision like any other mutation.
+        self.clear_data();
+        self.set_status("start an SSH session to inspect remote stats");
     }
 }
 
@@ -2849,5 +2851,20 @@ mod tests {
             after.0, previous.0,
             "apply_npu must not touch the stats pane"
         );
+        previous = after;
+
+        // A session switch clears every pane, so it must move every revision. This
+        // arm was missing when the counter first landed, and the stats pane silently
+        // did not bump: `reset_for_session_switch` wrote `data` and `status` directly
+        // rather than going through the methods that touch. A workspace-restore test
+        // caught it, one layer further out than it should have needed.
+        let after = expect_bump(
+            &mut state,
+            "reset_for_session_switch",
+            &|state: &mut RemoteOpsFeatureState| state.reset_for_session_switch(),
+        );
+        assert_ne!(after.0, previous.0, "the stats revision must advance");
+        assert_ne!(after.1, previous.1, "the GPU revision must advance");
+        assert_ne!(after.2, previous.2, "the NPU revision must advance");
     }
 }

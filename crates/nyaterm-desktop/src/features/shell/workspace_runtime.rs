@@ -454,6 +454,54 @@ impl NyaTermApp {
         self.shell.mark_window_layout_persist_dirty();
     }
 
+    /// Install a restored pane tree, activating a session in it if the current one is
+    /// not part of it. Reports whether the tree was actually installed.
+    ///
+    /// Split out of `try_restore_workspace_pane_layout`'s store callback so the
+    /// activation behaviour is testable without a store round trip.
+    ///
+    /// **Activation goes through `activate_session_id`, not
+    /// `session.select_active_session`.** This path used to call the latter directly,
+    /// which skipped the entire session-switch protocol: releasing the previous
+    /// session's RDP keys, caching its transfer browser, resetting terminal assist and
+    /// credential-autofill state, resetting the transfer queue interaction, and
+    /// resetting the remote runtime. The remote one is the visible bug -- restoring a
+    /// split layout that changed the active host left the previous host's stats, GPU,
+    /// NPU, process and Docker data on screen.
+    ///
+    /// Ordering matters and is deliberate: the pane root is inserted *before*
+    /// activating, because `activate_session_id` ends with
+    /// `sync_workspace_split_from_active_tab`, which derives the visible split from
+    /// `pane_roots`. Activating first would sync against a tree that does not contain
+    /// the restored root yet. Both that helper and `rebuild_session_tab_owners` are pure
+    /// derives, so the trailing sync here is idempotent and covers the branch where no
+    /// activation happens.
+    fn apply_restored_workspace_pane_layout(
+        &mut self,
+        restored: WorkspacePaneNode,
+        previously_active: Option<&str>,
+    ) -> bool {
+        if !restored.is_split() {
+            return false;
+        }
+        let Some(first) = restored.session_ids().into_iter().next() else {
+            return false;
+        };
+        let needs_activation =
+            previously_active.is_none_or(|active| !restored.contains_session(active));
+
+        self.shell
+            .workspace
+            .pane_roots
+            .insert(first.clone(), restored);
+        self.rebuild_session_tab_owners();
+        if needs_activation {
+            self.activate_session_id(&first);
+        }
+        self.sync_workspace_split_from_active_tab();
+        true
+    }
+
     pub(in crate::features) fn try_restore_workspace_pane_layout(
         &mut self,
         cx: &mut Context<Self>,
@@ -506,22 +554,8 @@ impl NyaTermApp {
                 let Some(restored) = WorkspacePaneNode::restore_layout(&layout, &ordered) else {
                     return;
                 };
-                if !restored.is_split() {
+                if !this.apply_restored_workspace_pane_layout(restored, active.as_deref()) {
                     return;
-                }
-                if let Some(active) = active {
-                    if !restored.contains_session(&active)
-                        && let Some(first) = restored.session_ids().into_iter().next()
-                    {
-                        this.session.select_active_session(first);
-                    }
-                } else if let Some(first) = restored.session_ids().into_iter().next() {
-                    this.session.select_active_session(first);
-                }
-                if let Some(first) = restored.session_ids().into_iter().next() {
-                    this.shell.workspace.pane_roots.insert(first, restored);
-                    this.rebuild_session_tab_owners();
-                    this.sync_workspace_split_from_active_tab();
                 }
                 this.shell.navigation.selected_nav = NavItem::Workspace;
                 this.shell.navigation.main_mode = MainMode::Workspace;
@@ -559,5 +593,144 @@ fn collapse_around_session(node: WorkspacePaneNode, session_id: &str) -> Option<
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod restore_activation_tests {
+    use gpui::{AppContext as _, TestAppContext};
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
+    use nyaterm_transport::{LocalSessionConfig, RemoteStats, SshSessionConfig};
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::models::{
+        SessionLaunchConfig, SessionRuntimeMetadata, WorkspacePaneNode, WorkspaceSplitDirection,
+    };
+
+    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        // A uuid rather than a clock reading: these tests run in parallel and
+        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
+        // which would share one config dir and so one settings database.
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-restore-activation-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    fn register_ssh_session(app: &mut NyaTermApp, session_id: &str) {
+        app.session.register_session_metadata(
+            session_id,
+            SessionRuntimeMetadata {
+                ssh_config: Some(SshSessionConfig::default()),
+                ssh_multiplex_key: None,
+                source_connection_id: None,
+                ai_execution_profile: AiExecutionProfile::Posix,
+                launch_config: SessionLaunchConfig::Local(LocalSessionConfig::default()),
+                disconnected: false,
+            },
+        );
+    }
+
+    fn split(first: &str, second: &str) -> WorkspacePaneNode {
+        WorkspacePaneNode::Split {
+            id: "split-1".to_string(),
+            direction: WorkspaceSplitDirection::Horizontal,
+            ratio_percent: WorkspacePaneNode::DEFAULT_RATIO_PERCENT,
+            first: Box::new(WorkspacePaneNode::leaf(first)),
+            second: Box::new(WorkspacePaneNode::leaf(second)),
+        }
+    }
+
+    /// Restoring a layout that switches hosts must clear the remote presentation.
+    ///
+    /// This path used to call `session.select_active_session` directly, so none of the
+    /// session-switch protocol ran -- the previous host stats, GPU and NPU data stayed on
+    /// screen under a different session. The revision assertions are the load-bearing
+    /// half: `reset_for_session_switch` clearing the data is not enough on its own,
+    /// because the snapshot flush keys on the revision moving.
+    #[test]
+    fn workspace_restore_switching_hosts_clears_the_remote_presentation() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            register_ssh_session(app, "host-a");
+            register_ssh_session(app, "host-b");
+            register_ssh_session(app, "host-c");
+            app.session.select_active_session("host-a".to_string());
+
+            // Host A data on screen.
+            app.remote_ops.apply_stats(RemoteStats::default());
+            app.remote_ops.set_stats_status("loaded stats for host-a");
+            assert!(app.remote_ops.stats_presentation().data.is_some());
+            let before = (
+                app.remote_ops.stats_revision(),
+                app.remote_ops.gpu_revision(),
+                app.remote_ops.npu_revision(),
+            );
+
+            // A layout that does not contain host A forces an activation.
+            let restored = split("host-b", "host-c");
+            assert!(app.apply_restored_workspace_pane_layout(restored, Some("host-a")));
+
+            assert_eq!(
+                app.session.active_id(),
+                Some("host-b"),
+                "the restored layout has to take the active session with it"
+            );
+            assert!(
+                app.remote_ops.stats_presentation().data.is_none(),
+                "host A stats must not survive a switch to host B"
+            );
+            let after = (
+                app.remote_ops.stats_revision(),
+                app.remote_ops.gpu_revision(),
+                app.remote_ops.npu_revision(),
+            );
+            assert_ne!(before.0, after.0, "the stats pane revision must advance");
+            assert_ne!(before.1, after.1, "the GPU pane revision must advance");
+            assert_ne!(before.2, after.2, "the NPU pane revision must advance");
+        });
+    }
+
+    /// A layout that already contains the active session is not a switch, so nothing
+    /// is reset. Without this the test above would pass for a version that reset the
+    /// remote runtime unconditionally, which would throw away live data on every
+    /// restore.
+    #[test]
+    fn workspace_restore_keeping_the_active_host_preserves_the_remote_presentation() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, _| {
+            register_ssh_session(app, "host-a");
+            register_ssh_session(app, "host-b");
+            app.session.select_active_session("host-a".to_string());
+            app.remote_ops.apply_stats(RemoteStats::default());
+            let before = app.remote_ops.stats_revision();
+
+            let restored = split("host-a", "host-b");
+            assert!(app.apply_restored_workspace_pane_layout(restored, Some("host-a")));
+
+            assert_eq!(app.session.active_id(), Some("host-a"));
+            assert!(
+                app.remote_ops.stats_presentation().data.is_some(),
+                "no host change means no reset"
+            );
+            assert_eq!(app.remote_ops.stats_revision(), before);
+        });
     }
 }
