@@ -5,7 +5,7 @@ use gpui::{
     prelude::*, px, rgb, rgba,
 };
 use nyaterm_core::{CloudConflictKind, CloudSyncSettings};
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
 use crate::features::{
     NyaTermApp, formatting::compact_id, formatting::configured_cloud_sync_provider,
@@ -50,6 +50,52 @@ impl NyaTermApp {
         .into_any_element()
     }
 
+    /// Whether the debounce control is live.
+    ///
+    /// Shared with the section so the option baked into the input at creation matches
+    /// what the section believes it drew.
+    fn cloud_sync_debounce_is_enabled(&self) -> bool {
+        let settings = self.cloud_sync.settings();
+        self.cloud_sync_form_enabled() && settings.enabled && settings.auto_push_on_change
+    }
+
+    /// Every cloud-sync input its section draws, with the value it seeds from.
+    fn cloud_sync_input_specs(&self) -> Vec<(CloudSyncInputField, String)> {
+        // Every field, not just the current provider's: switching provider reveals a
+        // different set, and that switch is not a boundary that rebuilds inputs. The
+        // value comes from the state's own field mapping, the read-only twin of the
+        // one editing uses, so the two cannot disagree about where a field lives.
+        CloudSyncInputField::ALL
+            .iter()
+            .map(|field| (*field, self.cloud_sync.input_value(*field)))
+            .collect()
+    }
+
+    pub(in crate::features) fn ensure_cloud_sync_settings_inputs(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        for (field, value) in self.cloud_sync_input_specs() {
+            self.ensure_text_input(
+                format!("cloud-sync.input.{}", field.input_key()),
+                &value,
+                secret_input_setup(field.is_secret()),
+                cx,
+            );
+        }
+        let debounce_enabled = self.cloud_sync_debounce_is_enabled();
+        let debounce = self.cloud_sync.settings().sync_debounce_seconds.to_string();
+        self.ensure_number_input(
+            "cloud-sync.number.debounce",
+            &debounce,
+            nyaterm_ui::NyaNumberInputOptions::default()
+                .range(1.0, 3_600.0)
+                .step(1.0)
+                .disabled(!debounce_enabled),
+            cx,
+        );
+    }
+
     pub(in crate::features) fn cloud_sync_input(
         &mut self,
         _id: &'static str,
@@ -60,13 +106,11 @@ impl NyaTermApp {
     ) -> AnyElement {
         let label: SharedString = label.into();
         let enabled = self.cloud_sync_form_enabled();
-        let setup = secret_input_setup(field.is_secret());
-        let input = self.text_input_field(
+        let _ = (value, cx);
+        let input = self.existing_text_input_field(
             format!("cloud-sync.input.{}", field.input_key()),
             label,
-            &value,
-            setup,
-            cx,
+            false,
         );
         // A settings row's control slot is content-sized, and a box with nothing
         // typed in it has no content — so the width comes from here.
@@ -228,7 +272,7 @@ impl NyaTermApp {
         let active_cloud_provider = configured_cloud_sync_provider(self.cloud_sync.settings());
         let form_enabled = self.cloud_sync_form_enabled();
         let auto_sync_enabled = form_enabled && self.cloud_sync.settings().enabled;
-        let debounce_enabled = auto_sync_enabled && self.cloud_sync.settings().auto_push_on_change;
+        let _debounce_enabled = auto_sync_enabled && self.cloud_sync.settings().auto_push_on_change;
         let validation_key = cloud_sync_validation_key(&self.cloud_sync.pending_settings());
         let validation_message = (form_enabled && self.cloud_sync.settings().enabled)
             .then(|| validation_key.map(|key| t!(key)))
@@ -557,19 +601,7 @@ impl NyaTermApp {
                         palette,
                         t!("settings.syncDebounceSeconds"),
                         Some(SharedString::from(t!("settings.syncDebounceSecondsDesc"))),
-                        self.number_input_box(
-                            "cloud-sync.number.debounce",
-                            self.cloud_sync
-                                .settings()
-                                .sync_debounce_seconds
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default()
-                                .range(1.0, 3_600.0)
-                                .step(1.0)
-                                .disabled(!debounce_enabled),
-                            cx,
-                        ),
+                        self.existing_number_input_box("cloud-sync.number.debounce"),
                     )),
             ))
             .child(settings_form_section(

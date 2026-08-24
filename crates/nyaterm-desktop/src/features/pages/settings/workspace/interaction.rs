@@ -3,9 +3,9 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, shell::TAB_MOUSE_ACTIONS, text_inputs::TextInputSetup};
+use crate::features::{NyaTermApp, shell::TAB_MOUSE_ACTIONS};
 use crate::theme::ThemePalette;
 
 use super::super::{settings_form_row, settings_form_section, settings_switch};
@@ -19,14 +19,8 @@ impl NyaTermApp {
         let encoding = self.settings.summary().interaction_default_encoding.clone();
         // Built before the form, which reads `self` throughout: creating the
         // box needs it mutably.
-        let word_separators_input = self
-            .text_input_box(
-                "settings.interaction.word-separators",
-                &self.settings.summary().interaction_word_separators.clone(),
-                TextInputSetup::default(),
-                cx,
-            )
-            .into_any_element();
+        let word_separators_input =
+            self.existing_text_input_box("settings.interaction.word-separators", false);
         let double_action = self
             .settings
             .summary()
@@ -42,15 +36,15 @@ impl NyaTermApp {
             .summary()
             .interaction_tab_right_click_action
             .clone();
-        let delay_ms = self
+        let _delay_ms = self
             .settings
             .summary()
             .interaction_duplicate_session_command_delay_ms;
-        let min_chars = self
+        let _min_chars = self
             .settings
             .summary()
             .interaction_command_suggestion_min_chars;
-        let max_chars = self
+        let _max_chars = self
             .settings
             .summary()
             .interaction_command_suggestion_max_chars;
@@ -161,13 +155,8 @@ impl NyaTermApp {
                             Some(SharedString::from(t!(
                                 "settings.commandSuggestionsMinCharsDesc"
                             ))),
-                            self.number_input_box(
+                            self.existing_number_input_box(
                                 "settings.number.command-suggestion-min-chars",
-                                min_chars.to_string().as_str(),
-                                NyaNumberInputOptions::default()
-                                    .range(1.0, max_chars as f64)
-                                    .step(1.0),
-                                cx,
                             ),
                         ))
                         .child(settings_form_row(
@@ -176,13 +165,8 @@ impl NyaTermApp {
                             Some(SharedString::from(t!(
                                 "settings.commandSuggestionsMaxCharsDesc"
                             ))),
-                            self.number_input_box(
+                            self.existing_number_input_box(
                                 "settings.number.command-suggestion-max-chars",
-                                max_chars.to_string().as_str(),
-                                NyaNumberInputOptions::default()
-                                    .range(min_chars as f64, 500.0)
-                                    .step(1.0),
-                                cx,
                             ),
                         ))
                     })
@@ -204,14 +188,8 @@ impl NyaTermApp {
                         Some(SharedString::from(t!(
                             "settings.duplicateSessionCommandDelayDesc"
                         ))),
-                        self.number_input_box(
+                        self.existing_number_input_box(
                             "settings.number.duplicate-session-command-delay",
-                            delay_ms.to_string().as_str(),
-                            NyaNumberInputOptions::default()
-                                .range(0.0, 60_000.0)
-                                .step(100.0)
-                                .suffix("ms"),
-                            cx,
                         ),
                     ))
                     .child(settings_form_row(

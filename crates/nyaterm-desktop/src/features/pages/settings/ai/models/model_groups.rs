@@ -7,7 +7,7 @@ use gpui::{
 use nyaterm_core::truncate_preview;
 use nyaterm_ui::NyaScrollable;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
 use super::super::super::settings_switch;
@@ -76,7 +76,6 @@ impl NyaTermApp {
 
         let collapsed = self.ai.settings_model_collapsed_groups().clone();
         let manual_drafts = self.ai.settings_manual_model_drafts().clone();
-        let manual_placeholder = t!("ai.manualModelPlaceholder");
         let manual_badge = t!("ai.manualModelBadge");
         let custom_provider = t!("ai.customProvider");
         let add_label = t!("common.add");
@@ -121,11 +120,9 @@ impl NyaTermApp {
                         this.handle_ai_manual_model_key_down(&group, event, window, cx);
                     }
                 });
-                let manual_input = self.text_input_box(
+                let manual_input = self.existing_text_input_box(
                     format!("ai.settings.manual-model.{group_key}"),
-                    &draft,
-                    TextInputSetup::placeholder(manual_placeholder.clone()),
-                    cx,
+                    false,
                 );
 
                 rows.child(

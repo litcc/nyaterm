@@ -8,8 +8,7 @@ use nyaterm_core::truncate_preview;
 
 use crate::features::settings::SearchEngineMenu;
 use crate::features::{
-    NyaTermApp, icons::SEARCH_ENGINE_ICON_IDS, icons::search_engine_icon,
-    text_inputs::TextInputSetup, view_widgets::mono_icon,
+    NyaTermApp, icons::SEARCH_ENGINE_ICON_IDS, icons::search_engine_icon, view_widgets::mono_icon,
 };
 use crate::theme::ThemePalette;
 use nyaterm_ui::NyaTooltip;
@@ -37,23 +36,13 @@ impl NyaTermApp {
         // Built before the row closure, which only has `&self`: the inputs are
         // entities the app has to create, and only the expanded row shows them.
         let mut editor_inputs = expanded_index.and_then(|index| {
-            let engine = engines.get(index)?.clone();
-            let name_placeholder = t!("settings.engineName");
+            let _engine = engines.get(index)?.clone();
+            let _name_placeholder = t!("settings.engineName");
             let name = self
-                .text_input_box(
-                    format!("settings.search-engine.{index}.name"),
-                    &engine.name,
-                    TextInputSetup::placeholder(name_placeholder),
-                    cx,
-                )
+                .existing_text_input_box(format!("settings.search-engine.{index}.name"), false)
                 .into_any_element();
             let url = self
-                .text_input_box(
-                    format!("settings.search-engine.{index}.url"),
-                    &engine.url_template,
-                    TextInputSetup::placeholder("https://google.com/search?q=%s"),
-                    cx,
-                )
+                .existing_text_input_box(format!("settings.search-engine.{index}.url"), false)
                 .into_any_element();
             Some((name, url))
         });

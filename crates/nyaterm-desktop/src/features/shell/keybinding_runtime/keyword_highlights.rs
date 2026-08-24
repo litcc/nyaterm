@@ -203,13 +203,73 @@ impl NyaTermApp {
         }
     }
 
+    /// Build the four inputs an opened keyword row draws.
+    ///
+    /// The row is the reveal boundary, so it is where they are created; the row's
+    /// render only looks them up.
+    pub(in crate::features) fn ensure_keyword_highlight_inputs(
+        &mut self,
+        rule_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(rule) = self
+            .settings
+            .keyword_config()
+            .rules
+            .iter()
+            .find(|rule| rule.id == rule_id)
+            .cloned()
+        else {
+            return;
+        };
+        for (field, value, setup) in [
+            (
+                KeywordHighlightEditorField::Name,
+                rule.name.clone(),
+                TextInputSetup::placeholder(t!("settings.keywordHighlightNewRule")),
+            ),
+            (
+                KeywordHighlightEditorField::Patterns,
+                rule.patterns.join("\n"),
+                TextInputSetup::multi_line(""),
+            ),
+            (
+                KeywordHighlightEditorField::ColorDark,
+                rule.color_dark.clone(),
+                TextInputSetup::placeholder("#rrggbb"),
+            ),
+            (
+                KeywordHighlightEditorField::ColorLight,
+                rule.color_light.clone(),
+                TextInputSetup::placeholder("#rrggbb"),
+            ),
+        ] {
+            let id = Self::keyword_highlight_text_input_id(rule_id, field);
+            self.ensure_text_input(id, &value, setup, cx);
+        }
+    }
+
     pub(in crate::features) fn expand_keyword_highlight_rule(
         &mut self,
         rule_id: String,
         cx: &mut Context<Self>,
     ) {
-        for forgotten_id in self.settings.toggle_keyword_highlight_expanded(rule_id) {
+        for forgotten_id in self
+            .settings
+            .toggle_keyword_highlight_expanded(rule_id.clone())
+        {
             self.forget_text_inputs(&keyword_highlight_text_input_prefix(&forgotten_id));
+        }
+        // Opening a row is what reveals its four fields, so it is what builds them.
+        // A row that just closed forgot its inputs above, and re-opening rebuilds.
+        if self
+            .settings
+            .keyword_highlight_presentation()
+            .expanded_id
+            .as_deref()
+            == Some(rule_id.as_str())
+        {
+            self.ensure_keyword_highlight_inputs(&rule_id, cx);
         }
         cx.notify();
     }

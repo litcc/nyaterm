@@ -16,6 +16,7 @@ use nyaterm_ui::{
 use super::super::NyaTermApp;
 
 mod ai;
+mod inputs;
 mod security;
 mod sync_backup;
 mod terminal;
@@ -311,6 +312,9 @@ impl NyaTermApp {
                     if tab == SettingsTab::Appearance {
                         this.ensure_appearance_font_options(cx);
                     }
+                    // Same boundary as the font catalog: activating a tab is what
+                    // builds the inputs it draws.
+                    this.ensure_settings_tab_inputs(tab, cx);
                     this.shell.set_settings_active_tab(tab);
                     cx.notify();
                 });

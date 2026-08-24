@@ -6,9 +6,8 @@ use gpui::{
     AnyElement, Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px,
     rgb,
 };
-use nyaterm_ui::NyaNumberInputOptions;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::models::{AiActionEditorField, AiActionListKind};
 use crate::widgets::small_button;
 
@@ -20,7 +19,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let file_size_mb =
+        let _file_size_mb =
             (self.ai.settings_config().max_ai_file_size_bytes / (1024 * 1024)).max(1);
         let terminal_actions = self.ai_action_editor(
             palette,
@@ -43,16 +42,35 @@ impl NyaTermApp {
                     palette,
                     format!("{} (MB)", t!("ai.maxAiFileSize")),
                     Some(SharedString::from(t!("ai.maxAiFileSizeDesc"))),
-                    self.number_input_box(
-                        "ai.number.file-size-mb",
-                        file_size_mb.to_string().as_str(),
-                        NyaNumberInputOptions::default().range(1.0, 256.0).step(1.0),
-                        cx,
-                    ),
+                    self.existing_number_input_box("ai.number.file-size-mb"),
                 ),
             ))
             .child(terminal_actions)
             .child(file_actions)
+    }
+
+    /// Every action-editor input the rules tab draws, with the value it seeds from.
+    ///
+    /// Both lists are drawn together, so both are built together.
+    pub(in crate::features) fn ai_action_input_specs(
+        &self,
+    ) -> Vec<(String, String, String, String)> {
+        let mut specs = Vec::new();
+        for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
+            let actions = match kind {
+                AiActionListKind::Terminal => self.ai.settings_config().terminal_ai_actions.clone(),
+                AiActionListKind::File => self.ai.settings_config().file_ai_actions.clone(),
+            };
+            for action in actions {
+                specs.push((
+                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Name),
+                    action.name.clone(),
+                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Prompt),
+                    action.prompt.clone(),
+                ));
+            }
+        }
+        specs
     }
 
     fn ai_action_editor(
@@ -69,7 +87,7 @@ impl NyaTermApp {
         let add_label = t!("common.add");
         let delete_label = t!("common.delete");
         let name_placeholder = t!("ai.actionName");
-        let prompt_placeholder = t!("ai.actionPrompt");
+        let _prompt_placeholder = t!("ai.actionPrompt");
 
         settings_form_section(
             palette,
@@ -123,18 +141,8 @@ impl NyaTermApp {
                             );
                         }
                     });
-                    let name_input = self.text_input_box(
-                        name_input_id,
-                        &action.name,
-                        TextInputSetup::placeholder(name_placeholder.clone()),
-                        cx,
-                    );
-                    let prompt_input = self.text_input_box(
-                        prompt_input_id,
-                        &action.prompt,
-                        TextInputSetup::multi_line(prompt_placeholder.clone()),
-                        cx,
-                    );
+                    let name_input = self.existing_text_input_box(name_input_id, false);
+                    let prompt_input = self.existing_text_input_box(prompt_input_id, true);
 
                     div()
                         .id(SharedString::from(format!(

@@ -5,7 +5,7 @@ use gpui::{
     Window, div, prelude::*, px, rgb, rgba, svg,
 };
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::models::KeywordHighlightEditorField;
 use crate::theme::ThemePalette;
 use nyaterm_ui::NyaSwitch;
@@ -265,15 +265,10 @@ impl NyaTermApp {
                                 let rule_id_delete = rule.id.clone();
                                 let patterns_value = rule.patterns.join("\n");
                                 let name_control = if is_open && keyword_highlighting_enabled {
-                                    let input = self.text_input_box(
-                                        Self::keyword_highlight_text_input_id(
+                                    let input = self.existing_text_input_box(Self::keyword_highlight_text_input_id(
                                             &rule.id,
                                             KeywordHighlightEditorField::Name,
-                                        ),
-                                        &rule.name,
-                                        TextInputSetup::placeholder(untitled_rule_label.clone()),
-                                        cx,
-                                    );
+                                        ), false);
                                     div()
                                         .id(SharedString::from(format!(
                                             "settings-keyword-rule-name-{}",
@@ -303,15 +298,10 @@ impl NyaTermApp {
                                     )
                                 };
                                 let patterns_control = if is_open && keyword_highlighting_enabled {
-                                    let input = self.text_input_box(
-                                        Self::keyword_highlight_text_input_id(
+                                    let input = self.existing_text_input_box(Self::keyword_highlight_text_input_id(
                                             &rule.id,
                                             KeywordHighlightEditorField::Patterns,
-                                        ),
-                                        &patterns_value,
-                                        TextInputSetup::multi_line(""),
-                                        cx,
-                                    );
+                                        ), true);
                                     div()
                                         .id(SharedString::from(format!(
                                             "settings-keyword-rule-patterns-{}",
@@ -341,15 +331,10 @@ impl NyaTermApp {
                                     )
                                 };
                                 let dark_control = if is_open && keyword_highlighting_enabled {
-                                    let input = self.text_input_box(
-                                        Self::keyword_highlight_text_input_id(
+                                    let input = self.existing_text_input_box(Self::keyword_highlight_text_input_id(
                                             &rule.id,
                                             KeywordHighlightEditorField::ColorDark,
-                                        ),
-                                        &rule.color_dark,
-                                        TextInputSetup::placeholder("#rrggbb"),
-                                        cx,
-                                    );
+                                        ), false);
                                     div()
                                         .id(SharedString::from(format!(
                                             "settings-keyword-rule-dark-{}",
@@ -380,15 +365,10 @@ impl NyaTermApp {
                                     )
                                 };
                                 let light_control = if is_open && keyword_highlighting_enabled {
-                                    let input = self.text_input_box(
-                                        Self::keyword_highlight_text_input_id(
+                                    let input = self.existing_text_input_box(Self::keyword_highlight_text_input_id(
                                             &rule.id,
                                             KeywordHighlightEditorField::ColorLight,
-                                        ),
-                                        &rule.color_light,
-                                        TextInputSetup::placeholder("#rrggbb"),
-                                        cx,
-                                    );
+                                        ), false);
                                     div()
                                         .id(SharedString::from(format!(
                                             "settings-keyword-rule-light-{}",

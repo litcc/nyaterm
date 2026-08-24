@@ -63,7 +63,18 @@ impl NyaTermApp {
         group_key: String,
         cx: &mut Context<Self>,
     ) {
-        self.ai.toggle_settings_model_group(group_key);
+        self.ai.toggle_settings_model_group(group_key.clone());
+        // Expanding a group reveals its manual-model field, so build it here rather
+        // than in the row's render.
+        let draft = self.ai.settings_manual_model_draft(&group_key);
+        self.ensure_text_input(
+            format!("ai.settings.manual-model.{group_key}"),
+            &draft,
+            crate::features::text_inputs::TextInputSetup::placeholder(
+                rust_i18n::t!("ai.manualModelPlaceholder").to_string(),
+            ),
+            cx,
+        );
         cx.notify();
     }
 

@@ -3,7 +3,7 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
 use super::super::{settings_form_row, settings_input_action_control};
@@ -16,12 +16,7 @@ impl NyaTermApp {
         let palette = self.theme_palette();
         let editor_type = self.settings.summary().transfer_editor_type.clone();
         let default_editor_input = self
-            .text_input_box(
-                "settings.transfer.default-editor",
-                &self.settings.summary().transfer_default_editor.clone(),
-                TextInputSetup::placeholder(t!("settings.defaultEditor")),
-                cx,
-            )
+            .existing_text_input_box("settings.transfer.default-editor", false)
             .into_any_element();
         let editor_type_label = if editor_type == "internal" {
             t!("settings.editorTypeInternal")

@@ -10,6 +10,53 @@ use crate::widgets::{small_button, status_pill};
 use super::settings_form_section;
 
 impl NyaTermApp {
+    /// Every translation input, with the value it seeds from.
+    ///
+    /// Shared by `ensure_translation_inputs` and the section render so the two cannot
+    /// disagree about which fields exist or what they hold.
+    fn translation_input_specs(&self) -> Vec<(TranslateInputField, String)> {
+        let (settings, secret_draft) = self.translation.settings_draft_snapshot();
+        vec![
+            (
+                TranslateInputField::DeeplApiKey,
+                secret_draft.deepl_api_key.clone(),
+            ),
+            (
+                TranslateInputField::BaiduAppId,
+                settings.baidu_app_id.clone(),
+            ),
+            (
+                TranslateInputField::BaiduAppKey,
+                secret_draft.baidu_app_key.clone(),
+            ),
+            (TranslateInputField::AliAppId, settings.ali_app_id.clone()),
+            (
+                TranslateInputField::AliAppKey,
+                secret_draft.ali_app_key.clone(),
+            ),
+            (
+                TranslateInputField::YoudaoAppId,
+                settings.youdao_app_id.clone(),
+            ),
+            (
+                TranslateInputField::YoudaoAppKey,
+                secret_draft.youdao_app_key.clone(),
+            ),
+        ]
+    }
+
+    pub(in crate::features) fn ensure_translation_inputs(&mut self, cx: &mut Context<Self>) {
+        for (field, value) in self.translation_input_specs() {
+            let setup = translation_input_setup(field);
+            self.ensure_text_input(
+                format!("translation.input.{}", field.input_key()),
+                &value,
+                setup,
+                cx,
+            );
+        }
+    }
+
     fn translation_input(
         &mut self,
         _id: &'static str,
@@ -19,20 +66,12 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label: SharedString = label.into();
-        // The text being translated is a paragraph, not a line.
-        let setup = if field == TranslateInputField::Text {
-            TextInputSetup::multi_line("")
-        } else {
-            secret_input_setup(field.is_secret())
-        };
-        self.text_input_field(
+        let _ = (value, cx);
+        self.existing_text_input_field(
             format!("translation.input.{}", field.input_key()),
             label,
-            &value,
-            setup,
-            cx,
+            field == TranslateInputField::Text,
         )
-        .into_any_element()
     }
 
     pub(in crate::features) fn translation_settings_section(
@@ -342,4 +381,13 @@ fn translation_target_languages() -> &'static [(&'static str, &'static str)] {
         ("th", "ไทย"),
         ("vi", "Tiếng Việt"),
     ]
+}
+
+/// The text being translated is a paragraph, not a line; the rest are secrets.
+fn translation_input_setup(field: TranslateInputField) -> TextInputSetup {
+    if field == TranslateInputField::Text {
+        TextInputSetup::multi_line("")
+    } else {
+        secret_input_setup(field.is_secret())
+    }
 }

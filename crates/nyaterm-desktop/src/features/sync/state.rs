@@ -442,6 +442,81 @@ impl CloudSyncFeatureState {
         self.github.auth = GithubGistAuthState::default();
     }
 
+    /// The value a given input holds, read-only.
+    ///
+    /// The mutable twin below drives editing; this one seeds an input when the tab
+    /// that draws it is activated, so the two cannot disagree about where a field
+    /// lives.
+    pub(in crate::features) fn input_value(&self, field: CloudSyncInputField) -> String {
+        match field {
+            CloudSyncInputField::RemoteRoot => self.settings.remote_root.clone(),
+            CloudSyncInputField::DeviceName => self.settings.device_name.clone(),
+            CloudSyncInputField::WebdavEndpoint => self.settings.webdav.endpoint.clone(),
+            CloudSyncInputField::WebdavRoot => self.settings.webdav.root.clone(),
+            CloudSyncInputField::WebdavUsername => self.settings.webdav.username.clone(),
+            CloudSyncInputField::WebdavPassword => self.secret_draft.webdav_password.clone(),
+            CloudSyncInputField::S3Endpoint => self.settings.s3.endpoint.clone(),
+            CloudSyncInputField::S3Bucket => self.settings.s3.bucket.clone(),
+            CloudSyncInputField::S3Region => self.settings.s3.region.clone(),
+            CloudSyncInputField::S3Root => self.settings.s3.root.clone(),
+            CloudSyncInputField::S3AccessKeyId => self.secret_draft.s3_access_key_id.clone(),
+            CloudSyncInputField::S3SecretAccessKey => {
+                self.secret_draft.s3_secret_access_key.clone()
+            }
+            CloudSyncInputField::S3SessionToken => self.secret_draft.s3_session_token.clone(),
+            CloudSyncInputField::GoogleDriveRoot => self.settings.google_drive.root.clone(),
+            CloudSyncInputField::GoogleDriveAccessToken => {
+                self.secret_draft.google_drive_access_token.clone()
+            }
+            CloudSyncInputField::GoogleDriveRefreshToken => {
+                self.secret_draft.google_drive_refresh_token.clone()
+            }
+            CloudSyncInputField::GoogleDriveClientId => self
+                .settings
+                .google_drive
+                .client_id
+                .clone()
+                .unwrap_or_default(),
+            CloudSyncInputField::GoogleDriveClientSecret => {
+                self.secret_draft.google_drive_client_secret.clone()
+            }
+            CloudSyncInputField::OneDriveRoot => self.settings.onedrive.root.clone(),
+            CloudSyncInputField::OneDriveAccessToken => {
+                self.secret_draft.onedrive_access_token.clone()
+            }
+            CloudSyncInputField::OneDriveRefreshToken => {
+                self.secret_draft.onedrive_refresh_token.clone()
+            }
+            CloudSyncInputField::OneDriveClientId => {
+                self.settings.onedrive.client_id.clone().unwrap_or_default()
+            }
+            CloudSyncInputField::OneDriveClientSecret => {
+                self.secret_draft.onedrive_client_secret.clone()
+            }
+            CloudSyncInputField::AliyunDriveRoot => self.settings.aliyun_drive.root.clone(),
+            CloudSyncInputField::AliyunDriveType => self.settings.aliyun_drive.drive_type.clone(),
+            CloudSyncInputField::AliyunDriveAccessToken => {
+                self.secret_draft.aliyun_drive_access_token.clone()
+            }
+            CloudSyncInputField::AliyunDriveRefreshToken => {
+                self.secret_draft.aliyun_drive_refresh_token.clone()
+            }
+            CloudSyncInputField::AliyunDriveClientId => self
+                .settings
+                .aliyun_drive
+                .client_id
+                .clone()
+                .unwrap_or_default(),
+            CloudSyncInputField::AliyunDriveClientSecret => {
+                self.secret_draft.aliyun_drive_client_secret.clone()
+            }
+            CloudSyncInputField::GiteeEndpoint => self.settings.gitee_snippet.api_endpoint.clone(),
+            CloudSyncInputField::GiteeGistId => self.settings.gitee_snippet.gist_id.clone(),
+            CloudSyncInputField::GiteeToken => self.secret_draft.gitee_token.clone(),
+            CloudSyncInputField::GithubGistId => self.settings.github_gist.gist_id.clone(),
+        }
+    }
+
     fn input_value_mut(&mut self) -> &mut String {
         match self.focused_field {
             CloudSyncInputField::RemoteRoot => &mut self.settings.remote_root,

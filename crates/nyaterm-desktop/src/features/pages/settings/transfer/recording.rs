@@ -2,9 +2,9 @@ use rust_i18n::t;
 
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px};
 use nyaterm_core::{ExistingFileBehavior, RecordingMode, RecordingRotationPolicy};
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
 use super::super::{
@@ -20,29 +20,19 @@ impl NyaTermApp {
         // Built before the form, which reads `self` throughout: creating the
         // box needs it mutably.
         let recording_path_input = self
-            .text_input_box(
-                "settings.recording.path",
-                &self.settings.summary().recording_path.clone(),
-                TextInputSetup::placeholder(t!("settings.recordingPath")),
-                cx,
-            )
+            .existing_text_input_box("settings.recording.path", false)
             .into_any_element();
         let recording_template_input = self
-            .text_input_box(
-                "settings.recording.path-template",
-                &self.settings.summary().recording_path_template.clone(),
-                TextInputSetup::placeholder(nyaterm_core::DEFAULT_RECORDING_PATH_TEMPLATE),
-                cx,
-            )
+            .existing_text_input_box("settings.recording.path-template", false)
             .into_any_element();
-        let memory_mib =
+        let _memory_mib =
             (self.settings.summary().recording_memory_limit_bytes / (1024 * 1024)).max(1);
         let rotation_value = match self.settings.summary().recording_rotation {
             RecordingRotationPolicy::Daily => "daily",
             RecordingRotationPolicy::Size { .. } => "size",
             RecordingRotationPolicy::Session => "session",
         };
-        let rotation_size_mib = match self.settings.summary().recording_rotation {
+        let _rotation_size_mib = match self.settings.summary().recording_rotation {
             RecordingRotationPolicy::Size { max_bytes } => (max_bytes / (1024 * 1024)).max(1),
             _ => 50,
         };
@@ -212,14 +202,8 @@ impl NyaTermApp {
                             Some(SharedString::from(t!(
                                 "settings.recordingRotationSizeLimitDesc"
                             ))),
-                            self.number_input_box(
+                            self.existing_number_input_box(
                                 "settings.number.recording-rotation-size",
-                                rotation_size_mib.to_string().as_str(),
-                                NyaNumberInputOptions::default()
-                                    .range(1.0, 102_400.0)
-                                    .step(1.0)
-                                    .suffix("MiB"),
-                                cx,
                             ),
                         ))
                     },
@@ -266,15 +250,7 @@ impl NyaTermApp {
                     palette,
                     t!("settings.recordingMemoryLimit"),
                     Some(SharedString::from(t!("settings.recordingMemoryLimitDesc"))),
-                    self.number_input_box(
-                        "settings.number.recording-memory-limit",
-                        memory_mib.to_string().as_str(),
-                        NyaNumberInputOptions::default()
-                            .range(1.0, 512.0)
-                            .step(1.0)
-                            .suffix("MiB"),
-                        cx,
-                    ),
+                    self.existing_number_input_box("settings.number.recording-memory-limit"),
                 )),
         ))
     }

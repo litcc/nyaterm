@@ -7,6 +7,9 @@ impl NyaTermApp {
     pub(in crate::features) fn open_page(&mut self, item: NavItem, cx: &mut Context<Self>) {
         if item == NavItem::Settings || item.opens_settings() {
             self.begin_settings_draft();
+            // Inputs are built where a tab is revealed, never in its render.
+            let tab = self.shell.navigation.settings.active_tab;
+            self.ensure_settings_tab_inputs(tab, cx);
             if let Some(group) = self
                 .shell
                 .navigation

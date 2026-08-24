@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use gpui::{Context, FontWeight, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
-use crate::features::{NyaTermApp, shell::gpui_code_font_family, text_inputs::TextInputSetup};
+use crate::features::{NyaTermApp, shell::gpui_code_font_family};
 use crate::shortcuts::{
     SHORTCUT_CATEGORIES, SHORTCUT_REGISTRY, ShortcutCategory, ShortcutDefinition,
     ShortcutNativeStatus, format_hotkey_for_display, shortcut_keys_for,
@@ -18,16 +18,14 @@ impl NyaTermApp {
     pub(in crate::features) fn keybindings_settings_section(
         &mut self,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> gpui::AnyElement {
         let palette = self.theme_palette();
         let overrides = self.settings.summary().keybindings.len();
         let search = self.settings.keybinding_presentation().search_draft;
-        let search_field = self.text_input(
-            "settings.keybindings.search",
-            &search,
-            TextInputSetup::placeholder(t!("settings.keybindingsSearch")),
-            cx,
-        );
+        let Some(search_field) = self.existing_text_input("settings.keybindings.search") else {
+            debug_assert!(false, "the keybindings search input was never built");
+            return div().into_any_element();
+        };
         let mut groups = div().flex().flex_col().gap_3();
         for category in SHORTCUT_CATEGORIES {
             groups = groups.child(self.shortcut_category_group(category, &search, cx));
@@ -76,6 +74,7 @@ impl NyaTermApp {
                     }),
             )
             .child(groups)
+            .into_any_element()
     }
 
     pub(in crate::features) fn shortcut_category_group(

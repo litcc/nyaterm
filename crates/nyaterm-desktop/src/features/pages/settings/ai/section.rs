@@ -2,7 +2,7 @@ use rust_i18n::t;
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::RiskLevel;
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::AiInputField;
@@ -22,19 +22,28 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label: SharedString = label.into();
-        let setup = if field == AiInputField::ApiKey {
-            TextInputSetup::masked()
-        } else {
-            TextInputSetup::default()
-        };
-        self.text_input_field(
-            format!("ai.input.{}", field.input_key()),
-            label,
-            &value,
-            setup,
-            cx,
-        )
-        .into_any_element()
+        let _ = (value, cx);
+        self.existing_text_input_field(format!("ai.input.{}", field.input_key()), label, false)
+    }
+
+    /// Every AI settings input its section draws, with the value it seeds from.
+    fn ai_input_specs(&self) -> Vec<(AiInputField, String)> {
+        let config = self.ai.settings_config();
+        vec![(
+            AiInputField::RequestUserAgent,
+            config.request_user_agent.clone(),
+        )]
+    }
+
+    pub(in crate::features) fn ensure_ai_settings_inputs(&mut self, cx: &mut Context<Self>) {
+        for (field, value) in self.ai_input_specs() {
+            let setup = if field == AiInputField::ApiKey {
+                TextInputSetup::masked()
+            } else {
+                TextInputSetup::default()
+            };
+            self.ensure_text_input(format!("ai.input.{}", field.input_key()), &value, setup, cx);
+        }
     }
 
     pub(in crate::features) fn ai_settings_section(
@@ -137,31 +146,13 @@ impl NyaTermApp {
                         palette,
                         t!("ai.contextLineLimit"),
                         None,
-                        self.number_input_box(
-                            "ai.number.context-line-limit",
-                            self.ai
-                                .settings_config()
-                                .context_line_limit
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default()
-                                .range(50.0, 500.0)
-                                .step(50.0),
-                            cx,
-                        ),
+                        self.existing_number_input_box("ai.number.context-line-limit"),
                     ))
                     .child(settings_form_row(
                         palette,
                         t!("ai.timeoutMs"),
                         None,
-                        self.number_input_box(
-                            "ai.number.timeout-ms",
-                            self.ai.settings_config().timeout_ms.to_string().as_str(),
-                            NyaNumberInputOptions::default()
-                                .range(5_000.0, 300_000.0)
-                                .step(1_000.0),
-                            cx,
-                        ),
+                        self.existing_number_input_box("ai.number.timeout-ms"),
                     )),
             ))
             .child(settings_form_section(
@@ -188,50 +179,19 @@ impl NyaTermApp {
                         palette,
                         t!("ai.agentMaxSteps"),
                         None,
-                        self.number_input_box(
-                            "ai.number.agent-steps",
-                            self.ai
-                                .settings_config()
-                                .max_agent_steps
-                                .unwrap_or(10)
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default().range(1.0, 50.0).step(1.0),
-                            cx,
-                        ),
+                        self.existing_number_input_box("ai.number.agent-steps"),
                     ))
                     .child(settings_form_row(
                         palette,
                         t!("ai.agentStepTimeout"),
                         None,
-                        self.number_input_box(
-                            "ai.number.agent-step-timeout-ms",
-                            self.ai
-                                .settings_config()
-                                .agent_step_timeout_ms
-                                .unwrap_or(30_000)
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default()
-                                .range(5_000.0, 120_000.0)
-                                .step(1_000.0),
-                            cx,
-                        ),
+                        self.existing_number_input_box("ai.number.agent-step-timeout-ms"),
                     ))
                     .child(settings_form_row(
                         palette,
                         t!("ai.terminalOutputLines"),
                         None,
-                        self.number_input_box(
-                            "ai.number.terminal-output-lines",
-                            self.ai
-                                .settings_config()
-                                .terminal_output_lines
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default().range(0.0, 100.0).step(1.0),
-                            cx,
-                        ),
+                        self.existing_number_input_box("ai.number.terminal-output-lines"),
                     ))
                     .child(ai_help_text(palette, t!("ai.agentMaxStepsDesc")))
                     .child(ai_help_text(palette, t!("ai.terminalOutputLinesDesc"))),

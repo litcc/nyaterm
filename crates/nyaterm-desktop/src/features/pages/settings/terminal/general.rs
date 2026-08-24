@@ -6,9 +6,9 @@ use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb,
 };
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::theme::ThemePalette;
 
 use super::super::{
@@ -22,20 +22,10 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let x11_display_input = self
-            .text_input_box(
-                "settings.terminal.x11-display",
-                &self.settings.summary().x11_display.clone(),
-                TextInputSetup::placeholder(t!("settings.x11DisplayPlaceholder")),
-                cx,
-            )
+            .existing_text_input_box("settings.terminal.x11-display", false)
             .into_any_element();
         let timestamp_format_input = self
-            .text_input_box(
-                "settings.terminal.timestamp-format",
-                &self.settings.summary().terminal_timestamp_format.clone(),
-                TextInputSetup::placeholder("[HH:mm:ss]"),
-                cx,
-            )
+            .existing_text_input_box("settings.terminal.timestamp-format", false)
             .into_any_element();
         let action_links_enabled = self.settings.summary().terminal_action_links_enabled;
 
@@ -55,18 +45,7 @@ impl NyaTermApp {
                         palette,
                         t!("settings.scrollbackLines"),
                         Some(SharedString::from(t!("settings.scrollbackLinesDesc"))),
-                        self.number_input_box(
-                            "settings.number.terminal-scrollback-lines",
-                            self.settings
-                                .summary()
-                                .terminal_scrollback_lines
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default()
-                                .range(100.0, 100_000.0)
-                                .step(100.0),
-                            cx,
-                        ),
+                        self.existing_number_input_box("settings.number.terminal-scrollback-lines"),
                     ))
                     .child(settings_form_row(
                         palette,
@@ -96,15 +75,8 @@ impl NyaTermApp {
                         palette,
                         t!("settings.keepAliveInterval"),
                         Some(SharedString::from(t!("settings.keepAliveIntervalDesc"))),
-                        self.number_input_box(
+                        self.existing_number_input_box(
                             "settings.number.terminal-keep-alive-interval",
-                            self.settings
-                                .summary()
-                                .terminal_keep_alive_interval
-                                .to_string()
-                                .as_str(),
-                            NyaNumberInputOptions::default().range(0.0, 600.0).step(5.0),
-                            cx,
                         ),
                     ))
                     .child(
@@ -261,16 +233,7 @@ impl NyaTermApp {
                             palette,
                             t!("settings.remoteStatsInterval"),
                             Some(SharedString::from(t!("settings.remoteStatsIntervalDesc"))),
-                            self.number_input_box(
-                                "settings.number.remote-stats-interval",
-                                self.settings
-                                    .summary()
-                                    .ui_remote_stats_interval
-                                    .to_string()
-                                    .as_str(),
-                                NyaNumberInputOptions::default().range(1.0, 60.0).step(1.0),
-                                cx,
-                            ),
+                            self.existing_number_input_box("settings.number.remote-stats-interval"),
                         ))
                     })
                     .child(settings_form_row(
@@ -291,16 +254,7 @@ impl NyaTermApp {
                             palette,
                             t!("settings.gpuMonitorInterval"),
                             Some(SharedString::from(t!("settings.gpuMonitorIntervalDesc"))),
-                            self.number_input_box(
-                                "settings.number.gpu-monitor-interval",
-                                self.settings
-                                    .summary()
-                                    .ui_gpu_monitor_interval
-                                    .to_string()
-                                    .as_str(),
-                                NyaNumberInputOptions::default().range(3.0, 120.0).step(1.0),
-                                cx,
-                            ),
+                            self.existing_number_input_box("settings.number.gpu-monitor-interval"),
                         ))
                     })
                     .child(settings_form_row(
@@ -323,15 +277,8 @@ impl NyaTermApp {
                             Some(SharedString::from(t!(
                                 "settings.ascendNpuMonitorIntervalDesc"
                             ))),
-                            self.number_input_box(
+                            self.existing_number_input_box(
                                 "settings.number.ascend-npu-monitor-interval",
-                                self.settings
-                                    .summary()
-                                    .ui_ascend_npu_monitor_interval
-                                    .to_string()
-                                    .as_str(),
-                                NyaNumberInputOptions::default().range(3.0, 120.0).step(1.0),
-                                cx,
                             ),
                         ))
                     })
@@ -355,15 +302,8 @@ impl NyaTermApp {
                             Some(SharedString::from(t!(
                                 "settings.processManagerIntervalDesc"
                             ))),
-                            self.number_input_box(
+                            self.existing_number_input_box(
                                 "settings.number.process-manager-interval",
-                                self.settings
-                                    .summary()
-                                    .ui_process_manager_interval
-                                    .to_string()
-                                    .as_str(),
-                                NyaNumberInputOptions::default().range(3.0, 120.0).step(1.0),
-                                cx,
                             ),
                         ))
                     })
@@ -385,15 +325,8 @@ impl NyaTermApp {
                             palette,
                             t!("settings.dockerManagerInterval"),
                             Some(SharedString::from(t!("settings.dockerManagerIntervalDesc"))),
-                            self.number_input_box(
+                            self.existing_number_input_box(
                                 "settings.number.docker-manager-interval",
-                                self.settings
-                                    .summary()
-                                    .ui_docker_manager_interval
-                                    .to_string()
-                                    .as_str(),
-                                NyaNumberInputOptions::default().range(3.0, 120.0).step(1.0),
-                                cx,
                             ),
                         ))
                     }),

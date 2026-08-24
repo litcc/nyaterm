@@ -3,7 +3,7 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup, transfers::duplicate_policy_label};
+use crate::features::{NyaTermApp, transfers::duplicate_policy_label};
 use crate::widgets::small_button;
 
 use super::super::{
@@ -17,12 +17,7 @@ impl NyaTermApp {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let download_path_input = self
-            .text_input_box(
-                "settings.transfer.download-path",
-                &self.settings.summary().transfer_download_path.clone(),
-                TextInputSetup::placeholder(t!("settings.downloadPath")),
-                cx,
-            )
+            .existing_text_input_box("settings.transfer.download-path", false)
             .into_any_element();
         let policy = self.transfer.duplicate_policy();
         let selected_policy = duplicate_policy_label(policy);

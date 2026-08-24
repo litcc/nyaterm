@@ -3,7 +3,7 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::theme::ThemePalette;
 use crate::widgets::small_button;
 
@@ -18,14 +18,11 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let query = self.ai.settings_model_query().to_string();
-        let query_placeholder = t!("ai.searchModels");
-        let search_field = self.text_input(
-            "ai.settings.model-search",
-            &query,
-            TextInputSetup::placeholder(query_placeholder),
-            cx,
-        );
+        let _query = self.ai.settings_model_query().to_string();
+        let Some(search_field) = self.existing_text_input("ai.settings.model-search") else {
+            debug_assert!(false, "the AI model search input was never built");
+            return div();
+        };
         let has_enabled_custom_credential = self
             .ai
             .settings_config()

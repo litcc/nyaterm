@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 
 use gpui::{
-    AppContext, BoxShadow, Context, Entity, InteractiveElement as _, IntoElement,
+    AnyElement, AppContext, BoxShadow, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement as _, Rgba, SharedString, Styled as _, Subscription, Window, div,
     prelude::FluentBuilder as _, px, rgb,
 };
@@ -132,12 +132,6 @@ impl NyaTermApp {
         true
     }
 
-    /// The input for `id`, created on first use and seeded with `seed`.
-    ///
-    /// After that the field owns its own text: `seed` is ignored, because the
-    /// field is the source of truth for what is being typed. Use
-    /// [`Self::reset_text_input`] to push a value back down, and
-    /// [`Self::forget_text_inputs`] when the thing being edited goes away.
     /// An existing field, without creating one.
     ///
     /// `text_input` takes `&mut self` because it builds the entity on first use, so
@@ -151,6 +145,12 @@ impl NyaTermApp {
         self.text_inputs.fields.get(id.as_ref()).cloned()
     }
 
+    /// The input for `id`, created on first use and seeded with `seed`.
+    ///
+    /// After that the field owns its own text: `seed` is ignored, because the
+    /// field is the source of truth for what is being typed. Use
+    /// [`Self::reset_text_input`] to push a value back down, and
+    /// [`Self::forget_text_inputs`] when the thing being edited goes away.
     pub(in crate::features) fn text_input(
         &mut self,
         id: impl Into<SharedString>,
@@ -286,6 +286,120 @@ impl NyaTermApp {
             .number_subscriptions
             .insert(id, subscription);
         entity
+    }
+
+    /// Build an input for `id` if it does not exist yet, discarding the handle.
+    ///
+    /// The counterpart to the `existing_*` lookups below. Creating an input is a
+    /// mutation -- it builds the entity and its change subscription -- so a render
+    /// that calls `text_input` or `number_input` writes to authoritative state on the
+    /// first frame that shows the field. These let the boundary that reveals a field
+    /// build it, and leave render able only to look one up.
+    ///
+    /// Note that the options are only ever honoured here: `number_input` returns early
+    /// for an id it already has, so a range or a disabled flag derived from state was
+    /// already frozen at first creation. Moving creation to an activation boundary
+    /// keeps that behaviour rather than changing it.
+    pub(in crate::features) fn ensure_number_input(
+        &mut self,
+        id: impl Into<SharedString>,
+        seed: &str,
+        setup: NyaNumberInputOptions,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.number_input(id, seed, setup, cx);
+    }
+
+    pub(in crate::features) fn ensure_text_input(
+        &mut self,
+        id: impl Into<SharedString>,
+        seed: &str,
+        setup: TextInputSetup,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.text_input(id, seed, setup, cx);
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn text_input_count_for_test(&self) -> usize {
+        self.text_inputs.fields.len() + self.text_inputs.number_fields.len()
+    }
+
+    pub(in crate::features) fn existing_number_input(
+        &self,
+        id: impl AsRef<str>,
+    ) -> Option<Entity<NyaNumberInputState>> {
+        self.text_inputs.number_fields.get(id.as_ref()).cloned()
+    }
+
+    /// The number input for `id`, which an activation boundary must already have built.
+    ///
+    /// Renders nothing if it is missing rather than creating one. That would be a bug
+    /// -- an input a tab draws but its ensure list forgot -- so it trips a debug
+    /// assertion, and the `every_settings_tab_builds_the_inputs_it_draws` test drives
+    /// every tab to catch it before a release build ever sees a gap.
+    pub(in crate::features) fn existing_number_input_box(
+        &self,
+        id: impl Into<SharedString>,
+    ) -> AnyElement {
+        let id = id.into();
+        let palette = self.theme_palette();
+        match self.existing_number_input(&id) {
+            Some(field) => number_input_box_from_state(id, palette, field).into_any_element(),
+            None => {
+                debug_assert!(false, "settings number input {id} was never built");
+                div().into_any_element()
+            }
+        }
+    }
+
+    pub(in crate::features) fn existing_text_input_box(
+        &self,
+        id: impl Into<SharedString>,
+        multi_line: bool,
+    ) -> AnyElement {
+        let id = id.into();
+        match self.existing_text_input(&id) {
+            Some(field) => {
+                let shell = NyaInputShell::new(id, &field);
+                if multi_line {
+                    shell.multi_line().into_any_element()
+                } else {
+                    shell.into_any_element()
+                }
+            }
+            None => {
+                debug_assert!(false, "settings text input {id} was never built");
+                div().into_any_element()
+            }
+        }
+    }
+
+    /// A caption above the input for `id`, looked up rather than built.
+    pub(in crate::features) fn existing_text_input_field(
+        &self,
+        id: impl Into<SharedString>,
+        caption: impl Into<SharedString>,
+        multi_line: bool,
+    ) -> AnyElement {
+        let palette = self.theme_palette();
+        let caption = caption.into();
+        let input = self.existing_text_input_box(id, multi_line);
+        div()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .when(!caption.is_empty(), |this| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(palette.text_muted))
+                        .child(caption),
+                )
+            })
+            .child(input)
+            .into_any_element()
     }
 
     pub(in crate::features) fn number_input_box<I: Into<SharedString>>(

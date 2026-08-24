@@ -1,9 +1,9 @@
 use rust_i18n::t;
 
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px, rgb};
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use nyaterm_ui::NyaTooltip;
 
 use super::{
@@ -20,16 +20,11 @@ impl NyaTermApp {
         let master_password_draft = master_password.draft.to_string();
         let master_password_enabled = master_password.enabled;
         let master_password_input = self
-            .text_input_box(
-                "settings.security.master-password",
-                &master_password_draft,
-                TextInputSetup::masked(),
-                cx,
-            )
+            .existing_text_input_box("settings.security.master-password", false)
             .into_any_element();
         let master_password_switch_enabled = !self.cloud_sync.settings().enabled;
         let has_stored_master_password = self.settings.summary().has_master_password;
-        let idle_minutes = self.settings.summary().idle_lock_minutes;
+        let _idle_minutes = self.settings.summary().idle_lock_minutes;
         let host_key_policy = match self.settings.summary().host_key_policy.as_str() {
             "strict" | "reject" => "strict",
             "accept" | "accept_new" => "accept",
@@ -52,7 +47,7 @@ impl NyaTermApp {
         let screen_lock_desc = t!("settings.enableScreenLockDesc");
         let idle_lock_label = t!("settings.idleLockMinutes");
         let idle_lock_desc = t!("settings.idleLockMinutesDesc");
-        let minutes_label = t!("common.minutes");
+        let _minutes_label = t!("common.minutes");
         let host_key_label = t!("settings.hostKeyPolicy");
         let host_key_desc = t!("settings.hostKeyPolicyDesc");
 
@@ -139,15 +134,7 @@ impl NyaTermApp {
                             palette,
                             idle_lock_label,
                             Some(SharedString::from(idle_lock_desc)),
-                            self.number_input_box(
-                                "settings.number.idle-lock-minutes",
-                                idle_minutes.to_string().as_str(),
-                                NyaNumberInputOptions::default()
-                                    .range(0.0, 1440.0)
-                                    .step(1.0)
-                                    .suffix(minutes_label),
-                                cx,
-                            ),
+                            self.existing_number_input_box("settings.number.idle-lock-minutes"),
                         ))
                     }),
             ))

@@ -1,9 +1,8 @@
 use rust_i18n::t;
 
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
-use nyaterm_ui::NyaNumberInputOptions;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 
 use super::super::{
     settings_form_row, settings_form_section, settings_input_control, settings_switch,
@@ -15,18 +14,13 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let permissions = self
+        let _permissions = self
             .settings
             .summary()
             .transfer_default_file_permissions
             .clone();
         let permissions_input = self
-            .text_input_box(
-                "settings.transfer.default-permissions",
-                &permissions,
-                TextInputSetup::placeholder("644"),
-                cx,
-            )
+            .existing_text_input_box("settings.transfer.default-permissions", false)
             .into_any_element();
 
         div().flex().flex_col().gap_3().child(settings_form_section(
@@ -43,61 +37,25 @@ impl NyaTermApp {
                     Some(SharedString::from(t!(
                         "settings.downloadConcurrentTasksDesc"
                     ))),
-                    self.number_input_box(
-                        "settings.number.transfer-download-threads",
-                        self.settings
-                            .summary()
-                            .transfer_download_threads
-                            .to_string()
-                            .as_str(),
-                        NyaNumberInputOptions::default().range(1.0, 10.0).step(1.0),
-                        cx,
-                    ),
+                    self.existing_number_input_box("settings.number.transfer-download-threads"),
                 ))
                 .child(settings_form_row(
                     palette,
                     t!("settings.uploadConcurrentTasks"),
                     Some(SharedString::from(t!("settings.uploadConcurrentTasksDesc"))),
-                    self.number_input_box(
-                        "settings.number.transfer-upload-threads",
-                        self.settings
-                            .summary()
-                            .transfer_upload_threads
-                            .to_string()
-                            .as_str(),
-                        NyaNumberInputOptions::default().range(1.0, 10.0).step(1.0),
-                        cx,
-                    ),
+                    self.existing_number_input_box("settings.number.transfer-upload-threads"),
                 ))
                 .child(settings_form_row(
                     palette,
                     t!("settings.maxTransferRetries"),
                     Some(SharedString::from(t!("settings.maxTransferRetriesDesc"))),
-                    self.number_input_box(
-                        "settings.number.transfer-max-retries",
-                        self.settings
-                            .summary()
-                            .transfer_max_retries
-                            .to_string()
-                            .as_str(),
-                        NyaNumberInputOptions::default().range(0.0, 10.0).step(1.0),
-                        cx,
-                    ),
+                    self.existing_number_input_box("settings.number.transfer-max-retries"),
                 ))
                 .child(settings_form_row(
                     palette,
                     t!("settings.transferBufferSize"),
                     Some(SharedString::from(t!("settings.transferBufferSizeDesc"))),
-                    self.number_input_box(
-                        "settings.number.transfer-buffer-size",
-                        self.settings
-                            .summary()
-                            .transfer_buffer_size
-                            .to_string()
-                            .as_str(),
-                        NyaNumberInputOptions::default().range(8.0, 256.0).step(8.0),
-                        cx,
-                    ),
+                    self.existing_number_input_box("settings.number.transfer-buffer-size"),
                 ))
                 .child(settings_form_row(
                     palette,

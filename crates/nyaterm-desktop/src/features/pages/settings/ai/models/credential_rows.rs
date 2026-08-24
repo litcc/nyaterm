@@ -4,7 +4,7 @@ use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb,
 };
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
 use super::super::super::settings_switch;
@@ -16,8 +16,8 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let credential_secret_drafts = self.ai.settings_credential_secret_drafts().clone();
-        let profile_name_label = t!("ai.profileName");
-        let base_url_label = t!("ai.baseUrl");
+        let _profile_name_label = t!("ai.profileName");
+        let _base_url_label = t!("ai.baseUrl");
         let delete_label = t!("common.delete");
         let save_label = t!("common.save");
 
@@ -44,32 +44,23 @@ impl NyaTermApp {
                         | "zai"
                         | "groq"
                 );
-                let secret_draft = credential_secret_drafts
+                let _secret_draft = credential_secret_drafts
                     .get(&credential.id)
                     .cloned()
                     .unwrap_or_default();
                 let name_input = self
-                    .text_input_box(
-                        format!("ai.credential.{}.name", credential.id),
-                        &credential.name,
-                        TextInputSetup::placeholder(profile_name_label.clone()),
-                        cx,
-                    )
+                    .existing_text_input_box(format!("ai.credential.{}.name", credential.id), false)
                     .into_any_element();
                 let base_url_input = self
-                    .text_input_box(
+                    .existing_text_input_box(
                         format!("ai.credential.{}.base-url", credential.id),
-                        credential.base_url.as_deref().unwrap_or(""),
-                        TextInputSetup::placeholder(base_url_label.clone()),
-                        cx,
+                        false,
                     )
                     .into_any_element();
                 let api_key_input = self
-                    .text_input_box(
+                    .existing_text_input_box(
                         format!("ai.credential.{}.api-key", credential.id),
-                        &secret_draft,
-                        TextInputSetup::masked(),
-                        cx,
+                        false,
                     )
                     .into_any_element();
 

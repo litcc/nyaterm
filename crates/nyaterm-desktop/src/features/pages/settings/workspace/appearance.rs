@@ -4,7 +4,7 @@ use gpui::{
     App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
     rgb, rgba, svg,
 };
-use nyaterm_ui::{NyaNumberInputOptions, NyaSelectOption};
+use nyaterm_ui::NyaSelectOption;
 
 use crate::features::{NyaTermApp, selects::FOLLOW_UI_THEME_VALUE, shell::appearance_font_stack};
 use crate::theme::{APPEARANCE_THEME_IDS, ThemePalette, appearance_theme_label};
@@ -307,18 +307,13 @@ impl NyaTermApp {
                 }));
 
         if terminal {
-            let font_size_label = self.settings.summary().terminal_font_size.to_string();
+            let _font_size_label = self.settings.summary().terminal_font_size.to_string();
             content = content
                 .child(appearance_settings_field(
                     palette,
                     t!("settings.fontSize"),
                     None,
-                    self.number_input_box(
-                        "appearance.number.terminal-font-size",
-                        font_size_label.as_str(),
-                        NyaNumberInputOptions::default().range(8.0, 72.0).step(1.0),
-                        cx,
-                    ),
+                    self.existing_number_input_box("appearance.number.terminal-font-size"),
                 ))
                 .child(appearance_settings_field(
                     palette,
@@ -335,17 +330,12 @@ impl NyaTermApp {
                     self.appearance_font_weight_select(true, cx),
                 ));
         } else {
-            let font_size_label = self.settings.summary().ui_font_size.to_string();
+            let _font_size_label = self.settings.summary().ui_font_size.to_string();
             content = content.child(appearance_settings_field(
                 palette,
                 t!("settings.uiFontSize"),
                 None,
-                self.number_input_box(
-                    "appearance.number.ui-font-size",
-                    font_size_label.as_str(),
-                    NyaNumberInputOptions::default().range(12.0, 24.0).step(1.0),
-                    cx,
-                ),
+                self.existing_number_input_box("appearance.number.ui-font-size"),
             ));
         }
 
