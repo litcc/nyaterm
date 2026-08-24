@@ -4,59 +4,37 @@ use gpui::{
     Context, InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement as _, SharedString,
     StatefulInteractiveElement as _, Styled as _, div, px, rgb,
 };
-use nyaterm_core::truncate_preview;
 
-use crate::features::{
-    NyaTermApp, shell::gpui_code_font_family, view_widgets::panel_header_with_actions,
-};
-use crate::models::{TransferJobState, TransferJobStatus};
+use crate::features::{shell::gpui_code_font_family, view_widgets::panel_header_with_actions};
 use nyaterm_ui::{NyaScrollable, NyaTooltip};
 
 use super::helpers::{TransferJobRowLabels, queue_action_button, transfer_job_row};
+use super::panel::TransferPanel;
 
-impl NyaTermApp {
-    pub(super) fn transfer_queue_view(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let active_session_id = self.session.active_id();
-        let visible_jobs = self
-            .transfer
-            .transfer_jobs()
-            .iter()
-            .filter(|job| job.is_visible_for_session(active_session_id))
-            .cloned()
-            .collect::<Vec<_>>();
+/// The transfer queue. Filtering and ordering happened here once, each with a deep
+/// copy of every job; both now arrive already done in the snapshot.
+pub(in crate::features::pages::transfers) fn transfer_queue_view(
+    panel: &TransferPanel,
+    cx: &mut Context<TransferPanel>,
+) -> impl IntoElement {
+    let snapshot = panel
+        .snapshot()
+        .expect("the caller returns early without a snapshot");
+    let chrome = snapshot.chrome;
+    let palette = chrome.palette;
+    let queue = &snapshot.queue;
+    let has_running = queue.has_running;
+    let has_paused = queue.has_paused;
+    let has_active = queue.has_active;
+    let has_completed = queue.has_completed;
+    let has_stopped = queue.has_stopped;
+    let download_path = queue.download_path.clone();
+    let selected_remote_path = snapshot.browser.selected_remote_path.clone();
+    let selected_job_id = queue.selected_job_id.clone();
 
-        let has_running = visible_jobs
-            .iter()
-            .any(|job| job.status == TransferJobStatus::Running && job.control.is_some());
-        let has_paused = visible_jobs
-            .iter()
-            .any(|job| job.status == TransferJobStatus::Paused && job.control.is_some());
-        let has_active = visible_jobs.iter().any(|job| {
-            job.control.is_some()
-                && matches!(
-                    job.status,
-                    TransferJobStatus::Running | TransferJobStatus::Paused
-                )
-        });
-        let has_completed = visible_jobs
-            .iter()
-            .any(|job| job.status == TransferJobStatus::Completed);
-        let has_stopped = visible_jobs.iter().any(|job| {
-            !matches!(
-                job.status,
-                TransferJobStatus::Running
-                    | TransferJobStatus::Paused
-                    | TransferJobStatus::Cancelling
-            )
-        });
-        let download_path = self
-            .resolved_transfer_download_dir()
-            .map(|path| truncate_preview(&path.display().to_string(), 64))
-            .unwrap_or_else(|| format!("{}: -", t!("fileTransfer.downloadPath")));
-
+    {
         let mut list = div().flex().flex_col();
-        if self.session.active_id().is_none() {
+        if !snapshot.has_session {
             list = list.child(
                 div()
                     .flex()
@@ -68,7 +46,7 @@ impl NyaTermApp {
                     .text_color(rgb(palette.text_dimmed))
                     .child(t!("fileExplorer.connectToSession")),
             );
-        } else if visible_jobs.is_empty() {
+        } else if queue.rows.is_empty() {
             list = list.child(
                 div()
                     .flex()
@@ -92,7 +70,7 @@ impl NyaTermApp {
                 streaming: t!("fileTransfer.streaming").to_string(),
                 unknown_size: t!("fileTransfer.unknownSize").to_string(),
             };
-            for job in ordered_transfer_jobs(&visible_jobs) {
+            for job in queue.rows.iter().cloned() {
                 let directory_progress = job.progress.as_ref().and_then(|progress| {
                     progress
                         .item_count_completed
@@ -111,8 +89,8 @@ impl NyaTermApp {
                     job,
                     directory_progress,
                     row_labels.clone(),
-                    self.transfer.browser_view().selected_remote_path.clone(),
-                    self.transfer.selected_transfer_job_id().map(str::to_string),
+                    selected_remote_path.clone(),
+                    selected_job_id.clone(),
                     cx,
                 ));
             }
@@ -123,20 +101,24 @@ impl NyaTermApp {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .bg(self.shell_transparent_color(palette.surface))
-            .track_focus(self.transfer.queue_focus())
-            .on_click(cx.listener(|this, _, window, cx| {
-                window.focus(this.transfer.queue_focus(), cx);
-                cx.notify();
+            .bg(chrome.transparent_surface)
+            .track_focus(&queue.focus)
+            .on_click(cx.listener(|panel, _, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    window.focus(this.transfer.queue_focus(), cx);
+                    cx.notify();
+                })
             }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                this.handle_transfer_queue_key_down(event, window, cx);
+            .on_key_down(cx.listener(|panel, event: &KeyDownEvent, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.handle_transfer_queue_key_down(event, window, cx);
+                })
             }))
             .child(panel_header_with_actions(
                 t!("panel.fileTransfer"),
                 "",
                 palette,
-                self.shell_transparent_color(palette.section_header),
+                chrome.transparent_section_header,
                 Some(
                     div()
                         .flex()
@@ -148,8 +130,10 @@ impl NyaTermApp {
                             "icons/transfer/pause.svg",
                             t!("fileTransfer.pauseAll"),
                             has_running,
-                            cx.listener(|this, _, _, cx| {
-                                this.pause_all_transfer_jobs(cx);
+                            cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.pause_all_transfer_jobs(cx);
+                                })
                             }),
                         ))
                         .child(queue_action_button(
@@ -158,8 +142,10 @@ impl NyaTermApp {
                             "icons/transfer/play.svg",
                             t!("fileTransfer.resumeAll"),
                             has_paused,
-                            cx.listener(|this, _, _, cx| {
-                                this.resume_all_transfer_jobs(cx);
+                            cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.resume_all_transfer_jobs(cx);
+                                })
                             }),
                         ))
                         .child(queue_action_button(
@@ -168,8 +154,10 @@ impl NyaTermApp {
                             "icons/transfer/stop.svg",
                             t!("fileTransfer.cancelAll"),
                             has_active,
-                            cx.listener(|this, _, _, cx| {
-                                this.cancel_all_transfer_jobs(cx);
+                            cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.cancel_all_transfer_jobs(cx);
+                                })
                             }),
                         ))
                         .child(queue_action_button(
@@ -178,8 +166,10 @@ impl NyaTermApp {
                             "icons/transfer/playlist-remove.svg",
                             t!("fileTransfer.clearCompleted"),
                             has_completed,
-                            cx.listener(|this, _, _, cx| {
-                                this.clear_completed_transfer_jobs(cx);
+                            cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.clear_completed_transfer_jobs(cx);
+                                })
                             }),
                         ))
                         .child(queue_action_button(
@@ -188,8 +178,10 @@ impl NyaTermApp {
                             "icons/transfer/clear-all.svg",
                             t!("fileTransfer.clearAll"),
                             has_stopped,
-                            cx.listener(|this, _, _, cx| {
-                                this.clear_stopped_transfer_jobs(cx);
+                            cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.clear_stopped_transfer_jobs(cx);
+                                })
                             }),
                         ))
                         .into_any_element(),
@@ -209,7 +201,7 @@ impl NyaTermApp {
                     .px_2()
                     .border_t_1()
                     .border_color(rgb(palette.border))
-                    .bg(self.shell_transparent_color(palette.surface))
+                    .bg(chrome.transparent_surface)
                     .flex()
                     .items_center()
                     .gap_1()
@@ -228,30 +220,12 @@ impl NyaTermApp {
                                 move |window, cx| NyaTooltip::new(label.clone()).build(window, cx)
                             })
                             .child(download_path)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.reveal_transfer_download_dir(cx);
+                            .on_click(cx.listener(|panel, _, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.reveal_transfer_download_dir(cx);
+                                })
                             })),
                     ),
             )
-    }
-}
-
-fn ordered_transfer_jobs(jobs: &[TransferJobState]) -> Vec<TransferJobState> {
-    let mut indexed_jobs = jobs.iter().cloned().enumerate().collect::<Vec<_>>();
-    indexed_jobs.sort_by(|(left_index, left), (right_index, right)| {
-        transfer_job_display_rank(left.status)
-            .cmp(&transfer_job_display_rank(right.status))
-            .then_with(|| right_index.cmp(left_index))
-    });
-    indexed_jobs.into_iter().map(|(_, job)| job).collect()
-}
-
-fn transfer_job_display_rank(status: TransferJobStatus) -> u8 {
-    match status {
-        TransferJobStatus::Running | TransferJobStatus::Cancelling => 0,
-        TransferJobStatus::Paused => 1,
-        TransferJobStatus::Cancelled | TransferJobStatus::Completed | TransferJobStatus::Failed => {
-            2
-        }
     }
 }

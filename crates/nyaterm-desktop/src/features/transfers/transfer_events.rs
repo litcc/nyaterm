@@ -201,7 +201,13 @@ impl NyaTermApp {
                             dirty |= this.apply_transfer_event(event, window, cx);
                         }
                         if dirty {
-                            cx.notify();
+                            // Only the transfers panel. An app-wide notify here would
+                            // repaint the whole shell twenty times a second for a
+                            // progress bar, which is the pump this batching exists to
+                            // remove; `set_snapshot` notifies the panel and nothing
+                            // else. Events that change something outside the panel
+                            // still notify the app from their own handlers.
+                            this.flush_transfer_panel_snapshot(cx);
                         }
                     })
                     .is_err()
@@ -1394,16 +1400,20 @@ mod tests {
         });
         vcx.run_until_parked();
 
-        // Derive once, the way a flush would, and record the baseline.
+        // Take the baseline from a real flush, not a hand-rolled derive: the flush is
+        // what the batches below will run, so its key is the one that must stay put.
         let baseline = vcx.update(|_, cx| {
-            app.update(cx, |app, _| {
-                app.transfer.visible_browser_entries(false);
+            app.update(cx, |app, cx| {
+                app.flush_transfer_panel_snapshot(cx);
                 app.transfer.browser_filter_recomputes()
             })
         });
-        assert_eq!(baseline, 1, "the listing must have been derived once");
+        assert!(
+            baseline > 0,
+            "the listing must have been derived at least once"
+        );
 
-        for round in 0..12 {
+        for round in 0..24 {
             let _ = sender.unbounded_send(progress("job-0", (round + 1) * 1_000));
             vcx.executor()
                 .advance_clock(TRANSFER_UI_COALESCE_WINDOW * 2);
@@ -1411,9 +1421,9 @@ mod tests {
         }
 
         let (batches, recomputes) = vcx.update(|_, cx| {
-            app.update(cx, |app, _| {
-                // Ask again: a hit must still be a hit after all that progress.
-                app.transfer.visible_browser_entries(false);
+            app.update(cx, |app, cx| {
+                // Flush again: a hit must still be a hit after all that progress.
+                app.flush_transfer_panel_snapshot(cx);
                 (
                     app.transfer.ui_batch_count(),
                     app.transfer.browser_filter_recomputes(),

@@ -1,6 +1,6 @@
 pub(in crate::features) mod connections;
 pub(in crate::features) mod remote;
 pub(in crate::features) mod settings;
-mod transfers;
+pub(in crate::features) mod transfers;
 mod tunnels;
 mod workspace;

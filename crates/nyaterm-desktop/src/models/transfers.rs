@@ -131,7 +131,40 @@ pub(crate) struct TransferJobState {
     pub(crate) control: Option<SftpTransferControl>,
 }
 
+/// What a queue row actually draws.
+///
+/// `TransferJobState` carries `entries`, the whole directory listing a navigation
+/// job returned, and the queue used to deep-copy every visible job twice per render
+/// -- once to filter and once to sort. No row reads that field. This carries the
+/// eight it does read, so a snapshot rebuilt on every coalesced progress batch
+/// costs a handful of small clones instead of the catalog.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TransferJobRowSnapshot {
+    pub(crate) id: String,
+    pub(crate) kind: TransferJobKind,
+    pub(crate) status: TransferJobStatus,
+    pub(crate) detail: String,
+    pub(crate) display_name: String,
+    pub(crate) created_at_ms: u128,
+    pub(crate) progress: Option<SftpTransferProgress>,
+    pub(crate) summary: Option<SftpTransferSummary>,
+}
+
 impl TransferJobState {
+    /// The row projection, dropping `entries`, `session_id` and the control handle.
+    pub(crate) fn row_snapshot(&self) -> TransferJobRowSnapshot {
+        TransferJobRowSnapshot {
+            id: self.id.clone(),
+            kind: self.kind.clone(),
+            status: self.status,
+            detail: self.detail.clone(),
+            display_name: self.display_name.clone(),
+            created_at_ms: self.created_at_ms,
+            progress: self.progress.clone(),
+            summary: self.summary.clone(),
+        }
+    }
+
     pub(crate) fn now_ms() -> u128 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

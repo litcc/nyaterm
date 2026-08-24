@@ -7,10 +7,11 @@ use gpui::{
 use nyaterm_core::truncate_preview;
 use nyaterm_ui::{NyaContextMenu, NyaHorizontalScrollbar, NyaSearchInput, NyaUniformListScrollbar};
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup, transfers::format_file_size};
+use crate::features::transfers::format_file_size;
 use crate::models::TransferBrowserSortColumn;
 
 use super::super::browser_filter::transfer_browser_footer_stats;
+use super::super::panel::TransferPanel;
 use super::super::{
     FILE_BROWSER_HEADER_HEIGHT_PX, TransferBrowserAvailability,
     TransferBrowserEntryRowPresentation, TransferBrowserSortHeaderState,
@@ -26,15 +27,25 @@ use super::helpers::{
 
 const FILE_BROWSER_SCROLLBAR_SIZE_PX: f32 = 16.;
 
-impl NyaTermApp {
-    pub(in crate::features::pages::transfers) fn transfer_browser_view(
-        &mut self,
-        availability: TransferBrowserAvailability,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let transparent_surface = self.shell_transparent_color(palette.surface);
-        let section_header = self.shell_transparent_color(palette.section_header);
+/// The SFTP browser.
+///
+/// Takes no `NyaTermApp`, including inside the `uniform_list` processor: that runs
+/// during the draw, so an app read there is recorded exactly like one in `render`.
+pub(in crate::features::pages::transfers) fn transfer_browser_view(
+    panel: &TransferPanel,
+    _window: &mut gpui::Window,
+    cx: &mut Context<TransferPanel>,
+) -> impl IntoElement {
+    {
+        let snapshot = panel
+            .snapshot()
+            .expect("the caller returns early without a snapshot");
+        let chrome = snapshot.chrome;
+        let browser = &snapshot.browser;
+        let availability = snapshot.availability;
+        let palette = chrome.palette;
+        let transparent_surface = chrome.transparent_surface;
+        let section_header = chrome.transparent_section_header;
         if availability != TransferBrowserAvailability::Browsable {
             let (title, description) = match availability {
                 TransferBrowserAvailability::UnsupportedSession => (
@@ -91,35 +102,28 @@ impl NyaTermApp {
         }
 
         let can_transfer = availability == TransferBrowserAvailability::Browsable;
-        let _selected = self
-            .transfer
-            .browser_view()
+        let _selected = browser
             .selected_remote_path
             .as_deref()
             .map(|path| truncate_preview(path, 56))
             .unwrap_or_else(|| "none".to_string());
-        let visible_entries = self.visible_transfer_browser_entries();
-        let column_widths = self.transfer.browser_view().column_widths;
+        let visible_entries = browser.visible_entries.clone();
+        let column_widths = browser.column_widths;
         let table_width = transfer_browser_table_width(column_widths);
-        let resizing_column = self
-            .transfer
-            .browser_view()
-            .column_resize
-            .map(|state| state.column);
+        let resizing_column = browser.column_resize.map(|state| state.column);
         let sort_header_state = TransferBrowserSortHeaderState {
             header_bg: section_header,
-            active_column: self.transfer.browser_view().sort_column,
-            direction: self.transfer.browser_view().sort_direction,
+            active_column: browser.sort_column,
+            direction: browser.sort_direction,
             resizing_column,
         };
-        let show_hidden_files = self.settings.summary().ui_file_explorer_show_hidden_files;
-        let browser = self.transfer.browser_view();
+        let show_hidden_files = browser.show_hidden_files;
         let footer_stats = transfer_browser_footer_stats(
-            browser.entries,
+            &browser.all_entries,
             &visible_entries,
             browser.selected_remote_path.as_deref(),
-            browser.selected_remote_paths,
-            show_hidden_files,
+            &browser.selected_remote_paths,
+            browser.show_hidden_files,
         );
         let footer_size_text =
             if footer_stats.selected_item_count > 0 && footer_stats.selected_file_size > 0 {
@@ -131,13 +135,13 @@ impl NyaTermApp {
             } else {
                 format_file_size(Some(footer_stats.total_file_size))
             };
-        let search_active = !self.transfer.browser_view().search.trim().is_empty();
-        let search_expanded = self.transfer.browser_view().search_expanded || search_active;
-        let app = cx.entity();
+        let search_active = !browser.search.trim().is_empty();
+        let search_expanded = browser.search_expanded || search_active;
+        let menu_app = panel.app_handle();
         // The field is built where the search is revealed, not here: this is a
         // render path, and `text_input` would create it on the first frame.
         let search_input = search_expanded
-            .then(|| self.existing_text_input("transfer.browser.search"))
+            .then(|| browser.search_field.clone())
             .flatten()
             .map(|field| {
                 div()
@@ -149,26 +153,26 @@ impl NyaTermApp {
                     .items_center()
                     .child(
                         NyaSearchInput::new("transfer-browser-search", &field).on_key_down(
-                            cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if event.keystroke.key == "escape" {
-                                    cx.stop_propagation();
-                                    this.clear_or_close_transfer_browser_search(window, cx);
-                                }
+                            cx.listener(|panel, event: &KeyDownEvent, window, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    if event.keystroke.key == "escape" {
+                                        cx.stop_propagation();
+                                        this.clear_or_close_transfer_browser_search(window, cx);
+                                    }
+                                })
                             }),
                         ),
                     )
                     .into_any_element()
             });
-        let current_browser_path =
-            normalized_transfer_browser_path(self.transfer.browser_view().path);
+        let current_browser_path = normalized_transfer_browser_path(&browser.path);
         let has_parent_entry =
             can_transfer && current_browser_path != "/" && current_browser_path != ".";
-        let show_list_scrollbar =
-            can_transfer && !self.transfer.browser_view().loading && !visible_entries.is_empty();
-        let auto_sync_cwd = self.transfer_browser_auto_sync_cwd_enabled();
-        let cwd_tracking_available = self.active_transfer_browser_connection_id().is_some();
-        let external_drop_hover = self.transfer.browser_view().external_drop_hover;
-        let rows: AnyElement = if self.transfer.browser_view().loading {
+        let show_list_scrollbar = can_transfer && !browser.loading && !visible_entries.is_empty();
+        let auto_sync_cwd = browser.auto_sync_cwd_enabled;
+        let cwd_tracking_available = browser.connection_id.clone().is_some();
+        let external_drop_hover = browser.external_drop_hover;
+        let rows: AnyElement = if browser.loading {
             div()
                 .flex()
                 .flex_col()
@@ -184,8 +188,8 @@ impl NyaTermApp {
                         .child(t!("fileExplorer.loading")),
                 )
                 .into_any_element()
-        } else if self.transfer.browser_view().entries.is_empty() {
-            if has_parent_entry && self.transfer.browser_view().error.is_none() {
+        } else if browser.all_entries.is_empty() {
+            if has_parent_entry && browser.error.is_none() {
                 div()
                     .flex()
                     .flex_col()
@@ -208,19 +212,17 @@ impl NyaTermApp {
                             .px_4()
                             .py_8()
                             .gap_1()
-                            .child(
-                                if let Some(error) = self.transfer.browser_view().error.as_deref() {
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgb(palette.danger))
-                                        .child(truncate_preview(error, 120))
-                                } else {
-                                    div()
-                                        .text_size(px(12.))
-                                        .text_color(rgb(palette.text_muted))
-                                        .child(t!("fileExplorer.emptyDirectory"))
-                                },
-                            ),
+                            .child(if let Some(error) = browser.error.as_deref() {
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(rgb(palette.danger))
+                                    .child(truncate_preview(error, 120))
+                            } else {
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(rgb(palette.text_muted))
+                                    .child(t!("fileExplorer.emptyDirectory"))
+                            }),
                     )
                     .into_any_element()
             }
@@ -243,17 +245,22 @@ impl NyaTermApp {
         } else {
             let parent_count = usize::from(has_parent_entry);
             let total_entries = visible_entries.len() + parent_count;
-            let name_placeholder = t!("fileExplorer.name");
+            let _name_placeholder = t!("fileExplorer.name");
             let mut list = uniform_list(
                 "transfer-browser-rows",
                 total_entries,
-                cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
-                    let renaming = this.transfer.rename_dialog().cloned();
-                    let selected_remote_path =
-                        this.transfer.browser_view().selected_remote_path.clone();
-                    let selected_remote_paths =
-                        this.transfer.browser_view().selected_remote_paths.clone();
+                // Still only the visible range, and now built from the snapshot
+                // rather than by re-entering the app for every row on screen.
+                cx.processor(move |panel, range: std::ops::Range<usize>, _, cx| {
                     let mut items = Vec::with_capacity(range.len());
+                    let Some(snapshot) = panel.snapshot() else {
+                        return items;
+                    };
+                    let browser = &snapshot.browser;
+                    let renaming = browser.rename.clone();
+                    let selected_remote_path = browser.selected_remote_path.clone();
+                    let selected_remote_paths = browser.selected_remote_paths.clone();
+                    let visible_entries = browser.visible_entries.clone();
                     for index in range {
                         if has_parent_entry && index == 0 {
                             items.push(
@@ -271,12 +278,15 @@ impl NyaTermApp {
                         let rename_input = renaming
                             .as_ref()
                             .filter(|state| state.old_path == entry.path)
-                            .map(|state| {
-                                this.text_input_box(
-                                    format!("transfer.rename.{}", state.old_path),
-                                    &state.value,
-                                    TextInputSetup::placeholder(name_placeholder.clone()),
-                                    cx,
+                            // The field is built where the rename opens, not here.
+                            .zip(browser.rename_field.clone())
+                            .map(|(state, field)| {
+                                nyaterm_ui::NyaInputShell::new(
+                                    SharedString::from(format!(
+                                        "transfer.rename.{}",
+                                        state.old_path
+                                    )),
+                                    &field,
                                 )
                                 .into_any_element()
                             });
@@ -296,6 +306,8 @@ impl NyaTermApp {
                             .into_any_element(),
                         );
                     }
+                    #[cfg(test)]
+                    panel.note_rows_built(items.len());
                     items
                 }),
             );
@@ -304,7 +316,7 @@ impl NyaTermApp {
                 .min_h_0()
                 .min_w(table_width)
                 .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::FitList)
-                .track_scroll(self.transfer.browser_view().list_scroll)
+                .track_scroll(&browser.list_scroll)
                 .into_any_element()
         };
 
@@ -316,22 +328,22 @@ impl NyaTermApp {
             .relative()
             .overflow_hidden()
             .bg(transparent_surface)
-            .track_focus(self.transfer.browser_view().focus)
+            .track_focus(&browser.focus)
             .can_drop(|drag, _, _| drag.is::<gpui::ExternalPaths>())
             .on_drag_move(cx.listener(
-                |this, event: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| {
+                |panel, event: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| panel.with_app(cx, |this, cx| {
                     this.set_transfer_browser_external_drop_hover(
                         event.bounds.contains(&event.event.position),
                         cx,
                     );
-                },
+                }),
             ))
-            .on_drop(cx.listener(|this, paths: &gpui::ExternalPaths, _, cx| {
+            .on_drop(cx.listener(|panel, paths: &gpui::ExternalPaths, _, cx| panel.with_app(cx, |this, cx| {
                 this.handle_transfer_browser_external_file_drop(paths.paths().to_vec(), cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            })))
+            .on_key_down(cx.listener(|panel, event: &KeyDownEvent, window, cx| panel.with_app(cx, |this, cx| {
                 this.handle_transfer_browser_key_down(event, window, cx);
-            }))
+            })))
             .when(can_transfer, |this| {
                 this.child(
                     div()
@@ -349,18 +361,18 @@ impl NyaTermApp {
                             "transfer-browser-new-file",
                             "icons/fe/new-file.svg",
                             t!("fileExplorer.newFile"),
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.open_transfer_new_file_dialog(window, cx);
-                            }),
+                            })),
                         ))
                         .child(compact_transfer_toolbar_button(
                             palette,
                             "transfer-browser-new-folder",
                             "icons/fe/new-folder.svg",
                             t!("fileExplorer.newFolder"),
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.open_transfer_new_folder_dialog(window, cx);
-                            }),
+                            })),
                         ))
                         .child(transfer_toolbar_divider(palette))
                         .child(compact_transfer_upload_menu_button(
@@ -374,9 +386,9 @@ impl NyaTermApp {
                             "icons/fe/download.svg",
                             t!("fileExplorer.downloadSelected"),
                             footer_stats.selected_item_count > 0,
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.start_selected_sftp_download_jobs(window, cx);
-                            }),
+                            })),
                         ))
                         .child(compact_transfer_toolbar_button_enabled(
                             palette,
@@ -384,9 +396,9 @@ impl NyaTermApp {
                             "icons/fe/delete.svg",
                             t!("fileExplorer.delete"),
                             footer_stats.selected_item_count > 0,
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.open_selected_transfer_delete_dialog(window, cx);
-                            }),
+                            })),
                         ))
                         .child(transfer_toolbar_divider(palette))
                         .child(compact_transfer_toolbar_button(
@@ -394,18 +406,18 @@ impl NyaTermApp {
                             "transfer-browser-go-up",
                             "icons/fe/up.svg",
                             t!("fileExplorer.goUp"),
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.open_transfer_parent_directory(window, cx);
-                            }),
+                            })),
                         ))
                         .child(compact_transfer_toolbar_button(
                             palette,
                             "transfer-browser-refresh",
                             "icons/fe/refresh.svg",
                             t!("fileExplorer.refresh"),
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.refresh_transfer_browser(window, cx);
-                            }),
+                            })),
                         ))
                         .child(div().flex_1())
                         .child(compact_transfer_toolbar_button_active(
@@ -414,9 +426,9 @@ impl NyaTermApp {
                             "icons/fe/search.svg",
                             t!("fileExplorer.search"),
                             search_active || search_expanded,
-                            cx.listener(|this, _, window, cx| {
+                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                 this.focus_transfer_browser_search(None, window, cx);
-                            }),
+                            })),
                         ))
                         .child(compact_transfer_toolbar_button_active(
                             palette,
@@ -428,9 +440,9 @@ impl NyaTermApp {
                                 t!("fileExplorer.showHiddenFiles")
                             },
                             show_hidden_files,
-                            cx.listener(|this, _, _, cx| {
+                            cx.listener(|panel, _, _, cx| panel.with_app(cx, |this, cx| {
                                 this.toggle_transfer_browser_hidden_files(cx);
-                            }),
+                            })),
                         ))
                         .when(search_expanded, |toolbar| {
                             toolbar.child(
@@ -478,16 +490,16 @@ impl NyaTermApp {
                                                     .path("icons/window/close.svg")
                                                     .text_color(rgb(palette.text_muted)),
                                             )
-                                            .on_click(cx.listener(|this, _, window, cx| {
+                                            .on_click(cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
                                                 this.clear_or_close_transfer_browser_search(
                                                     window, cx,
                                                 );
-                                            })),
+                                            }))),
                                     ),
                             )
                         }),
                 )
-                .child(self.transfer_browser_path_row(current_browser_path.clone(), cx))
+                .child(super::super::path_bar::transfer_browser_path_row(panel, current_browser_path.clone(), cx))
             })
             .child(NyaContextMenu::new_dynamic(
                 div()
@@ -497,16 +509,16 @@ impl NyaTermApp {
                     .min_h_0()
                     .min_w_0()
                     .overflow_hidden()
-                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    .capture_any_mouse_down(cx.listener(|panel, event: &MouseDownEvent, _, cx| panel.with_app(cx, |this, cx| {
                         if event.button == MouseButton::Right {
                             this.begin_transfer_browser_context_menu(cx);
                         }
-                    }))
+                    })))
                     .on_mouse_down(
                         MouseButton::Right,
-                        cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                        cx.listener(|panel, _: &MouseDownEvent, window, cx| panel.with_app(cx, |this, cx| {
                             this.prepare_transfer_browser_current_context_menu(window, cx);
-                        }),
+                        })),
                     )
                     .child(
                         div()
@@ -516,7 +528,7 @@ impl NyaTermApp {
                             .overflow_x_scroll()
                             .overflow_y_hidden()
                             .restrict_scroll_to_axis()
-                            .track_scroll(self.transfer.browser_view().horizontal_scroll)
+                            .track_scroll(&browser.horizontal_scroll)
                             .child(
                                 div()
                                     .min_w(table_width)
@@ -594,7 +606,7 @@ impl NyaTermApp {
                                 .right_0()
                                 .child(NyaUniformListScrollbar::new(
                                     "transfer-browser-vertical-scrollbar",
-                                    self.transfer.browser_view().list_scroll,
+                                    &browser.list_scroll,
                                 )),
                         )
                     })
@@ -609,11 +621,17 @@ impl NyaTermApp {
                             .right(px(FILE_BROWSER_SCROLLBAR_SIZE_PX))
                             .child(NyaHorizontalScrollbar::new(
                                 "transfer-browser-horizontal-scrollbar",
-                                self.transfer.browser_view().horizontal_scroll,
+                                &browser.horizontal_scroll,
                             )),
                     ),
+                // Items are still built on the app, and still only when the menu
+                // opens, reached weakly rather than held.
+                // Items are still built on the app, and still only when the menu
+                // opens, reached weakly rather than held.
                 move |_, cx| {
-                    app.update(cx, |this, cx| this.transfer_browser_context_menu_items(cx))
+                    menu_app
+                        .update(cx, |this, cx| this.transfer_browser_context_menu_items(cx))
+                        .unwrap_or_default()
                 },
             ))
             // Tauri FileExplorer footer: totals left, cwd sync / send icons right.
@@ -638,8 +656,8 @@ impl NyaTermApp {
                             .text_size(px(11.))
                             .text_color(rgb(palette.text_muted))
                             .when(
-                                !self.transfer.browser_view().loading
-                                    && self.transfer.browser_view().error.is_none()
+                                !browser.loading
+                                    && browser.error.is_none()
                                     && footer_stats.total_item_count > 0,
                                 |this| {
                                     this.child(if footer_stats.selected_item_count > 0 {
@@ -666,9 +684,9 @@ impl NyaTermApp {
                                     t!("fileExplorer.cwdTrackingUnavailable")
                                 },
                                 cwd_tracking_available,
-                                cx.listener(|this, _, _window, cx| {
+                                cx.listener(|panel, _, _window, cx| panel.with_app(cx, |this, cx| {
                                     this.start_transfer_sync_cwd_job(cx);
-                                }),
+                                })),
                             ))
                             .child(compact_transfer_footer_button_active(
                                 palette,
@@ -681,9 +699,9 @@ impl NyaTermApp {
                                 },
                                 auto_sync_cwd,
                                 cwd_tracking_available,
-                                cx.listener(|this, _, _window, cx| {
+                                cx.listener(|panel, _, _window, cx| panel.with_app(cx, |this, cx| {
                                     this.toggle_transfer_browser_auto_sync_cwd(cx);
-                                }),
+                                })),
                             ))
                             .child(compact_transfer_footer_button(
                                 palette,
@@ -691,9 +709,9 @@ impl NyaTermApp {
                                 "icons/fe/send-path.svg",
                                 t!("fileExplorer.sendToTerminal"),
                                 true,
-                                cx.listener(|this, _, _, cx| {
+                                cx.listener(|panel, _, _, cx| panel.with_app(cx, |this, cx| {
                                     this.send_current_transfer_browser_path_to_terminal(cx);
-                                }),
+                                })),
                             )),
                     ),
             )

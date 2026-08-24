@@ -6,6 +6,7 @@ use super::commands::CommandFeatureState;
 use super::connections::ConnectionFeatureState;
 use super::pages::connections::panel::ConnectionPanel;
 use super::pages::remote::RemotePanels;
+use super::pages::transfers::panel::TransferPanel;
 use super::panels::SendCommandFeatureState;
 use super::recording::RecordingFeatureState;
 use super::remote::RemoteOpsFeatureState;
@@ -36,6 +37,7 @@ pub struct NyaTermApp {
     pub(in crate::features) runtime: AppRuntime,
     pub(in crate::features) connection_state: ConnectionFeatureState,
     pub(in crate::features) connection_panel: gpui::Entity<ConnectionPanel>,
+    pub(in crate::features) transfer_panel: gpui::Entity<TransferPanel>,
     /// Real text inputs for the panels that have not been given their own,
     /// keyed by an id the panel picks. See `features::text_inputs`.
     pub(in crate::features) text_inputs: TextInputRegistry,

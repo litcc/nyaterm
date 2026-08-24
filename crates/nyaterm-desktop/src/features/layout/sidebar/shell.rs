@@ -56,7 +56,11 @@ impl NyaTermApp {
     ) -> gpui::AnyElement {
         let palette = self.theme_palette();
         match panel {
-            NavItem::Transfers => self.transfers_view(cx).into_any_element(),
+            NavItem::Transfers => self
+                .transfer_panel
+                .clone()
+                .cached(cached_panel_style())
+                .into_any_element(),
             NavItem::Tunnels => self.tunnels_view(cx).into_any_element(),
             NavItem::SecurityAuth => self.security_auth_panel(cx).into_any_element(),
             NavItem::SyncBackupHistory => self.sync_backup_history_panel(cx).into_any_element(),

@@ -304,35 +304,6 @@ impl NyaTermApp {
             cx.notify();
         }
     }
-
-    pub(in crate::features) fn transfer_height_resize_handle(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let id = SharedString::from("transfer-height-resize");
-        let hover_id = id.clone();
-        let drag_id = id.clone();
-        deferred(
-            horizontal_resize_handle_visual(
-                palette,
-                self.transfer.panel_height_is_resizing(),
-                self.shell.resize_handle_is_highlighted(&id),
-            )
-            .id(id.clone())
-            .cursor_row_resize()
-            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                this.update_resize_handle_hover(hover_id.clone(), *hovered, cx);
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                    this.activate_resize_handle_immediately(drag_id.clone(), cx);
-                    this.start_transfer_height_resize(event, cx);
-                }),
-            ),
-        )
-    }
 }
 
 impl NyaTermApp {

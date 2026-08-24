@@ -4,7 +4,7 @@ use gpui::{
     prelude::*, px, rgb, svg,
 };
 
-use crate::features::NyaTermApp;
+use crate::features::pages::transfers::panel::TransferPanel;
 use crate::theme::ThemePalette;
 use nyaterm_ui::NyaTooltip;
 
@@ -101,7 +101,7 @@ pub(super) fn compact_transfer_footer_button_active(
 pub(super) fn compact_transfer_upload_menu_button(
     palette: ThemePalette,
     tooltip: impl Into<String>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     let tooltip = tooltip.into();
     // Tauri: single Upload icon opens DropdownMenu (Upload Files / Upload Folder).
@@ -128,8 +128,10 @@ pub(super) fn compact_transfer_upload_menu_button(
         )
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                this.open_transfer_browser_upload_menu(event, cx);
+            cx.listener(|panel, event: &MouseDownEvent, _, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.open_transfer_browser_upload_menu(event, cx);
+                })
             }),
         )
 }

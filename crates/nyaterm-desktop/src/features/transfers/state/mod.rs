@@ -158,9 +158,6 @@ pub(super) struct TransferBrowserState {
     pub(super) navigation_jobs: HashMap<String, String>,
     pub(super) pending_navigations: HashMap<String, TransferBrowserNavigationSnapshot>,
     pub(super) auto_sync_cwd_last_at: Option<Instant>,
-    /// Whether the cwd sync clock is running. Owned here rather than in the shell's
-    /// runtime state, where it sat while one shell-wide clock drove every remote poll.
-    pub(super) cwd_sync_clock_armed: bool,
     pub(super) favorites: VecDeque<String>,
     pub(super) sort_column: TransferBrowserSortColumn,
     pub(super) sort_direction: TransferBrowserSortDirection,
@@ -287,7 +284,6 @@ impl TransferFeatureState {
                 navigation_jobs: HashMap::new(),
                 pending_navigations: HashMap::new(),
                 auto_sync_cwd_last_at: None,
-                cwd_sync_clock_armed: false,
                 favorites: VecDeque::new(),
                 sort_column: TransferBrowserSortColumn::Name,
                 sort_direction: TransferBrowserSortDirection::Ascending,
