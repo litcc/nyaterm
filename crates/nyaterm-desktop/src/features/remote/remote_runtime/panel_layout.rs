@@ -28,14 +28,15 @@ impl NyaTermApp {
     /// active session, not a general activation side-effect bucket. Today that is refresh
     /// demand: a panel's clock is armed on `(visible || the header wants it) && enabled in
     /// settings && a session with an SSH config`, and the last term just changed --
-    /// switching to a non-SSH session has to drop the clocks. The snapshot flush will join
-    /// this helper, which is what keeps a future activation caller from switching sessions
-    /// while omitting either.
+    /// switching to a non-SSH session has to drop the clocks. The snapshot flush joins
+    /// this helper, which keeps every activation caller from switching sessions while
+    /// omitting either.
     pub(in crate::features) fn sync_remote_panels_after_activation(
         &mut self,
         cx: &mut Context<Self>,
     ) {
         self.sync_remote_panel_demand(cx);
+        self.defer_remote_panel_snapshot_flush(cx);
     }
 
     /// Tell the process pane which sort columns the current panel width can show.

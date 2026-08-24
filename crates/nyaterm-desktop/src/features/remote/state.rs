@@ -701,7 +701,10 @@ impl RemoteOpsFeatureState {
     }
 
     pub(in crate::features) fn docker_menus_open(&self) -> bool {
-        self.docker.tab_menu_open || self.docker.header_menu_open
+        self.docker.tab_menu_open
+            || self.docker.header_menu_open
+            || self.docker.container_menu_id.is_some()
+            || self.docker.compose_menu_id.is_some()
     }
 
     pub(in crate::features) fn toggle_docker_container_menu(&mut self, id: String) {
@@ -2315,6 +2318,7 @@ mod tests {
         state.toggle_docker_compose_menu("compose".to_string());
         let presentation = state.docker_presentation();
         assert!(!state.docker_header_menu_open());
+        assert!(state.docker_menus_open());
         assert!(presentation.container_menu_id.is_none());
         assert_eq!(presentation.compose_menu_id.as_deref(), Some("compose"));
 
