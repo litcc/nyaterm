@@ -134,32 +134,31 @@ impl NyaTermApp {
         let search_active = !self.transfer.browser_view().search.trim().is_empty();
         let search_expanded = self.transfer.browser_view().search_expanded || search_active;
         let app = cx.entity();
-        let search_input = search_expanded.then(|| {
-            let field = self.text_input(
-                "transfer.browser.search",
-                &self.transfer.browser_view().search.clone(),
-                TextInputSetup::placeholder(t!("fileExplorer.searchPlaceholder")),
-                cx,
-            );
-            div()
-                .h_full()
-                .flex_1()
-                .min_w_0()
-                .px_1()
-                .flex()
-                .items_center()
-                .child(
-                    NyaSearchInput::new("transfer-browser-search", &field).on_key_down(
-                        cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                            if event.keystroke.key == "escape" {
-                                cx.stop_propagation();
-                                this.clear_or_close_transfer_browser_search(window, cx);
-                            }
-                        }),
-                    ),
-                )
-                .into_any_element()
-        });
+        // The field is built where the search is revealed, not here: this is a
+        // render path, and `text_input` would create it on the first frame.
+        let search_input = search_expanded
+            .then(|| self.existing_text_input("transfer.browser.search"))
+            .flatten()
+            .map(|field| {
+                div()
+                    .h_full()
+                    .flex_1()
+                    .min_w_0()
+                    .px_1()
+                    .flex()
+                    .items_center()
+                    .child(
+                        NyaSearchInput::new("transfer-browser-search", &field).on_key_down(
+                            cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                if event.keystroke.key == "escape" {
+                                    cx.stop_propagation();
+                                    this.clear_or_close_transfer_browser_search(window, cx);
+                                }
+                            }),
+                        ),
+                    )
+                    .into_any_element()
+            });
         let current_browser_path =
             normalized_transfer_browser_path(self.transfer.browser_view().path);
         let has_parent_entry =

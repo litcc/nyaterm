@@ -110,6 +110,8 @@ impl NyaTermApp {
             self.load_transfer_browser_for_active_session_if_needed(cx);
         }
         cx.notify();
+        // Revealing or hiding the browser is what the cwd clock keys on.
+        self.ensure_transfer_cwd_sync_clock(cx);
     }
 
     pub(in crate::features) fn ensure_panel_open(&mut self, item: NavItem) {

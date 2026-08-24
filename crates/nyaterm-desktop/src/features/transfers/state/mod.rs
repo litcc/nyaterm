@@ -6,10 +6,17 @@
 //! lifetime visible; the flat `transfer_*` prefix did not.
 
 mod browser;
+mod browser_logic;
+
+use self::browser_logic::BrowserFilterCache;
+pub(in crate::features) use self::browser_logic::natural_compare_ascii;
+#[cfg(test)]
+pub(in crate::features) use self::browser_logic::transfer_browser_entry_is_visible;
 mod editor;
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{FocusHandle, Pixels, ScrollHandle, UniformListScrollHandle};
@@ -32,6 +39,13 @@ pub(in crate::features) struct TransferFeatureState {
     queue: TransferQueueState,
     paths: TransferPathState,
     pub(super) browser: TransferBrowserState,
+    /// The memo over `browser.entries`.
+    ///
+    /// A coalesced progress batch moves job byte counts and nothing this listing is
+    /// derived from, so the high-rate path must not pay to clone and sort a whole
+    /// directory. Owned here rather than exposed for the view to drive, so there is
+    /// no cache protocol for a caller to get wrong.
+    browser_filter: BrowserFilterCache,
     file_ops: TransferFileOpsState,
     editor: TransferEditorFeatureState,
     external_sync: TransferExternalSyncState,
@@ -88,7 +102,7 @@ pub(in crate::features) struct TransferBrowserView<'a> {
     pub home_dir_pending: bool,
     pub path_draft: &'a String,
     pub path_editing: bool,
-    pub entries: &'a Vec<SftpFileEntry>,
+    pub entries: &'a Arc<Vec<SftpFileEntry>>,
     pub loading: bool,
     pub error: &'a Option<String>,
     pub search: &'a String,
@@ -122,7 +136,13 @@ pub(super) struct TransferBrowserState {
     pub(super) home_dir_pending: bool,
     pub(super) path_draft: String,
     pub(super) path_editing: bool,
-    pub(super) entries: Vec<SftpFileEntry>,
+    /// Shared, and always replaced whole.
+    ///
+    /// The browser listing is swapped in and out of caches and navigation snapshots,
+    /// and the filter/sort memo keys on this pointer. Both want the same thing: one
+    /// allocation handed around rather than deep-copied, and a pointer that changes
+    /// exactly when the listing does.
+    pub(super) entries: Arc<Vec<SftpFileEntry>>,
     pub(super) loading: bool,
     pub(super) error: Option<String>,
     pub(super) status: String,
@@ -244,6 +264,7 @@ impl TransferFeatureState {
             file_ops: TransferFileOpsState::new(),
             queue: TransferQueueState::new(tx, rx, focus.queue),
             paths: TransferPathState::new(remote_path, local_path, duplicate_policy),
+            browser_filter: BrowserFilterCache::default(),
             browser: TransferBrowserState {
                 path: ".".to_string(),
                 raw_path_token: None,
@@ -251,7 +272,7 @@ impl TransferFeatureState {
                 home_dir_pending: false,
                 path_draft: String::new(),
                 path_editing: false,
-                entries: Vec::new(),
+                entries: Arc::new(Vec::new()),
                 loading: false,
                 error: None,
                 status: "List a remote directory to browse files.".to_string(),

@@ -4,39 +4,24 @@ use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_transport::{SftpFileEntry, SftpFileType};
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::TransferBrowserSortColumn;
 
-use super::helpers::{compare_transfer_browser_entries, transfer_browser_search_status};
+use super::helpers::transfer_browser_search_status;
 
 impl NyaTermApp {
+    /// The filtered, sorted listing, from the state's memo.
+    ///
+    /// A thin wrapper for one reason: `show_hidden` lives in settings and the memo
+    /// lives in transfer state, so the two borrows have to be sequenced rather than
+    /// nested. Everything else about the derivation belongs to the state layer.
     pub(in crate::features::pages::transfers) fn visible_transfer_browser_entries(
-        &self,
-    ) -> Vec<SftpFileEntry> {
-        let browser = self.transfer.browser_view();
-        let query = browser.search.trim().to_lowercase();
-        let mut entries = browser
-            .entries
-            .iter()
-            .filter(|entry| {
-                transfer_browser_entry_is_visible(
-                    entry,
-                    &query,
-                    self.settings.summary().ui_file_explorer_show_hidden_files,
-                )
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        entries.sort_by(|left, right| {
-            compare_transfer_browser_entries(
-                left,
-                right,
-                browser.sort_column,
-                browser.sort_direction,
-            )
-        });
-        entries
+        &mut self,
+    ) -> Arc<[SftpFileEntry]> {
+        let show_hidden = self.settings.summary().ui_file_explorer_show_hidden_files;
+        self.transfer.visible_browser_entries(show_hidden)
     }
 
     pub(in crate::features::pages::transfers) fn toggle_transfer_browser_sort(
@@ -55,9 +40,10 @@ impl NyaTermApp {
     ) {
         self.mark_user_activity();
         self.transfer.set_browser_search(text);
+        let visible = self.visible_transfer_browser_entries().len();
         let status = transfer_browser_search_status(
             self.transfer.browser_view().search.as_str(),
-            self.visible_transfer_browser_entries().len(),
+            visible,
             self.transfer.browser_view().entries.len(),
         );
         self.transfer.set_browser_status(status);
@@ -82,9 +68,10 @@ impl NyaTermApp {
             cx,
         );
         window.focus(&field.read(cx).focus_handle(), cx);
+        let visible = self.visible_transfer_browser_entries().len();
         let status = transfer_browser_search_status(
             self.transfer.browser_view().search.as_str(),
-            self.visible_transfer_browser_entries().len(),
+            visible,
             self.transfer.browser_view().entries.len(),
         );
         self.transfer.set_browser_status(status);
@@ -125,15 +112,6 @@ pub(super) fn transfer_browser_search_text_for_key(event: &KeyDownEvent) -> Opti
         .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
         .map(str::to_string)
         .or_else(|| (keystroke.key == "space").then(|| " ".to_string()))
-}
-
-fn transfer_browser_entry_is_visible(
-    entry: &SftpFileEntry,
-    normalized_query: &str,
-    show_hidden_files: bool,
-) -> bool {
-    (show_hidden_files || !entry.name.starts_with('.'))
-        && (normalized_query.is_empty() || entry.name.to_lowercase().contains(normalized_query))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,10 +169,8 @@ pub(super) fn transfer_browser_footer_stats(
 mod tests {
     use std::collections::HashSet;
 
-    use super::{
-        transfer_browser_entry_is_visible, transfer_browser_footer_stats,
-        transfer_browser_search_text_for_key,
-    };
+    use super::{transfer_browser_footer_stats, transfer_browser_search_text_for_key};
+    use crate::features::transfers::transfer_browser_entry_is_visible;
     use gpui::{KeyDownEvent, Keystroke, Modifiers};
     use nyaterm_transport::{SftpFileEntry, SftpFileType};
 

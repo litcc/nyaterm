@@ -14,8 +14,9 @@ use crate::models::{
     TransferBrowserPathMenuKind, TransferBrowserPathMenuState,
 };
 
-use super::helpers::{natural_compare_ascii, normalized_transfer_browser_path, remote_child_path};
+use super::helpers::{normalized_transfer_browser_path, remote_child_path};
 use super::transfer_menu_position;
+use crate::features::transfers::natural_compare_ascii;
 
 impl NyaTermApp {
     pub(super) fn transfer_browser_path_row(
@@ -42,38 +43,40 @@ impl NyaTermApp {
             .cloned()
             .collect::<Vec<_>>();
         let palette = self.theme_palette();
-        let path_input = self.transfer.browser_view().path_editing.then(|| {
-            let field = self.text_input(
-                "transfer.browser.path",
-                &self.transfer.browser_view().path_draft.clone(),
-                TextInputSetup::placeholder(t!("fileExplorer.editPath")),
-                cx,
-            );
-            let focus = field.read(cx).focus_handle();
-            div()
-                .id("transfer-path-bar-input-shell")
-                .h(px(20.))
-                .min_w_0()
-                .flex_1()
-                .px_1()
-                .flex()
-                .items_center()
-                .rounded_sm()
-                .bg(rgb(palette.input))
-                .cursor_text()
-                .on_click(move |_, window, cx| {
-                    window.focus(&focus, cx);
-                })
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .text_size(px(10.))
-                        .text_color(rgb(palette.text))
-                        .child(NyaInput::new(&field)),
-                )
-                .into_any_element()
-        });
+        // Built by `begin_transfer_browser_path_edit`, which is the only thing that
+        // can set `path_editing`. Render only reads it.
+        let path_input = self
+            .transfer
+            .browser_view()
+            .path_editing
+            .then(|| self.existing_text_input("transfer.browser.path"))
+            .flatten()
+            .map(|field| {
+                let focus = field.read(cx).focus_handle();
+                div()
+                    .id("transfer-path-bar-input-shell")
+                    .h(px(20.))
+                    .min_w_0()
+                    .flex_1()
+                    .px_1()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .bg(rgb(palette.input))
+                    .cursor_text()
+                    .on_click(move |_, window, cx| {
+                        window.focus(&focus, cx);
+                    })
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .text_size(px(10.))
+                            .text_color(rgb(palette.text))
+                            .child(NyaInput::new(&field)),
+                    )
+                    .into_any_element()
+            });
         let breadcrumbs = build_transfer_browser_breadcrumbs(
             &current_browser_path,
             self.transfer.browser_view().home_dir,

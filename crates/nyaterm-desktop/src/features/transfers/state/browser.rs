@@ -1,10 +1,11 @@
 //! SFTP browser navigation, selection, menu and column-layout transitions.
 
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{Pixels, ScrollHandle, ScrollStrategy};
-use nyaterm_transport::RemoteFilePath;
+use nyaterm_transport::{RemoteFilePath, SftpFileEntry};
 
 use crate::models::{
     TransferBrowserColumnResizeState, TransferBrowserContextTarget,
@@ -14,6 +15,7 @@ use crate::models::{
     TransferBrowserUploadMenuState,
 };
 
+use super::browser_logic::BrowserFilterKey;
 use super::{TransferBrowserState, TransferBrowserView, TransferFeatureState};
 
 impl TransferFeatureState {
@@ -57,6 +59,38 @@ impl TransferFeatureState {
 
     pub(in crate::features) fn select_browser_path(&mut self, path: impl Into<String>) {
         self.browser.selected_remote_path = Some(path.into());
+    }
+
+    /// The filtered, sorted listing the browser draws.
+    ///
+    /// Recomputed only when one of its real inputs moved. `show_hidden` is passed in
+    /// because it lives in settings while everything else here is transfer state.
+    pub(in crate::features) fn visible_browser_entries(
+        &mut self,
+        show_hidden: bool,
+    ) -> Arc<[SftpFileEntry]> {
+        let key = BrowserFilterKey::new(
+            &self.browser.entries,
+            &self.browser.search,
+            show_hidden,
+            self.browser.sort_column,
+            self.browser.sort_direction,
+        );
+        self.browser_filter.entries(key, &self.browser.entries)
+    }
+
+    /// Replace the listing the way a store reply does: whole.
+    #[cfg(test)]
+    pub(in crate::features) fn replace_browser_entries_for_test(
+        &mut self,
+        entries: Vec<SftpFileEntry>,
+    ) {
+        self.browser.entries = Arc::new(entries);
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn browser_filter_recomputes(&self) -> usize {
+        self.browser_filter.recomputes()
     }
 
     pub(in crate::features) fn browser_entries_are_empty(&self) -> bool {
@@ -296,7 +330,7 @@ impl TransferFeatureState {
         self.browser.home_dir_pending = false;
         self.browser.path_draft.clear();
         self.browser.path_editing = false;
-        self.browser.entries.clear();
+        self.browser.entries = Arc::new(Vec::new());
         self.browser.loading = false;
         self.browser.error = None;
         self.browser.status = if ssh_active {

@@ -129,6 +129,9 @@ pub(in crate::features) fn session_ssh_process_service(
 }
 
 pub(in crate::features) use remote_text_editor::RemoteTextEditor;
+pub(in crate::features) use state::natural_compare_ascii;
+#[cfg(test)]
+pub(in crate::features) use state::transfer_browser_entry_is_visible;
 pub(in crate::features) use state::{
     TransferEditorCloseAfterSave, TransferEditorCloseOutcome, TransferEditorDiscardOutcome,
     TransferFeatureFocus, TransferFeatureState,

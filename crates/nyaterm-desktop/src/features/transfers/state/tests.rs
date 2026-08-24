@@ -1,6 +1,7 @@
 use futures::channel::mpsc::unbounded;
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui::{ScrollHandle, ScrollStrategy, TestAppContext, UniformListScrollHandle, point, px};
 use nyaterm_transport::{
@@ -10,10 +11,10 @@ use nyaterm_transport::{
 
 use crate::models::{
     TransferBrowserContextTarget, TransferBrowserNavigationSnapshot,
-    TransferBrowserSessionCacheState, TransferEditorField, TransferEditorState,
-    TransferExternalSyncPromptState, TransferJobEvent, TransferJobKind, TransferJobResult,
-    TransferJobState, TransferJobStatus, TransferNewFolderState, TransferPathPromptKind,
-    TransferPropertiesState, TransferRenameState,
+    TransferBrowserSessionCacheState, TransferBrowserSortColumn, TransferEditorField,
+    TransferEditorState, TransferExternalSyncPromptState, TransferJobEvent, TransferJobKind,
+    TransferJobResult, TransferJobState, TransferJobStatus, TransferNewFolderState,
+    TransferPathPromptKind, TransferPropertiesState, TransferRenameState,
 };
 
 use super::{
@@ -40,6 +41,75 @@ fn transfer_state(cx: &TestAppContext) -> TransferFeatureState {
         180.,
         transfer_focus(cx),
     )
+}
+
+/// Every real input to the derived listing must invalidate the memo, and nothing
+/// else may.
+///
+/// The listing is keyed on the entry `Arc`'s address plus four small values. This
+/// walks each one in turn and pins that a repeat read costs nothing while a genuine
+/// change costs exactly one recompute.
+#[test]
+fn each_browser_filter_input_invalidates_the_memo_and_nothing_else_does() {
+    let cx = TestAppContext::single();
+    let mut state = transfer_state(&cx);
+    state.replace_browser_entries_for_test(vec![
+        file_entry("/srv/alpha.txt"),
+        file_entry("/srv/.hidden"),
+        file_entry("/srv/beta.txt"),
+    ]);
+
+    let first = state.visible_browser_entries(false);
+    assert_eq!(state.browser_filter_recomputes(), 1);
+    // Hidden files are filtered out, so the memo is doing real work.
+    assert_eq!(first.len(), 2);
+
+    // A repeat read with identical inputs must not recompute.
+    let again = state.visible_browser_entries(false);
+    assert_eq!(
+        state.browser_filter_recomputes(),
+        1,
+        "a repeat read recomputed"
+    );
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "a memo hit must hand back the same allocation"
+    );
+
+    // 1. show_hidden
+    let with_hidden = state.visible_browser_entries(true);
+    assert_eq!(state.browser_filter_recomputes(), 2);
+    assert_eq!(with_hidden.len(), 3);
+
+    // 2. search
+    state.set_browser_search("beta".to_string());
+    assert_eq!(state.visible_browser_entries(true).len(), 1);
+    assert_eq!(state.browser_filter_recomputes(), 3);
+    state.set_browser_search(String::new());
+    state.visible_browser_entries(true);
+    assert_eq!(state.browser_filter_recomputes(), 4);
+
+    // 3. sort column, and 4. direction -- toggling the same column flips direction,
+    // so this covers both key fields.
+    state.toggle_browser_sort(TransferBrowserSortColumn::Size);
+    state.visible_browser_entries(true);
+    assert_eq!(state.browser_filter_recomputes(), 5);
+    state.toggle_browser_sort(TransferBrowserSortColumn::Size);
+    state.visible_browser_entries(true);
+    assert_eq!(
+        state.browser_filter_recomputes(),
+        6,
+        "direction is part of the key"
+    );
+
+    // 5. the entry list itself, replaced whole
+    state.replace_browser_entries_for_test(vec![file_entry("/srv/gamma.txt")]);
+    assert_eq!(state.visible_browser_entries(true).len(), 1);
+    assert_eq!(state.browser_filter_recomputes(), 7);
+
+    // And still nothing after all of that if nothing moves.
+    state.visible_browser_entries(true);
+    assert_eq!(state.browser_filter_recomputes(), 7);
 }
 
 fn file_entry(path: &str) -> SftpFileEntry {
@@ -203,7 +273,7 @@ fn browser_session_restore_clamps_history_and_clears_interaction() {
     transfer.store_browser_session_cache(
         "session-a".to_string(),
         TransferBrowserSessionCacheState {
-            entries: vec![file_entry("/srv/current.txt")],
+            entries: Arc::new(vec![file_entry("/srv/current.txt")]),
             current_path: "/srv".to_string(),
             current_raw_path_token: None,
             home_dir: "/home/test".to_string(),
@@ -239,7 +309,7 @@ fn browser_session_restore_preserves_the_raw_directory_token() {
     transfer.store_browser_session_cache(
         "session-a".to_string(),
         TransferBrowserSessionCacheState {
-            entries: Vec::new(),
+            entries: Arc::new(Vec::new()),
             current_path: remote.display_path.clone(),
             current_raw_path_token: remote.raw_path_token.clone(),
             home_dir: "/home/test".to_string(),
@@ -271,7 +341,7 @@ fn browser_navigation_restores_the_stable_pending_snapshot() {
         remote_path: "/stable".to_string(),
         browser_path: "/stable".to_string(),
         browser_raw_path_token: None,
-        entries: vec![file_entry("/stable/file.txt")],
+        entries: Arc::new(vec![file_entry("/stable/file.txt")]),
         loading: false,
         error: None,
         status: "stable".to_string(),
@@ -337,7 +407,7 @@ fn transfer_session_id_migration_preserves_reconnected_sftp_state() {
     let cx = TestAppContext::single();
     let mut transfer = transfer_state(&cx);
     let cache = TransferBrowserSessionCacheState {
-        entries: vec![file_entry("/srv/app.txt")],
+        entries: Arc::new(vec![file_entry("/srv/app.txt")]),
         current_path: "/srv".to_string(),
         current_raw_path_token: None,
         home_dir: "/home/nya".to_string(),
@@ -349,7 +419,7 @@ fn transfer_session_id_migration_preserves_reconnected_sftp_state() {
     transfer.store_browser_session_cache(
         "new-session".to_string(),
         TransferBrowserSessionCacheState {
-            entries: vec![file_entry("/stale/file.txt")],
+            entries: Arc::new(vec![file_entry("/stale/file.txt")]),
             current_path: "/stale".to_string(),
             current_raw_path_token: None,
             home_dir: "/stale".to_string(),
@@ -368,7 +438,7 @@ fn transfer_session_id_migration_preserves_reconnected_sftp_state() {
             remote_path: "/srv".to_string(),
             browser_path: "/srv".to_string(),
             browser_raw_path_token: None,
-            entries: vec![file_entry("/srv/old.txt")],
+            entries: Arc::new(vec![file_entry("/srv/old.txt")]),
             loading: true,
             error: None,
             status: "listing".to_string(),
@@ -387,7 +457,7 @@ fn transfer_session_id_migration_preserves_reconnected_sftp_state() {
             remote_path: "/tmp".to_string(),
             browser_path: "/tmp".to_string(),
             browser_raw_path_token: None,
-            entries: Vec::new(),
+            entries: Arc::new(Vec::new()),
             loading: false,
             error: None,
             status: "orphan".to_string(),

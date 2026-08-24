@@ -361,6 +361,8 @@ impl NyaTermApp {
         }
         self.persist_ui_layout();
         cx.notify();
+        // Revealing or hiding the browser is what the cwd clock keys on.
+        self.ensure_transfer_cwd_sync_clock(cx);
     }
 
     pub(in crate::features) fn ensure_panel_in_stack(&mut self, item: NavItem) {

@@ -5,6 +5,7 @@ use nyaterm_transport::{
 };
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -424,7 +425,13 @@ pub(crate) enum TransferJobOutput {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TransferBrowserSessionCacheState {
-    pub(crate) entries: Vec<SftpFileEntry>,
+    /// Shared, and always replaced whole.
+    ///
+    /// The browser listing is swapped in and out of caches and navigation snapshots,
+    /// and the filter/sort memo keys on this pointer. Both want the same thing: one
+    /// allocation handed around rather than deep-copied, and a pointer that changes
+    /// exactly when the listing does.
+    pub(crate) entries: Arc<Vec<SftpFileEntry>>,
     pub(crate) current_path: String,
     pub(crate) current_raw_path_token: Option<String>,
     pub(crate) home_dir: String,
@@ -438,7 +445,13 @@ pub(crate) struct TransferBrowserNavigationSnapshot {
     pub(crate) remote_path: String,
     pub(crate) browser_path: String,
     pub(crate) browser_raw_path_token: Option<String>,
-    pub(crate) entries: Vec<SftpFileEntry>,
+    /// Shared, and always replaced whole.
+    ///
+    /// The browser listing is swapped in and out of caches and navigation snapshots,
+    /// and the filter/sort memo keys on this pointer. Both want the same thing: one
+    /// allocation handed around rather than deep-copied, and a pointer that changes
+    /// exactly when the listing does.
+    pub(crate) entries: Arc<Vec<SftpFileEntry>>,
     pub(crate) loading: bool,
     pub(crate) error: Option<String>,
     pub(crate) status: String,

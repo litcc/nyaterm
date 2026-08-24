@@ -1,11 +1,8 @@
-use std::cmp::Ordering;
-
 use gpui::{
     ClickEvent, Context, FontWeight, InteractiveElement as _, IntoElement, MouseButton,
     MouseDownEvent, ParentElement as _, Pixels, Rgba, SharedString,
     StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _, px, rgb, rgba,
 };
-use nyaterm_transport::SftpFileEntry;
 
 use crate::features::NyaTermApp;
 use crate::models::{TransferBrowserSortColumn, TransferBrowserSortDirection};
@@ -133,112 +130,4 @@ pub(in crate::features::pages::transfers) struct TransferBrowserSortHeaderState 
     pub active_column: TransferBrowserSortColumn,
     pub direction: TransferBrowserSortDirection,
     pub resizing_column: Option<TransferBrowserSortColumn>,
-}
-
-pub(in crate::features::pages::transfers) fn compare_transfer_browser_entries(
-    left: &SftpFileEntry,
-    right: &SftpFileEntry,
-    column: TransferBrowserSortColumn,
-    direction: TransferBrowserSortDirection,
-) -> Ordering {
-    if left.file_type != right.file_type {
-        let left_dir = left.is_directory();
-        let right_dir = right.is_directory();
-        if left_dir != right_dir {
-            return if left_dir {
-                Ordering::Less
-            } else {
-                Ordering::Greater
-            };
-        }
-    }
-
-    let result = match column {
-        TransferBrowserSortColumn::Name => natural_compare_ascii(&left.name, &right.name),
-        TransferBrowserSortColumn::Size => left.size.unwrap_or(0).cmp(&right.size.unwrap_or(0)),
-        TransferBrowserSortColumn::Modified => left
-            .modified_at
-            .unwrap_or(0)
-            .cmp(&right.modified_at.unwrap_or(0)),
-        TransferBrowserSortColumn::Permissions => left
-            .permissions
-            .unwrap_or(0)
-            .cmp(&right.permissions.unwrap_or(0)),
-        TransferBrowserSortColumn::Owner => natural_compare_ascii(&left.owner, &right.owner),
-        TransferBrowserSortColumn::Group => natural_compare_ascii(&left.group, &right.group),
-    };
-
-    let directed = match direction {
-        TransferBrowserSortDirection::Ascending => result,
-        TransferBrowserSortDirection::Descending => result.reverse(),
-    };
-    directed.then_with(|| natural_compare_ascii(&left.name, &right.name))
-}
-
-pub(in crate::features::pages::transfers) fn natural_compare_ascii(
-    left: &str,
-    right: &str,
-) -> Ordering {
-    let left = left.to_lowercase();
-    let right = right.to_lowercase();
-    let mut left_chars = left.chars().peekable();
-    let mut right_chars = right.chars().peekable();
-
-    loop {
-        match (left_chars.peek().copied(), right_chars.peek().copied()) {
-            (None, None) => return Ordering::Equal,
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (Some(left_char), Some(right_char))
-                if left_char.is_ascii_digit() && right_char.is_ascii_digit() =>
-            {
-                let mut left_number = String::new();
-                while let Some(value) = left_chars.peek().copied() {
-                    if value.is_ascii_digit() {
-                        left_number.push(value);
-                        left_chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                let mut right_number = String::new();
-                while let Some(value) = right_chars.peek().copied() {
-                    if value.is_ascii_digit() {
-                        right_number.push(value);
-                        right_chars.next();
-                    } else {
-                        break;
-                    }
-                }
-                let left_trimmed = left_number.trim_start_matches('0');
-                let right_trimmed = right_number.trim_start_matches('0');
-                let left_key = if left_trimmed.is_empty() {
-                    "0"
-                } else {
-                    left_trimmed
-                };
-                let right_key = if right_trimmed.is_empty() {
-                    "0"
-                } else {
-                    right_trimmed
-                };
-                let ordering = left_key
-                    .len()
-                    .cmp(&right_key.len())
-                    .then_with(|| left_key.cmp(right_key))
-                    .then_with(|| left_number.len().cmp(&right_number.len()));
-                if ordering != Ordering::Equal {
-                    return ordering;
-                }
-            }
-            (Some(left_char), Some(right_char)) => {
-                left_chars.next();
-                right_chars.next();
-                let ordering = left_char.cmp(&right_char);
-                if ordering != Ordering::Equal {
-                    return ordering;
-                }
-            }
-        }
-    }
 }

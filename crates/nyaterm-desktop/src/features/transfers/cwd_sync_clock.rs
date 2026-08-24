@@ -38,6 +38,16 @@ impl NyaTermApp {
     /// Idempotent. Armed from `render`, because what it depends on -- the browser being
     /// open, and Auto CWD being on for the active connection -- changes alongside a
     /// repaint and has no single event that covers both.
+    /// Arm the cwd-sync clock if the transfer browser now wants one.
+    ///
+    /// Called from the panel-stack transitions that can reveal or hide the browser,
+    /// not from a render. Arming from `NyaTermApp::render` meant every unrelated
+    /// repaint in the app re-armed it, and it meant the demand check ran on the paint
+    /// path; the browser becoming visible is an event, so it is treated as one. The
+    /// clock retires itself when the demand goes away, so nothing has to disarm it.
+    ///
+    /// Idempotent, which matters because the two panel entry points call into each
+    /// other depending on the multi-open mode.
     pub(in crate::features) fn ensure_transfer_cwd_sync_clock(&mut self, cx: &mut Context<Self>) {
         if self.transfer.cwd_sync_clock_is_armed() || !self.transfer_cwd_sync_needs_polling() {
             return;
@@ -221,28 +231,56 @@ mod tests {
     /// checked, not assumed -- because they drive `ensure_transfer_cwd_sync_clock`
     /// themselves. That is the gap that let `3904c69b`'s dead clock through: they prove
     /// the mechanism and say nothing about the wiring.
+    /// Opening the browser arms the clock at that moment, with no window in play.
+    ///
+    /// Arming used to happen in `NyaTermApp::render`, which made a paint the trigger.
+    /// The browser becoming visible is an event, so it is treated as one.
     #[test]
-    fn a_paint_arms_the_clock_for_an_open_browser() {
+    fn opening_the_browser_arms_the_clock_without_a_paint() {
         let mut cx = TestAppContext::single();
         let app = app(&mut cx);
-        cx.update_entity(&app, |app, cx| app.sync_component_theme(cx));
-        open_transfer_browser(&app, &mut cx);
         cx.update_entity(&app, |app, _| {
             assert!(
                 !app.transfer.cwd_sync_clock_is_armed(),
-                "nothing has painted yet"
+                "nothing has opened the browser yet"
             );
         });
+
+        open_transfer_browser(&app, &mut cx);
+
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                app.transfer.cwd_sync_clock_is_armed(),
+                "opening the transfer browser must arm the cwd sync clock, with no paint"
+            );
+        });
+    }
+
+    /// The inverse, and the reason the arming moved: repaints of an app that is not
+    /// showing the browser must not start polling a remote for its cwd.
+    #[test]
+    fn unrelated_root_paints_cannot_arm_the_clock() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| app.sync_component_theme(cx));
 
         let host_app = app.clone();
         let (_, cx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
         let cx: &mut gpui::VisualTestContext = cx;
         cx.run_until_parked();
 
+        for _ in 0..5 {
+            cx.update(|window, cx| {
+                app.update(cx, |_, cx| cx.notify());
+                _ = window.draw(cx);
+            });
+            cx.run_until_parked();
+        }
+
         cx.update(|_, cx| {
             assert!(
-                app.read(cx).transfer.cwd_sync_clock_is_armed(),
-                "a paint with the transfer browser open must arm the cwd sync clock"
+                !app.read(cx).transfer.cwd_sync_clock_is_armed(),
+                "five repaints with the browser closed must not arm the cwd sync clock"
             );
         });
     }

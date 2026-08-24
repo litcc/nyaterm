@@ -138,6 +138,19 @@ impl NyaTermApp {
     /// field is the source of truth for what is being typed. Use
     /// [`Self::reset_text_input`] to push a value back down, and
     /// [`Self::forget_text_inputs`] when the thing being edited goes away.
+    /// An existing field, without creating one.
+    ///
+    /// `text_input` takes `&mut self` because it builds the entity on first use, so
+    /// a render that calls it mutates authoritative state on the first frame that
+    /// shows the field. Render paths use this instead: the boundary that reveals a
+    /// field is the boundary that builds it.
+    pub(in crate::features) fn existing_text_input(
+        &self,
+        id: &str,
+    ) -> Option<Entity<NyaInputState>> {
+        self.text_inputs.fields.get(id).cloned()
+    }
+
     pub(in crate::features) fn text_input(
         &mut self,
         id: impl Into<SharedString>,

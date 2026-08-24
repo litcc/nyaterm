@@ -449,8 +449,10 @@ impl NyaTermApp {
             .cloned()
     }
 
+    /// Takes `&mut self` now: it reads the memoised listing, and populating a memo
+    /// is a mutation even though nothing observable changes.
     pub(in crate::features::pages::transfers) fn selected_transfer_entries(
-        &self,
+        &mut self,
     ) -> Vec<SftpFileEntry> {
         if self
             .transfer
@@ -460,14 +462,17 @@ impl NyaTermApp {
         {
             return self.selected_transfer_entry().into_iter().collect();
         }
+        // The listing is shared now, so this iterates a slice and clones the few
+        // entries that are selected rather than consuming a private vector.
         self.visible_transfer_browser_entries()
-            .into_iter()
+            .iter()
             .filter(|entry| {
                 self.transfer
                     .browser_view()
                     .selected_remote_paths
                     .contains(&entry.identity_key())
             })
+            .cloned()
             .collect()
     }
 

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{FutureExt as _, StreamExt as _, select_biased};
@@ -39,7 +40,7 @@ struct TransferBrowserEventSnapshot {
     browser_path: String,
     home_dir: String,
     home_dir_pending: bool,
-    entries: Vec<SftpFileEntry>,
+    entries: Arc<Vec<SftpFileEntry>>,
     loading: bool,
     error: Option<String>,
     status: String,
@@ -98,7 +99,7 @@ impl NyaTermApp {
             self.transfer.browser.path = ".".to_string();
             self.transfer.browser.home_dir.clear();
             self.transfer.browser.home_dir_pending = false;
-            self.transfer.browser.entries.clear();
+            self.transfer.browser.entries = Arc::new(Vec::new());
             self.transfer.browser.loading = false;
             self.transfer.browser.error = None;
             self.transfer.browser.status.clear();
@@ -325,7 +326,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("{} item(s)", entries.len());
                 self.transfer.browser.path = listed_path;
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.loading = false;
                 self.transfer.browser.error = None;
                 self.transfer.browser.status = job.detail.clone();
@@ -426,7 +427,7 @@ impl NyaTermApp {
                 self.transfer.browser.list_scroll = gpui::UniformListScrollHandle::new();
                 self.transfer.browser.horizontal_scroll = gpui::ScrollHandle::new();
                 self.transfer.browser.path = remote_path;
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.loading = false;
                 self.transfer.browser.error = None;
                 self.transfer.browser.status =
@@ -449,7 +450,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("Renamed {old_path} -> {new_path}");
                 self.transfer.browser.path = parent_path.clone();
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries;
                 job.summary = None;
@@ -478,7 +479,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("Moved {old_path} -> {new_path}");
                 self.transfer.browser.path = parent_path.clone();
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries;
                 job.summary = None;
@@ -506,7 +507,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("Deleted {remote_path}");
                 self.transfer.browser.path = parent_path.clone();
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries;
                 job.summary = None;
@@ -538,7 +539,7 @@ impl NyaTermApp {
                 } else {
                     parent_path.clone()
                 };
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries;
                 job.summary = None;
@@ -564,7 +565,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("Created {remote_path}");
                 self.transfer.browser.path = parent_path.clone();
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries.clone();
                 job.summary = None;
@@ -614,7 +615,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("Linked {link_path} -> {target_path}");
                 self.transfer.browser.path = parent_path.clone();
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries;
                 job.summary = None;
@@ -681,7 +682,7 @@ impl NyaTermApp {
                 job.status = TransferJobStatus::Completed;
                 job.detail = format!("Updated properties for {remote_path}");
                 self.transfer.browser.path = parent_path.clone();
-                self.transfer.browser.entries = entries.clone();
+                self.transfer.browser.entries = Arc::new(entries.clone());
                 self.transfer.browser.status = format!("{} item(s)", entries.len());
                 job.entries = entries;
                 job.summary = None;
@@ -854,7 +855,7 @@ impl NyaTermApp {
 
                 if transfer_event_paths_match(&self.transfer.browser.path, &parent_path) {
                     self.transfer.browser.path = parent_path.clone();
-                    self.transfer.browser.entries = entries.clone();
+                    self.transfer.browser.entries = Arc::new(entries.clone());
                     self.transfer.browser.status = format!("{} item(s)", entries.len());
                     self.transfer.browser.selected_remote_path = Some(summary.remote_path.clone());
                     self.transfer.browser.selected_remote_paths.clear();
@@ -1175,6 +1176,21 @@ mod tests {
         (app, vcx)
     }
 
+    fn browser_entry(name: &str) -> nyaterm_transport::SftpFileEntry {
+        nyaterm_transport::SftpFileEntry {
+            name: name.to_string(),
+            path: format!("/remote/{name}"),
+            file_type: nyaterm_transport::SftpFileType::File,
+            size: Some(1),
+            permissions: None,
+            owner: String::new(),
+            group: String::new(),
+            modified_at: None,
+            raw_path_token: None,
+            symlink_target_is_directory: false,
+        }
+    }
+
     fn running_job(id: &str) -> TransferJobState {
         TransferJobState {
             id: id.to_string(),
@@ -1357,7 +1373,63 @@ mod tests {
         );
     }
 
-    /// Coalescing must not delay a lifecycle transition.    /// Coalescing must not delay a lifecycle transition. `Finished` carries the
+    /// A progress batch must not touch the derived browser listing.
+    ///
+    /// This is the whole reason the memo exists. Progress moves job byte counts;
+    /// the listing is keyed on the entry `Arc`, the filter text, the hidden-files
+    /// setting and the sort, none of which a transfer touches. Without the memo each
+    /// coalesced batch would clone and re-sort the entire directory.
+    #[test]
+    fn a_progress_batch_does_not_recompute_the_browser_listing() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let sender = vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.transfer
+                    .replace_browser_entries_for_test(vec![browser_entry("alpha")]);
+                app.transfer.enqueue_transfer_job(running_job("job-0"));
+                app.start_transfer_event_drain(cx);
+                app.transfer.transfer_event_sender()
+            })
+        });
+        vcx.run_until_parked();
+
+        // Derive once, the way a flush would, and record the baseline.
+        let baseline = vcx.update(|_, cx| {
+            app.update(cx, |app, _| {
+                app.transfer.visible_browser_entries(false);
+                app.transfer.browser_filter_recomputes()
+            })
+        });
+        assert_eq!(baseline, 1, "the listing must have been derived once");
+
+        for round in 0..12 {
+            let _ = sender.unbounded_send(progress("job-0", (round + 1) * 1_000));
+            vcx.executor()
+                .advance_clock(TRANSFER_UI_COALESCE_WINDOW * 2);
+            vcx.run_until_parked();
+        }
+
+        let (batches, recomputes) = vcx.update(|_, cx| {
+            app.update(cx, |app, _| {
+                // Ask again: a hit must still be a hit after all that progress.
+                app.transfer.visible_browser_entries(false);
+                (
+                    app.transfer.ui_batch_count(),
+                    app.transfer.browser_filter_recomputes(),
+                )
+            })
+        });
+        assert!(batches > 0, "the drain must have applied the progress");
+        assert_eq!(
+            recomputes,
+            baseline,
+            "{batches} progress batches recomputed the browser listing {} time(s)",
+            recomputes - baseline
+        );
+    }
+
+    /// Coalescing must not delay a lifecycle transition.
     /// directory listing, the resolved home dir and editor payloads, and opens the
     /// follow-up jobs and dialogs that depend on them.
     #[test]
