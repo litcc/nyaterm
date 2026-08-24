@@ -20,9 +20,12 @@ use crate::models::{
 
 /// How long the event drain holds a progress batch open before entering GPUI.
 ///
-/// One frame at 60Hz. This is the consumer-side bound that makes the UI update
-/// rate independent of how many transfers are running; the 50ms throttle in
-/// `TransferProgressEventSender` is per job and cannot provide that on its own.
+/// A bounded UI coalescing cadence, not a display frame: it is about one frame at
+/// 60Hz and rather less than one at 120 or 144Hz, and nothing here observes the
+/// actual refresh rate. What it buys is the consumer-side bound that makes the UI
+/// update rate independent of how many transfers are running -- the 50ms throttle
+/// in `TransferProgressEventSender` is per job and cannot provide that. The value
+/// is kept well under that 50ms so a lone transfer is no chunkier than before.
 const TRANSFER_UI_COALESCE_WINDOW: Duration = Duration::from_millis(16);
 
 type ExternalEditorSyncStart = (Option<String>, String, String, Option<String>, PathBuf);
@@ -145,21 +148,29 @@ impl NyaTermApp {
                 // already queued does not help: each wake finds one event and an empty
                 // tail. Holding the batch open for a bounded window is what makes the
                 // UI rate independent of the job count.
-                //
-                // One frame, not the source's 50ms: a second UI update inside the same
-                // frame cannot be seen, and a longer window would make a lone transfer
-                // visibly chunkier than it is today.
                 let mut batch = vec![first];
                 if batch
                     .iter()
                     .all(|event| matches!(event.event, TransferJobEvent::Progress(_)))
                 {
-                    let mut timer = cx
+                    // One deadline, taken from the first event of the batch and never
+                    // extended. Re-arming it per event would let a steady stream hold
+                    // the batch open indefinitely.
+                    let mut deadline = cx
                         .background_executor()
                         .timer(TRANSFER_UI_COALESCE_WINDOW)
                         .fuse();
                     loop {
+                        // The deadline is polled FIRST, and that ordering is the whole
+                        // termination argument. `select_biased!` takes branches in
+                        // written order, so with the receiver first a producer that
+                        // keeps it ready would never let the deadline be polled at all,
+                        // and the batch would grow without bound. Deadline-first means
+                        // that once it is ready it wins the very next poll; while it is
+                        // still pending it falls through to the receiver, so nothing is
+                        // lost by checking it first.
                         select_biased! {
+                            _ = deadline => break,
                             queued = rx.next().fuse() => {
                                 let Some(event) = queued else { break };
                                 // Anything that is not progress ends the batch now.
@@ -175,7 +186,6 @@ impl NyaTermApp {
                                     break;
                                 }
                             }
-                            _ = timer => break,
                         }
                     }
                 }
@@ -184,7 +194,7 @@ impl NyaTermApp {
                     .update_in(cx, |this, window, cx| {
                         // One transaction, one notify, however many events it took.
                         #[cfg(test)]
-                        this.transfer.note_ui_batch();
+                        this.transfer.note_ui_batch(batch.len());
                         let mut dirty = false;
                         for event in batch {
                             dirty |= this.apply_transfer_event(event, window, cx);
@@ -1294,7 +1304,60 @@ mod tests {
         );
     }
 
-    /// Coalescing must not delay a lifecycle transition. `Finished` carries the
+    /// The deadline belongs to the batch, not to the last event in it.
+    ///
+    /// Re-arming per event would let any steady stream hold a batch open for as long
+    /// as it kept arriving -- unbounded latency and an unbounded batch, which is the
+    /// failure the fixed deadline exists to prevent. A stream spread over several
+    /// windows therefore has to produce several batches.
+    ///
+    /// This covers the deadline being fixed. It does not cover the branch ordering in
+    /// `select_biased!`: starving the deadline needs the queue to be non-empty at the
+    /// instant it fires, and virtual time only advances once every task has parked, so
+    /// a finite queue always drains first. The ordering is argued structurally at the
+    /// call site instead.
+    #[test]
+    fn the_batch_deadline_is_not_extended_by_later_events() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let sender = vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.transfer.enqueue_transfer_job(running_job("job-0"));
+                app.start_transfer_event_drain(cx);
+                app.transfer.transfer_event_sender()
+            })
+        });
+        vcx.run_until_parked();
+
+        // A steady stream at a quarter of the window, run for six windows.
+        let step = TRANSFER_UI_COALESCE_WINDOW / 4;
+        let windows = 6;
+        let sends = windows * 4;
+        for index in 0..sends {
+            let _ = sender.unbounded_send(progress("job-0", index as u64 + 1));
+            vcx.executor().advance_clock(step);
+            vcx.run_until_parked();
+        }
+        vcx.executor()
+            .advance_clock(TRANSFER_UI_COALESCE_WINDOW * 2);
+        vcx.run_until_parked();
+
+        let (batches, largest) = vcx.update(|_, cx| {
+            let transfer = &app.read(cx).transfer;
+            (transfer.ui_batch_count(), transfer.ui_batch_max())
+        });
+        assert!(
+            batches >= windows / 2,
+            "{sends} events over {windows} windows produced only {batches} batch(es), \
+             largest {largest}: the deadline is being extended by later events"
+        );
+        assert!(
+            largest < sends,
+            "one batch took {largest} of {sends} events, so the stream held it open"
+        );
+    }
+
+    /// Coalescing must not delay a lifecycle transition.    /// Coalescing must not delay a lifecycle transition. `Finished` carries the
     /// directory listing, the resolved home dir and editor payloads, and opens the
     /// follow-up jobs and dialogs that depend on them.
     #[test]

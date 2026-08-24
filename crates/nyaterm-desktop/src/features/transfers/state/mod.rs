@@ -42,6 +42,10 @@ pub(in crate::features) struct TransferFeatureState {
     /// it proves is that the first is bounded while the second is not.
     #[cfg(test)]
     ui_batch_count: usize,
+    /// The largest single batch the drain has applied. A batch that outgrew the
+    /// coalescing window is how deadline starvation shows up.
+    #[cfg(test)]
+    ui_batch_max: usize,
 }
 
 /// Focus handles the transfer feature needs at construction time.
@@ -235,6 +239,8 @@ impl TransferFeatureState {
         Self {
             #[cfg(test)]
             ui_batch_count: 0,
+            #[cfg(test)]
+            ui_batch_max: 0,
             file_ops: TransferFileOpsState::new(),
             queue: TransferQueueState::new(tx, rx, focus.queue),
             paths: TransferPathState::new(remote_path, local_path, duplicate_policy),
@@ -325,8 +331,14 @@ impl TransferFeatureState {
     }
 
     #[cfg(test)]
-    pub(in crate::features) fn note_ui_batch(&mut self) {
+    pub(in crate::features) fn note_ui_batch(&mut self, size: usize) {
         self.ui_batch_count += 1;
+        self.ui_batch_max = self.ui_batch_max.max(size);
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn ui_batch_max(&self) -> usize {
+        self.ui_batch_max
     }
 
     #[cfg(test)]
