@@ -24,7 +24,7 @@ use crate::models::NavItem;
 ///
 /// Matches the interval it services, which is a constant rather than a setting, so
 /// there is nothing finer to sample for.
-const TRANSFER_CWD_SYNC_POLL_INTERVAL: Duration = Duration::from_secs(1);
+pub(in crate::features) const TRANSFER_CWD_SYNC_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// How stale the browser's cwd may get before it is re-listed.
 ///
@@ -38,46 +38,6 @@ impl NyaTermApp {
     /// Idempotent. Armed from `render`, because what it depends on -- the browser being
     /// open, and Auto CWD being on for the active connection -- changes alongside a
     /// repaint and has no single event that covers both.
-    /// Arm the cwd-sync clock if the transfer browser now wants one.
-    ///
-    /// Called from the panel-stack transitions that can reveal or hide the browser,
-    /// not from a render. Arming from `NyaTermApp::render` meant every unrelated
-    /// repaint in the app re-armed it, and it meant the demand check ran on the paint
-    /// path; the browser becoming visible is an event, so it is treated as one. The
-    /// clock retires itself when the demand goes away, so nothing has to disarm it.
-    ///
-    /// Idempotent, which matters because the two panel entry points call into each
-    /// other depending on the multi-open mode.
-    pub(in crate::features) fn ensure_transfer_cwd_sync_clock(&mut self, cx: &mut Context<Self>) {
-        if self.transfer.cwd_sync_clock_is_armed() || !self.transfer_cwd_sync_needs_polling() {
-            return;
-        }
-        self.transfer.set_cwd_sync_clock_armed(true);
-        cx.spawn(async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(TRANSFER_CWD_SYNC_POLL_INTERVAL)
-                    .await;
-                let Ok(keep_running) = this.update(cx, |this, cx| {
-                    if this.sync_transfer_cwd_if_due(cx) {
-                        cx.notify();
-                    }
-                    let running = this.transfer_cwd_sync_needs_polling();
-                    if !running {
-                        this.transfer.set_cwd_sync_clock_armed(false);
-                    }
-                    running
-                }) else {
-                    break;
-                };
-                if !keep_running {
-                    break;
-                }
-            }
-        })
-        .detach();
-    }
-
     /// Whether the transfer browser is open at all.
     ///
     /// Only the panel, not Auto CWD or the session: both of those change without a
@@ -91,7 +51,7 @@ impl NyaTermApp {
     /// List the remote cwd if it has gone stale.
     ///
     /// The same conditions and the same deferral gate the shell-wide clock applied.
-    fn sync_transfer_cwd_if_due(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::features) fn sync_transfer_cwd_if_due(&mut self, cx: &mut Context<Self>) -> bool {
         if self.session.active_ssh_config().is_none() || self.remote_refresh_is_deferred() {
             return false;
         }
@@ -114,19 +74,22 @@ impl NyaTermApp {
 mod tests {
     use std::time::Duration;
 
-    use gpui::{AppContext as _, TestAppContext};
+    use gpui::{
+        AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+        TestAppContext, div,
+    };
     use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::NavItem;
 
-    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
         let root = std::env::temp_dir().join(format!(
-            "nyaterm-transfer-cwd-sync-{}-{}",
+            "nyaterm-cwd-clock-{}-{}",
             std::process::id(),
             uuid()
         ));
@@ -145,119 +108,82 @@ mod tests {
         cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
     }
 
-    fn open_transfer_browser(app: &gpui::Entity<NyaTermApp>, cx: &mut TestAppContext) {
-        cx.update_entity(app, |app, cx| {
-            app.open_or_toggle_panel(NavItem::Transfers, cx);
-        });
-    }
-
-    /// A closed transfer browser costs no wakes, which is the state the app is in
-    /// nearly always.
-    #[test]
-    fn a_closed_browser_arms_no_clock() {
-        let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
-        cx.update_entity(&app, |app, cx| {
-            assert!(!app.transfer_cwd_sync_needs_polling());
-            app.ensure_transfer_cwd_sync_clock(cx);
-            assert!(!app.transfer.cwd_sync_clock_is_armed());
-        });
-    }
-
-    /// An open browser arms the clock even with Auto CWD off.
-    ///
-    /// Deliberate: Auto CWD is a per-connection setting that changes without a repaint,
-    /// so gating the *clock* on it would mean switching it on had no effect until
-    /// something else painted. The per-beat check is what makes it cheap instead.
-    #[test]
-    fn an_open_browser_arms_the_clock_regardless_of_auto_cwd() {
-        let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
-        open_transfer_browser(&app, &mut cx);
-        cx.update_entity(&app, |app, cx| {
-            assert!(
-                !app.transfer_browser_auto_sync_cwd_enabled(),
-                "no connection is selected, so Auto CWD cannot be on"
-            );
-            app.ensure_transfer_cwd_sync_clock(cx);
-            assert!(app.transfer.cwd_sync_clock_is_armed());
-        });
-    }
-
-    /// Closing the browser retires the clock rather than leaving it waking every
-    /// second forever.
-    #[test]
-    fn closing_the_browser_retires_the_clock() {
-        let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
-        open_transfer_browser(&app, &mut cx);
-        cx.update_entity(&app, |app, cx| {
-            app.ensure_transfer_cwd_sync_clock(cx);
-            assert!(app.transfer.cwd_sync_clock_is_armed());
-            // Toggling the same panel again closes it, which is what the activity bar
-            // does.
-            app.open_or_toggle_panel(NavItem::Transfers, cx);
-            assert!(!app.transfer_cwd_sync_needs_polling());
-        });
-
-        cx.executor().advance_clock(Duration::from_secs(2));
-        cx.run_until_parked();
-        cx.update_entity(&app, |app, _| {
-            assert!(
-                !app.transfer.cwd_sync_clock_is_armed(),
-                "a closed browser must retire the clock, not keep it waking"
-            );
-        });
-    }
-
     struct AppHost {
-        app: gpui::Entity<NyaTermApp>,
+        app: Entity<NyaTermApp>,
     }
 
-    impl gpui::Render for AppHost {
+    impl Render for AppHost {
         fn render(
             &mut self,
             _window: &mut gpui::Window,
-            _cx: &mut gpui::Context<Self>,
-        ) -> impl gpui::IntoElement {
-            use gpui::{ParentElement as _, Styled as _};
-            gpui::div().size_full().child(self.app.clone())
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(self.app.read(cx).transfer_panel.clone())
         }
     }
 
-    /// A paint must arm the clock, with nothing calling `ensure` by hand.
-    ///
-    /// The three tests above all keep passing with the call removed from `render` --
-    /// checked, not assumed -- because they drive `ensure_transfer_cwd_sync_clock`
-    /// themselves. That is the gap that let `3904c69b`'s dead clock through: they prove
-    /// the mechanism and say nothing about the wiring.
-    /// Opening the browser arms the clock at that moment, with no window in play.
-    ///
-    /// Arming used to happen in `NyaTermApp::render`, which made a paint the trigger.
-    /// The browser becoming visible is an event, so it is treated as one.
+    fn armed(app: &Entity<NyaTermApp>, cx: &mut gpui::App) -> bool {
+        app.read(cx).transfer_panel.read(cx).cwd_clock_is_armed()
+    }
+
+    /// Nothing wants the poll, so the panel owns no task.
     #[test]
-    fn opening_the_browser_arms_the_clock_without_a_paint() {
+    fn a_closed_browser_owns_no_clock() {
         let mut cx = TestAppContext::single();
         let app = app(&mut cx);
-        cx.update_entity(&app, |app, _| {
-            assert!(
-                !app.transfer.cwd_sync_clock_is_armed(),
-                "nothing has opened the browser yet"
-            );
+        cx.update_entity(&app, |app, cx| {
+            assert!(!app.transfer_cwd_sync_needs_polling());
+            app.flush_transfer_panel_snapshot(cx);
         });
+        cx.update(|cx| assert!(!armed(&app, cx)));
+    }
 
-        open_transfer_browser(&app, &mut cx);
-
-        cx.update_entity(&app, |app, _| {
+    /// Opening the browser hands the panel a task, with no paint involved.
+    ///
+    /// Arming used to happen in `NyaTermApp::render`, which made a repaint the
+    /// trigger and left the task owned app-wide. It is the panel's now, so it cannot
+    /// outlive the view that wanted it.
+    #[test]
+    fn opening_the_browser_gives_the_panel_a_clock_without_a_paint() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.open_or_toggle_panel(NavItem::Transfers, cx);
+        });
+        cx.update(|cx| {
             assert!(
-                app.transfer.cwd_sync_clock_is_armed(),
-                "opening the transfer browser must arm the cwd sync clock, with no paint"
+                armed(&app, cx),
+                "opening the transfer browser must give the panel its cwd clock"
             );
         });
     }
 
-    /// The inverse, and the reason the arming moved: repaints of an app that is not
-    /// showing the browser must not start polling a remote for its cwd.
+    /// Leaving the browser drops it, which cancels the poll.
+    #[test]
+    fn leaving_the_browser_drops_the_panel_clock() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.open_or_toggle_panel(NavItem::Transfers, cx);
+        });
+        cx.update(|cx| assert!(armed(&app, cx)));
+
+        cx.update_entity(&app, |app, cx| {
+            app.open_or_toggle_panel(NavItem::Transfers, cx);
+            assert!(!app.transfer_cwd_sync_needs_polling());
+        });
+        cx.update(|cx| {
+            assert!(
+                !armed(&app, cx),
+                "closing the browser must drop the panel's clock, which cancels the poll"
+            );
+        });
+    }
+
+    /// The other half of moving arming off the paint path: repaints of an app that is
+    /// not showing the browser must not start polling a remote for its cwd.
     #[test]
     fn unrelated_root_paints_cannot_arm_the_clock() {
         let mut cx = TestAppContext::single();
@@ -279,8 +205,31 @@ mod tests {
 
         cx.update(|_, cx| {
             assert!(
-                !app.read(cx).transfer.cwd_sync_clock_is_armed(),
-                "five repaints with the browser closed must not arm the cwd sync clock"
+                !armed(&app, cx),
+                "five repaints with the browser closed must not start a cwd poll"
+            );
+        });
+    }
+
+    /// The poll still hops back to the app: the panel decides when to ask, the app
+    /// owns the cwd and every mutation of it.
+    #[test]
+    fn the_panel_clock_beats_through_the_app() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.open_or_toggle_panel(NavItem::Transfers, cx);
+        });
+        cx.update(|cx| assert!(armed(&app, cx)));
+
+        // With no SSH session the app declines every beat, which is the point: the
+        // decision is not the panel's to make.
+        cx.executor().advance_clock(Duration::from_secs(3));
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert!(
+                armed(&app, cx),
+                "the clock must survive beats the app declines"
             );
         });
     }

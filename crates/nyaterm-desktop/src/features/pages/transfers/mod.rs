@@ -1,6 +1,10 @@
 use gpui::{Context, IntoElement, div, prelude::*, px};
 
-use super::super::NyaTermApp;
+use self::browser::transfer_browser_view;
+use self::duplicate_banner::duplicate_prompt_banner;
+use self::panel::TransferPanel;
+use self::queue::transfer_queue_view;
+use self::resize::transfer_height_resize_handle;
 
 mod browser;
 mod browser_columns;
@@ -8,9 +12,11 @@ mod browser_filter;
 mod browser_keys;
 mod browser_navigation;
 mod browser_selection;
+mod duplicate_banner;
 mod editor;
 mod entry_row;
 mod file_ops;
+mod flush;
 mod forms;
 mod helpers;
 mod overlays;
@@ -20,10 +26,14 @@ mod overlays_editor;
 mod overlays_favorites;
 mod overlays_unknown;
 mod overlays_upload;
-mod path_bar;
+pub(in crate::features) mod panel;
+pub(in crate::features::pages::transfers) mod path_bar;
 mod properties;
 mod properties_dialog;
 mod queue;
+mod resize;
+#[cfg(test)]
+pub(in crate::features::pages::transfers) mod tests_support;
 
 use entry_row::{
     TransferBrowserEntryRowPresentation, transfer_browser_entry_row,
@@ -34,7 +44,7 @@ use helpers::*;
 const NATIVE_EDITOR_MAX_BYTES: u64 = 512 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::features::pages::transfers) enum TransferBrowserAvailability {
+pub(in crate::features) enum TransferBrowserAvailability {
     NoSession,
     UnsupportedSession,
     DisconnectedSsh,
@@ -77,48 +87,61 @@ fn transfer_menu_position(
     (x.clamp(margin, max_x), y.clamp(margin, max_y), max_height)
 }
 
-impl NyaTermApp {
-    pub(in crate::features) fn transfers_view(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let active_session_id = self.session.active_id();
-        let browser_availability = transfer_browser_availability(
-            active_session_id.is_some(),
-            self.session.active_ssh_file_browser_config().is_some(),
-            active_session_id.is_some_and(|session_id| self.session.is_disconnected(session_id)),
-        );
-        let transfer_height = self.transfer.panel_height().clamp(60., 600.);
-        let duplicate_prompt = self.session.prompt_active_duplicate().cloned();
+/// The transfers panel body.
+///
+/// Takes no `NyaTermApp`. GPUI records every entity read during a draw, so an app
+/// read here -- even a diagnostic one -- would put the panel back on the app's
+/// invalidation path and undo the isolation. Everything it draws comes from the
+/// snapshot; everything it changes goes back through `TransferPanel::with_app`.
+pub(in crate::features::pages::transfers) fn transfer_panel(
+    panel: &mut TransferPanel,
+    window: &mut gpui::Window,
+    cx: &mut Context<TransferPanel>,
+) -> gpui::AnyElement {
+    // Before the first flush there is nothing to draw and nothing to draw it from.
+    let Some(snapshot) = panel.snapshot() else {
+        return div().into_any_element();
+    };
+    let chrome = snapshot.chrome;
+    let transfer_height = snapshot.panel_height;
+    let duplicate_prompt = snapshot.duplicate_prompt.clone();
 
-        // Tauri AppPanelContent: FileExplorer (flex-1) + vertical resize + FileTransfer fixed height.
-        let palette = self.theme_palette();
-        let view = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .bg(self.shell_transparent_color(palette.surface));
-
-        view.child(
+    // Tauri AppPanelContent: FileExplorer (flex-1) + vertical resize + FileTransfer fixed height.
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .bg(chrome.transparent_surface)
+        .child(
             div()
                 .flex_1()
                 .min_h_0()
                 .overflow_hidden()
-                .child(self.transfer_browser_view(browser_availability, cx)),
+                .child(transfer_browser_view(panel, window, cx)),
         )
-        .child(self.transfer_height_resize_handle(cx))
+        .child(transfer_height_resize_handle(
+            chrome,
+            snapshot.height_is_resizing,
+            snapshot.resize_handle_highlighted,
+            cx,
+        ))
         .child(
             div()
                 .h(px(transfer_height))
                 .flex_none()
                 .overflow_hidden()
-                .child(self.transfer_queue_view(cx)),
+                .child(transfer_queue_view(panel, cx)),
         )
         .when_some(duplicate_prompt, |this, prompt| {
-            this.child(self.duplicate_prompt_banner(prompt, cx))
+            this.child(duplicate_prompt_banner(
+                chrome,
+                prompt,
+                &snapshot.panel_focus,
+                cx,
+            ))
         })
-    }
+        .into_any_element()
 }
 
 #[cfg(test)]

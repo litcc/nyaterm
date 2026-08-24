@@ -18,199 +18,198 @@ use super::helpers::{normalized_transfer_browser_path, remote_child_path};
 use super::transfer_menu_position;
 use crate::features::transfers::natural_compare_ascii;
 
-impl NyaTermApp {
-    pub(super) fn transfer_browser_path_row(
-        &mut self,
-        current_browser_path: String,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let display_browser_path = display_transfer_browser_home_path(
-            &current_browser_path,
-            self.transfer.browser_view().home_dir,
-        );
-        let is_current_favorite = self
-            .transfer
-            .browser_view()
-            .favorites
-            .iter()
-            .any(|path| path == &current_browser_path);
-        let history_paths = self
-            .transfer
-            .browser_view()
-            .visited_history
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>();
-        let palette = self.theme_palette();
-        // Built by `begin_transfer_browser_path_edit`, which is the only thing that
-        // can set `path_editing`. Render only reads it.
-        let path_input = self
-            .transfer
-            .browser_view()
-            .path_editing
-            .then(|| self.existing_text_input("transfer.browser.path"))
-            .flatten()
-            .map(|field| {
-                let focus = field.read(cx).focus_handle();
-                div()
-                    .id("transfer-path-bar-input-shell")
-                    .h(px(20.))
-                    .min_w_0()
-                    .flex_1()
-                    .px_1()
-                    .flex()
-                    .items_center()
-                    .rounded_sm()
-                    .bg(rgb(palette.input))
-                    .cursor_text()
-                    .on_click(move |_, window, cx| {
-                        window.focus(&focus, cx);
-                    })
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(px(10.))
-                            .text_color(rgb(palette.text))
-                            .child(NyaInput::new(&field)),
-                    )
-                    .into_any_element()
-            });
-        let breadcrumbs = build_transfer_browser_breadcrumbs(
-            &current_browser_path,
-            self.transfer.browser_view().home_dir,
-        );
-        let (visible_breadcrumbs, overflow_breadcrumbs) =
-            collapse_transfer_browser_breadcrumbs(&breadcrumbs);
+use super::panel::TransferPanel;
 
-        // Tauri FileExplorerPathBar: minHeight ~26px, mono path, favorites on the right.
-        div()
-            .flex()
-            .flex_col()
-            .gap_0()
-            .min_h(px(26.))
-            .border_b_1()
-            .border_color(rgb(palette.border))
-            .bg(self.shell_transparent_color(palette.surface))
-            .px_2()
-            .py(px(2.))
-            .justify_center()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .when(self.transfer.browser_view().path_editing, |this| {
-                        this.child(
-                            div()
-                                .id(SharedString::from("transfer-browser-path-input"))
-                                .h_full()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .items_center()
-                                .font_family(crate::features::shell::gpui_code_font_family())
-                                .text_size(px(10.))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        this.mark_user_activity();
-                                        match event.keystroke.key.as_str() {
-                                            "enter" => {
-                                                cx.stop_propagation();
-                                                this.submit_transfer_browser_path_edit(window, cx);
-                                            }
-                                            "escape" => {
-                                                cx.stop_propagation();
-                                                this.cancel_transfer_browser_path_edit(cx);
-                                            }
-                                            _ => {}
-                                        }
-                                    },
-                                ))
-                                .children(path_input),
-                        )
-                    })
-                    .when(!self.transfer.browser_view().path_editing, |this| {
-                        this.child(transfer_browser_breadcrumb_row(
-                            TransferBrowserBreadcrumbRowPresentation {
-                                palette,
-                                display_path: display_browser_path.clone(),
-                                current_path: current_browser_path.clone(),
-                                all_segments: breadcrumbs.clone(),
-                                visible_segments: visible_breadcrumbs.clone(),
-                                overflow_segments: overflow_breadcrumbs.clone(),
-                                overflow_label: t!("fileExplorer.breadcrumbOverflow").to_string(),
-                            },
-                            cx,
-                        ))
-                    })
-                    .child(
+/// The browser path bar.
+///
+/// A free function over the snapshot: it is part of the panel body, so it must not
+/// reach the app during a draw. Its handlers still do, at event time.
+pub(in crate::features::pages::transfers) fn transfer_browser_path_row(
+    panel: &TransferPanel,
+    current_browser_path: String,
+    cx: &mut Context<TransferPanel>,
+) -> impl IntoElement {
+    let snapshot = panel
+        .snapshot()
+        .expect("the caller returns early without a snapshot");
+    let chrome = snapshot.chrome;
+    let browser = &snapshot.browser;
+    let display_browser_path =
+        display_transfer_browser_home_path(&current_browser_path, &browser.home_dir);
+    let is_current_favorite = browser
+        .favorites
+        .iter()
+        .any(|path| path == &current_browser_path);
+    let history_paths = browser
+        .visited_history
+        .iter()
+        .take(5)
+        .cloned()
+        .collect::<Vec<_>>();
+    let palette = chrome.palette;
+    // Built by `begin_transfer_browser_path_edit`, which is the only thing that
+    // can set `path_editing`. Render only reads it.
+    let path_input = browser
+        .path_editing
+        .then(|| browser.path_field.clone())
+        .flatten()
+        .map(|field| {
+            let focus = field.read(cx).focus_handle();
+            div()
+                .id("transfer-path-bar-input-shell")
+                .h(px(20.))
+                .min_w_0()
+                .flex_1()
+                .px_1()
+                .flex()
+                .items_center()
+                .rounded_sm()
+                .bg(rgb(palette.input))
+                .cursor_text()
+                .on_click(move |_, window, cx| {
+                    window.focus(&focus, cx);
+                })
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .text_size(px(10.))
+                        .text_color(rgb(palette.text))
+                        .child(NyaInput::new(&field)),
+                )
+                .into_any_element()
+        });
+    let breadcrumbs = build_transfer_browser_breadcrumbs(&current_browser_path, &browser.home_dir);
+    let (visible_breadcrumbs, overflow_breadcrumbs) =
+        collapse_transfer_browser_breadcrumbs(&breadcrumbs);
+
+    // Tauri FileExplorerPathBar: minHeight ~26px, mono path, favorites on the right.
+    div()
+        .flex()
+        .flex_col()
+        .gap_0()
+        .min_h(px(26.))
+        .border_b_1()
+        .border_color(rgb(palette.border))
+        .bg(chrome.transparent_surface)
+        .px_2()
+        .py(px(2.))
+        .justify_center()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .when(browser.path_editing, |this| {
+                    this.child(
                         div()
-                            .id(SharedString::from("transfer-browser-path-favorite"))
-                            .ml_1()
-                            .size(px(22.))
-                            .flex_none()
+                            .id(SharedString::from("transfer-browser-path-input"))
+                            .h_full()
+                            .flex_1()
+                            .min_w_0()
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .rounded_sm()
-                            .text_sm()
-                            .text_color(if is_current_favorite {
-                                rgb(palette.link)
-                            } else {
-                                rgb(palette.text_muted)
-                            })
-                            .cursor_pointer()
-                            .hover(|this| {
-                                this.bg(rgb(palette.surface_elevated))
-                                    .text_color(rgb(palette.text))
-                            })
-                            .tooltip({
-                                let label = t!("fileExplorer.favorites").to_string();
-                                move |window, cx| {
-                                    nyaterm_ui::NyaTooltip::new(label.clone()).build(window, cx)
-                                }
-                            })
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                                    cx.stop_propagation();
-                                    this.open_transfer_browser_favorites_menu(event, cx);
-                                }),
-                            )
-                            .child(
-                                svg()
-                                    .size(px(14.))
-                                    .flex_none()
-                                    .path(if is_current_favorite {
-                                        "icons/fe/star.svg"
-                                    } else {
-                                        "icons/fe/star-outline.svg"
-                                    })
-                                    .text_color(if is_current_favorite {
-                                        rgb(palette.link)
-                                    } else {
-                                        rgb(palette.text_muted)
-                                    }),
-                            ),
-                    ),
-            )
-            .when(
-                self.transfer.browser_view().path_editing && !history_paths.is_empty(),
-                |this| {
-                    this.child(transfer_browser_path_history_list(
-                        palette,
-                        self.shell_surface_color(palette.surface),
-                        current_browser_path,
-                        self.transfer.browser_view().home_dir.clone(),
-                        history_paths,
+                            .font_family(crate::features::shell::gpui_code_font_family())
+                            .text_size(px(10.))
+                            .on_key_down(cx.listener(|panel, event: &KeyDownEvent, window, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.mark_user_activity();
+                                    match event.keystroke.key.as_str() {
+                                        "enter" => {
+                                            cx.stop_propagation();
+                                            this.submit_transfer_browser_path_edit(window, cx);
+                                        }
+                                        "escape" => {
+                                            cx.stop_propagation();
+                                            this.cancel_transfer_browser_path_edit(cx);
+                                        }
+                                        _ => {}
+                                    }
+                                })
+                            }))
+                            .children(path_input),
+                    )
+                })
+                .when(!browser.path_editing, |this| {
+                    this.child(transfer_browser_breadcrumb_row(
+                        TransferBrowserBreadcrumbRowPresentation {
+                            palette,
+                            display_path: display_browser_path.clone(),
+                            current_path: current_browser_path.clone(),
+                            all_segments: breadcrumbs.clone(),
+                            visible_segments: visible_breadcrumbs.clone(),
+                            overflow_segments: overflow_breadcrumbs.clone(),
+                            overflow_label: t!("fileExplorer.breadcrumbOverflow").to_string(),
+                        },
                         cx,
                     ))
-                },
-            )
-    }
+                })
+                .child(
+                    div()
+                        .id(SharedString::from("transfer-browser-path-favorite"))
+                        .ml_1()
+                        .size(px(22.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .text_sm()
+                        .text_color(if is_current_favorite {
+                            rgb(palette.link)
+                        } else {
+                            rgb(palette.text_muted)
+                        })
+                        .cursor_pointer()
+                        .hover(|this| {
+                            this.bg(rgb(palette.surface_elevated))
+                                .text_color(rgb(palette.text))
+                        })
+                        .tooltip({
+                            let label = t!("fileExplorer.favorites").to_string();
+                            move |window, cx| {
+                                nyaterm_ui::NyaTooltip::new(label.clone()).build(window, cx)
+                            }
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|panel, event: &MouseDownEvent, _window, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    cx.stop_propagation();
+                                    this.open_transfer_browser_favorites_menu(event, cx);
+                                })
+                            }),
+                        )
+                        .child(
+                            svg()
+                                .size(px(14.))
+                                .flex_none()
+                                .path(if is_current_favorite {
+                                    "icons/fe/star.svg"
+                                } else {
+                                    "icons/fe/star-outline.svg"
+                                })
+                                .text_color(if is_current_favorite {
+                                    rgb(palette.link)
+                                } else {
+                                    rgb(palette.text_muted)
+                                }),
+                        ),
+                ),
+        )
+        .when(browser.path_editing && !history_paths.is_empty(), |this| {
+            this.child(transfer_browser_path_history_list(
+                palette,
+                chrome.surface,
+                current_browser_path,
+                browser.home_dir.clone(),
+                history_paths,
+                cx,
+            ))
+        })
+}
 
+impl NyaTermApp {
     pub(super) fn copy_current_transfer_browser_path(&mut self, cx: &mut Context<Self>) {
         let path = normalized_transfer_browser_path(self.transfer.browser_view().path);
         cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
@@ -464,10 +463,10 @@ impl NyaTermApp {
     ) {
         let path = normalized_transfer_browser_path(self.transfer.browser_view().path);
         self.transfer.begin_browser_path_edit(path);
-        self.forget_text_inputs("transfer.browser.path");
+        self.forget_text_inputs("transfer.self.transfer.browser_view().path");
         self.start_transfer_browser_home_dir_job(cx);
         let field = self.text_input(
-            "transfer.browser.path",
+            "transfer.self.transfer.browser_view().path",
             &self.transfer.browser_view().path_draft.clone(),
             TextInputSetup::placeholder(t!("fileExplorer.editPath")),
             cx,
@@ -479,7 +478,7 @@ impl NyaTermApp {
 
     pub(super) fn cancel_transfer_browser_path_edit(&mut self, cx: &mut Context<Self>) {
         self.transfer.cancel_browser_path_edit();
-        self.forget_text_inputs("transfer.browser.path");
+        self.forget_text_inputs("transfer.self.transfer.browser_view().path");
         cx.notify();
     }
 
@@ -522,14 +521,14 @@ impl NyaTermApp {
             return;
         }
         self.transfer.finish_browser_path_edit();
-        self.forget_text_inputs("transfer.browser.path");
+        self.forget_text_inputs("transfer.self.transfer.browser_view().path");
         self.open_transfer_browser_directory(path, window, cx);
     }
 }
 
 fn transfer_browser_breadcrumb_row(
     presentation: TransferBrowserBreadcrumbRowPresentation,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     let TransferBrowserBreadcrumbRowPresentation {
         palette,
@@ -575,13 +574,15 @@ fn transfer_browser_breadcrumb_row(
                 })
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.open_transfer_browser_breadcrumb_overflow(
-                            open_segments.clone(),
-                            event,
-                            cx,
-                        );
+                    cx.listener(move |panel, event: &MouseDownEvent, _, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            cx.stop_propagation();
+                            this.open_transfer_browser_breadcrumb_overflow(
+                                open_segments.clone(),
+                                event,
+                                cx,
+                            );
+                        })
                     }),
                 )
                 .child(
@@ -633,16 +634,18 @@ fn transfer_browser_breadcrumb_row(
                             this.bg(rgb(palette.surface_elevated))
                                 .text_color(rgb(palette.text))
                         })
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            if is_current {
-                                this.begin_transfer_browser_path_edit(window, cx);
-                            } else {
-                                this.open_transfer_browser_directory(
-                                    label_path.clone(),
-                                    window,
-                                    cx,
-                                );
-                            }
+                        .on_click(cx.listener(move |panel, _, window, cx| {
+                            panel.with_app(cx, |this, cx| {
+                                if is_current {
+                                    this.begin_transfer_browser_path_edit(window, cx);
+                                } else {
+                                    this.open_transfer_browser_directory(
+                                        label_path.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            })
                         }))
                         .child(truncate_preview(&segment.label, 18)),
                 )
@@ -670,14 +673,16 @@ fn transfer_browser_breadcrumb_row(
                         })
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                                cx.stop_propagation();
-                                this.open_transfer_browser_children_menu(
-                                    children_path.clone(),
-                                    children_branch.clone(),
-                                    event,
-                                    cx,
-                                );
+                            cx.listener(move |panel, event: &MouseDownEvent, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    cx.stop_propagation();
+                                    this.open_transfer_browser_children_menu(
+                                        children_path.clone(),
+                                        children_branch.clone(),
+                                        event,
+                                        cx,
+                                    );
+                                })
                             }),
                         )
                         .child(
@@ -841,7 +846,7 @@ fn transfer_browser_path_history_list(
     current_browser_path: String,
     home_dir: String,
     paths: Vec<String>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     let mut list = div()
         .id(SharedString::from("transfer-browser-path-history-list"))
@@ -879,9 +884,11 @@ fn transfer_browser_path_history_list(
                 })
                 .cursor_pointer()
                 .hover(|this| this.bg(rgb(palette.hover)))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.transfer.dismiss_browser_path_edit();
-                    this.open_transfer_browser_directory(open_path.clone(), window, cx);
+                .on_click(cx.listener(move |panel, _, window, cx| {
+                    panel.with_app(cx, |this, cx| {
+                        this.transfer.dismiss_browser_path_edit();
+                        this.open_transfer_browser_directory(open_path.clone(), window, cx);
+                    })
                 }))
                 .child(truncate_preview(&display_path, 72)),
         );

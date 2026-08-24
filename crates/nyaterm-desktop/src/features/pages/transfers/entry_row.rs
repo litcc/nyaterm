@@ -9,18 +9,18 @@ use nyaterm_transport::{SftpFileEntry, SftpFileType};
 use std::collections::HashSet;
 
 use crate::features::{
-    NyaTermApp, shell::gpui_code_font_family, transfers::format_file_size,
-    view_widgets::transfer_entry_icon,
+    shell::gpui_code_font_family, transfers::format_file_size, view_widgets::transfer_entry_icon,
 };
 use crate::models::{TransferBrowserColumnWidths, TransferRenameState};
 use crate::theme::ThemePalette;
 
 use super::{format_permissions_octal, format_sftp_modified};
+use crate::features::pages::transfers::panel::TransferPanel;
 
 pub(super) fn transfer_browser_parent_entry_row(
     palette: ThemePalette,
     column_widths: TransferBrowserColumnWidths,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     div()
         .id(SharedString::from("transfer-browser-entry-parent"))
@@ -31,13 +31,17 @@ pub(super) fn transfer_browser_parent_entry_row(
         .bg(gpui::rgba(0x00000000))
         .cursor_pointer()
         .hover(|this| this.bg(rgb(palette.hover)))
-        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-            this.open_transfer_parent_directory(window, cx);
+        .on_click(cx.listener(|panel, _: &ClickEvent, window, cx| {
+            panel.with_app(cx, |this, cx| {
+                this.open_transfer_parent_directory(window, cx);
+            })
         }))
         .on_mouse_down(
             MouseButton::Right,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.prepare_transfer_browser_parent_context_menu(window, cx);
+            cx.listener(move |panel, _: &MouseDownEvent, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.prepare_transfer_browser_parent_context_menu(window, cx);
+                })
             }),
         )
         .child(
@@ -86,7 +90,7 @@ fn transfer_browser_text_cell(
 
 pub(super) fn transfer_browser_entry_row(
     presentation: TransferBrowserEntryRowPresentation<'_>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     let TransferBrowserEntryRowPresentation {
         palette,
@@ -139,43 +143,61 @@ pub(super) fn transfer_browser_entry_row(
         })
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+            cx.listener(move |panel, event: &MouseDownEvent, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    if !is_renaming {
+                        this.handle_transfer_browser_entry_mouse_down(
+                            mouse_down_path.clone(),
+                            event,
+                            window,
+                            cx,
+                        );
+                    }
+                })
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |panel, _: &MouseDownEvent, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.prepare_transfer_browser_entry_context_menu(
+                        context_path.clone(),
+                        window,
+                        cx,
+                    );
+                })
+            }),
+        )
+        .on_mouse_move(cx.listener(move |panel, event: &MouseMoveEvent, _, cx| {
+            panel.with_app(cx, |this, cx| {
                 if !is_renaming {
-                    this.handle_transfer_browser_entry_mouse_down(
-                        mouse_down_path.clone(),
+                    this.handle_transfer_browser_entry_mouse_move(
+                        mouse_move_path.clone(),
+                        event,
+                        cx,
+                    );
+                }
+            })
+        }))
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|panel, event: &MouseUpEvent, _, cx| {
+                panel.with_app(cx, |this, cx| {
+                    this.finish_transfer_browser_selection_drag(event, cx);
+                })
+            }),
+        )
+        .on_click(cx.listener(move |panel, event: &ClickEvent, window, cx| {
+            panel.with_app(cx, |this, cx| {
+                if !is_renaming {
+                    this.select_transfer_browser_entry_from_click(
+                        entry_identity.clone(),
                         event,
                         window,
                         cx,
                     );
                 }
-            }),
-        )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.prepare_transfer_browser_entry_context_menu(context_path.clone(), window, cx);
-            }),
-        )
-        .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-            if !is_renaming {
-                this.handle_transfer_browser_entry_mouse_move(mouse_move_path.clone(), event, cx);
-            }
-        }))
-        .on_mouse_up(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                this.finish_transfer_browser_selection_drag(event, cx);
-            }),
-        )
-        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-            if !is_renaming {
-                this.select_transfer_browser_entry_from_click(
-                    entry_identity.clone(),
-                    event,
-                    window,
-                    cx,
-                );
-            }
+            })
         }))
         .child(
             div()
@@ -213,9 +235,11 @@ pub(super) fn transfer_browser_entry_row(
                             })
                             .on_mouse_down(
                                 MouseButton::Right,
-                                cx.listener(|this, _, _, cx| {
-                                    this.suppress_transfer_browser_context_menu(cx);
-                                    cx.stop_propagation();
+                                cx.listener(|panel, _, _, cx| {
+                                    panel.with_app(cx, |this, cx| {
+                                        this.suppress_transfer_browser_context_menu(cx);
+                                        cx.stop_propagation();
+                                    })
                                 }),
                             )
                             .on_click(|_, _, cx| {
@@ -227,8 +251,10 @@ pub(super) fn transfer_browser_entry_row(
                             })
                             // Escape and Enter belong to the row, which the box
                             // leaves unconsumed.
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                this.handle_transfer_rename_key_down(event, window, cx);
+                            .on_key_down(cx.listener(|panel, event: &KeyDownEvent, window, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.handle_transfer_rename_key_down(event, window, cx);
+                                })
                             }))
                             .children(rename_input.take()),
                     )
@@ -241,12 +267,14 @@ pub(super) fn transfer_browser_entry_row(
                             )))
                             .min_w_0()
                             .flex_1()
-                            .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                                this.schedule_transfer_browser_name_rename(
-                                    name_click_path.clone(),
-                                    event,
-                                    cx,
-                                );
+                            .on_click(cx.listener(move |panel, event: &ClickEvent, _, cx| {
+                                panel.with_app(cx, |this, cx| {
+                                    this.schedule_transfer_browser_name_rename(
+                                        name_click_path.clone(),
+                                        event,
+                                        cx,
+                                    );
+                                })
                             }))
                             .truncate()
                             .child(truncate_preview(&entry.name, 42)),

@@ -121,14 +121,6 @@ impl TransferFeatureState {
         self.browser.auto_sync_cwd_last_at = None;
     }
 
-    pub(in crate::features) fn cwd_sync_clock_is_armed(&self) -> bool {
-        self.browser.cwd_sync_clock_armed
-    }
-
-    pub(in crate::features) fn set_cwd_sync_clock_armed(&mut self, armed: bool) {
-        self.browser.cwd_sync_clock_armed = armed;
-    }
-
     pub(in crate::features) fn remove_browser_session_cache(&mut self, session_id: &str) {
         self.browser.session_cache.remove(session_id);
     }

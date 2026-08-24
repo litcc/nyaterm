@@ -146,9 +146,9 @@ impl NyaTermApp {
     /// field is the boundary that builds it.
     pub(in crate::features) fn existing_text_input(
         &self,
-        id: &str,
+        id: impl AsRef<str>,
     ) -> Option<Entity<NyaInputState>> {
-        self.text_inputs.fields.get(id).cloned()
+        self.text_inputs.fields.get(id.as_ref()).cloned()
     }
 
     pub(in crate::features) fn text_input(

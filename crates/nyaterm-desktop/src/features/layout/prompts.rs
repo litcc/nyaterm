@@ -6,22 +6,17 @@ use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb, rgba,
 };
 use nyaterm_transport::{
-    SftpDuplicateDecision, SshAgentPromptAction, SshAgentPromptPhase, SshCredentialPromptKind,
-    SshCredentialPromptReason,
+    SshAgentPromptAction, SshAgentPromptPhase, SshCredentialPromptKind, SshCredentialPromptReason,
 };
 use nyaterm_ui::NyaScrollable;
 
-use crate::features::formatting::download_file_name_from_remote_path;
 use crate::features::session::{
     AgentPromptRequest, CredentialPromptState, HostKeyPromptChoice, HostKeyPromptIssue,
-    HostKeyPromptRequest, KeyboardInteractivePromptState, SftpDuplicatePromptState,
-    credential_prompt_target, credential_text_input_id, keyboard_interactive_text_input_id,
-    unix_seconds_now,
+    HostKeyPromptRequest, KeyboardInteractivePromptState, credential_prompt_target,
+    credential_text_input_id, keyboard_interactive_text_input_id, unix_seconds_now,
 };
-use crate::features::view_widgets::{dialog_action_button, full_window_input_layer};
-use crate::features::{
-    NyaTermApp, text_inputs::TextInputSetup, view_widgets::bounded_dialog_width,
-};
+use crate::features::view_widgets::dialog_action_button;
+use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::{SnapshotPasswordPromptKind, SnapshotPasswordPromptState};
 use crate::widgets::small_button;
 
@@ -101,138 +96,6 @@ impl NyaTermApp {
                             this.resolve_agent_prompt(SshAgentPromptAction::Retry, cx);
                         }),
                     )),
-            )
-    }
-
-    pub(in crate::features) fn duplicate_prompt_banner(
-        &mut self,
-        prompt: SftpDuplicatePromptState,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let overwrite_id = prompt.id.clone();
-        let skip_id = prompt.id.clone();
-        let escape_id = prompt.id.clone();
-        let rename_id = prompt.id.clone();
-        let kind = if prompt.request.is_directory {
-            t!("fileTransfer.duplicateKindFolder")
-        } else {
-            t!("fileTransfer.duplicateKindFile")
-        };
-        let target_name = download_file_name_from_remote_path(&prompt.request.target_path);
-        let description = t!(
-            "fileTransfer.duplicateDescription",
-            kind = kind,
-            name = target_name
-        );
-
-        full_window_input_layer("duplicate-prompt-overlay")
-            .bg(rgba(0x00000080))
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_3()
-            .track_focus(self.transfer.panel_focus())
-            .on_click(cx.listener(|this, _, window, cx| {
-                window.focus(this.transfer.panel_focus(), cx);
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if event.keystroke.key.as_str() == "escape" {
-                    this.resolve_duplicate_prompt(
-                        escape_id.clone(),
-                        SftpDuplicateDecision::Skip,
-                        cx,
-                    );
-                }
-            }))
-            .child(
-                div()
-                    .id("duplicate-prompt-dialog")
-                    .w(px(bounded_dialog_width(
-                        self.shell.viewport_size().0,
-                        32.,
-                        280.,
-                        448.,
-                    )))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(palette.border))
-                    .bg(self.shell_surface_color(palette.bg))
-                    .shadow_lg()
-                    .p_6()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight(700.))
-                            .child(t!("fileTransfer.duplicateTitle")),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .line_height(px(17.))
-                            .text_color(rgb(palette.text_muted))
-                            .child(description),
-                    )
-                    .child(
-                        div()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(rgb(palette.border))
-                            .px_2()
-                            .py_1()
-                            .font_family(crate::features::shell::gpui_code_font_family())
-                            .text_size(px(11.))
-                            .text_color(rgb(palette.text_muted))
-                            .child(prompt.request.target_path.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .justify_end()
-                            .gap_2()
-                            .child(small_button(
-                                palette,
-                                format!("duplicate-overwrite-{overwrite_id}"),
-                                t!("fileTransfer.duplicateOverwrite"),
-                                cx.listener(move |this, _, _, cx| {
-                                    this.resolve_duplicate_prompt(
-                                        overwrite_id.clone(),
-                                        SftpDuplicateDecision::Overwrite,
-                                        cx,
-                                    );
-                                }),
-                            ))
-                            .child(small_button(
-                                palette,
-                                format!("duplicate-skip-{skip_id}"),
-                                t!("fileTransfer.duplicateSkip"),
-                                cx.listener(move |this, _, _, cx| {
-                                    this.resolve_duplicate_prompt(
-                                        skip_id.clone(),
-                                        SftpDuplicateDecision::Skip,
-                                        cx,
-                                    );
-                                }),
-                            ))
-                            .child(small_button(
-                                palette,
-                                format!("duplicate-rename-{rename_id}"),
-                                t!("common.rename"),
-                                cx.listener(move |this, _, _, cx| {
-                                    this.resolve_duplicate_prompt(
-                                        rename_id.clone(),
-                                        SftpDuplicateDecision::Rename,
-                                        cx,
-                                    );
-                                }),
-                            )),
-                    ),
             )
     }
 

@@ -5,11 +5,12 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 
-use crate::features::{NyaTermApp, transfers::format_file_size};
-use crate::models::{TransferJobKind, TransferJobState, TransferJobStatus};
+use crate::features::transfers::format_file_size;
+use crate::models::{TransferJobKind, TransferJobRowSnapshot, TransferJobStatus};
 use crate::theme::ThemePalette;
 
 use super::{transfer_progress_percent_label, transfer_progress_ratio};
+use crate::features::pages::transfers::panel::TransferPanel;
 
 #[derive(Clone)]
 pub(in crate::features::pages::transfers) struct TransferJobRowLabels {
@@ -25,12 +26,12 @@ pub(in crate::features::pages::transfers) struct TransferJobRowLabels {
 
 pub(in crate::features::pages::transfers) fn transfer_job_row(
     palette: ThemePalette,
-    job: TransferJobState,
+    job: TransferJobRowSnapshot,
     directory_progress: Option<String>,
     labels: TransferJobRowLabels,
     _selected_remote_path: Option<String>,
     selected_job_id: Option<String>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     let status_color = match job.status {
         TransferJobStatus::Running => rgb(palette.warning),
@@ -75,16 +76,20 @@ pub(in crate::features::pages::transfers) fn transfer_job_row(
         .cursor_pointer()
         .on_click({
             let job_id = job.id.clone();
-            cx.listener(move |this, _, window, cx| {
-                window.focus(this.transfer.queue_focus(), cx);
-                this.select_transfer_job(job_id.clone(), cx);
+            cx.listener(move |panel, _, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    window.focus(this.transfer.queue_focus(), cx);
+                    this.select_transfer_job(job_id.clone(), cx);
+                })
             })
         })
         .on_mouse_down(
             MouseButton::Right,
-            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                this.open_transfer_job_menu(context_job_id.clone(), event, window, cx);
+            cx.listener(move |panel, event: &MouseDownEvent, window, cx| {
+                panel.with_app(cx, |this, cx| {
+                    cx.stop_propagation();
+                    this.open_transfer_job_menu(context_job_id.clone(), event, window, cx);
+                })
             }),
         )
         .child(
@@ -154,7 +159,7 @@ pub(in crate::features::pages::transfers) fn transfer_job_row(
         })
 }
 
-fn transfer_job_file_name(job: &TransferJobState) -> String {
+fn transfer_job_file_name(job: &TransferJobRowSnapshot) -> String {
     (!job.display_name.trim().is_empty())
         .then(|| job.display_name.clone())
         .or_else(|| {
@@ -181,7 +186,7 @@ fn transfer_job_file_name(job: &TransferJobState) -> String {
 }
 
 fn transfer_job_detail(
-    job: &TransferJobState,
+    job: &TransferJobRowSnapshot,
     directory_progress: Option<String>,
     labels: &TransferJobRowLabels,
 ) -> String {
@@ -222,7 +227,7 @@ fn transfer_job_detail(
     }
 }
 
-fn transfer_job_progress_percent(job: &TransferJobState) -> Option<f32> {
+fn transfer_job_progress_percent(job: &TransferJobRowSnapshot) -> Option<f32> {
     matches!(
         job.status,
         TransferJobStatus::Running | TransferJobStatus::Paused
@@ -255,7 +260,7 @@ fn format_transfer_row_time(created_at_ms: u128) -> String {
         .unwrap_or_else(|_| "--:--:--".to_string())
 }
 
-fn transfer_job_icon_path(kind: &TransferJobKind, job: &TransferJobState) -> &'static str {
+fn transfer_job_icon_path(kind: &TransferJobKind, job: &TransferJobRowSnapshot) -> &'static str {
     if transfer_job_is_directory(job) {
         return "icons/conn/folder.svg";
     }
@@ -267,7 +272,7 @@ fn transfer_job_icon_path(kind: &TransferJobKind, job: &TransferJobState) -> &'s
     }
 }
 
-fn transfer_job_is_directory(job: &TransferJobState) -> bool {
+fn transfer_job_is_directory(job: &TransferJobRowSnapshot) -> bool {
     job.progress
         .as_ref()
         .is_some_and(|progress| progress.item_count_total.is_some())
@@ -305,7 +310,7 @@ mod tests {
 
     use nyaterm_transport::SftpTransferProgress;
 
-    use crate::models::{TransferJobKind, TransferJobState, TransferJobStatus};
+    use crate::models::{TransferJobKind, TransferJobRowSnapshot, TransferJobStatus};
 
     use super::{
         TransferJobRowLabels, format_transfer_row_time, transfer_job_file_name,
@@ -342,16 +347,16 @@ mod tests {
         }
     }
 
-    fn job(status: TransferJobStatus) -> TransferJobState {
+    fn job(status: TransferJobStatus) -> TransferJobRowSnapshot {
         let kind = TransferJobKind::Download {
             remote_path: "/remote/file.bin".to_string(),
             raw_path_token: None,
             local_path: PathBuf::from("/local/file.bin"),
         };
-        TransferJobState {
+        crate::models::TransferJobState {
             id: "job-1".to_string(),
             session_id: Some("session-a".to_string()),
-            display_name: TransferJobState::display_name_for_kind(&kind),
+            display_name: crate::models::TransferJobState::display_name_for_kind(&kind),
             kind,
             status,
             detail: String::new(),
@@ -361,6 +366,7 @@ mod tests {
             progress: Some(progress("/remote/file.bin", 25, Some(100), None, None)),
             control: None,
         }
+        .row_snapshot()
     }
 
     #[test]
@@ -389,10 +395,10 @@ mod tests {
             raw_path_token: None,
             local_path: PathBuf::from("/downloads/project"),
         };
-        let job = TransferJobState {
+        let job = crate::models::TransferJobState {
             id: "job-1".to_string(),
             session_id: Some("session-a".to_string()),
-            display_name: TransferJobState::display_name_for_kind(&kind),
+            display_name: crate::models::TransferJobState::display_name_for_kind(&kind),
             kind,
             status: TransferJobStatus::Running,
             detail: String::new(),
@@ -407,7 +413,8 @@ mod tests {
                 Some(4),
             )),
             control: None,
-        };
+        }
+        .row_snapshot();
 
         assert_eq!(transfer_job_file_name(&job), "project");
         assert_eq!(

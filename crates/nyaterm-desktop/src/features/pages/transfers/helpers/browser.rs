@@ -4,7 +4,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled as _, div, prelude::FluentBuilder as _, px, rgb, rgba,
 };
 
-use crate::features::NyaTermApp;
+use crate::features::pages::transfers::panel::TransferPanel;
 use crate::models::{TransferBrowserSortColumn, TransferBrowserSortDirection};
 use crate::theme::ThemePalette;
 
@@ -32,7 +32,7 @@ pub(in crate::features::pages::transfers) fn sort_header_cell(
     localized_label: impl Into<SharedString>,
     width: Pixels,
     state: TransferBrowserSortHeaderState,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<TransferPanel>,
 ) -> impl IntoElement {
     let localized_label: SharedString = localized_label.into();
     let is_active = column == state.active_column;
@@ -71,8 +71,10 @@ pub(in crate::features::pages::transfers) fn sort_header_cell(
             rgb(palette.text_muted)
         })
         .hover(|this| this.bg(rgb(palette.hover)).text_color(rgb(palette.text)))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.toggle_transfer_browser_sort(column, cx);
+        .on_click(cx.listener(move |panel, _, _, cx| {
+            panel.with_app(cx, |this, cx| {
+                this.toggle_transfer_browser_sort(column, cx);
+            })
         }))
         .child(
             div()
@@ -116,9 +118,11 @@ pub(in crate::features::pages::transfers) fn sort_header_cell(
                 }))
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.start_transfer_browser_column_resize(column, event, cx);
+                    cx.listener(move |panel, event: &MouseDownEvent, _, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            cx.stop_propagation();
+                            this.start_transfer_browser_column_resize(column, event, cx);
+                        })
                     }),
                 ),
         )

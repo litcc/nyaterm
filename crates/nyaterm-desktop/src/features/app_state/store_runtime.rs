@@ -55,6 +55,7 @@ impl NyaTermApp {
                         // the catalog therefore still flush fresh state, which a
                         // flush inside `apply_loaded_sessions` could not promise.
                         this.flush_connection_panel_snapshot(cx);
+                        this.flush_transfer_panel_snapshot(cx);
                     });
                 })
                 .detach();
