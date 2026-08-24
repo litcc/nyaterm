@@ -7,7 +7,7 @@ use crate::features::app_state::SettingsDraftSnapshot;
 use crate::models::TranslationSecretDraft;
 
 impl NyaTermApp {
-    pub(in crate::features) fn begin_settings_draft(&mut self) {
+    pub(in crate::features) fn begin_settings_draft(&mut self, cx: &mut Context<Self>) {
         if self.shell.has_settings_draft() {
             return;
         }
@@ -33,6 +33,7 @@ impl NyaTermApp {
                 master_password_enabled: master_password.enabled,
                 master_password_draft: master_password.draft.to_string(),
             });
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn settings_draft_dirty(&self) -> bool {
@@ -65,6 +66,7 @@ impl NyaTermApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.request_settings_panel_refresh(cx);
         if !self.shell.has_settings_draft() {
             return false;
         }
@@ -191,13 +193,13 @@ impl NyaTermApp {
         true
     }
 
-    pub(in crate::features) fn rebase_open_settings_draft(&mut self) {
+    pub(in crate::features) fn rebase_open_settings_draft(&mut self, cx: &mut Context<Self>) {
         if !self.shell.has_settings_draft() {
             return;
         }
         self.shell.clear_settings_draft_snapshot();
         self.settings.rebase_master_password();
-        self.begin_settings_draft();
+        self.begin_settings_draft(cx);
     }
 
     pub(in crate::features) fn apply_settings_draft(
@@ -209,6 +211,7 @@ impl NyaTermApp {
             if close_after_apply {
                 self.finish_settings_page(cx);
             }
+            self.request_settings_panel_refresh(cx);
             return;
         }
         if let Some(error) = self.pending_settings_cloud_error() {
@@ -216,6 +219,7 @@ impl NyaTermApp {
             self.shell
                 .set_status(format!("settings apply blocked: {error}"));
             cx.notify();
+            self.request_settings_panel_refresh(cx);
             return;
         }
 
@@ -318,14 +322,16 @@ impl NyaTermApp {
                     if close_after_apply {
                         this.finish_settings_page(cx);
                     } else {
-                        this.begin_settings_draft();
+                        this.begin_settings_draft(cx);
                         cx.notify();
                     }
+                    this.request_settings_panel_refresh(cx);
                 }
                 Err(error) => {
                     let message = format!("settings apply failed: {error}");
                     this.settings.update_store_status(message.clone(), false);
                     this.shell.set_status(message);
+                    this.request_settings_panel_refresh(cx);
                     cx.notify();
                 }
             },
@@ -369,6 +375,7 @@ impl NyaTermApp {
             self.refresh_visible_terminal_surfaces(cx);
         }
         self.finish_settings_page(cx);
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn confirm_settings_draft(&mut self, cx: &mut Context<Self>) {
@@ -378,6 +385,7 @@ impl NyaTermApp {
             self.shell.clear_settings_draft_snapshot();
             self.finish_settings_page(cx);
         }
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn toggle_settings_master_password(&mut self, cx: &mut Context<Self>) {
@@ -522,7 +530,7 @@ mod tests {
         );
 
         cx.update_entity(&app, |app, cx| {
-            app.begin_settings_draft();
+            app.begin_settings_draft(cx);
             app.set_header_status_mode(HeaderStatusMode::DateTime, cx);
             assert_eq!(
                 app.settings.summary().ui_header_status_mode,
@@ -564,7 +572,7 @@ mod tests {
         );
 
         cx.update_entity(&app, |app, cx| {
-            app.begin_settings_draft();
+            app.begin_settings_draft(cx);
             app.set_header_status_mode(HeaderStatusMode::Host, cx);
             app.apply_settings_draft(false, cx);
         });

@@ -6,13 +6,16 @@ use gpui::{
 };
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, selects::FOLLOW_UI_THEME_VALUE, shell::appearance_font_stack};
+use crate::features::{
+    pages::settings::panel::SettingsPanel, selects::FOLLOW_UI_THEME_VALUE,
+    shell::appearance_font_stack,
+};
 use crate::theme::{APPEARANCE_THEME_IDS, ThemePalette, appearance_theme_label};
 use nyaterm_ui::NyaTooltip;
 
 use super::super::{settings_form_row, settings_form_section, settings_switch};
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn appearance_settings_section(
         &mut self,
         cx: &mut Context<Self>,
@@ -57,7 +60,7 @@ impl NyaTermApp {
                         settings_switch(
                             palette,
                             "appearance-panel-multi-open",
-                            self.shell.panel_multi_open(),
+                            self.settings.panel_multi_open(),
                             cx.listener(|this, _, _, cx| {
                                 this.toggle_panel_multi_open(cx);
                             }),

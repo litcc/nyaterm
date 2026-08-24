@@ -5,7 +5,7 @@ use gpui::{
     Window, div, prelude::*, px, rgb, rgba, svg,
 };
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::models::KeywordHighlightEditorField;
 use crate::theme::ThemePalette;
 use nyaterm_ui::NyaSwitch;
@@ -16,7 +16,7 @@ use super::super::{
 };
 use super::helpers::parse_keyword_swatch;
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn keyword_highlights_settings_section(
         &mut self,
         cx: &mut Context<Self>,

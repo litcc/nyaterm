@@ -3,13 +3,16 @@ use rust_i18n::t;
 use gpui::{AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup, text_inputs::secret_input_setup};
+use crate::features::{
+    pages::settings::panel::SettingsPanel, text_inputs::TextInputSetup,
+    text_inputs::secret_input_setup,
+};
 use crate::models::TranslateInputField;
 use crate::widgets::{small_button, status_pill};
 
 use super::settings_form_section;
 
-impl NyaTermApp {
+impl SettingsPanel {
     /// Every translation input, with the value it seeds from.
     ///
     /// Shared by `ensure_translation_inputs` and the section render so the two cannot

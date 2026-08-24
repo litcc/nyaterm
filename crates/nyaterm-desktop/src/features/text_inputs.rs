@@ -145,6 +145,18 @@ impl NyaTermApp {
         self.text_inputs.fields.get(id.as_ref()).cloned()
     }
 
+    pub(in crate::features) fn text_input_fields_snapshot(
+        &self,
+    ) -> HashMap<SharedString, Entity<NyaInputState>> {
+        self.text_inputs.fields.clone()
+    }
+
+    pub(in crate::features) fn number_input_fields_snapshot(
+        &self,
+    ) -> HashMap<SharedString, Entity<NyaNumberInputState>> {
+        self.text_inputs.number_fields.clone()
+    }
+
     /// The input for `id`, created on first use and seeded with `seed`.
     ///
     /// After that the field owns its own text: `seed` is ignored, because the

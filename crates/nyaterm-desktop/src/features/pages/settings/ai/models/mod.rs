@@ -3,7 +3,7 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::theme::ThemePalette;
 use crate::widgets::small_button;
 
@@ -12,7 +12,7 @@ use super::super::settings_form_section;
 mod credential_rows;
 mod model_groups;
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn ai_models_settings_section(
         &mut self,
         cx: &mut Context<Self>,
@@ -78,13 +78,7 @@ impl NyaTermApp {
                                             |this, event: &KeyDownEvent, _, cx| {
                                                 if event.keystroke.key == "escape" {
                                                     cx.stop_propagation();
-                                                    this.ai.clear_settings_model_query();
-                                                    this.reset_text_input(
-                                                        "ai.settings.model-search",
-                                                        "",
-                                                        cx,
-                                                    );
-                                                    cx.notify();
+                                                    this.clear_ai_model_search(cx);
                                                 }
                                             },
                                         )),

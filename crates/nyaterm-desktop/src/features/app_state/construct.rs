@@ -25,6 +25,7 @@ use crate::features::commands::{
 };
 use crate::features::connections::{ConnectionFeatureFocus, ConnectionFeatureState};
 use crate::features::pages::connections::panel::ConnectionPanel;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::features::pages::transfers::panel::TransferPanel;
 use crate::features::panels::{SendCommandFeatureFocus, SendCommandFeatureState};
 use crate::features::recording::RecordingFeatureState;
@@ -165,6 +166,7 @@ impl NyaTermApp {
         let remote_panels =
             crate::features::pages::remote::RemotePanels::new(app_entity.downgrade(), cx);
         let connection_panel = cx.new(|_| ConnectionPanel::new(app_entity.downgrade()));
+        let settings_panel = cx.new(|cx| SettingsPanel::new(app_entity.downgrade(), cx));
         let transfer_panel = cx.new(|_| TransferPanel::new(app_entity.downgrade()));
 
         Self {
@@ -183,6 +185,8 @@ impl NyaTermApp {
                 cx,
             ),
             connection_panel,
+            settings_panel,
+            native_settings_panel: None,
             transfer_panel,
             commands: CommandFeatureState::new(CommandFeatureInit {
                 commands: quick_commands,

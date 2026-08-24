@@ -5,12 +5,12 @@ use std::borrow::Cow;
 use gpui::{Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, shell::TAB_MOUSE_ACTIONS};
+use crate::features::{pages::settings::panel::SettingsPanel, shell::TAB_MOUSE_ACTIONS};
 use crate::theme::ThemePalette;
 
 use super::super::{settings_form_row, settings_form_section, settings_switch};
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn interaction_settings_section(
         &mut self,
         cx: &mut Context<Self>,

@@ -7,13 +7,13 @@ use gpui::{
     rgb,
 };
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::models::{AiActionEditorField, AiActionListKind};
 use crate::widgets::small_button;
 
 use super::super::{settings_form_row, settings_form_section, settings_switch};
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn ai_rules_settings_section(
         &mut self,
         cx: &mut Context<Self>,

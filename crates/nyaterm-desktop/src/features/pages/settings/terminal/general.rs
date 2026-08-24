@@ -8,14 +8,14 @@ use gpui::{
 };
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::theme::ThemePalette;
 
 use super::super::{
     settings_form_row, settings_form_section, settings_switch, settings_switch_with_enabled,
 };
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn terminal_general_settings_section(
         &mut self,
         cx: &mut Context<Self>,

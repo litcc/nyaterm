@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use gpui::{Context, FontWeight, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSearchInput;
 
-use crate::features::{NyaTermApp, shell::gpui_code_font_family};
+use crate::features::{pages::settings::panel::SettingsPanel, shell::gpui_code_font_family};
 use crate::shortcuts::{
     SHORTCUT_CATEGORIES, SHORTCUT_REGISTRY, ShortcutCategory, ShortcutDefinition,
     ShortcutNativeStatus, format_hotkey_for_display, shortcut_keys_for,
@@ -14,7 +14,7 @@ use crate::widgets::small_button;
 
 use super::super::settings_form_section;
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn keybindings_settings_section(
         &mut self,
         cx: &mut Context<Self>,
@@ -51,13 +51,7 @@ impl NyaTermApp {
                                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                                     if event.keystroke.key == "escape" {
                                         cx.stop_propagation();
-                                        this.settings.clear_keybinding_search();
-                                        this.reset_text_input(
-                                            "settings.keybindings.search",
-                                            "",
-                                            cx,
-                                        );
-                                        cx.notify();
+                                        this.clear_keybinding_search(cx);
                                     }
                                 })),
                         ),

@@ -2,13 +2,13 @@ use rust_i18n::t;
 
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 
 use super::super::{
     settings_form_row, settings_form_section, settings_input_control, settings_switch,
 };
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features::pages::settings) fn transfer_advanced_settings_section(
         &mut self,
         cx: &mut Context<Self>,

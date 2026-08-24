@@ -22,10 +22,13 @@ use gpui::Context;
 use nyaterm_ui::NyaNumberInputOptions;
 
 use crate::features::NyaTermApp;
-use crate::features::text_inputs::TextInputSetup;
+use crate::features::text_inputs::{TextInputSetup, secret_input_setup};
 use nyaterm_core::RecordingRotationPolicy;
 
-use crate::models::SettingsTab;
+use crate::models::{
+    AiActionEditorField, AiActionListKind, AiInputField, CloudSyncInputField, SettingsTab,
+    TranslateInputField,
+};
 
 impl NyaTermApp {
     /// Build every input the given tab draws.
@@ -52,6 +55,119 @@ impl NyaTermApp {
             SettingsTab::Security => self.ensure_security_inputs(cx),
             SettingsTab::SyncBackup => self.ensure_cloud_sync_settings_inputs(cx),
         }
+    }
+
+    pub(in crate::features) fn ensure_ai_settings_inputs(&mut self, cx: &mut Context<Self>) {
+        let config = self.ai.settings_config();
+        for (field, value) in [(
+            AiInputField::RequestUserAgent,
+            config.request_user_agent.clone(),
+        )] {
+            let setup = if field == AiInputField::ApiKey {
+                TextInputSetup::masked()
+            } else {
+                TextInputSetup::default()
+            };
+            self.ensure_text_input(format!("ai.input.{}", field.input_key()), &value, setup, cx);
+        }
+    }
+
+    pub(in crate::features) fn ensure_translation_inputs(&mut self, cx: &mut Context<Self>) {
+        let (settings, secret_draft) = self.translation.settings_draft_snapshot();
+        for (field, value) in [
+            (
+                TranslateInputField::DeeplApiKey,
+                secret_draft.deepl_api_key.clone(),
+            ),
+            (
+                TranslateInputField::BaiduAppId,
+                settings.baidu_app_id.clone(),
+            ),
+            (
+                TranslateInputField::BaiduAppKey,
+                secret_draft.baidu_app_key.clone(),
+            ),
+            (TranslateInputField::AliAppId, settings.ali_app_id.clone()),
+            (
+                TranslateInputField::AliAppKey,
+                secret_draft.ali_app_key.clone(),
+            ),
+            (
+                TranslateInputField::YoudaoAppId,
+                settings.youdao_app_id.clone(),
+            ),
+            (
+                TranslateInputField::YoudaoAppKey,
+                secret_draft.youdao_app_key.clone(),
+            ),
+        ] {
+            let setup = if field.is_settings_field()
+                && matches!(
+                    field,
+                    TranslateInputField::DeeplApiKey
+                        | TranslateInputField::BaiduAppKey
+                        | TranslateInputField::AliAppKey
+                        | TranslateInputField::YoudaoAppKey
+                ) {
+                TextInputSetup::masked()
+            } else {
+                TextInputSetup::default()
+            };
+            self.ensure_text_input(
+                format!("translation.input.{}", field.input_key()),
+                &value,
+                setup,
+                cx,
+            );
+        }
+    }
+
+    pub(in crate::features) fn ensure_cloud_sync_settings_inputs(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        for field in CloudSyncInputField::ALL {
+            let value = self.cloud_sync.input_value(field);
+            self.ensure_text_input(
+                format!("cloud-sync.input.{}", field.input_key()),
+                &value,
+                secret_input_setup(field.is_secret()),
+                cx,
+            );
+        }
+        let form_enabled = self.cloud_sync_form_enabled();
+        let settings = self.cloud_sync.settings();
+        let debounce_enabled = form_enabled && settings.enabled && settings.auto_push_on_change;
+        self.ensure_number_input(
+            "cloud-sync.number.debounce",
+            &settings.sync_debounce_seconds.to_string(),
+            NyaNumberInputOptions::default()
+                .range(1.0, 3_600.0)
+                .step(1.0)
+                .disabled(!debounce_enabled),
+            cx,
+        );
+    }
+
+    pub(in crate::features) fn ai_action_input_specs(
+        &self,
+    ) -> Vec<(String, String, String, String)> {
+        let mut specs = Vec::new();
+        for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
+            let actions = match kind {
+                AiActionListKind::Terminal => self.ai.settings_config().terminal_ai_actions.clone(),
+                AiActionListKind::File => self.ai.settings_config().file_ai_actions.clone(),
+            };
+            for action in actions {
+                specs.push((
+                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Name),
+                    action.name.clone(),
+                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Prompt),
+                    action.prompt.clone(),
+                ));
+            }
+        }
+        specs
     }
 
     fn ensure_appearance_inputs(&mut self, cx: &mut Context<Self>) {
@@ -430,10 +546,7 @@ const ALL_SETTINGS_TABS: [SettingsTab; 13] = [
 
 #[cfg(test)]
 mod tests {
-    use gpui::{
-        AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-        TestAppContext, VisualTestContext, div, px,
-    };
+    use gpui::{AppContext as _, Entity, TestAppContext};
     use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -441,8 +554,6 @@ mod tests {
     use crate::models::{NavItem, SettingsTab};
 
     use super::ALL_SETTINGS_TABS;
-
-    const VIEWPORT_WIDTH: f32 = 1_100.;
 
     fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
@@ -468,103 +579,53 @@ mod tests {
         cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
     }
 
-    /// Draws the settings surface through a real window.
-    ///
-    /// Rendering without one leaks by construction: elements are arena-allocated and
-    /// the arena is only cleared when `Window::draw` completes, so an element built
-    /// outside a draw holds its entity handles until the process exits. That is why
-    /// these tests host a window and step frames rather than calling a section render
-    /// directly -- the earlier no-window version reported leaks for entities the
-    /// render itself creates, `NyaSelectState` among them, which no production path
-    /// owns either.
-    struct SettingsHost {
-        surface: Option<gpui::AnyElement>,
-    }
-
-    impl Render for SettingsHost {
-        fn render(
-            &mut self,
-            _window: &mut gpui::Window,
-            _cx: &mut gpui::Context<Self>,
-        ) -> impl IntoElement {
-            // `update` here would re-enter the app from a render, and notifying the
-            // app to force a frame would then schedule the next one forever. The
-            // panel batch will render from a snapshot instead; for now the surface is
-            // built inside the app's own update, driven from the test body.
-            div().w(px(VIEWPORT_WIDTH)).h(px(800.)).child(
-                self.surface
-                    .take()
-                    .unwrap_or_else(|| div().into_any_element()),
-            )
-        }
-    }
-
-    fn hosted(
-        cx: &mut TestAppContext,
-    ) -> (
-        Entity<NyaTermApp>,
-        Entity<SettingsHost>,
-        &mut VisualTestContext,
-    ) {
+    fn hosted(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
         let app = app(cx);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_page(NavItem::Settings, cx);
+            app.flush_settings_panel_snapshots(cx);
         });
-        let host_app = app.clone();
-        let _ = host_app;
-        let (host, vcx) = cx.add_window_view(move |_, _| SettingsHost { surface: None });
-        let vcx: &mut VisualTestContext = vcx;
-        vcx.run_until_parked();
-        (app, host, vcx)
+        app
     }
 
-    /// Build the settings surface inside the app's own update, hand it to the host,
-    /// and draw one real frame.
-    ///
-    /// The element must be built and drawn in the same draw for the arena to release
-    /// it, which is the whole reason these tests are hosted.
-    fn draw(host: &Entity<SettingsHost>, app: &Entity<NyaTermApp>, vcx: &mut VisualTestContext) {
-        vcx.update(|window, cx| {
-            let surface = app.update(cx, |app, cx| app.settings_window_view(VIEWPORT_WIDTH, cx));
-            host.update(cx, |host, cx| {
-                host.surface = Some(surface);
-                cx.notify();
-            });
-            _ = window.draw(cx);
-        });
-        vcx.run_until_parked();
-    }
-
-    /// Activating a tab must build every input that tab draws, and drawing it must
-    /// build none.
-    ///
-    /// The render sites can no longer create one, so a tab whose ensure list is short
-    /// would draw an empty slot. `existing_number_input_box` and
-    /// `existing_text_input_box` both trip a debug assertion in that case, so drawing
-    /// every tab here turns a gap into a failure rather than a blank row -- which is
-    /// how the cross-line call sites, the AI credential rows and the full Cloud Sync
-    /// provider field set were found.
+    /// Activating a tab must build its app-owned inputs and publish those handles
+    /// into the panel snapshot. Rendering is covered by the hosted SettingsPanel
+    /// tests; this pins the ownership boundary that render relies on.
     #[test]
-    fn every_settings_tab_builds_its_inputs_and_drawing_builds_none() {
+    fn every_settings_tab_builds_its_inputs_and_snapshot_handles() {
         let mut cx = TestAppContext::single();
-        let (app, host, vcx) = hosted(&mut cx);
+        let app = hosted(&mut cx);
 
         for tab in ALL_SETTINGS_TABS {
-            vcx.update(|_, cx| {
-                app.update(cx, |app, cx| {
-                    app.ensure_settings_tab_inputs(tab, cx);
-                    app.shell.set_settings_active_tab(tab);
-                });
+            cx.update_entity(&app, |app, cx| {
+                app.ensure_settings_tab_inputs(tab, cx);
+                app.shell.set_settings_active_tab(tab);
+                app.request_settings_panel_refresh(cx);
+                app.flush_settings_panel_snapshots(cx);
             });
-            // The first draw is where a missing input would assert.
-            draw(&host, &app, vcx);
-            let after_first = vcx.update(|_, cx| app.read(cx).text_input_count_for_test());
-            draw(&host, &app, vcx);
+            let after_first = cx.update_entity(&app, |app, cx| {
+                app.settings_panel
+                    .read(cx)
+                    .snapshot()
+                    .expect("tab snapshot")
+                    .text_inputs
+                    .len()
+            });
+            cx.update_entity(&app, |app, cx| {
+                app.flush_settings_panel_snapshots(cx);
+            });
             assert_eq!(
-                vcx.update(|_, cx| app.read(cx).text_input_count_for_test()),
+                cx.update_entity(&app, |app, cx| {
+                    app.settings_panel
+                        .read(cx)
+                        .snapshot()
+                        .expect("tab snapshot")
+                        .text_inputs
+                        .len()
+                }),
                 after_first,
-                "drawing the {tab:?} tab again created an input"
+                "flushing the {tab:?} tab again changed its input handle set"
             );
         }
     }
@@ -584,30 +645,28 @@ mod tests {
     #[test]
     fn static_settings_inputs_outlive_the_page() {
         let mut cx = TestAppContext::single();
-        let (app, host, vcx) = hosted(&mut cx);
+        let app = hosted(&mut cx);
 
-        vcx.update(|_, cx| {
-            app.update(cx, |app, cx| {
-                app.ensure_settings_tab_inputs(SettingsTab::Security, cx);
-                app.shell.set_settings_active_tab(SettingsTab::Security);
-            });
+        cx.update_entity(&app, |app, cx| {
+            app.ensure_settings_tab_inputs(SettingsTab::Security, cx);
+            app.shell.set_settings_active_tab(SettingsTab::Security);
+            app.request_settings_panel_refresh(cx);
+            app.flush_settings_panel_snapshots(cx);
         });
-        draw(&host, &app, vcx);
 
-        let probe = vcx.update(|_, cx| {
-            app.read(cx)
-                .existing_text_input("settings.security.master-password")
+        let probe = cx.update_entity(&app, |app, _| {
+            app.existing_text_input("settings.security.master-password")
                 .expect("activation built the master-password input")
                 .downgrade()
         });
 
-        vcx.update(|_, cx| {
-            app.update(cx, |app, cx| app.cancel_settings(cx));
+        cx.update_entity(&app, |app, cx| {
+            app.cancel_settings(cx);
+            app.flush_settings_panel_snapshots(cx);
         });
-        draw(&host, &app, vcx);
 
         assert!(
-            vcx.update(|_, _| probe.upgrade().is_some()),
+            probe.upgrade().is_some(),
             "a static tab input is app-lifetime; page close must not release it"
         );
     }

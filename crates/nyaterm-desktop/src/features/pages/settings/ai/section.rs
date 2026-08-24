@@ -4,7 +4,7 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px, 
 use nyaterm_core::RiskLevel;
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::{pages::settings::panel::SettingsPanel, text_inputs::TextInputSetup};
 use crate::models::AiInputField;
 use crate::theme::ThemePalette;
 
@@ -12,7 +12,7 @@ use super::super::{
     settings_form_row, settings_form_section, settings_input_control, settings_switch,
 };
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn ai_input(
         &mut self,
         _id: &'static str,

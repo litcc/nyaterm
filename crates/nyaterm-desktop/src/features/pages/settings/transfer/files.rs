@@ -3,14 +3,14 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, SharedString, div, prelude::*};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{NyaTermApp, transfers::duplicate_policy_label};
+use crate::features::{pages::settings::panel::SettingsPanel, transfers::duplicate_policy_label};
 use crate::widgets::small_button;
 
 use super::super::{
     settings_form_row, settings_form_section, settings_input_action_control, settings_switch,
 };
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn transfer_settings_section(
         &mut self,
         cx: &mut Context<Self>,

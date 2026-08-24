@@ -27,6 +27,7 @@ pub(in crate::features) struct SettingsFeatureState {
     keybindings: KeybindingSettingsState,
     prompts: SettingsPromptState,
     persistence: HashMap<SettingsPersistenceDomain, SettingsPersistenceSlot>,
+    panel_refresh_requested: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -235,7 +236,20 @@ impl SettingsFeatureState {
             },
             prompts: SettingsPromptState::default(),
             persistence: HashMap::new(),
+            panel_refresh_requested: false,
         }
+    }
+
+    pub(in crate::features) fn request_panel_refresh(&mut self) -> bool {
+        if self.panel_refresh_requested {
+            return false;
+        }
+        self.panel_refresh_requested = true;
+        true
+    }
+
+    pub(in crate::features) fn clear_panel_refresh_request(&mut self) {
+        self.panel_refresh_requested = false;
     }
 
     pub(in crate::features) fn queue_persistence(

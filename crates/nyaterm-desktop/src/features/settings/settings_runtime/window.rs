@@ -6,20 +6,29 @@ use gpui::{
 };
 use nyaterm_ui::{NyaWindowHandle, nya_root};
 
+use crate::features::pages::settings::panel::{SettingsPanel, SettingsSurface};
 use crate::features::{
     NyaTermApp, view_widgets::child_window_header, view_widgets::child_window_titlebar,
 };
 
 pub(in crate::features) struct SettingsWindow {
     app: Entity<NyaTermApp>,
+    settings_panel: Entity<SettingsPanel>,
     _app_subscription: Subscription,
 }
 
 impl SettingsWindow {
     fn new(app: Entity<NyaTermApp>, cx: &mut Context<Self>) -> Self {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
+        let settings_panel = cx.new(|cx| {
+            SettingsPanel::new_for_surface(app.downgrade(), SettingsSurface::NativeWindow, cx)
+        });
+        app.update(cx, |app, cx| {
+            app.register_native_settings_panel(&settings_panel, cx);
+        });
         Self {
             app,
+            settings_panel,
             _app_subscription: app_subscription,
         }
     }
@@ -29,6 +38,7 @@ impl Render for SettingsWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.app.read(cx).shell.has_settings_draft() {
             self.app.update(cx, |app, cx| {
+                app.clear_native_settings_panel(&self.settings_panel, cx);
                 app.shell.clear_settings_window();
                 cx.notify();
             });
@@ -36,8 +46,6 @@ impl Render for SettingsWindow {
             return div().size_full().into_any_element();
         }
 
-        let viewport = window.viewport_size();
-        let viewport_width = f32::from(viewport.width);
         let (palette, font, font_size, title) = self.app.read_with(cx, |app, _| {
             (
                 app.theme_palette(),
@@ -48,9 +56,11 @@ impl Render for SettingsWindow {
         });
         window.set_window_title(&title);
         let content = self
-            .app
-            .update(cx, |app, cx| app.settings_window_view(viewport_width, cx));
+            .settings_panel
+            .clone()
+            .cached(crate::features::layout::cached_panel_style());
         let close_app = self.app.clone();
+        let close_panel = self.settings_panel.clone();
 
         div()
             .size_full()
@@ -68,7 +78,10 @@ impl Render for SettingsWindow {
                 false,
                 window.is_maximized(),
                 move |_, window, cx| {
-                    close_app.update(cx, |app, cx| app.cancel_settings(cx));
+                    close_app.update(cx, |app, cx| {
+                        app.clear_native_settings_panel(&close_panel, cx);
+                        app.cancel_settings(cx);
+                    });
                     window.remove_window();
                 },
             ))

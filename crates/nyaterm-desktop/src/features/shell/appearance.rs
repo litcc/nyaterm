@@ -117,6 +117,7 @@ impl NyaTermApp {
         if !self.settings.begin_font_options_load() {
             return;
         }
+        self.request_settings_panel_refresh(cx);
         cx.spawn(async move |this, cx| {
             let Ok(system_fonts) = this.update(cx, |_, cx| cx.text_system().all_font_names())
             else {
@@ -147,6 +148,7 @@ impl NyaTermApp {
             let _ = this.update(cx, |this, cx| {
                 this.settings
                     .finish_font_options_load(ui_fonts, terminal_fonts);
+                this.request_settings_panel_refresh(cx);
                 cx.notify();
             });
         })

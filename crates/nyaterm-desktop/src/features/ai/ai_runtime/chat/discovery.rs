@@ -11,6 +11,7 @@ impl NyaTermApp {
         if self.ai.discovery_is_pending() {
             self.ai
                 .set_panel_status("AI model discovery already running".to_string());
+            self.request_settings_panel_refresh(cx);
             cx.notify();
             return;
         }
@@ -20,14 +21,17 @@ impl NyaTermApp {
             self.ai.set_panel_status(
                 "AI model discovery requires an enabled custom provider".to_string(),
             );
+            self.request_settings_panel_refresh(cx);
             cx.notify();
             return;
         }
 
         let Some(tx) = self.ai.begin_discovery_job() else {
+            self.request_settings_panel_refresh(cx);
             cx.notify();
             return;
         };
+        self.request_settings_panel_refresh(cx);
         std::thread::spawn(move || {
             let mut discoveries = Vec::new();
             let mut errors = Vec::new();
@@ -63,6 +67,7 @@ impl NyaTermApp {
                     .update(cx, |this, cx| {
                         this.ai.note_discovery_event_delivered();
                         this.apply_ai_discovery_event(event, cx);
+                        this.request_settings_panel_refresh(cx);
                         cx.notify();
                     })
                     .is_err()

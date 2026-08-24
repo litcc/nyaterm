@@ -537,7 +537,7 @@ impl NyaTermApp {
             }
             ConfigPathPromptResult::Imported(info) => {
                 self.refresh_store_from_runtime_and_sync_theme(cx);
-                self.rebase_open_settings_draft();
+                self.rebase_open_settings_draft(cx);
                 let safety = info
                     .safety_backup_path
                     .as_ref()
@@ -672,5 +672,6 @@ impl NyaTermApp {
             "redb connection store online".to_string(),
             true,
         );
+        self.request_settings_panel_refresh(cx);
     }
 }

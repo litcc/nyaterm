@@ -3,13 +3,13 @@ use rust_i18n::t;
 use gpui::{AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::models::CloudSyncInputField;
 
 use super::super::super::{settings_form_row, settings_switch_with_enabled};
 use super::cloud_sync_action_button;
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(super) fn cloud_sync_webdav_provider_fields(
         &mut self,
         password: String,

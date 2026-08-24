@@ -134,7 +134,7 @@ impl NyaTermApp {
                 total_rules,
             } => {
                 self.refresh_keyword_highlights(cx);
-                self.rebase_open_settings_draft();
+                self.rebase_open_settings_draft(cx);
                 self.shell.set_status(format!(
                     "imported {imported_rules} keyword highlight rule(s), updated {updated_rules}, total {total_rules}"
                 ));

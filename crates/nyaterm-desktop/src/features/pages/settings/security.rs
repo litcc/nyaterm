@@ -3,14 +3,14 @@ use rust_i18n::t;
 use gpui::{Context, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use nyaterm_ui::NyaTooltip;
 
 use super::{
     settings_form_row, settings_form_section, settings_switch, settings_switch_with_enabled,
 };
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn security_settings_section(
         &mut self,
         cx: &mut Context<Self>,

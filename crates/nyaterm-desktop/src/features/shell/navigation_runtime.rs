@@ -6,7 +6,7 @@ use crate::models::{MainMode, NavItem, PanelSide, RightFocus};
 impl NyaTermApp {
     pub(in crate::features) fn open_page(&mut self, item: NavItem, cx: &mut Context<Self>) {
         if item == NavItem::Settings || item.opens_settings() {
-            self.begin_settings_draft();
+            self.begin_settings_draft(cx);
             // Inputs are built where a tab is revealed, never in its render.
             let tab = self.shell.navigation.settings.active_tab;
             self.ensure_settings_tab_inputs(tab, cx);
@@ -40,6 +40,7 @@ impl NyaTermApp {
             self.shell.panels.left_collapsed = true;
             self.shell.panels.right_collapsed = true;
             self.shell.set_status("settings opened".to_string());
+            self.request_settings_panel_refresh(cx);
             cx.notify();
             return;
         }

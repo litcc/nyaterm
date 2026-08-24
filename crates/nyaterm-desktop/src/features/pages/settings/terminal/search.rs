@@ -6,16 +6,17 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::features::settings::SearchEngineMenu;
 use crate::features::{
-    NyaTermApp, icons::SEARCH_ENGINE_ICON_IDS, icons::search_engine_icon, view_widgets::mono_icon,
+    icons::SEARCH_ENGINE_ICON_IDS, icons::search_engine_icon, view_widgets::mono_icon,
 };
 use crate::theme::ThemePalette;
 use nyaterm_ui::NyaTooltip;
 
 use super::super::settings_switch;
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(in crate::features) fn terminal_search_settings_section(
         &mut self,
         cx: &mut Context<Self>,
@@ -176,9 +177,10 @@ impl NyaTermApp {
                                                         .into_any_element(),
                                                     })
                                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if this.settings.toggle_search_engine_menu(
+                                                        if this.toggle_search_engine_menu(
                                                             SearchEngineMenu::Icon,
                                                             index,
+                                                            cx,
                                                         ) {
                                                             cx.notify();
                                                         }
@@ -268,9 +270,10 @@ impl NyaTermApp {
                                                         actions_label,
                                                         actions_open,
                                                         cx.listener(move |this, _, _, cx| {
-                                                            if this.settings.toggle_search_engine_menu(
+                                                            if this.toggle_search_engine_menu(
                                                                 SearchEngineMenu::Actions,
                                                                 index,
+                                                                cx,
                                                             ) {
                                                                 cx.notify();
                                                             }
@@ -321,7 +324,7 @@ impl NyaTermApp {
                                                     false,
                                                     has_placeholder,
                                                     cx.listener(move |this, _, _, cx| {
-                                                        this.settings.close_search_engine_menus();
+                                                        this.close_search_engine_menus(cx);
                                                         this.test_search_engine(index, cx);
                                                     }),
                                                 ))
@@ -421,7 +424,7 @@ fn search_engine_icon_picker(
     index: usize,
     selected_icon: Option<&str>,
     clear_label: impl Into<SharedString>,
-    cx: &mut Context<NyaTermApp>,
+    cx: &mut Context<SettingsPanel>,
 ) -> impl IntoElement {
     let clear_label: SharedString = clear_label.into();
     div()

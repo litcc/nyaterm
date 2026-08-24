@@ -14,6 +14,7 @@ pub(in crate::features) use security_state::{
     SecurityCatalogState, SecurityFeatureFocus, SecurityFeatureState,
 };
 pub(in crate::features) use state::{
-    SearchEngineMenu, SettingsFeatureFocus, SettingsFeatureInit, SettingsFeatureState,
+    KeybindingPresentationState, KeywordHighlightPresentationState, SearchEngineMenu,
+    SearchEnginePresentationState, SettingsFeatureFocus, SettingsFeatureInit, SettingsFeatureState,
     SettingsPersistenceDomain, UiLayoutSettingsUpdate,
 };

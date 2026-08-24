@@ -4,12 +4,12 @@ use gpui::{
     Context, FontWeight, IntoElement, KeyDownEvent, SharedString, div, prelude::*, px, rgb,
 };
 
-use crate::features::NyaTermApp;
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::widgets::small_button;
 
 use super::super::super::settings_switch;
 
-impl NyaTermApp {
+impl SettingsPanel {
     pub(super) fn ai_credential_rows(
         &mut self,
         palette: crate::theme::ThemePalette,

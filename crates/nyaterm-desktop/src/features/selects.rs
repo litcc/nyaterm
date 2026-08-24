@@ -35,6 +35,20 @@ pub(in crate::features) struct SelectRegistry {
     subscriptions: HashMap<SharedString, Subscription>,
 }
 
+impl SelectRegistry {
+    pub(in crate::features) fn field(&self, id: &SharedString) -> Option<Entity<NyaSelectState>> {
+        self.fields.get(id).cloned()
+    }
+
+    pub(in crate::features) fn insert_field(
+        &mut self,
+        id: SharedString,
+        field: Entity<NyaSelectState>,
+    ) {
+        self.fields.insert(id, field);
+    }
+}
+
 impl NyaTermApp {
     pub(in crate::features) fn select_entity<I>(
         &mut self,
@@ -195,7 +209,12 @@ impl NyaTermApp {
             .child(NyaSelect::new(&select).appearance(appearance))
     }
 
-    fn on_select_changed(&mut self, id: &str, value: Option<&str>, cx: &mut Context<Self>) {
+    pub(in crate::features) fn on_select_changed(
+        &mut self,
+        id: &str,
+        value: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(value) = value else {
             return;
         };

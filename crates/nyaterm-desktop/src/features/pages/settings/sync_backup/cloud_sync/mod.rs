@@ -8,9 +8,10 @@ use nyaterm_core::{CloudConflictKind, CloudSyncSettings};
 use nyaterm_ui::NyaSelectOption;
 
 use crate::features::{
-    NyaTermApp, formatting::compact_id, formatting::configured_cloud_sync_provider,
+    formatting::compact_id, formatting::configured_cloud_sync_provider,
     formatting::format_cloud_provider, formatting::format_history_timestamp_ms,
-    text_inputs::secret_input_setup, view_widgets::dialog_action_button,
+    pages::settings::panel::SettingsPanel, text_inputs::secret_input_setup,
+    view_widgets::dialog_action_button,
 };
 use crate::models::{
     CloudSyncConflictState, CloudSyncInputField, SettingsTab, SnapshotPasswordPromptKind,
@@ -21,7 +22,7 @@ use crate::widgets::small_button;
 use super::super::{settings_form_row, settings_form_section, settings_switch_with_enabled};
 
 mod providers;
-impl NyaTermApp {
+impl SettingsPanel {
     fn cloud_sync_provider_select(
         &mut self,
         active_provider: &str,
@@ -481,8 +482,10 @@ impl NyaTermApp {
                                     "cloud-open-security",
                                     t!("settings.openSecuritySettings"),
                                     cx.listener(|this, _, _, cx| {
-                                        this.shell.set_settings_active_tab(SettingsTab::Security);
-                                        cx.notify();
+                                        this.with_app(cx, |app, _| {
+                                            app.shell
+                                                .set_settings_active_tab(SettingsTab::Security);
+                                        });
                                     }),
                                 )),
                         )
