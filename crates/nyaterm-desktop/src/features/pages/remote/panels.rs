@@ -216,11 +216,12 @@ impl RemoteMonitorPanel {
         RemoteMonitorKind::Docker,
     ];
 
-    /// Run `f` against the app, then flush whatever snapshot it invalidated.
+    /// Run `f` against the app and queue the snapshot flush after the panel lease ends.
     ///
     /// Every panel-initiated mutation goes through here, which makes the panel its own
-    /// flush boundary: no callback has to remember a separate step. Called from event
-    /// handlers, never from render.
+    /// flush boundary: no callback has to remember a separate step. Event handlers lease
+    /// this panel while they run, so the flush is deferred until that lease is released.
+    /// This method is called from event handlers, never from render.
     pub(in crate::features::pages::remote) fn with_app<R: Default>(
         &self,
         cx: &mut Context<Self>,
@@ -231,7 +232,7 @@ impl RemoteMonitorPanel {
         };
         app.update(cx, |app, cx| {
             let result = f(app, cx);
-            app.flush_remote_panel_snapshots(cx);
+            app.defer_remote_panel_snapshot_flush(cx);
             result
         })
     }
@@ -451,6 +452,13 @@ impl RemotePanels {
 }
 
 impl NyaTermApp {
+    /// Queue a remote-panel snapshot rebuild after the current GPUI entity leases end.
+    pub(in crate::features) fn defer_remote_panel_snapshot_flush(&self, cx: &mut Context<Self>) {
+        self.defer_app_update(cx, |app, cx| {
+            app.flush_remote_panel_snapshots(cx);
+        });
+    }
+
     /// Push a fresh snapshot to every panel whose pane has moved on.
     ///
     /// **Never called from `render`.** The boundaries are the three event drains, a
@@ -1265,6 +1273,41 @@ mod isolation_tests {
             delivered,
             Some(revision),
             "the snapshot must be current before any paint"
+        );
+    }
+
+    /// A panel interaction must not flush while its own entity is leased by GPUI.
+    #[test]
+    fn a_panel_interaction_flushes_after_its_lease_is_released() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let panel = vcx.update(|_, cx| {
+            app.read(cx)
+                .remote_panels
+                .entity(RemoteMonitorKind::Stats)
+                .clone()
+        });
+        let before = vcx.update(|_, cx| panel.read(cx).snapshot_revision());
+
+        vcx.update(|_, cx| {
+            panel.update(cx, |panel, cx| {
+                panel.with_app(cx, |app, _| {
+                    app.remote_ops.apply_stats(RemoteStats::default());
+                    app.remote_ops.set_stats_status("loaded stats");
+                });
+                assert_eq!(
+                    panel.snapshot_revision(),
+                    before,
+                    "the snapshot must remain unchanged until the panel lease is released"
+                );
+            });
+        });
+        vcx.run_until_parked();
+
+        let after = vcx.update(|_, cx| panel.read(cx).snapshot_revision());
+        assert!(
+            after > before,
+            "the deferred interaction flush must publish the changed stats state"
         );
     }
 

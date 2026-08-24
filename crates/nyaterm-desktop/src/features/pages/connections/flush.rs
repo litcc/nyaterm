@@ -10,6 +10,20 @@ use crate::features::perf::record_gpui_perf_sample;
 use super::panel::{ConnectionChrome, ConnectionListKey, ConnectionListSnapshot};
 
 impl NyaTermApp {
+    /// Queue a snapshot rebuild after the current GPUI entity leases are released.
+    ///
+    /// Input subscriptions and panel listeners can both mutate connection state while
+    /// another entity is leased. Deferring the rebuild keeps those boundaries safe and
+    /// still publishes the snapshot before the next paint.
+    pub(in crate::features) fn defer_connection_panel_snapshot_flush(
+        &self,
+        cx: &mut Context<Self>,
+    ) {
+        self.defer_app_update(cx, |app, cx| {
+            app.flush_connection_panel_snapshot(cx);
+        });
+    }
+
     fn connection_chrome(&self) -> ConnectionChrome {
         let palette = self.theme_palette();
         ConnectionChrome {

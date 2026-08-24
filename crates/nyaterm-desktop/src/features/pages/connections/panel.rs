@@ -238,15 +238,14 @@ impl ConnectionPanel {
         cx.notify();
     }
 
-    /// The one hop from a panel interaction back to the owner.
+    /// The single entry point from a panel interaction back to authoritative app state.
     ///
-    /// Every callback in the list goes through here, which is what keeps the
-    /// authoritative state on `NyaTermApp` while the panel renders from a value.
-    /// Flushing on the way out means an interaction needs no boundary of its own:
-    /// the mutation and the rebuild are one transaction.
+    /// `cx.listener` still leases `ConnectionPanel` while the callback runs. Update
+    /// `NyaTermApp` first, then defer the snapshot flush until the current GPUI effect
+    /// cycle ends and the panel lease has been returned, avoiding re-entrant entity access.
     ///
-    /// The return value is carried back out because some handlers decide whether
-    /// to stop propagation from what the mutation reported.
+    /// The return value is passed back because some event handlers decide whether to
+    /// stop propagation based on the mutation result.
     pub(in crate::features::pages::connections) fn with_app<R: Default>(
         &self,
         cx: &mut Context<Self>,
@@ -257,7 +256,7 @@ impl ConnectionPanel {
         };
         app.update(cx, |app, cx| {
             let result = f(app, cx);
-            app.flush_connection_panel_snapshot(cx);
+            app.defer_connection_panel_snapshot_flush(cx);
             result
         })
     }
