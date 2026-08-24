@@ -242,6 +242,7 @@ impl ConnectionFeatureState {
                 NyaInputEvent::Changed(text) | NyaInputEvent::Submitted(text) => {
                     app.connection_state.set_list_search_text(text.clone());
                     app.sync_connection_keyboard_active(cx);
+                    app.defer_connection_panel_snapshot_flush(cx);
                     cx.notify();
                 }
                 NyaInputEvent::Blurred(_) => {}
@@ -1107,15 +1108,18 @@ impl ConnectionFeatureState {
             cx.subscribe(&entity, |app: &mut NyaTermApp, _, event, cx| match event {
                 NyaInputEvent::Changed(text) => {
                     app.connection_state.set_group_editor_name(text.clone());
+                    app.defer_connection_panel_snapshot_flush(cx);
                     cx.notify();
                 }
                 NyaInputEvent::Submitted(text) => {
                     app.connection_state.set_group_editor_name(text.clone());
                     app.save_connection_group_editor(cx);
+                    app.defer_connection_panel_snapshot_flush(cx);
                 }
                 NyaInputEvent::Blurred(text) => {
                     app.connection_state.set_group_editor_name(text.clone());
                     app.finish_connection_group_editor_from_blur(cx);
+                    app.defer_connection_panel_snapshot_flush(cx);
                 }
             });
         self.group_editor.field = Some(entity);

@@ -826,6 +826,7 @@ impl NyaTermApp {
                         can_refresh,
                         cx.listener(|this, _, _window, cx| {
                             this.refresh_stats(cx);
+                            this.defer_remote_panel_snapshot_flush(cx);
                         }),
                     )
                     .into_any_element(),
@@ -844,6 +845,7 @@ impl NyaTermApp {
                         can_refresh,
                         cx.listener(|this, _, _window, cx| {
                             this.refresh_gpu(cx);
+                            this.defer_remote_panel_snapshot_flush(cx);
                         }),
                     )
                     .into_any_element(),
@@ -862,6 +864,7 @@ impl NyaTermApp {
                         can_refresh,
                         cx.listener(|this, _, _window, cx| {
                             this.refresh_npu(cx);
+                            this.defer_remote_panel_snapshot_flush(cx);
                         }),
                     )
                     .into_any_element(),
@@ -880,6 +883,7 @@ impl NyaTermApp {
                         can_refresh,
                         cx.listener(|this, _, _window, cx| {
                             this.refresh_processes(cx);
+                            this.defer_remote_panel_snapshot_flush(cx);
                         }),
                     )
                     .into_any_element(),
@@ -905,6 +909,7 @@ impl NyaTermApp {
                             can_refresh,
                             cx.listener(|this, _, _window, cx| {
                                 this.refresh_docker(cx);
+                                this.defer_remote_panel_snapshot_flush(cx);
                             }),
                         ))
                         .child(
@@ -919,6 +924,7 @@ impl NyaTermApp {
                                     can_prune,
                                     cx.listener(|this, _, _, cx| {
                                         this.remote_ops.toggle_docker_header_menu();
+                                        this.defer_remote_panel_snapshot_flush(cx);
                                         cx.notify();
                                     }),
                                 ))
@@ -960,6 +966,9 @@ impl NyaTermApp {
                                                         |this, _, window, cx| {
                                                             this.remote_ops.close_docker_menus();
                                                             this.prune_docker_system(window, cx);
+                                                            this.defer_remote_panel_snapshot_flush(
+                                                                cx,
+                                                            );
                                                         },
                                                     )),
                                             ),

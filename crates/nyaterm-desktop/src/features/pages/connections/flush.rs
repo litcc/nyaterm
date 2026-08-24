@@ -10,6 +10,20 @@ use crate::features::perf::record_gpui_perf_sample;
 use super::panel::{ConnectionChrome, ConnectionListKey, ConnectionListSnapshot};
 
 impl NyaTermApp {
+    /// Queue a snapshot rebuild after the current GPUI entity leases are released.
+    ///
+    /// Input subscriptions and panel listeners can both mutate connection state while
+    /// another entity is leased. Deferring the rebuild keeps those boundaries safe and
+    /// still publishes the snapshot before the next paint.
+    pub(in crate::features) fn defer_connection_panel_snapshot_flush(
+        &self,
+        cx: &mut Context<Self>,
+    ) {
+        self.defer_app_update(cx, |app, cx| {
+            app.flush_connection_panel_snapshot(cx);
+        });
+    }
+
     fn connection_chrome(&self) -> ConnectionChrome {
         let palette = self.theme_palette();
         ConnectionChrome {
@@ -23,9 +37,10 @@ impl NyaTermApp {
     ///
     /// Not called from any render. The panel used to re-enter the app from its own
     /// `render`, which made the root paint the reconciliation pump; this runs at
-    /// the boundaries that actually change something instead -- every panel
-    /// interaction (through `ConnectionPanel::with_app`) and every store reply
-    /// (through `submit_store_request`, after the whole handler body has run).
+    /// the boundaries that actually change something instead -- panel interactions,
+    /// connection-input subscriptions, and menu actions that open the group editor
+    /// (through their deferred boundary helpers), plus every store reply (through
+    /// `submit_store_request`, after the whole handler body has run).
     ///
     /// The derived model is reconciled first and unconditionally. It is memoised,
     /// so a no-op costs a key comparison, and it is what settles the search

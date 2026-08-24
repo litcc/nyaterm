@@ -238,15 +238,14 @@ impl ConnectionPanel {
         cx.notify();
     }
 
-    /// The one hop from a panel interaction back to the owner.
+    /// The single entry point from a panel interaction back to authoritative app state.
     ///
-    /// Every callback in the list goes through here, which is what keeps the
-    /// authoritative state on `NyaTermApp` while the panel renders from a value.
-    /// Flushing on the way out means an interaction needs no boundary of its own:
-    /// the mutation and the rebuild are one transaction.
+    /// `cx.listener` still leases `ConnectionPanel` while the callback runs. Update
+    /// `NyaTermApp` first, then defer the snapshot flush until the current GPUI effect
+    /// cycle ends and the panel lease has been returned, avoiding re-entrant entity access.
     ///
-    /// The return value is carried back out because some handlers decide whether
-    /// to stop propagation from what the mutation reported.
+    /// The return value is passed back because some event handlers decide whether to
+    /// stop propagation based on the mutation result.
     pub(in crate::features::pages::connections) fn with_app<R: Default>(
         &self,
         cx: &mut Context<Self>,
@@ -257,7 +256,7 @@ impl ConnectionPanel {
         };
         app.update(cx, |app, cx| {
             let result = f(app, cx);
-            app.flush_connection_panel_snapshot(cx);
+            app.defer_connection_panel_snapshot_flush(cx);
             result
         })
     }
@@ -293,6 +292,7 @@ mod tests {
         TestAppContext, VisualTestContext, div, px,
     };
     use nyaterm_core::{AppRuntime, Group, ProxyConfig, RuntimeMode, SavedConnection, uuid};
+    use nyaterm_ui::NyaInputEvent;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
@@ -580,6 +580,81 @@ mod tests {
                 });
             });
         }
+    }
+
+    /// A listener updates the panel entity while the panel is still leased.
+    /// The interaction flush must wait until that lease is returned, otherwise GPUI's
+    /// re-entrant entity assertion is triggered.
+    #[test]
+    fn panel_interaction_flushes_after_its_lease_is_released() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let panel = vcx.update(|_, cx| app.read(cx).connection_panel.clone());
+
+        vcx.update(|_, cx| {
+            panel.update(cx, |panel, cx| {
+                panel.with_app(cx, |app, _| {
+                    app.connection_state
+                        .set_list_search_text("Alpha".to_string());
+                });
+                assert!(
+                    panel
+                        .snapshot()
+                        .expect("the hosted panel should have a snapshot")
+                        .search_is_empty,
+                    "the snapshot must remain unchanged until the panel lease is released"
+                );
+            });
+        });
+        vcx.run_until_parked();
+
+        vcx.update(|_, cx| {
+            let panel = app.read(cx).connection_panel.read(cx);
+            assert!(
+                !panel
+                    .snapshot()
+                    .expect("the hosted panel should have a snapshot")
+                    .search_is_empty,
+                "the deferred interaction flush must publish the changed search state"
+            );
+        });
+    }
+
+    /// A search subscription must publish the cached panel after the input event updates
+    /// the authoritative connection state.
+    #[test]
+    fn search_input_changes_reach_the_snapshot_after_the_subscription_runs() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let search_field = vcx.update(|_, cx| app.read(cx).connection_state.list_search_field());
+
+        vcx.update(|_, cx| {
+            search_field.update(cx, |_, cx| {
+                cx.emit(NyaInputEvent::Changed("Alpha".to_string()));
+            });
+            assert!(
+                app.read(cx)
+                    .connection_panel
+                    .read(cx)
+                    .snapshot()
+                    .expect("the hosted panel should have a snapshot")
+                    .search_is_empty,
+                "the snapshot must remain unchanged until the deferred flush runs"
+            );
+        });
+        vcx.run_until_parked();
+
+        vcx.update(|_, cx| {
+            assert!(
+                !app.read(cx)
+                    .connection_panel
+                    .read(cx)
+                    .snapshot()
+                    .expect("the hosted panel should have a snapshot")
+                    .search_is_empty,
+                "the search subscription must publish the changed search state"
+            );
+        });
     }
 
     /// Rows name their proxy in the detail tooltip, so a proxy edit has to reach

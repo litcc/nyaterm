@@ -39,6 +39,24 @@ struct OverlayFlags {
 }
 
 impl NyaTermApp {
+    /// Run an app update after the current GPUI entity leases are released.
+    ///
+    /// The weak handle lets the deferred work disappear normally during application
+    /// teardown instead of keeping the root entity alive until the callback runs.
+    pub(in crate::features) fn defer_app_update(
+        &self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut Self, &mut Context<Self>) + 'static,
+    ) {
+        let app = cx.entity().downgrade();
+        cx.defer(move |cx| {
+            let Some(app) = app.upgrade() else {
+                return;
+            };
+            app.update(cx, update);
+        });
+    }
+
     pub(in crate::features) fn gpui_perf_context(
         &self,
         flat_row_count: usize,
@@ -142,10 +160,13 @@ impl NyaTermApp {
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     this.dismiss_transfer_rename_if_open(cx);
-                    let changed =
-                        this.shell.close_root_menus() || this.remote_ops.docker_menus_open();
+                    let remote_menus_open = this.remote_ops.docker_menus_open();
+                    let changed = this.shell.close_root_menus() || remote_menus_open;
                     if changed {
                         this.remote_ops.close_docker_menus();
+                        if remote_menus_open {
+                            this.defer_remote_panel_snapshot_flush(cx);
+                        }
                         cx.notify();
                     }
                 }),
