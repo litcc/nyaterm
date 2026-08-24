@@ -334,6 +334,9 @@ impl NyaTermApp {
     /// ignored rather than panicking — a field can outlive one frame of the
     /// panel that made it.
     fn on_text_input_changed(&mut self, id: SharedString, text: String, cx: &mut Context<Self>) {
+        // Remote panels render cached snapshots, so their input subscriptions need the
+        // same deferred flush boundary as panel event handlers.
+        let remote_panel_input = id.starts_with("remote.");
         if let Some(rest) = id.strip_prefix("settings.number.") {
             self.apply_settings_number_input(rest, &text, cx);
         } else if let Some(rest) = id.strip_prefix("ai.number.") {
@@ -494,6 +497,9 @@ impl NyaTermApp {
             self.apply_transfer_default_editor(text, cx);
         } else if id.as_ref() == "settings.transfer.default-permissions" {
             self.apply_transfer_file_permissions(text, cx);
+        }
+        if remote_panel_input {
+            self.defer_remote_panel_snapshot_flush(cx);
         }
     }
 

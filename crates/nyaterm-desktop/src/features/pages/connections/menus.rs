@@ -177,6 +177,7 @@ impl NyaTermApp {
                         window,
                         cx,
                     );
+                    this.defer_connection_panel_snapshot_flush(cx);
                 })),
         ];
         if total_in_group > 0 {
@@ -200,6 +201,7 @@ impl NyaTermApp {
                         window,
                         cx,
                     );
+                    this.defer_connection_panel_snapshot_flush(cx);
                 })),
             NyaMenuItem::action(t!("savedConnections.deleteFolder"))
                 .icon("icons/net/delete.svg")
@@ -304,6 +306,7 @@ impl NyaTermApp {
                 .icon("icons/fe/new-folder.svg")
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.open_connection_group_editor(None, None, window, cx);
+                    this.defer_connection_panel_snapshot_flush(cx);
                 })),
             NyaMenuItem::separator(),
             NyaMenuItem::action(t!("settings.importConfig"))

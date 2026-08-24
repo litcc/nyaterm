@@ -37,9 +37,10 @@ impl NyaTermApp {
     ///
     /// Not called from any render. The panel used to re-enter the app from its own
     /// `render`, which made the root paint the reconciliation pump; this runs at
-    /// the boundaries that actually change something instead -- every panel
-    /// interaction (through `ConnectionPanel::with_app`) and every store reply
-    /// (through `submit_store_request`, after the whole handler body has run).
+    /// the boundaries that actually change something instead -- panel interactions,
+    /// connection-input subscriptions, and menu actions that open the group editor
+    /// (through their deferred boundary helpers), plus every store reply (through
+    /// `submit_store_request`, after the whole handler body has run).
     ///
     /// The derived model is reconciled first and unconditionally. It is memoised,
     /// so a no-op costs a key comparison, and it is what settles the search

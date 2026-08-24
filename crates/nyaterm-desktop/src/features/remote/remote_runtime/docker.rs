@@ -577,6 +577,9 @@ impl NyaTermApp {
                         if this.apply_docker_event(event) {
                             cx.notify();
                         }
+                        // Flush boundary: a reply changed the pane, so its panel
+                        // gets the snapshot before the next paint.
+                        this.flush_remote_panel_snapshots(cx);
                     })
                     .is_err()
                 {

@@ -181,9 +181,8 @@ pub(in crate::features) struct DockerSnapshot {
 pub(in crate::features) struct RemoteMonitorPanel {
     kind: RemoteMonitorKind,
     /// Weak on purpose. `NyaTermApp` owns this entity, so a strong handle back would
-    /// be a reference cycle that keeps both alive forever -- which is what
-    /// `ConnectionPanel` does today. The app always outlives the panels it owns, so
-    /// the upgrade below only fails during teardown.
+    /// be a reference cycle that keeps both alive forever. The app always outlives
+    /// the panels it owns, so the upgrade below only fails during teardown.
     app: WeakEntity<NyaTermApp>,
     /// The refresh schedule, and the only record of whether this panel is wanted.
     ///
@@ -193,8 +192,7 @@ pub(in crate::features) struct RemoteMonitorPanel {
     /// to remember to check, and it is why there is no separate `demand: bool`: the
     /// task's existence *is* the demand, so the two cannot disagree.
     clock: Option<Task<()>>,
-    /// What this panel renders from, for the kinds moved off the app. `None` for
-    /// Processes and Docker, which still delegate.
+    /// The snapshot this panel renders from.
     snapshot: Option<RemoteMonitorSnapshot>,
     /// Paints of *this entity*, so a test can tell the entity route apart from the
     /// inline views it replaced. Both register the same search-input ids, so no
@@ -204,10 +202,7 @@ pub(in crate::features) struct RemoteMonitorPanel {
 }
 
 impl RemoteMonitorPanel {
-    /// Which pane kinds render from a snapshot rather than through the app.
-    ///
-    /// Processes and Docker still delegate.
-    /// Every kind renders from a snapshot now; nothing delegates through the app.
+    /// Every pane kind renders from a snapshot rather than reading app state in `render`.
     pub(in crate::features::pages::remote) const SNAPSHOT_KINDS: [RemoteMonitorKind; 5] = [
         RemoteMonitorKind::Stats,
         RemoteMonitorKind::Gpu,
@@ -461,12 +456,12 @@ impl NyaTermApp {
 
     /// Push a fresh snapshot to every panel whose pane has moved on.
     ///
-    /// **Never called from `render`.** The boundaries are the three event drains, a
-    /// settings apply, `sync_remote_panels_after_activation` for a session switch, the
-    /// panel's own refresh clock, and `RemoteMonitorPanel::with_app` for anything the
-    /// panel initiates. GPUI runs `flush_effects` when the outermost `update` finishes,
-    /// so a mutation and the panel update it causes land in the same cycle, before any
-    /// paint.
+    /// **Never called from `render`.** The boundaries are the remote event drains, remote
+    /// input subscriptions, a settings apply, `sync_remote_panels_after_activation` for
+    /// a session switch, the panel's own refresh clock, and `RemoteMonitorPanel::with_app`
+    /// for anything the panel initiates. GPUI runs `flush_effects` when the outermost
+    /// `update` finishes, so a mutation and the panel update it causes land in the same
+    /// cycle, before any paint.
     ///
     /// Cheap when nothing changed: one `u64` compare per kind.
     pub(in crate::features) fn flush_remote_panel_snapshots(&mut self, cx: &mut Context<Self>) {
@@ -1106,6 +1101,7 @@ mod isolation_tests {
     };
     use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
     use nyaterm_transport::{LocalSessionConfig, RemoteGpuOverview, RemoteStats, SshSessionConfig};
+    use nyaterm_ui::NyaInputEvent;
 
     use super::RemoteMonitorKind;
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -1380,6 +1376,62 @@ mod isolation_tests {
             (after[0], after[2]),
             (before[0], before[2]),
             "and the other two must not"
+        );
+    }
+
+    /// A remote search subscription must publish its panel snapshot after the input event.
+    #[test]
+    fn remote_search_input_reaches_its_snapshot_after_the_subscription_runs() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.open_or_toggle_panel(NavItem::GpuMonitor, cx);
+                app.flush_remote_panel_snapshots(cx);
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+
+        let field = vcx.update(|_, cx| {
+            app.read(cx)
+                .existing_text_input("remote.gpu.filter")
+                .expect("the GPU panel should own its search field")
+        });
+        let before = vcx.update(|_, cx| {
+            app.read(cx)
+                .remote_panels
+                .entity(RemoteMonitorKind::Gpu)
+                .read(cx)
+                .snapshot_revision()
+        });
+
+        vcx.update(|_, cx| {
+            field.update(cx, |_, cx| {
+                cx.emit(NyaInputEvent::Changed("py".to_string()));
+            });
+            assert_eq!(
+                app.read(cx)
+                    .remote_panels
+                    .entity(RemoteMonitorKind::Gpu)
+                    .read(cx)
+                    .snapshot_revision(),
+                before,
+                "the snapshot must remain unchanged until the deferred flush runs"
+            );
+        });
+        vcx.run_until_parked();
+
+        let after = vcx.update(|_, cx| {
+            app.read(cx)
+                .remote_panels
+                .entity(RemoteMonitorKind::Gpu)
+                .read(cx)
+                .snapshot_revision()
+        });
+        assert!(
+            after > before,
+            "the remote search subscription must publish its changed state"
         );
     }
 
