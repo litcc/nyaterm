@@ -11,6 +11,20 @@ use super::panel::{
 use super::transfer_browser_availability;
 
 impl NyaTermApp {
+    /// Flush the transfers panel once the current effect cycle ends.
+    ///
+    /// `cx.listener` and `cx.processor` both lease `TransferPanel` for the whole
+    /// callback -- GPUI takes the entity out of its map -- so a flush that ran inline
+    /// would reach back for `panel.update` and double-lease it, which aborts the
+    /// process rather than unwinding. Deferring returns the lease first and still
+    /// lands before any paint, so the panel is never drawn stale. The two sibling
+    /// panels reach their flushes the same way.
+    pub(in crate::features) fn defer_transfer_panel_snapshot_flush(&self, cx: &mut Context<Self>) {
+        self.defer_app_update(cx, |app, cx| {
+            app.flush_transfer_panel_snapshot(cx);
+        });
+    }
+
     fn transfer_chrome(&self) -> TransferChrome {
         let palette = self.theme_palette();
         TransferChrome {

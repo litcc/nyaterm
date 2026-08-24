@@ -195,8 +195,13 @@ impl TransferPanel {
 
     /// The one hop from a panel interaction back to the owner.
     ///
-    /// Flushing on the way out means an interaction needs no boundary of its own:
-    /// the mutation and the rebuild are one transaction.
+    /// The flush is deferred rather than run inline, and that is load-bearing: this is
+    /// called from a listener (or the virtualised row builder) on this panel, so GPUI
+    /// has the panel *leased* -- taken out of the entity map -- for the whole callback.
+    /// A flush that reached back for `panel.read` or `panel.update` would double-lease
+    /// it and abort the process. `App::defer` exists for precisely this, and runs at
+    /// the end of the current effect cycle: after the lease is returned, and still
+    /// before anything paints, so the panel is never drawn stale.
     pub(in crate::features::pages::transfers) fn with_app<R: Default>(
         &self,
         cx: &mut Context<Self>,
@@ -207,7 +212,7 @@ impl TransferPanel {
         };
         app.update(cx, |app, cx| {
             let result = f(app, cx);
-            app.flush_transfer_panel_snapshot(cx);
+            app.defer_transfer_panel_snapshot_flush(cx);
             result
         })
     }
@@ -426,5 +431,66 @@ mod tests {
             );
         });
         let _ = Duration::from_secs(1);
+    }
+
+    struct Host {
+        panel: Entity<super::TransferPanel>,
+    }
+
+    impl Render for Host {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div().w(px(320.)).h(px(600.)).child(self.panel.clone())
+        }
+    }
+
+    /// A panel callback must not double-lease the panel.
+    ///
+    /// `cx.listener` leases `TransferPanel` for the whole callback, so a `with_app`
+    /// that flushed inline would reach back for `panel.update` and abort the process
+    /// -- not a catchable panic, a `STATUS_STACK_BUFFER_OVERRUN`. This drives
+    /// `with_app` the way a listener does rather than calling `app.update` directly,
+    /// which is exactly the gap that let the crash reach a build: every other test in
+    /// this batch entered through the app and never held the panel lease.
+    #[test]
+    fn a_panel_callback_does_not_double_lease_the_panel() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            app.open_or_toggle_panel(NavItem::Transfers, cx);
+            app.flush_transfer_panel_snapshot(cx);
+        });
+        let panel = cx.update_entity(&app, |app, _| app.transfer_panel.clone());
+        let host_panel = panel.clone();
+        let (_, vcx) = cx.add_window_view(move |_, _| Host { panel: host_panel });
+        let vcx: &mut gpui::VisualTestContext = vcx;
+        vcx.run_until_parked();
+
+        // Enter through the panel entity, holding its lease, the way a listener does.
+        vcx.update(|_, cx| {
+            panel.update(cx, |panel, cx| {
+                panel.with_app(cx, |app, cx| {
+                    app.transfer.set_browser_search("leased".to_string());
+                    let _ = cx;
+                });
+            });
+        });
+        vcx.run_until_parked();
+
+        assert_eq!(
+            vcx.update(|_, cx| panel
+                .read(cx)
+                .snapshot()
+                .expect("flushed")
+                .browser
+                .search
+                .clone()),
+            "leased",
+            "the deferred flush must still reach the panel"
+        );
     }
 }
