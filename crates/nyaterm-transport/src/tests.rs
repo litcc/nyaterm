@@ -699,6 +699,56 @@ fn cwd_only_shell_scripts_omit_semantic_markers_and_bash_debug_trap() {
     }
 }
 
+/// Feeds a pty master in small whole-line batches instead of one large write.
+///
+/// Linux's line discipline applies back-pressure to a master write once its buffer
+/// fills, so a multi-KiB burst is delivered intact. Darwin compares the raw plus
+/// canonical queue against `TTYHOG` (about a kilobyte) and *discards* the excess
+/// instead, silently truncating the tail. Batching by whole lines keeps canonical
+/// mode's per-line assembly intact while leaving the reader time to drain.
+fn write_pty_paced(writer: &mut impl Write, payload: &str) {
+    const BATCH_LIMIT: usize = 256;
+
+    let mut batch = String::new();
+    let mut flush_batch = |batch: &mut String, pause: bool| {
+        if batch.is_empty() {
+            return;
+        }
+        writer
+            .write_all(batch.as_bytes())
+            .expect("write paced pty batch");
+        writer.flush().expect("flush paced pty batch");
+        batch.clear();
+        if pause {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+
+    for line in payload.split_inclusive('\n') {
+        if !batch.is_empty() && batch.len() + line.len() > BATCH_LIMIT {
+            flush_batch(&mut batch, true);
+        }
+        batch.push_str(line);
+    }
+    flush_batch(&mut batch, false);
+}
+
+/// The batching must be byte-for-byte transparent, or a probe failure would be the
+/// harness losing input rather than the behaviour under test.
+#[test]
+fn paced_pty_writes_preserve_the_payload_exactly() {
+    let mut payload = String::new();
+    for index in 0..200 {
+        payload.push_str(&format!("line-{index} {}\n", "x".repeat(index % 97)));
+    }
+    payload.push_str("trailing line without newline");
+
+    let mut sink = Vec::new();
+    write_pty_paced(&mut sink, &payload);
+
+    assert_eq!(String::from_utf8(sink).expect("utf8 sink"), payload);
+}
+
 #[cfg(unix)]
 fn run_bash_injection_history_probe(
     mode: super::ShellIntegrationMode,
@@ -764,6 +814,7 @@ fn run_bash_injection_history_probe(
         .write_all(b"stty -echo\nprintf '__NYATERM_PTY_READY__\\n'\n")
         .expect("initialize bash history probe");
     writer.flush().expect("flush bash history probe setup");
+
     let setup_deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let ready = output
@@ -789,19 +840,22 @@ fn run_bash_injection_history_probe(
     commands.push_str(
         "case $- in *h*) printf '__NYATERM_HISTORY_STATE__:enabled\\n' ;; *) printf '__NYATERM_HISTORY_STATE__:disabled\\n' ;; esac\nprintf '__NYATERM_HISTORY_BEGIN__\\n'\nHISTTIMEFORMAT= builtin history\nprintf '__NYATERM_HISTORY_END__\\n'\nexit\n",
     );
-    writer
-        .write_all(commands.as_bytes())
-        .expect("write bash history probe commands");
-    writer.flush().expect("flush bash history probe commands");
+    write_pty_paced(&mut writer, &commands);
 
-    let child_deadline = Instant::now() + Duration::from_secs(10);
+    let child_deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll bash history probe") {
             break status;
         }
         if Instant::now() >= child_deadline {
             let _ = child.kill();
-            panic!("interactive bash history probe timed out");
+            // Report what the shell actually produced. A truncated transcript means
+            // the pty dropped input; a complete one that never exits means bash
+            // stalled executing the script.
+            let captured =
+                String::from_utf8_lossy(&output.lock().expect("bash history probe output lock"))
+                    .into_owned();
+            panic!("interactive bash history probe timed out; captured: {captured:?}");
         }
         std::thread::sleep(Duration::from_millis(10));
     };
@@ -922,11 +976,22 @@ fn generated_bash_shell_integration_scripts_pass_syntax_check() {
         )
         .expect("bash activation script"),
     ];
-    for script in scripts {
+    for (index, script) in scripts.into_iter().enumerate() {
+        // Check a file rather than `bash -n -c <script>`: on Windows `bash` is Git
+        // Bash, which rebuilds argv from the raw Windows command line and mangles a
+        // multi-KiB argument containing newlines and quotes. Write bytes so no
+        // newline translation is applied either.
+        let path = std::env::temp_dir().join(format!(
+            "nyaterm-bash-syntax-{}-{index}.sh",
+            std::process::id()
+        ));
+        std::fs::write(&path, script.as_bytes()).expect("write bash syntax fixture");
         let output = std::process::Command::new("bash")
-            .args(["-n", "-c", script.as_str()])
+            .arg("-n")
+            .arg(&path)
             .output()
             .expect("run bash syntax check");
+        std::fs::remove_file(&path).ok();
         assert!(
             output.status.success(),
             "bash syntax error: {}",

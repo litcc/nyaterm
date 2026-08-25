@@ -621,6 +621,7 @@ fn map_recording_rotation(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use nyaterm_core::{AppSettingsSummary, Group};
@@ -652,10 +653,11 @@ mod tests {
         let path =
             session_transcript_file_path(&settings, "prod / shell", now).expect("transcript path");
 
-        assert_eq!(
-            path.to_string_lossy(),
-            "/tmp/nyaterm-recordings/session-prod_shell-2026-08-15T07-08-09.log"
-        );
+        // Compare against a joined `PathBuf` rather than a `/`-separated literal so
+        // the expectation matches the platform separator `join` emits.
+        let expected = PathBuf::from("/tmp/nyaterm-recordings")
+            .join("session-prod_shell-2026-08-15T07-08-09.log");
+        assert_eq!(path, expected);
     }
 
     #[test]

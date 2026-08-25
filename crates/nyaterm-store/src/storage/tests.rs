@@ -3058,6 +3058,32 @@ fn quick_commands_export_matches_tauri_json_shape() {
     assert!(value["commands"][0].get("use_count").is_none());
 }
 
+/// Endpoint the sync/backup snapshot carries, valid on the running platform.
+///
+/// `normalize_backup_agent_settings` rewrites endpoints that
+/// `ssh_agent_endpoint_supported_on_current_platform` rejects, so the fixture has to
+/// pick per-platform values. The two helpers must stay distinguishable: the test
+/// asserts the device-local value survives a sync apply while this one is restored
+/// from a backup.
+fn synced_agent_endpoint() -> nyaterm_core::SshAgentEndpoint {
+    #[cfg(windows)]
+    return nyaterm_core::SshAgentEndpoint::WindowsOpenSsh;
+    #[cfg(not(windows))]
+    return nyaterm_core::SshAgentEndpoint::UnixSocket {
+        path: "/run/user/1000/agent.sock".to_string(),
+    };
+}
+
+/// Endpoint standing in for a device-local setting that must never be synced away.
+fn device_local_agent_endpoint() -> nyaterm_core::SshAgentEndpoint {
+    #[cfg(windows)]
+    return nyaterm_core::SshAgentEndpoint::Pageant;
+    #[cfg(not(windows))]
+    return nyaterm_core::SshAgentEndpoint::UnixSocket {
+        path: "/tmp/device-local-agent.sock".to_string(),
+    };
+}
+
 #[test]
 fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     let dir = unique_temp_dir("sync-agent-settings");
@@ -3108,16 +3134,12 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     else {
         panic!("SSH expected");
     };
-    *auth_agent_endpoint = Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
-        path: "/run/user/1000/agent.sock".to_string(),
-    });
+    *auth_agent_endpoint = Some(synced_agent_endpoint());
     *agent_forwarding_config = Some(nyaterm_core::SshAgentForwardingConfig {
         enabled: true,
         sources: nyaterm_core::SshAgentForwardingSources {
             external_agent: true,
-            external_agent_endpoints: vec![nyaterm_core::SshAgentEndpoint::UnixSocket {
-                path: "/run/user/1000/agent.sock".to_string(),
-            }],
+            external_agent_endpoints: vec![synced_agent_endpoint()],
             stored_keys: false,
         },
         policy: nyaterm_core::SshAgentForwardingPolicy::All,
@@ -3155,9 +3177,7 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     else {
         panic!("SSH expected");
     };
-    *auth_agent_endpoint = Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
-        path: "/tmp/device-local-agent.sock".to_string(),
-    });
+    *auth_agent_endpoint = Some(device_local_agent_endpoint());
     *agent_forwarding_config = Some(nyaterm_core::SshAgentForwardingConfig::default());
     store
         .replace_sessions(&sessions)
@@ -3175,12 +3195,7 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     else {
         panic!("SSH expected");
     };
-    assert_eq!(
-        auth_agent_endpoint,
-        Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
-            path: "/tmp/device-local-agent.sock".to_string(),
-        })
-    );
+    assert_eq!(auth_agent_endpoint, Some(device_local_agent_endpoint()));
     assert_eq!(
         agent_forwarding_config,
         Some(nyaterm_core::SshAgentForwardingConfig::default())
@@ -3198,12 +3213,7 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     else {
         panic!("SSH expected");
     };
-    assert_eq!(
-        auth_agent_endpoint,
-        Some(nyaterm_core::SshAgentEndpoint::UnixSocket {
-            path: "/run/user/1000/agent.sock".to_string(),
-        })
-    );
+    assert_eq!(auth_agent_endpoint, Some(synced_agent_endpoint()));
     assert!(agent_forwarding_config.is_some_and(|config| config.enabled));
     std::fs::remove_dir_all(dir).ok();
 }
