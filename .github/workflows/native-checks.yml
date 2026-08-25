@@ -130,6 +130,9 @@ jobs:
       - name: Check application
         run: cargo check -p nyaterm-app
 
+      - name: Test workspace
+        run: cargo test --workspace
+
   windows:
     name: Windows application check
     runs-on: windows-latest
@@ -148,3 +151,6 @@ jobs:
 
       - name: Check application
         run: cargo check -p nyaterm-app
+
+      - name: Test workspace
+        run: cargo test --workspace
