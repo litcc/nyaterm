@@ -2,9 +2,21 @@ use gpui::{KeyDownEvent, KeyUpEvent};
 use nyaterm_terminal::alternate_scroll_key_bytes;
 
 use crate::{
-    TerminalKeyMode, TerminalSearchFlags, terminal_buffer_matches, terminal_key_bytes,
-    terminal_key_bytes_with_mode, terminal_key_release_bytes_with_mode,
+    TerminalKeyMode, TerminalSearchFlags, terminal_buffer_matches, terminal_font_features,
+    terminal_key_bytes, terminal_key_bytes_with_mode, terminal_key_release_bytes_with_mode,
 };
+
+#[test]
+fn terminal_font_features_disable_all_ligature_tags() {
+    assert_eq!(
+        terminal_font_features().tag_value_list(),
+        &[
+            ("calt".to_string(), 0),
+            ("clig".to_string(), 0),
+            ("liga".to_string(), 0),
+        ]
+    );
+}
 
 #[test]
 fn buffer_matches_report_column_ranges() {

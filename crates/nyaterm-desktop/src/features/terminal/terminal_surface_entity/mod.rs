@@ -29,7 +29,7 @@ use crate::terminal::{
     NyaTerminalElement, NyaTerminalLayoutCache, TerminalGridSelection,
     TerminalKeywordHighlightSnapshot, TerminalKeywordHighlighter, TerminalLineDecorations,
     compile_terminal_keyword_highlighter,
-    precompute_terminal_keyword_highlights_for_rows_with_stats_and_cancel,
+    precompute_terminal_keyword_highlights_for_rows_with_stats_and_cancel, terminal_font_features,
     terminal_keyword_highlight_expanded_rows, terminal_keyword_rules_key,
 };
 use crate::theme::ThemePalette;
@@ -2415,6 +2415,7 @@ impl Render for TerminalSurface {
         let skipped_output_chars = self.skipped_output_chars;
         let mut surface_font = font(SharedString::from(self.font_family.clone()));
         surface_font.fallbacks = self.font_fallbacks.clone();
+        surface_font.features = terminal_font_features();
         let app = self.app.as_ref().and_then(WeakEntity::upgrade);
         let surface = cx.entity();
         let session_id = self.session_id.clone();

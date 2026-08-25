@@ -17,12 +17,15 @@ use nyaterm_ui::{
     NyaSelectState, NyaSettingsLayout, NyaSettingsNavGroup, NyaSettingsNavItem,
 };
 
-use crate::features::NyaTermApp;
 use crate::features::selects::SelectRegistry;
 use crate::features::settings::{
     KeybindingPresentationState, KeywordHighlightPresentationState, SearchEnginePresentationState,
 };
 use crate::features::text_inputs::number_input_box_from_state;
+use crate::features::{
+    FontAvailability, FontCatalogKind, FontCatalogLoadState, FontCatalogPresentation,
+    FontResolutionStatus, NyaTermApp, normalize_font_family,
+};
 use crate::models::{
     AiActionEditorField, AiActionListKind, CloudSyncConflictState, CloudSyncSecretDraft,
     GithubGistAuthState, KeywordHighlightEditorField, SettingsTab, SnapshotPasswordPromptState,
@@ -130,8 +133,7 @@ pub(in crate::features) struct SettingsPresentation {
     pub(in crate::features) keyword_highlight_presentation: KeywordHighlightPresentationState,
     pub(in crate::features) keybinding_presentation: KeybindingPresentationState,
     pub(in crate::features) master_password: MasterPasswordPresentation,
-    pub(in crate::features) ui_font_options: Arc<[String]>,
-    pub(in crate::features) terminal_font_options: Arc<[String]>,
+    pub(in crate::features) font_catalog: FontCatalogPresentation,
     pub(in crate::features) search_engine_focus: gpui::FocusHandle,
     pub(in crate::features) keyword_highlight_focus: gpui::FocusHandle,
     pub(in crate::features) keybinding_focus: gpui::FocusHandle,
@@ -163,8 +165,7 @@ impl SettingsPresentation {
                 search_draft: String::new(),
             },
             master_password: MasterPasswordPresentation::default(),
-            ui_font_options: Arc::from(Vec::<String>::new()),
-            terminal_font_options: Arc::from(Vec::<String>::new()),
+            font_catalog: FontCatalogPresentation::empty(),
             search_engine_focus: cx.focus_handle(),
             keyword_highlight_focus: cx.focus_handle(),
             keybinding_focus: cx.focus_handle(),
@@ -210,12 +211,40 @@ impl SettingsPresentation {
         &self.master_password
     }
 
-    pub(in crate::features) fn ui_font_options(&self) -> &[String] {
-        &self.ui_font_options
+    pub(in crate::features) fn font_catalog_state(&self) -> FontCatalogLoadState {
+        self.font_catalog.state()
     }
 
-    pub(in crate::features) fn terminal_font_options(&self) -> &[String] {
-        &self.terminal_font_options
+    pub(in crate::features) fn font_availability(
+        &self,
+        family: &str,
+        terminal: bool,
+    ) -> FontAvailability {
+        self.font_catalog.availability(
+            family,
+            if terminal {
+                FontCatalogKind::Terminal
+            } else {
+                FontCatalogKind::Ui
+            },
+        )
+    }
+
+    pub(in crate::features) fn resolve_font_stack(
+        &self,
+        families: &[String],
+        terminal: bool,
+        platform_default: &str,
+    ) -> Option<FontResolutionStatus> {
+        self.font_catalog.resolve_stack(
+            families,
+            if terminal {
+                FontCatalogKind::Terminal
+            } else {
+                FontCatalogKind::Ui
+            },
+            platform_default,
+        )
     }
 
     pub(in crate::features) fn search_engine_focus(&self) -> &gpui::FocusHandle {
@@ -405,6 +434,50 @@ impl TransferSettingsPresentation {
     }
 }
 
+struct FontSelectOptionCache {
+    state: Option<FontCatalogLoadState>,
+    generation: Option<u64>,
+    options: Arc<[NyaSelectOption]>,
+    normalized_options: Arc<HashMap<String, String>>,
+}
+
+impl FontSelectOptionCache {
+    fn empty() -> Self {
+        Self {
+            state: None,
+            generation: None,
+            options: Arc::from(Vec::<NyaSelectOption>::new()),
+            normalized_options: Arc::new(HashMap::new()),
+        }
+    }
+
+    fn update(&mut self, state: FontCatalogLoadState, generation: u64, source: &[String]) {
+        // Settings snapshots can change for unrelated fields while the system font catalog stays
+        // the same. Reuse the descriptors across those renders instead of rebuilding them per
+        // configured fallback row.
+        if self.state == Some(state) && self.generation == Some(generation) {
+            return;
+        }
+
+        let options: Arc<[NyaSelectOption]> = source
+            .iter()
+            .map(|option| {
+                NyaSelectOption::new(option.clone(), option.clone()).font_family(option.clone())
+            })
+            .collect::<Vec<_>>()
+            .into();
+        let normalized_options = source
+            .iter()
+            .map(|option| (normalize_font_family(option), option.clone()))
+            .collect();
+
+        self.state = Some(state);
+        self.generation = Some(generation);
+        self.options = options;
+        self.normalized_options = Arc::new(normalized_options);
+    }
+}
+
 pub(in crate::features) struct SettingsPanel {
     app: WeakEntity<NyaTermApp>,
     surface: SettingsSurface,
@@ -418,6 +491,8 @@ pub(in crate::features) struct SettingsPanel {
     number_inputs: HashMap<SharedString, Entity<NyaNumberInputState>>,
     selects: SelectRegistry,
     select_subscriptions: Vec<Subscription>,
+    ui_font_select_options: FontSelectOptionCache,
+    terminal_font_select_options: FontSelectOptionCache,
     #[cfg(test)]
     paint_count: usize,
     #[cfg(test)]
@@ -447,6 +522,8 @@ impl SettingsPanel {
             number_inputs: HashMap::new(),
             selects: SelectRegistry::default(),
             select_subscriptions: Vec::new(),
+            ui_font_select_options: FontSelectOptionCache::empty(),
+            terminal_font_select_options: FontSelectOptionCache::empty(),
             #[cfg(test)]
             paint_count: 0,
             #[cfg(test)]
@@ -529,6 +606,29 @@ impl SettingsPanel {
             .child(NyaSelect::new(&select))
     }
 
+    pub(in crate::features::pages::settings) fn font_select_option_catalog(
+        &mut self,
+        terminal: bool,
+    ) -> (Arc<[NyaSelectOption]>, Arc<HashMap<String, String>>) {
+        let source = if terminal {
+            self.settings.font_catalog.terminal_options()
+        } else {
+            self.settings.font_catalog.ui_options()
+        };
+        let state = self.settings.font_catalog.state();
+        let generation = self.settings.font_catalog.generation();
+        let cache = if terminal {
+            &mut self.terminal_font_select_options
+        } else {
+            &mut self.ui_font_select_options
+        };
+        cache.update(state, generation, source);
+        (
+            Arc::clone(&cache.options),
+            Arc::clone(&cache.normalized_options),
+        )
+    }
+
     pub(in crate::features::pages::settings) fn select_control<I>(
         &mut self,
         id: I,
@@ -549,6 +649,34 @@ impl SettingsPanel {
             .max_w(px(360.))
             .h(px(NYA_FORM_CONTROL_HEIGHT_PX))
             .child(NyaSelect::new(&select))
+    }
+
+    pub(in crate::features::pages::settings) fn font_select_control<I>(
+        &mut self,
+        id: I,
+        options: Arc<[NyaSelectOption]>,
+        selected_value: Option<String>,
+        placeholder_content: Option<AnyElement>,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<I>
+    where
+        I: Into<SharedString>,
+    {
+        let id = id.into();
+        let placeholder = selected_value.clone().unwrap_or_default();
+        let select = self.select_entity_shared(id.clone(), options, selected_value, disabled, cx);
+        select.update(cx, |state, cx| state.set_placeholder(placeholder, cx));
+        let mut select_element = NyaSelect::new(&select).appearance(true);
+        if let Some(content) = placeholder_content {
+            select_element = select_element.placeholder_content(content);
+        }
+        div()
+            .id(id)
+            .w_full()
+            .max_w(px(360.))
+            .h(px(NYA_FORM_CONTROL_HEIGHT_PX))
+            .child(select_element)
     }
 
     pub(in crate::features::pages::settings) fn settings_select_control<I, S>(
@@ -723,11 +851,86 @@ impl SettingsPanel {
         let select = if let Some(select) = self.selects.field(&id) {
             select
         } else {
-            let select = cx.new(|cx| {
-                NyaSelectState::new(cx, options.clone(), selected_value.clone()).disabled(disabled)
-            });
-            let subscription_id = id.clone();
-            let subscription = cx.subscribe(
+            self.create_select_entity(
+                id.clone(),
+                options.clone(),
+                selected_value.clone(),
+                disabled,
+                cx,
+            )
+        };
+
+        select.update(cx, |select, cx| {
+            select.set_options(options, cx);
+            select.set_selected_value(selected_value, cx);
+            select.set_disabled(disabled, cx);
+        });
+        select
+    }
+
+    fn select_entity_shared(
+        &mut self,
+        id: SharedString,
+        options: Arc<[NyaSelectOption]>,
+        selected_value: Option<String>,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> Entity<NyaSelectState> {
+        let select = if let Some(select) = self.selects.field(&id) {
+            select
+        } else {
+            self.create_select_entity_shared(
+                id.clone(),
+                Arc::clone(&options),
+                selected_value.clone(),
+                disabled,
+                cx,
+            )
+        };
+
+        select.update(cx, |select, cx| {
+            select.set_options_shared(options, cx);
+            select.set_selected_value(selected_value, cx);
+            select.set_disabled(disabled, cx);
+        });
+        select
+    }
+
+    fn create_select_entity(
+        &mut self,
+        id: SharedString,
+        options: Vec<NyaSelectOption>,
+        selected_value: Option<String>,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> Entity<NyaSelectState> {
+        let select =
+            cx.new(|cx| NyaSelectState::new(cx, options, selected_value).disabled(disabled));
+        self.register_select_entity(id, select, cx)
+    }
+
+    fn create_select_entity_shared(
+        &mut self,
+        id: SharedString,
+        options: Arc<[NyaSelectOption]>,
+        selected_value: Option<String>,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> Entity<NyaSelectState> {
+        let select =
+            cx.new(|cx| NyaSelectState::new_shared(cx, options, selected_value).disabled(disabled));
+        self.register_select_entity(id, select, cx)
+    }
+
+    fn register_select_entity(
+        &mut self,
+        id: SharedString,
+        select: Entity<NyaSelectState>,
+        cx: &mut Context<Self>,
+    ) -> Entity<NyaSelectState> {
+        let subscription_id = id.clone();
+        let subscription =
+            cx.subscribe(
                 &select,
                 move |panel: &mut SettingsPanel, _, event, cx| match event {
                     nyaterm_ui::NyaSelectEvent::Changed(value) => {
@@ -737,16 +940,8 @@ impl SettingsPanel {
                     }
                 },
             );
-            self.selects.insert_field(id.clone(), select.clone());
-            self.select_subscriptions.push(subscription);
-            select
-        };
-
-        select.update(cx, |select, cx| {
-            select.set_options(options, cx);
-            select.set_selected_value(selected_value, cx);
-            select.set_disabled(disabled, cx);
-        });
+        self.selects.insert_field(id, select.clone());
+        self.select_subscriptions.push(subscription);
         select
     }
 }
@@ -1822,11 +2017,24 @@ mod tests {
     use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
-    use crate::features::NyaTermApp;
     use crate::features::pages::settings::inputs::ALL_SETTINGS_TABS;
+    use crate::features::{FontCatalogLoadState, NyaTermApp};
     use crate::models::{AiActionEditorField, AiActionListKind, NavItem, SettingsTab};
 
-    use super::{SettingsPanel, SettingsSurface};
+    use super::{FontSelectOptionCache, SettingsPanel, SettingsSurface};
+
+    #[test]
+    fn font_select_option_cache_rebuilds_after_catalog_load() {
+        let mut cache = FontSelectOptionCache::empty();
+        cache.update(FontCatalogLoadState::Loading, 1, &["Inter".to_string()]);
+        cache.update(
+            FontCatalogLoadState::Loaded,
+            1,
+            &["JetBrains Mono".to_string()],
+        );
+
+        assert_eq!(cache.options[0].value(), "JetBrains Mono");
+    }
 
     fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
         let root = std::env::temp_dir().join(format!(

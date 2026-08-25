@@ -4,32 +4,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext, Context, Font, FontFallbacks, PathPromptOptions, RenderImage, SharedString,
-    font, px, rgb, rgba,
+    App, AppContext, Context, FontFallbacks, FontWeight, PathPromptOptions, RenderImage,
+    SharedString, font, px, rgb, rgba,
 };
 use nyaterm_core::{
     AppSettingsSummary, ResolvedKeywordHighlightRule, merge_keyword_highlight_rules_for_paint,
 };
 
-use crate::features::NyaTermApp;
+use crate::features::terminal::{ResolvedAppearanceFont, measure_terminal_font};
+use crate::features::{
+    FontAvailability, FontAvailabilityReason, FontCatalogEntry, FontCatalogLoadState,
+    FontCatalogSnapshot, FontResolutionSource, FontResolutionStatus, NyaTermApp,
+    font_names_fingerprint, normalize_font_family,
+};
 pub(in crate::features) use crate::theme::{ThemePalette, apply_component_theme, theme_palette};
 
 const TERMINAL_FONT_SIZE_MIN: i16 = 8;
 const TERMINAL_FONT_SIZE_MAX: i16 = 72;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::features) struct ResolvedAppearanceFont {
-    pub family: String,
-    pub fallbacks: Option<FontFallbacks>,
-}
-
-impl ResolvedAppearanceFont {
-    pub(in crate::features) fn font(&self) -> Font {
-        let mut font = font(SharedString::from(self.family.clone()));
-        font.fallbacks = self.fallbacks.clone();
-        font
-    }
-}
 
 impl NyaTermApp {
     pub(in crate::features) fn apply_gpui_settings(
@@ -37,7 +28,20 @@ impl NyaTermApp {
         settings: AppSettingsSummary,
         cx: &mut Context<Self>,
     ) {
+        let terminal_font_changed = {
+            let current = self.settings.summary();
+            current.terminal_font_family != settings.terminal_font_family
+                || current.terminal_font_size != settings.terminal_font_size
+                || current.terminal_font_weight != settings.terminal_font_weight
+                || current.terminal_font_weight_bold != settings.terminal_font_weight_bold
+        };
         self.settings.replace_summary(settings);
+        if terminal_font_changed {
+            // External loading or settings-save completion may replace font settings;
+            // clear the runtime override and paint caches so the next frame cannot use
+            // the old font.
+            self.invalidate_terminal_cell_metrics(cx);
+        }
         self.invalidate_paint_theme_caches();
         // Flush boundary: the theme and wallpaper feed `PanelChrome` and
         // `ConnectionChrome`.
@@ -53,11 +57,25 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn gpui_terminal_font(&self) -> ResolvedAppearanceFont {
+        self.terminal
+            .terminal_font_override()
+            .cloned()
+            .unwrap_or_else(|| self.gpui_configured_terminal_font())
+    }
+
+    pub(in crate::features) fn gpui_configured_terminal_font(&self) -> ResolvedAppearanceFont {
         gpui_platform_font(
             &self.settings.summary().terminal_font_family,
             gpui_terminal_font_fallback(),
             true,
         )
+    }
+
+    pub(in crate::features) fn gpui_terminal_font_for_family(
+        &self,
+        family: &str,
+    ) -> ResolvedAppearanceFont {
+        gpui_platform_font(family, gpui_terminal_font_fallback(), true)
     }
 
     pub(in crate::features) fn gpui_ui_font(&self) -> ResolvedAppearanceFont {
@@ -66,7 +84,50 @@ impl NyaTermApp {
         } else {
             self.settings.summary().ui_font_family.as_str()
         };
-        gpui_platform_font(raw, gpui_ui_font_fallback(), false)
+        let fallback = gpui_ui_font_fallback();
+        let effective_raw = self
+            .appearance_font_resolution(false)
+            .map(|status| match status.source {
+                FontResolutionSource::UserFallback(index) => appearance_font_stack(raw, "Inter")
+                    .get(index..)
+                    .filter(|families| !families.is_empty())
+                    .map(|families| families.join(", "))
+                    .unwrap_or_else(|| fallback.to_string()),
+                FontResolutionSource::PlatformDefault => fallback.to_string(),
+                FontResolutionSource::Configured
+                | FontResolutionSource::EmergencyMetricsFallback => raw.to_string(),
+            })
+            .unwrap_or_else(|| raw.to_string());
+        gpui_platform_font(&effective_raw, fallback, false)
+    }
+
+    pub(in crate::features) fn appearance_font_resolution(
+        &self,
+        terminal: bool,
+    ) -> Option<FontResolutionStatus> {
+        if terminal && let Some(resolution) = self.terminal.terminal_font_resolution() {
+            return Some(resolution.clone());
+        }
+        let (raw, fallback, platform_default) = if terminal {
+            (
+                self.settings.summary().terminal_font_family.as_str(),
+                "JetBrains Mono",
+                gpui_terminal_font_fallback(),
+            )
+        } else {
+            (
+                if self.settings.summary().ui_font_family.trim().is_empty() {
+                    self.settings.summary().terminal_font_family.as_str()
+                } else {
+                    self.settings.summary().ui_font_family.as_str()
+                },
+                "Inter",
+                gpui_ui_font_fallback(),
+            )
+        };
+        let families = configured_appearance_font_stack(raw, fallback);
+        self.settings
+            .resolve_font_stack(&families, terminal, platform_default)
     }
 
     pub(in crate::features) fn theme_palette(&self) -> ThemePalette {
@@ -114,41 +175,120 @@ impl NyaTermApp {
         .detach();
     }
 
-    pub(in crate::features) fn ensure_appearance_font_options(&mut self, cx: &mut Context<Self>) {
-        if !self.settings.begin_font_options_load() {
+    pub(crate) fn ensure_appearance_font_options(&mut self, cx: &mut Context<Self>) {
+        if self.settings.font_catalog_state() == FontCatalogLoadState::Loaded {
+            self.check_appearance_font_options(cx);
             return;
         }
-        self.request_settings_panel_refresh(cx);
+        let Some(generation) = self.settings.begin_font_options_load() else {
+            return;
+        };
+        self.start_appearance_font_options_scan(generation, None, cx);
+    }
+
+    fn check_appearance_font_options(&mut self, cx: &mut Context<Self>) {
+        if !self.settings.begin_font_names_fingerprint_check() {
+            return;
+        }
+
         cx.spawn(async move |this, cx| {
-            let Ok(system_fonts) = this.update(cx, |_, cx| cx.text_system().all_font_names())
-            else {
+            let Ok(text_system) = this.update(cx, |_, cx| cx.text_system().clone()) else {
+                let _ = this.update(cx, |this, _| {
+                    this.settings.cancel_font_names_fingerprint_check();
+                });
                 return;
             };
-            let mut ui_fonts = Vec::with_capacity(system_fonts.len());
-            for family in &system_fonts {
-                push_unique_font(&mut ui_fonts, family.clone());
-            }
-
-            const FONT_SCAN_BATCH_SIZE: usize = 16;
-            let mut terminal_fonts = Vec::new();
-            for batch in system_fonts.chunks(FONT_SCAN_BATCH_SIZE) {
-                let batch = batch.to_vec();
-                let Ok(monospace_fonts) =
-                    this.update(cx, |_, cx| appearance_monospace_font_options(cx, &batch))
-                else {
+            let system_fonts = cx
+                .background_spawn(async move { text_system.all_font_names() })
+                .await;
+            let fingerprint = font_names_fingerprint(&system_fonts);
+            let _ = this.update(cx, move |this, cx| {
+                if !this
+                    .settings
+                    .finish_font_names_fingerprint_check(fingerprint)
+                {
+                    return;
+                }
+                let Some(generation) = this.settings.refresh_font_options_load() else {
                     return;
                 };
-                for family in monospace_fonts {
-                    push_unique_font(&mut terminal_fonts, family);
+                this.start_appearance_font_options_scan(generation, Some(system_fonts), cx);
+            });
+        })
+        .detach();
+    }
+
+    fn start_appearance_font_options_scan(
+        &mut self,
+        generation: u64,
+        initial_system_fonts: Option<Vec<String>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_settings_panel_refresh(cx);
+        cx.spawn(async move |this, cx| {
+            let system_fonts = if let Some(system_fonts) = initial_system_fonts {
+                system_fonts
+            } else {
+                let Ok(text_system) = this.update(cx, |_, cx| cx.text_system().clone()) else {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.settings.fail_font_options_load(generation) {
+                            this.request_settings_panel_refresh(cx);
+                            cx.notify();
+                        }
+                    });
+                    return;
+                };
+                cx.background_spawn(async move { text_system.all_font_names() })
+                    .await
+            };
+
+            const FONT_SCAN_BATCH_SIZE: usize = 8;
+            let mut entries = Vec::with_capacity(system_fonts.len());
+            let Ok(text_system) = this.update(cx, |_, cx| cx.text_system().clone()) else {
+                let _ = this.update(cx, |this, cx| {
+                    if this.settings.fail_font_options_load(generation) {
+                        this.request_settings_panel_refresh(cx);
+                        cx.notify();
+                    }
+                });
+                return;
+            };
+            for batch in system_fonts.chunks(FONT_SCAN_BATCH_SIZE) {
+                let batch = batch.to_vec();
+                let batch_entries = {
+                    let text_system = Arc::clone(&text_system);
+                    cx.background_spawn(
+                        async move { probe_appearance_font_batch(&text_system, &batch) },
+                    )
+                    .await
+                };
+                entries.extend(batch_entries);
+                let generation_is_current = this
+                    .update(cx, |this, _| {
+                        this.settings.font_catalog_generation() == generation
+                    })
+                    .unwrap_or(false);
+                if !generation_is_current {
+                    return;
                 }
                 cx.background_executor()
-                    .timer(Duration::from_millis(1))
+                    .timer(Duration::from_millis(4))
                     .await;
             }
-            push_unique_font(&mut terminal_fonts, "monospace".to_string());
+            let snapshot = FontCatalogSnapshot::from_entries(generation, entries);
             let _ = this.update(cx, |this, cx| {
-                this.settings
-                    .finish_font_options_load(ui_fonts, terminal_fonts);
+                if !this.settings.finish_font_options_load(generation, snapshot) {
+                    return;
+                }
+                let refresh_terminal_metrics = this
+                    .terminal
+                    .terminal_font_metrics_need_catalog_refresh(generation);
+                // Re-measure after an explicit catalog generation change, or when the active
+                // font was previously unresolved or used a fallback. The initial catalog
+                // commit keeps a validated metric cache untouched.
+                if refresh_terminal_metrics {
+                    this.invalidate_terminal_cell_metrics(cx);
+                }
                 this.request_settings_panel_refresh(cx);
                 cx.notify();
             });
@@ -362,9 +502,9 @@ impl NyaTermApp {
 
     pub(in crate::features) fn invalidate_terminal_cell_metrics(&mut self, cx: &mut Context<Self>) {
         self.terminal.invalidate_cell_metrics();
-        // Refresh the measured metrics before resizing the terminal. Using the
-        // font-size fallback here makes the app and surface briefly disagree;
-        // that is especially visible while scrolled or dragging a selection.
+        // Refresh measured metrics before resizing the terminal. Using a font-size
+        // fallback here would briefly desynchronize app state and the surface, especially
+        // while scrolling or dragging a selection.
         self.refresh_terminal_cell_metrics(cx);
         self.sync_terminal_cell_metrics_to_screens();
         self.terminal.invalidate_all_render_caches();
@@ -525,13 +665,17 @@ impl NyaTermApp {
         };
         let fallback = if terminal { "JetBrains Mono" } else { "Inter" };
         let mut fonts = appearance_font_stack(raw, fallback);
-        let next = if terminal {
-            self.settings.terminal_font_options().first()
+        let options = if terminal {
+            self.settings.terminal_font_options()
         } else {
-            self.settings.ui_font_options().first()
-        }
-        .cloned()
-        .unwrap_or_else(|| fallback.to_string());
+            self.settings.ui_font_options()
+        };
+        let next = options
+            .iter()
+            .find(|candidate| normalize_font_family(candidate) == normalize_font_family(fallback))
+            .or_else(|| options.first())
+            .cloned()
+            .unwrap_or_else(|| fallback.to_string());
         fonts.push(next);
         self.save_appearance_font_stack(terminal, fonts, cx);
     }
@@ -753,33 +897,71 @@ pub(in crate::features) fn appearance_font_stack(raw: &str, fallback: &str) -> V
     fonts
 }
 
-fn appearance_monospace_font_options(cx: &App, system_fonts: &[String]) -> Vec<String> {
-    let text_system = cx.text_system();
-    let mut terminal_fonts = Vec::new();
-
-    for family in system_fonts {
-        let font_id = text_system.resolve_font(&font(SharedString::from(family.clone())));
-        let font_size = px(14.);
-        let widths = ['i', 'W', '0']
-            .into_iter()
-            .filter_map(|ch| text_system.advance(font_id, font_size, ch).ok())
-            .map(|advance| f32::from(advance.width))
-            .collect::<Vec<_>>();
-        let monospace = widths.len() == 3
-            && widths
-                .iter()
-                .all(|width| (*width - widths[0]).abs() <= 0.05);
-        if monospace {
-            push_unique_font(&mut terminal_fonts, family.clone());
-        }
+pub(in crate::features) fn configured_appearance_font_stack(
+    raw: &str,
+    fallback: &str,
+) -> Vec<String> {
+    if !raw
+        .split(',')
+        .map(trim_gpui_font_family)
+        .any(|family| !family.is_empty())
+    {
+        Vec::new()
+    } else {
+        appearance_font_stack(raw, fallback)
     }
-    terminal_fonts
+}
+
+fn probe_appearance_font_batch(
+    text_system: &gpui::TextSystem,
+    system_fonts: &[String],
+) -> Vec<FontCatalogEntry> {
+    system_fonts
+        .iter()
+        .filter(|family| !normalize_font_family(family).is_empty())
+        .map(|family| {
+            let ui = probe_ui_font(text_system, family);
+            let descriptor = ResolvedAppearanceFont {
+                family: family.clone(),
+                fallbacks: None,
+                fallback_families: Vec::new(),
+            };
+            let terminal =
+                match measure_terminal_font(text_system, &descriptor, px(14.), FontWeight(400.)) {
+                    Ok(measurement) => FontAvailability::Available {
+                        resolved_family: measurement.resolved_family.into(),
+                    },
+                    Err(reason) => FontAvailability::Unavailable {
+                        reason: FontAvailabilityReason::from(reason),
+                    },
+                };
+            FontCatalogEntry::new(family.clone(), ui, terminal)
+        })
+        .collect()
+}
+
+fn probe_ui_font(text_system: &gpui::TextSystem, family: &str) -> FontAvailability {
+    let font_id = text_system.resolve_font(&font(SharedString::from(family.to_string())));
+    let Some(resolved) = text_system.get_font_for_id(font_id) else {
+        return FontAvailability::Unavailable {
+            reason: FontAvailabilityReason::FontNotResolved,
+        };
+    };
+    let resolved_family = resolved.family.to_string();
+    if !resolved_family.eq_ignore_ascii_case(family) {
+        return FontAvailability::Unavailable {
+            reason: FontAvailabilityReason::ResolvedFamilyMismatch,
+        };
+    }
+    FontAvailability::Available {
+        resolved_family: resolved_family.into(),
+    }
 }
 
 fn push_unique_font(fonts: &mut Vec<String>, family: String) {
     if !fonts
         .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(&family))
+        .any(|existing| normalize_font_family(existing) == normalize_font_family(&family))
     {
         fonts.push(family);
     }
@@ -820,10 +1002,12 @@ fn gpui_platform_font_for_target(
         .first()
         .cloned()
         .unwrap_or_else(|| fallback.to_string());
-    let fallbacks = families.into_iter().skip(1).collect::<Vec<_>>();
+    let fallback_families = families.into_iter().skip(1).collect::<Vec<_>>();
     ResolvedAppearanceFont {
         family,
-        fallbacks: (!fallbacks.is_empty()).then(|| FontFallbacks::from_fonts(fallbacks)),
+        fallbacks: (!fallback_families.is_empty())
+            .then(|| FontFallbacks::from_fonts(fallback_families.clone())),
+        fallback_families,
     }
 }
 
@@ -841,7 +1025,7 @@ fn trim_gpui_font_family(value: &str) -> &str {
     value.trim().trim_matches(|ch| ch == '"' || ch == '\'')
 }
 
-fn gpui_terminal_font_fallback() -> &'static str {
+pub(in crate::features) fn gpui_terminal_font_fallback() -> &'static str {
     if cfg!(target_os = "windows") {
         "Consolas"
     } else {
@@ -857,7 +1041,7 @@ pub(in crate::features) fn gpui_code_font_family() -> &'static str {
     }
 }
 
-fn gpui_ui_font_fallback() -> &'static str {
+pub(in crate::features) fn gpui_ui_font_fallback() -> &'static str {
     if cfg!(target_os = "windows") {
         "Microsoft YaHei UI"
     } else {
@@ -872,8 +1056,8 @@ fn windows_gpui_font_should_fallback(family: &str, _monospace: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        appearance_font_stack, gpui_code_font_family, gpui_platform_font_family_for_target,
-        gpui_platform_font_for_target,
+        appearance_font_stack, configured_appearance_font_stack, gpui_code_font_family,
+        gpui_platform_font_family_for_target, gpui_platform_font_for_target,
     };
 
     #[test]
@@ -929,6 +1113,23 @@ mod tests {
     }
 
     #[test]
+    fn promoting_configured_fallback_keeps_remaining_fallback_order() {
+        let font = gpui_platform_font_for_target(
+            "Missing Primary, JetBrains Mono, Maple Mono CN",
+            "Consolas",
+            true,
+            true,
+        );
+        let promoted = font.with_primary_family("JetBrains Mono");
+
+        assert_eq!(promoted.family, "JetBrains Mono");
+        assert_eq!(
+            promoted.fallback_families,
+            ["Maple Mono CN".to_string(), "Consolas".to_string()]
+        );
+    }
+
+    #[test]
     fn windows_code_font_uses_installed_platform_default() {
         if cfg!(target_os = "windows") {
             assert_eq!(gpui_code_font_family(), "Consolas");
@@ -959,6 +1160,15 @@ mod tests {
         assert_eq!(
             appearance_font_stack("  ,  ", "system-ui"),
             vec!["system-ui"]
+        );
+    }
+
+    #[test]
+    fn configured_font_stack_keeps_empty_input_as_platform_default() {
+        assert!(configured_appearance_font_stack("  ,  ", "Inter").is_empty());
+        assert_eq!(
+            configured_appearance_font_stack("JetBrains Mono, Inter", "Inter"),
+            vec!["JetBrains Mono", "Inter"]
         );
     }
 
