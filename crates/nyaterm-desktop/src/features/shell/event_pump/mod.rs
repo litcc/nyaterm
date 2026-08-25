@@ -9,10 +9,10 @@ use crate::features::shell::event_pump::helpers::{
     TITLE_DRAG_ACTIVE_HOLD, TerminalFrameApplyDecision, connect_settle_active,
     connect_settle_deadline, pending_session_status_message, remote_refresh_should_defer,
     runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
-    runtime_output_pressure_active_from_counts, runtime_ui_notify_allowed,
-    terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
-    terminal_input_idle_remaining_delay, terminal_user_scroll_frame_apply_pending,
-    viewport_change_terminal_session_ids, window_geometry_churn_active,
+    runtime_output_pressure_active_from_counts, terminal_cell_metrics_refresh_needed,
+    terminal_frame_apply_should_defer, terminal_input_idle_remaining_delay,
+    terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
+    window_geometry_churn_active,
 };
 use crate::features::{
     NyaTermApp, session::credential_prompt_target, session::keyboard_interactive_prompt_target,
@@ -123,12 +123,12 @@ impl NyaTermApp {
         self.terminal.arm_frame_event_wakes();
 
         let session_started_at = Instant::now();
-        let session_dirty = self.drain_session_events(cx);
+        let session_root_chrome_dirty = self.drain_session_events(cx);
         let session_events = session_started_at.elapsed();
 
         let decision = self.terminal_frame_apply_decision(now);
         let frames_started_at = Instant::now();
-        let frames_dirty = if decision.defer {
+        let frame_root_chrome_dirty = if decision.defer {
             false
         } else {
             self.drain_terminal_frame_events(cx)
@@ -140,8 +140,8 @@ impl NyaTermApp {
         // render requests ask for the snapshots a visible session is missing -- so the
         // cycle that applied a frame is exactly when they want to run, rather than a
         // cadence that has to be fast enough to notice.
-        let sideband_dirty = self.drain_pending_credential_autofill_detection(cx)
-            | self.drive_terminal_render_requests(true);
+        let credential_overlay_dirty = self.drain_pending_credential_autofill_detection(cx);
+        let _requested_terminal_render_work = self.drive_terminal_render_requests(true);
 
         // A DECSCUSR arrives as a frame, and a tab becoming visible produces a
         // snapshot, so this cycle sees every change to what the blink clock depends
@@ -151,15 +151,10 @@ impl NyaTermApp {
         // this cycle is where recovery accounting starts needing to run.
         self.ensure_terminal_recovery_clock(cx);
 
-        let notified = self.notify_after_runtime_data_plane_drain(
-            session_dirty || frames_dirty || sideband_dirty,
-            cx,
-        );
-        // A paint the throttle coalesced is work too: without this the task parks and
-        // the tick becomes the only thing that can flush it, at up to its quiet 500ms.
-        let throttled_notify = !notified && self.shell.runtime.pending_ui_notify;
-        let work_remaining =
-            decision.defer || throttled_notify || self.runtime_data_plane_work_remaining();
+        if session_root_chrome_dirty || frame_root_chrome_dirty || credential_overlay_dirty {
+            cx.notify();
+        }
+        let work_remaining = decision.defer || self.runtime_data_plane_work_remaining();
         let wake_delay = runtime_data_plane_wake_delay(
             work_remaining,
             self.session.has_protocol_runtime_sessions(),
@@ -242,39 +237,6 @@ impl NyaTermApp {
             deferred_after_output,
             paced,
         }
-    }
-
-    /// The tick's notify gate, applied to this task's drain.
-    ///
-    /// Not a bare `cx.notify()`: under output pressure or connect settle that would
-    /// drop `UI_PAINT_THROTTLE`'s full-shell paint coalescing on the busiest path in
-    /// the application. No `force_immediate` either -- input-echo immediacy belongs
-    /// to `arm_terminal_input_wake`'s own ladder, which notifies unconditionally.
-    fn notify_after_runtime_data_plane_drain(
-        &mut self,
-        visual_dirty: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let now = Instant::now();
-        if visual_dirty {
-            self.shell.runtime.pending_ui_notify = true;
-        }
-        let throttle_active = self.runtime_output_pressure_active()
-            || connect_settle_active(self.shell.runtime.connect_settle_until, now);
-        if !runtime_ui_notify_allowed(
-            visual_dirty,
-            self.shell.runtime.pending_ui_notify,
-            false,
-            throttle_active,
-            self.shell.runtime.last_ui_notify_at,
-            now,
-        ) {
-            return false;
-        }
-        cx.notify();
-        self.shell.runtime.last_ui_notify_at = Some(now);
-        self.shell.runtime.pending_ui_notify = false;
-        true
     }
 
     fn maybe_log_slow_runtime_data_plane_drain(&mut self, drain: &RuntimeDataPlaneDrain) {
@@ -399,8 +361,6 @@ impl NyaTermApp {
             | self.drain_terminal_frame_events_for_input_wake(cx);
         if chrome_dirty {
             cx.notify();
-            self.shell.runtime.last_ui_notify_at = Some(Instant::now());
-            self.shell.runtime.pending_ui_notify = false;
         }
     }
 
@@ -628,7 +588,7 @@ impl NyaTermApp {
 mod tests {
     use std::path::PathBuf;
 
-    use gpui::{AppContext as _, TestAppContext};
+    use gpui::{AppContext as _, Context, Subscription, TestAppContext};
     use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
     use nyaterm_transport::{LocalSessionConfig, SessionEvent};
 
@@ -644,6 +604,23 @@ mod tests {
     };
 
     const SESSION_ID: &str = "event-pump-session";
+
+    struct RootNotifyObserver {
+        count: usize,
+        _subscription: Subscription,
+    }
+
+    impl RootNotifyObserver {
+        fn new(app: gpui::Entity<NyaTermApp>, cx: &mut Context<Self>) -> Self {
+            let subscription = cx.observe(&app, |observer, _, _| {
+                observer.count += 1;
+            });
+            Self {
+                count: 0,
+                _subscription: subscription,
+            }
+        }
+    }
 
     fn unique_test_dir() -> PathBuf {
         // A uuid rather than a clock reading: these tests run in parallel and
@@ -696,6 +673,91 @@ mod tests {
             app.terminal.complete_terminal_windows_restore();
         });
         app
+    }
+
+    fn observe_root_notifies(
+        app: gpui::Entity<NyaTermApp>,
+        cx: &mut TestAppContext,
+    ) -> gpui::Entity<RootNotifyObserver> {
+        cx.new(|cx| RootNotifyObserver::new(app, cx))
+    }
+
+    fn root_notify_count(
+        observer: &gpui::Entity<RootNotifyObserver>,
+        cx: &mut TestAppContext,
+    ) -> usize {
+        cx.update_entity(observer, |observer, _| observer.count)
+    }
+
+    #[test]
+    fn terminal_output_does_not_require_full_shell_repaint() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        let observer = observe_root_notifies(app.clone(), &mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.start_runtime_data_plane_drain(cx);
+            app.session
+                .push_event_bridge_ui_event_for_test(SessionEvent::Output {
+                    session_id: SESSION_ID.to_string(),
+                    data: b"ordinary terminal output\r\n".to_vec(),
+                });
+        });
+        cx.run_until_parked();
+
+        assert_eq!(
+            root_notify_count(&observer, &mut cx),
+            0,
+            "ordinary terminal output must not notify the full shell"
+        );
+    }
+
+    #[test]
+    fn root_status_change_still_repaints_root() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        let observer = observe_root_notifies(app.clone(), &mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.start_runtime_data_plane_drain(cx);
+            app.session
+                .push_event_bridge_ui_event_for_test(SessionEvent::OutputDropped {
+                    session_id: SESSION_ID.to_string(),
+                    bytes: 1024,
+                });
+        });
+        cx.run_until_parked();
+
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                app.shell.status().contains("terminal output overloaded"),
+                "active-session drop status is root chrome"
+            );
+        });
+        assert!(
+            root_notify_count(&observer, &mut cx) > 0,
+            "root chrome status changes must still notify the full shell"
+        );
+    }
+
+    #[test]
+    fn data_plane_has_no_pending_ui_repaint_work() {
+        let mut cx = TestAppContext::single();
+        let app = quiet_app_with_visible_session(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.start_runtime_data_plane_drain(cx);
+            app.session
+                .push_event_bridge_ui_event_for_test(SessionEvent::Output {
+                    session_id: SESSION_ID.to_string(),
+                    data: b"plain data-plane output\r\n".to_vec(),
+                });
+        });
+        cx.run_until_parked();
+
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                !app.runtime_data_plane_work_remaining_for_test(),
+                "plain output must not leave repaint-only work behind after the data plane drains"
+            );
+        });
     }
 
     /// A pending credential-prompt detection must not be stranded by the task parking.

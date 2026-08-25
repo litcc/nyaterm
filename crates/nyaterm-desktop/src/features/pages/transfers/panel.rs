@@ -228,6 +228,14 @@ impl TransferPanel {
     }
 
     #[cfg(test)]
+    pub(in crate::features) fn queue_row_count_for_test(&self) -> usize {
+        self.snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.queue.rows.len())
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
     pub(in crate::features::pages::transfers) fn note_rows_built(&self, count: usize) {
         self.rows_built.set(self.rows_built.get() + count);
     }

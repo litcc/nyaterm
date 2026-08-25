@@ -14,16 +14,33 @@ use crate::features::{NyaTermApp, formatting::short_id};
 
 #[derive(Clone, Copy)]
 enum SessionOutputDrainStep {
-    SidebandOnly { chunk_duration: Duration },
-    Accepted { chunk_duration: Duration },
+    SidebandOnly {
+        chunk_duration: Duration,
+        root_chrome_dirty: bool,
+    },
+    Accepted {
+        chunk_duration: Duration,
+        root_chrome_dirty: bool,
+    },
 }
 
 impl SessionOutputDrainStep {
     fn chunk_duration(self) -> Duration {
         match self {
-            Self::SidebandOnly { chunk_duration } | Self::Accepted { chunk_duration } => {
+            Self::SidebandOnly { chunk_duration, .. } | Self::Accepted { chunk_duration, .. } => {
                 chunk_duration
             }
+        }
+    }
+
+    fn root_chrome_dirty(self) -> bool {
+        match self {
+            Self::SidebandOnly {
+                root_chrome_dirty, ..
+            }
+            | Self::Accepted {
+                root_chrome_dirty, ..
+            } => root_chrome_dirty,
         }
     }
 }
@@ -98,7 +115,7 @@ impl NyaTermApp {
         drain_sideband_workers: bool,
     ) -> bool {
         let drain_started_at = Instant::now();
-        let mut dirty = false;
+        let mut root_chrome_dirty = false;
         // Common calm path: no local pending events, no bridge UI work, no file
         // transfer sideband. Skip harvest/atomics so idle and window-drag ticks
         // do not touch the session event pipeline at all.
@@ -123,10 +140,10 @@ impl NyaTermApp {
         // Bridge encoding/scrollback and per-session routing are updated on the
         // state transitions that need them, not on every runtime tick.
         if drain_sideband_workers {
-            dirty |= self.drain_zmodem_worker_events(cx);
-            dirty |= self.drain_trzsz_download_worker_events(cx);
-            dirty |= self.drain_trzsz_upload_prepare_events(cx);
-            dirty |= self.drain_trzsz_upload_worker_events(cx);
+            root_chrome_dirty |= self.drain_zmodem_worker_events(cx);
+            root_chrome_dirty |= self.drain_trzsz_download_worker_events(cx);
+            root_chrome_dirty |= self.drain_trzsz_upload_prepare_events(cx);
+            root_chrome_dirty |= self.drain_trzsz_upload_worker_events(cx);
         }
         let mut drained_events = 0usize;
         let mut output_event_count = 0usize;
@@ -203,6 +220,7 @@ impl NyaTermApp {
                         );
                         max_output_chunk_duration =
                             max_output_chunk_duration.max(step.chunk_duration());
+                        root_chrome_dirty |= step.root_chrome_dirty();
                         if matches!(step, SessionOutputDrainStep::SidebandOnly { .. })
                             && session_event_drain_should_yield(
                                 drain_started_at,
@@ -220,15 +238,17 @@ impl NyaTermApp {
                             &mut pending_frame_outputs,
                             &mut drain_timings,
                         );
-                        dirty |= self.handle_session_output_dropped_event(session_id, bytes, cx);
+                        root_chrome_dirty |=
+                            self.handle_session_output_dropped_event(session_id, bytes, cx);
                     }
                     SessionEvent::CwdChanged { session_id, cwd } => {
                         self.flush_pending_session_frame_outputs(
                             &mut pending_frame_outputs,
                             &mut drain_timings,
                         );
-                        self.apply_session_cwd(&session_id, cwd);
-                        dirty = true;
+                        if self.apply_session_cwd(&session_id, cwd) {
+                            self.defer_transfer_panel_snapshot_flush(cx);
+                        }
                     }
                     SessionEvent::CommandAccepted {
                         session_id,
@@ -244,15 +264,16 @@ impl NyaTermApp {
                                 "command history worker is unavailable",
                                 false,
                             );
+                            self.request_settings_panel_refresh(cx);
                         }
-                        dirty = true;
                     }
                     SessionEvent::Exited { session_id, reason } => {
                         self.flush_pending_session_frame_outputs(
                             &mut pending_frame_outputs,
                             &mut drain_timings,
                         );
-                        dirty |= self.handle_session_exited_event(session_id, reason, cx);
+                        root_chrome_dirty |=
+                            self.handle_session_exited_event(session_id, reason, cx);
                     }
                     SessionEvent::Error {
                         session_id,
@@ -262,7 +283,7 @@ impl NyaTermApp {
                             &mut pending_frame_outputs,
                             &mut drain_timings,
                         );
-                        dirty |= self.handle_session_error_event(session_id, message);
+                        root_chrome_dirty |= self.handle_session_error_event(session_id, message);
                     }
                 }
                 if session_event_drain_should_yield(
@@ -326,7 +347,7 @@ impl NyaTermApp {
                 "slow session event drain"
             );
         }
-        dirty
+        root_chrome_dirty
     }
 
     fn handle_session_output_dropped_event(
@@ -336,7 +357,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> bool {
         self.note_trzsz_output_discontinuity(&session_id);
-        self.note_zmodem_output_discontinuity(&session_id, bytes, cx);
+        let mut root_chrome_dirty = self.note_zmodem_output_discontinuity(&session_id, bytes, cx);
         self.note_ai_agent_output_discontinuity(&session_id, bytes, cx);
         self.session.route_session_events_to_ui(&session_id);
         let encoding = self.settings.summary().interaction_default_encoding.clone();
@@ -351,9 +372,9 @@ impl NyaTermApp {
                 "terminal output overloaded; dropped {} queued byte(s)",
                 bytes
             ));
-            return true;
+            root_chrome_dirty = true;
         }
-        false
+        root_chrome_dirty
     }
 
     fn handle_session_exited_event(
@@ -426,12 +447,15 @@ impl NyaTermApp {
         let chunk_started_at = Instant::now();
         let chunk_input_bytes = data.len();
         let mut chunk_timings = SessionEventDrainTimings::default();
+        let mut root_chrome_dirty = false;
         let sideband_bypass = self.session_output_can_bypass_sideband_detectors(&session_id, &data);
         let data = if sideband_bypass {
             data
         } else {
             let stage_started_at = Instant::now();
-            let data = self.process_zmodem_output(&session_id, &data, cx);
+            let (data, zmodem_root_chrome_dirty) =
+                self.process_zmodem_output(&session_id, &data, cx);
+            root_chrome_dirty |= zmodem_root_chrome_dirty;
             let stage_duration = stage_started_at.elapsed();
             drain_timings.zmodem += stage_duration;
             chunk_timings.zmodem += stage_duration;
@@ -445,11 +469,15 @@ impl NyaTermApp {
                     chunk_duration,
                     &chunk_timings,
                 );
-                return SessionOutputDrainStep::SidebandOnly { chunk_duration };
+                return SessionOutputDrainStep::SidebandOnly {
+                    chunk_duration,
+                    root_chrome_dirty,
+                };
             }
             // Consume side-band markers after active transfer payloads are removed.
             let stage_started_at = Instant::now();
-            let data = self.process_trzsz_output(&session_id, &data, cx);
+            let (data, trzsz_root_chrome_dirty) = self.process_trzsz_output(&session_id, &data, cx);
+            root_chrome_dirty |= trzsz_root_chrome_dirty;
             let stage_duration = stage_started_at.elapsed();
             drain_timings.trzsz += stage_duration;
             chunk_timings.trzsz += stage_duration;
@@ -463,7 +491,10 @@ impl NyaTermApp {
                     chunk_duration,
                     &chunk_timings,
                 );
-                return SessionOutputDrainStep::SidebandOnly { chunk_duration };
+                return SessionOutputDrainStep::SidebandOnly {
+                    chunk_duration,
+                    root_chrome_dirty,
+                };
             }
             data
         };
@@ -512,7 +543,10 @@ impl NyaTermApp {
             chunk_duration,
             &chunk_timings,
         );
-        SessionOutputDrainStep::Accepted { chunk_duration }
+        SessionOutputDrainStep::Accepted {
+            chunk_duration,
+            root_chrome_dirty,
+        }
     }
 
     fn maybe_detect_ai_terminal_error(
@@ -540,7 +574,7 @@ impl NyaTermApp {
             terminal_error_notice_output(&output),
             Instant::now(),
         ) {
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
         }
     }
 

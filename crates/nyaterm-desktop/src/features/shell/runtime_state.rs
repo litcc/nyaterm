@@ -52,10 +52,6 @@ pub(super) struct ShellRuntimeState {
     pub(super) terminal_input_wake_armed: bool,
     /// Incremented on every user input write so an armed wake can extend itself.
     pub(super) terminal_input_wake_generation: u64,
-    /// Last full-shell cx.notify from the runtime tick (paint throttle).
-    pub(super) last_ui_notify_at: Option<Instant>,
-    /// A visual update was deferred by paint throttle and still needs a notify.
-    pub(super) pending_ui_notify: bool,
     /// Full NyaTermApp shell paints (chrome + workspace structure).
     pub(super) full_shell_paint_count: u64,
     /// Output frames that notified only a TerminalSurface.
@@ -140,8 +136,6 @@ impl Default for ShellRuntimeState {
             connect_settle_until: None,
             terminal_input_wake_armed: false,
             terminal_input_wake_generation: 0,
-            last_ui_notify_at: None,
-            pending_ui_notify: false,
             full_shell_paint_count: 0,
             terminal_surface_frame_notify_count: 0,
             terminal_chrome_frame_notify_count: 0,

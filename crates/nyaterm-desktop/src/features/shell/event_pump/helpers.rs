@@ -21,8 +21,6 @@ pub(super) const TITLE_DRAG_ACTIVE_HOLD: Duration = Duration::from_millis(1200);
 /// After a session becomes live, demote idle/visual for this long so first-frame
 /// output does not compete with chrome rebuilds (does not raise tick cadence).
 pub(in crate::features::shell) const CONNECT_SETTLE_HOLD: Duration = Duration::from_millis(750);
-/// Under output pressure / connect settle, coalesce full-shell paints.
-pub(super) const UI_PAINT_THROTTLE: Duration = Duration::from_millis(33);
 pub(super) const TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL: Duration = Duration::from_millis(16);
 pub(super) const SLOW_DIAGNOSTIC_THROTTLE: Duration = Duration::from_secs(2);
 pub(super) const SESSION_EVENT_DRAIN_SLOW_TOTAL: Duration = Duration::from_millis(20);
@@ -126,32 +124,6 @@ pub(super) fn connect_settle_active(until: Option<Instant>, now: Instant) -> boo
 
 pub(super) fn connect_settle_deadline(now: Instant) -> Instant {
     now + CONNECT_SETTLE_HOLD
-}
-
-/// Whether a runtime tick should call cx.notify immediately.
-/// Under pressure/settle, terminal-driven dirtiness is coalesced to ~30fps so
-/// the full shell (title/tabs/status/sidebars) is not rebuilt every frame tick.
-pub(super) fn runtime_ui_notify_allowed(
-    visual_dirty: bool,
-    pending_ui_notify: bool,
-    force_immediate: bool,
-    throttle_active: bool,
-    last_ui_notify_at: Option<Instant>,
-    now: Instant,
-) -> bool {
-    if force_immediate {
-        return visual_dirty || pending_ui_notify;
-    }
-    if !visual_dirty && !pending_ui_notify {
-        return false;
-    }
-    if !throttle_active {
-        return true;
-    }
-    last_ui_notify_at.is_none_or(|last| {
-        now.checked_duration_since(last)
-            .is_none_or(|elapsed| elapsed >= UI_PAINT_THROTTLE)
-    })
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -385,18 +357,18 @@ mod tests {
         RuntimeOutputPressureCounts, SESSION_EVENT_DRAIN_BATCH,
         SESSION_EVENT_DRAIN_IDLE_OUTPUT_BUDGET, SESSION_EVENT_DRAIN_PRESSURE_OUTPUT_BUDGET,
         SESSION_EVENT_DRAIN_SLOW_CHUNK, SESSION_EVENT_DRAIN_SLOW_TOTAL,
-        SESSION_EVENT_DRAIN_WALL_BUDGET, TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL, UI_PAINT_THROTTLE,
+        SESSION_EVENT_DRAIN_WALL_BUDGET, TERMINAL_FRAME_APPLY_PRESSURE_INTERVAL,
         WINDOW_GEOMETRY_CHURN_HOLD, connect_settle_active, connect_settle_deadline,
         pending_session_status_message, remote_refresh_should_defer,
         runtime_background_should_defer_terminal_frames, runtime_data_plane_wake_delay,
-        runtime_output_pressure_active_from_counts, runtime_ui_notify_allowed,
-        session_event_backlog_active, session_event_drain_budget, session_event_drain_is_slow,
-        session_event_drain_should_yield, session_event_input_wake_drain_budget,
-        terminal_cell_metrics_refresh_needed, terminal_frame_apply_should_defer,
-        terminal_frame_backlog_active_from_counts, terminal_input_idle_remaining_delay,
-        terminal_log_plain_text, terminal_output_dropped_marker,
-        terminal_render_work_pressure_active, terminal_user_scroll_frame_apply_pending,
-        viewport_change_terminal_session_ids, window_geometry_churn_active,
+        runtime_output_pressure_active_from_counts, session_event_backlog_active,
+        session_event_drain_budget, session_event_drain_is_slow, session_event_drain_should_yield,
+        session_event_input_wake_drain_budget, terminal_cell_metrics_refresh_needed,
+        terminal_frame_apply_should_defer, terminal_frame_backlog_active_from_counts,
+        terminal_input_idle_remaining_delay, terminal_log_plain_text,
+        terminal_output_dropped_marker, terminal_render_work_pressure_active,
+        terminal_user_scroll_frame_apply_pending, viewport_change_terminal_session_ids,
+        window_geometry_churn_active,
     };
 
     #[test]
@@ -507,49 +479,6 @@ mod tests {
         assert!(remote_refresh_should_defer(true, false, false));
         assert!(remote_refresh_should_defer(false, true, false));
         assert!(remote_refresh_should_defer(false, false, true));
-    }
-
-    #[test]
-    fn runtime_ui_notify_throttles_under_pressure() {
-        let now = Instant::now();
-        assert!(!runtime_ui_notify_allowed(
-            false, false, false, true, None, now
-        ));
-        assert!(runtime_ui_notify_allowed(
-            true, false, false, true, None, now
-        ));
-        assert!(!runtime_ui_notify_allowed(
-            true,
-            false,
-            false,
-            true,
-            Some(now),
-            now
-        ));
-        assert!(runtime_ui_notify_allowed(
-            true,
-            false,
-            false,
-            true,
-            Some(now - UI_PAINT_THROTTLE),
-            now
-        ));
-        assert!(runtime_ui_notify_allowed(
-            true,
-            false,
-            true,
-            true,
-            Some(now),
-            now
-        ));
-        assert!(runtime_ui_notify_allowed(
-            false,
-            true,
-            false,
-            false,
-            Some(now),
-            now
-        ));
     }
 
     #[test]

@@ -2759,6 +2759,8 @@ fn ai_message_menu_position(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use gpui::{
         AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, div, px,
@@ -2891,6 +2893,55 @@ mod tests {
 
     fn settings_paints(app: &Entity<NyaTermApp>, cx: &mut gpui::App) -> usize {
         app.read(cx).settings_panel.read(cx).paint_count()
+    }
+
+    #[test]
+    fn detected_terminal_error_refreshes_ai_panel_only() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let before_snapshots = vcx.update(|_, cx| ai_snapshot_sets(&app, cx));
+        let before_ai_paints = vcx.update(|_, cx| ai_paints(&app, cx));
+        let before_connection_paints = vcx.update(|_, cx| connection_paints(&app, cx));
+        let before_transfer_paints = vcx.update(|_, cx| transfer_paints(&app, cx));
+        let before_settings_paints = vcx.update(|_, cx| settings_paints(&app, cx));
+
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                assert!(app.ai.note_detected_error(
+                    "session-a".to_string(),
+                    "permission denied".to_string(),
+                    Instant::now(),
+                ));
+                app.defer_ai_panel_snapshot_flush(cx);
+            });
+        });
+        vcx.run_until_parked();
+
+        assert_eq!(
+            vcx.update(|_, cx| ai_snapshot_sets(&app, cx)),
+            before_snapshots + 1,
+            "detected terminal errors should rebuild the AiPanel snapshot"
+        );
+        draw(&app, vcx);
+        assert!(
+            vcx.update(|_, cx| ai_paints(&app, cx)) > before_ai_paints,
+            "the AiPanel should repaint after its snapshot changes"
+        );
+        assert_eq!(
+            vcx.update(|_, cx| connection_paints(&app, cx)),
+            before_connection_paints,
+            "AI-owned refreshes must not repaint the connections panel"
+        );
+        assert_eq!(
+            vcx.update(|_, cx| transfer_paints(&app, cx)),
+            before_transfer_paints,
+            "AI-owned refreshes must not repaint the transfer panel"
+        );
+        assert_eq!(
+            vcx.update(|_, cx| settings_paints(&app, cx)),
+            before_settings_paints,
+            "AI-owned refreshes must not repaint the settings panel"
+        );
     }
 
     #[test]

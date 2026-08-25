@@ -140,9 +140,9 @@ impl NyaTermApp {
         session_id: &str,
         dropped_bytes: usize,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(state) = self.session.zmodem_state_mut(session_id) else {
-            return;
+            return false;
         };
         let reason = format!("terminal output dropped {dropped_bytes} byte(s)");
         if let Some(worker) = state.worker.as_ref() {
@@ -153,13 +153,14 @@ impl NyaTermApp {
             state.detector = ZmodemDetector::new();
             state.pending_download = false;
             if !actions.is_empty() {
-                self.apply_zmodem_actions(session_id, actions, cx);
+                return self.apply_zmodem_actions(session_id, actions, cx);
             }
-            return;
+            return false;
         }
         state.transfer = None;
         state.detector = ZmodemDetector::new();
         state.pending_download = false;
+        false
     }
 
     /// Queue local files for ZMODEM upload (remote `rz`) after optional SFTP conflict probe.
@@ -386,10 +387,11 @@ impl NyaTermApp {
             return false;
         }
 
+        let mut root_chrome_dirty = false;
         for (session_id, event) in events {
-            self.apply_zmodem_worker_event(&session_id, event, cx);
+            root_chrome_dirty |= self.apply_zmodem_worker_event(&session_id, event, cx);
         }
-        true
+        root_chrome_dirty
     }
 
     fn apply_zmodem_worker_event(
@@ -397,14 +399,15 @@ impl NyaTermApp {
         session_id: &str,
         event: ZmodemWorkerEvent,
         cx: &mut Context<Self>,
-    ) {
-        self.apply_zmodem_actions(session_id, event.actions, cx);
+    ) -> bool {
+        let root_chrome_dirty = self.apply_zmodem_actions(session_id, event.actions, cx);
         if event.done
             && let Some(state) = self.session.zmodem_state_mut(session_id)
             && state.worker.is_some()
         {
             state.finish_transfer();
         }
+        root_chrome_dirty
     }
 
     /// Process raw session output for ZMODEM interception. Returns bytes that
@@ -414,12 +417,12 @@ impl NyaTermApp {
         session_id: &str,
         data: &[u8],
         cx: &mut Context<Self>,
-    ) -> Vec<u8> {
+    ) -> (Vec<u8>, bool) {
         if data.is_empty() {
-            return Vec::new();
+            return (Vec::new(), false);
         }
         if self.zmodem_output_can_bypass_detector(session_id, data) {
-            return data.to_vec();
+            return (data.to_vec(), false);
         }
 
         // Active transfer: consume all raw bytes.
@@ -427,7 +430,7 @@ impl NyaTermApp {
             && let Some(worker) = state.worker.as_ref()
         {
             worker.send_input(data.to_vec());
-            return Vec::new();
+            return (Vec::new(), false);
         }
 
         if self
@@ -446,7 +449,7 @@ impl NyaTermApp {
                     state.worker = Some(worker);
                 }
             }
-            return Vec::new();
+            return (Vec::new(), false);
         }
 
         // Detection path.
@@ -455,7 +458,7 @@ impl NyaTermApp {
             state.detector.feed(data)
         };
         match feed_result {
-            ZmodemDetectResult::NoMatch { passthrough } => passthrough,
+            ZmodemDetectResult::NoMatch { passthrough } => (passthrough, false),
             ZmodemDetectResult::Detected {
                 direction,
                 passthrough,
@@ -492,7 +495,7 @@ impl NyaTermApp {
                         "ZMODEM download detected — choose save folder".to_string()
                     }
                 });
-                passthrough
+                (passthrough, true)
             }
         }
     }
@@ -517,18 +520,23 @@ impl NyaTermApp {
         session_id: &str,
         actions: Vec<ZmodemAction>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
+        let mut root_chrome_dirty = false;
         for action in actions {
             match action {
                 ZmodemAction::SendToRemote(bytes) => {
                     if let Err(error) = self.write_session_protocol_response(session_id, &bytes) {
                         self.shell
                             .set_status(format!("ZMODEM write failed: {error}"));
+                        root_chrome_dirty = true;
                     }
                 }
-                ZmodemAction::EmitEvent(event) => self.handle_zmodem_event(session_id, event, cx),
+                ZmodemAction::EmitEvent(event) => {
+                    root_chrome_dirty |= self.handle_zmodem_event(session_id, event, cx);
+                }
             }
         }
+        root_chrome_dirty
     }
 
     fn handle_zmodem_event(
@@ -536,7 +544,7 @@ impl NyaTermApp {
         session_id: &str,
         event: ZmodemEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         match event {
             ZmodemEvent::Detected { direction } => {
                 self.shell.set_status(match direction {
@@ -604,7 +612,7 @@ impl NyaTermApp {
                 }
             }
         }
-        cx.notify();
+        true
     }
 
     fn upsert_zmodem_transfer_job(
@@ -683,6 +691,7 @@ impl NyaTermApp {
             } else if fail_reason.is_some() {
                 job.status = TransferJobStatus::Failed;
             }
+            self.defer_transfer_panel_snapshot_flush(cx);
             return;
         }
 
@@ -716,7 +725,7 @@ impl NyaTermApp {
             progress: Some(progress),
             control: None,
         });
-        let _ = cx;
+        self.defer_transfer_panel_snapshot_flush(cx);
     }
 
     fn finish_zmodem_transfer_jobs(
@@ -724,8 +733,9 @@ impl NyaTermApp {
         session_id: &str,
         success: bool,
         fail_reason: Option<&str>,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        let mut changed = false;
         self.transfer.visit_transfer_jobs_mut(|job| {
             let is_zmodem = matches!(
                 &job.kind,
@@ -756,7 +766,11 @@ impl NyaTermApp {
                     .map(|r| format!("Failed: {r}"))
                     .unwrap_or_else(|| "Failed".to_string());
             }
+            changed = true;
         });
+        if changed {
+            self.defer_transfer_panel_snapshot_flush(cx);
+        }
     }
 
     fn prompt_zmodem_download_directory(&mut self, session_id: String, cx: &mut Context<Self>) {
@@ -913,9 +927,81 @@ const ZMODEM_WORKER_EVENT_DRAIN_BATCH: usize = 32;
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_transport::{ZmodemAction, ZmodemDirection, ZmodemEvent, ZmodemTransfer};
+    use gpui::{AppContext as _, Context, Subscription, TestAppContext};
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
+    use nyaterm_transport::{
+        LocalSessionConfig, ZmodemAction, ZmodemDirection, ZmodemEvent, ZmodemTransfer,
+    };
 
-    use super::{ZmodemWorkerCommand, process_zmodem_worker_command};
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::models::{SessionLaunchConfig, SessionRuntimeMetadata};
+
+    use super::{ZmodemTransferJobUpdate, ZmodemWorkerCommand, process_zmodem_worker_command};
+
+    const SESSION_ID: &str = "zmodem-panel-session";
+
+    struct RootNotifyObserver {
+        count: usize,
+        _subscription: Subscription,
+    }
+
+    impl RootNotifyObserver {
+        fn new(app: gpui::Entity<NyaTermApp>, cx: &mut Context<Self>) -> Self {
+            let subscription = cx.observe(&app, |observer, _, _| {
+                observer.count += 1;
+            });
+            Self {
+                count: 0,
+                _subscription: subscription,
+            }
+        }
+    }
+
+    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-zmodem-panel-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        let app = cx.new(|cx| NyaTermApp::new(runtime, stores, cx));
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            app.session.register_session_metadata(
+                SESSION_ID,
+                SessionRuntimeMetadata {
+                    ssh_config: None,
+                    ssh_multiplex_key: None,
+                    source_connection_id: None,
+                    ai_execution_profile: AiExecutionProfile::Posix,
+                    launch_config: SessionLaunchConfig::Local(LocalSessionConfig::default()),
+                    disconnected: false,
+                },
+            );
+            app.session.select_active_session(SESSION_ID);
+            app.flush_transfer_panel_snapshot(cx);
+        });
+        app
+    }
+
+    fn root_notify_count(
+        observer: &gpui::Entity<RootNotifyObserver>,
+        cx: &mut TestAppContext,
+    ) -> usize {
+        cx.update_entity(observer, |observer, _| observer.count)
+    }
 
     #[test]
     fn zmodem_worker_cancel_emits_failed_event_off_ui_state() {
@@ -932,5 +1018,42 @@ mod tests {
             action,
             ZmodemAction::EmitEvent(ZmodemEvent::Failed { reason }) if reason == "stop"
         )));
+    }
+
+    #[test]
+    fn zmodem_progress_refreshes_transfer_panel_without_root_notify() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        let observer = cx.new(|cx| RootNotifyObserver::new(app.clone(), cx));
+
+        cx.update_entity(&app, |app, cx| {
+            assert_eq!(app.transfer_panel.read(cx).queue_row_count_for_test(), 0);
+            app.upsert_zmodem_transfer_job(
+                ZmodemTransferJobUpdate {
+                    session_id: SESSION_ID,
+                    direction: ZmodemDirection::Upload,
+                    file_name: "artifact.bin",
+                    bytes_transferred: 7,
+                    total_size: 10,
+                    completed: false,
+                    fail_reason: None,
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+
+        cx.update_entity(&app, |app, cx| {
+            assert_eq!(
+                app.transfer_panel.read(cx).queue_row_count_for_test(),
+                1,
+                "ZMODEM progress should refresh TransferPanel through its own snapshot"
+            );
+        });
+        assert_eq!(
+            root_notify_count(&observer, &mut cx),
+            0,
+            "transfer progress should not rely on a root app notification"
+        );
     }
 }

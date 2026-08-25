@@ -1018,7 +1018,7 @@ impl NyaTermApp {
         }
     }
 
-    pub(in crate::features) fn apply_session_cwd(&mut self, session_id: &str, cwd: String) {
+    pub(in crate::features) fn apply_session_cwd(&mut self, session_id: &str, cwd: String) -> bool {
         let changed = self.session.update_cwd(session_id, cwd.clone());
         // Auto-sync the transfer browser path when enabled for the active SSH session.
         if terminal_should_apply_session_cwd(
@@ -1028,8 +1028,9 @@ impl NyaTermApp {
             self.transfer.browser_view().path_editing,
             &cwd,
         ) {
-            self.transfer.apply_terminal_cwd_to_browser(cwd);
+            return self.transfer.apply_terminal_cwd_to_browser(cwd);
         }
+        false
     }
 
     /// Apply OSC 133 command-start / command-finish edges (Tauri shell integration).

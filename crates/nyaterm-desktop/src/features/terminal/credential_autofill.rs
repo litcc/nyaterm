@@ -132,7 +132,7 @@ impl NyaTermApp {
         }
         // Replies arrive on `start_credential_autofill_match_drain`; what is
         // left here is snapshot-driven detection.
-        let mut dirty = false;
+        let mut root_overlay_dirty = false;
         let detection_was_pending = self.terminal.assist.credential_autofill_detection_pending;
         let runtime_backlog = CredentialAutofillRuntimeBacklog {
             queued_output_bytes: self.shell.session_event_queued_output_bytes(),
@@ -157,7 +157,7 @@ impl NyaTermApp {
             runtime_backlog,
             match_request_pending,
         ) {
-            dirty |= self.sync_credential_autofill_from_active_snapshot(cx);
+            root_overlay_dirty |= self.sync_credential_autofill_from_active_snapshot(cx);
         }
         if !credential_autofill_detection_should_run_this_tick(
             detection_was_pending,
@@ -168,11 +168,11 @@ impl NyaTermApp {
                 match_request_pending,
             ),
         ) {
-            return dirty;
+            return root_overlay_dirty;
         }
         self.terminal.assist.credential_autofill_detection_pending = false;
-        dirty |= self.detect_credential_prompt(cx);
-        dirty
+        let _ = self.detect_credential_prompt(cx);
+        root_overlay_dirty
     }
 
     fn sync_credential_autofill_from_active_snapshot(&mut self, cx: &mut Context<Self>) -> bool {
@@ -205,7 +205,7 @@ impl NyaTermApp {
             if !self.terminal.assist.credential_autofill_buffer.is_empty() {
                 self.terminal.assist.credential_autofill_buffer.clear();
                 self.terminal.assist.credential_prompt_input_until_ms = 0;
-                return true;
+                return false;
             }
             return false;
         }
@@ -222,22 +222,21 @@ impl NyaTermApp {
             if !self.terminal.assist.credential_autofill_buffer.is_empty() {
                 self.terminal.assist.credential_autofill_buffer.clear();
                 self.terminal.assist.credential_prompt_input_until_ms = 0;
-                return true;
+                return false;
             }
             return false;
         }
 
-        let mut dirty = false;
         if self.terminal.assist.credential_autofill_buffer != prompt_text {
             self.terminal.assist.credential_autofill_buffer = prompt_text;
-            dirty = true;
         }
+        let mut root_overlay_dirty = false;
         if detected_prompt_kind.is_some() {
             self.terminal.assist.credential_prompt_input_until_ms =
                 Self::now_unix_ms().saturating_add(CREDENTIAL_PROMPT_INPUT_TTL_MS);
             // Suppress command suggestions while a credential prompt is live.
             if self.terminal.assist.command_suggestions.take().is_some() {
-                dirty = true;
+                root_overlay_dirty = true;
             }
             self.terminal.assist.command_input_tracker = TerminalInputState::new();
         }
@@ -245,14 +244,13 @@ impl NyaTermApp {
         if self.terminal.assist.credential_suggestions.is_some()
             || self.terminal.assist.credential_autofill_sending
         {
-            return dirty;
+            return root_overlay_dirty;
         }
         if !self.terminal.assist.credential_autofill_detection_pending {
             self.terminal.assist.credential_autofill_detection_pending = true;
-            dirty = true;
-            cx.notify();
         }
-        dirty
+        let _ = cx;
+        root_overlay_dirty
     }
 
     pub(in crate::features) fn detect_credential_prompt(

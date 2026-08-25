@@ -389,12 +389,12 @@ impl NyaTermApp {
         session_id: &str,
         data: &[u8],
         cx: &mut Context<Self>,
-    ) -> Vec<u8> {
+    ) -> (Vec<u8>, bool) {
         if data.is_empty() {
-            return Vec::new();
+            return (Vec::new(), false);
         }
         if self.trzsz_output_can_bypass_detector(session_id, data) {
-            return data.to_vec();
+            return (data.to_vec(), false);
         }
         let events = {
             let state = self.trzsz_state_mut(session_id);
@@ -406,6 +406,7 @@ impl NyaTermApp {
         let mut latest_trigger_status = None;
         let mut latest_protocol_status = None;
         let mut response_error = false;
+        let mut root_chrome_dirty = false;
 
         for event in events {
             match event {
@@ -525,15 +526,15 @@ impl NyaTermApp {
                 self.shell
                     .set_status(format!("trzsz protocol response failed: {error}"));
                 response_error = true;
-                cx.notify();
+                root_chrome_dirty = true;
             }
         }
 
         if !response_error && let Some(status) = latest_protocol_status.or(latest_trigger_status) {
             self.shell.set_status(status);
-            cx.notify();
+            root_chrome_dirty = true;
         }
-        passthrough
+        (passthrough, root_chrome_dirty)
     }
 
     fn queue_trzsz_download_worker_output(&mut self, session_id: &str, data: &[u8]) -> bool {
@@ -590,11 +591,11 @@ impl NyaTermApp {
             return false;
         }
 
-        let mut dirty = false;
+        let mut root_chrome_dirty = false;
         for (session_id, event) in events {
-            dirty |= self.apply_trzsz_download_worker_event(&session_id, event, cx);
+            root_chrome_dirty |= self.apply_trzsz_download_worker_event(&session_id, event, cx);
         }
-        dirty
+        root_chrome_dirty
     }
 
     fn apply_trzsz_download_worker_event(
@@ -603,21 +604,19 @@ impl NyaTermApp {
         event: TrzszDownloadWorkerEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let mut dirty = false;
+        let mut root_chrome_dirty = false;
         if !event.passthrough.is_empty() {
             self.submit_terminal_frame_output(session_id, event.passthrough);
-            dirty = true;
         }
         for response in event.responses {
             if let Err(error) = self.write_session_protocol_response(session_id, &response) {
                 self.shell
                     .set_status(format!("trzsz protocol response failed: {error}"));
-                dirty = true;
+                root_chrome_dirty = true;
             }
         }
         for update in event.progress {
             self.update_trzsz_download_job(session_id, update, cx);
-            dirty = true;
         }
         if let Some(reason) = event.failed {
             self.finish_trzsz_download_jobs(session_id, false, Some(&reason), cx);
@@ -626,22 +625,19 @@ impl NyaTermApp {
             }
             self.shell
                 .set_status(format!("trzsz download failed: {reason}"));
-            dirty = true;
+            root_chrome_dirty = true;
         } else if let Some(message) = event.completed {
             self.finish_trzsz_download_jobs(session_id, true, None, cx);
             if let Some(state) = self.session.trzsz_state_mut(session_id) {
                 state.finish_download();
             }
             self.shell.set_status(message);
-            dirty = true;
+            root_chrome_dirty = true;
         } else if let Some(status) = event.status {
             self.shell.set_status(status);
-            dirty = true;
+            root_chrome_dirty = true;
         }
-        if dirty {
-            cx.notify();
-        }
-        dirty
+        root_chrome_dirty
     }
 
     pub(in crate::features) fn drain_trzsz_upload_worker_events(
@@ -670,11 +666,11 @@ impl NyaTermApp {
             return false;
         }
 
-        let mut dirty = false;
+        let mut root_chrome_dirty = false;
         for (session_id, event) in events {
-            dirty |= self.apply_trzsz_upload_worker_event(&session_id, event, cx);
+            root_chrome_dirty |= self.apply_trzsz_upload_worker_event(&session_id, event, cx);
         }
-        dirty
+        root_chrome_dirty
     }
 
     fn apply_trzsz_upload_worker_event(
@@ -683,17 +679,16 @@ impl NyaTermApp {
         event: TrzszUploadWorkerEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let mut dirty = false;
+        let mut root_chrome_dirty = false;
         for response in event.responses {
             if let Err(error) = self.write_session_protocol_response(session_id, &response) {
                 self.shell
                     .set_status(format!("trzsz protocol response failed: {error}"));
-                dirty = true;
+                root_chrome_dirty = true;
             }
         }
         for update in event.progress {
             self.update_trzsz_upload_job(session_id, update, cx);
-            dirty = true;
         }
         if let Some(reason) = event.failed {
             self.finish_trzsz_upload_jobs(session_id, false, Some(&reason), cx);
@@ -702,22 +697,19 @@ impl NyaTermApp {
             }
             self.shell
                 .set_status(format!("trzsz upload failed: {reason}"));
-            dirty = true;
+            root_chrome_dirty = true;
         } else if let Some(message) = event.completed {
             self.finish_trzsz_upload_jobs(session_id, true, None, cx);
             if let Some(state) = self.session.trzsz_state_mut(session_id) {
                 state.finish_upload();
             }
             self.shell.set_status(message);
-            dirty = true;
+            root_chrome_dirty = true;
         } else if let Some(status) = event.status {
             self.shell.set_status(status);
-            dirty = true;
+            root_chrome_dirty = true;
         }
-        if dirty {
-            cx.notify();
-        }
-        dirty
+        root_chrome_dirty
     }
 
     pub(in crate::features) fn trzsz_output_can_bypass_detector(
@@ -890,7 +882,7 @@ impl NyaTermApp {
         remote_is_windows: bool,
         directory_mode: bool,
         paths: Vec<PathBuf>,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) {
         self.trzsz_state_mut(session_id).begin_upload_preparation(
             paths,
@@ -898,7 +890,6 @@ impl NyaTermApp {
             remote_is_windows,
         );
         self.shell.set_status("preparing trzsz upload".to_string());
-        cx.notify();
     }
 
     fn accept_prepared_trzsz_upload(
@@ -908,7 +899,7 @@ impl NyaTermApp {
         directory_mode: bool,
         entries: Vec<TrzszUploadEntry>,
         files: HashMap<String, TrzszUploadFile>,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) {
         let file_count = entries.len();
         self.trzsz_state_mut(session_id).install_prepared_upload(
@@ -934,7 +925,6 @@ impl NyaTermApp {
                     .set_status(format!("trzsz upload ACT failed: {error}"));
             }
         }
-        cx.notify();
     }
 
     fn reject_trzsz_upload_prompt(
@@ -942,7 +932,7 @@ impl NyaTermApp {
         session_id: &str,
         remote_is_windows: bool,
         reason: &str,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) {
         let fail = trzsz_fail_response(reason, remote_is_windows);
         if let Err(error) = self.write_session_protocol_response(session_id, &fail) {
@@ -954,7 +944,6 @@ impl NyaTermApp {
         if let Some(state) = self.session.trzsz_state_mut(session_id) {
             state.finish_upload();
         }
-        cx.notify();
     }
 
     pub(in crate::features) fn drain_trzsz_upload_prepare_events(
@@ -1040,7 +1029,7 @@ impl NyaTermApp {
                         self.fail_trzsz_upload(session_id, reason, responses, status, cx);
                         return;
                     }
-                    self.begin_trzsz_upload(session_id, status, cx);
+                    self.begin_trzsz_upload(session_id, status);
                     return;
                 }
             }
@@ -1061,7 +1050,7 @@ impl NyaTermApp {
             .trzsz_state(session_id)
             .is_some_and(|state| state.upload.is_some() || state.upload_worker.is_some())
         {
-            self.handle_trzsz_upload_frame(session_id, frame, responses, status, cx);
+            self.handle_trzsz_upload_frame(session_id, frame, responses, status);
             return;
         }
 
@@ -1157,12 +1146,7 @@ impl NyaTermApp {
         *status = Some(format!("trzsz download failed: {reason}"));
     }
 
-    fn begin_trzsz_upload(
-        &mut self,
-        session_id: &str,
-        status: &mut Option<String>,
-        cx: &mut Context<Self>,
-    ) {
+    fn begin_trzsz_upload(&mut self, session_id: &str, status: &mut Option<String>) {
         let remote_is_windows = self
             .session
             .trzsz_state(session_id)
@@ -1181,7 +1165,6 @@ impl NyaTermApp {
             state.upload_worker = Some(worker);
         }
         *status = Some("trzsz upload starting".to_string());
-        cx.notify();
     }
 
     fn handle_trzsz_upload_frame(
@@ -1190,14 +1173,12 @@ impl NyaTermApp {
         frame: TrzszProtocolFrame,
         _responses: &mut Vec<Vec<u8>>,
         status: &mut Option<String>,
-        cx: &mut Context<Self>,
     ) {
         if !is_trzsz_upload_frame(&frame) {
             return;
         }
         if self.queue_trzsz_upload_worker_frame(session_id, frame) {
             *status = Some("trzsz upload in progress".to_string());
-            cx.notify();
         }
     }
 
@@ -1276,7 +1257,7 @@ impl NyaTermApp {
             } else if update.fail_reason.is_some() {
                 job.status = TransferJobStatus::Failed;
             }
-            cx.notify();
+            self.defer_transfer_panel_snapshot_flush(cx);
             return;
         }
 
@@ -1315,7 +1296,7 @@ impl NyaTermApp {
             progress: Some(progress),
             control: None,
         });
-        cx.notify();
+        self.defer_transfer_panel_snapshot_flush(cx);
     }
 
     fn update_trzsz_upload_job(
@@ -1372,7 +1353,7 @@ impl NyaTermApp {
             } else if update.fail_reason.is_some() {
                 job.status = TransferJobStatus::Failed;
             }
-            cx.notify();
+            self.defer_transfer_panel_snapshot_flush(cx);
             return;
         }
 
@@ -1411,7 +1392,7 @@ impl NyaTermApp {
             progress: Some(progress),
             control: None,
         });
-        cx.notify();
+        self.defer_transfer_panel_snapshot_flush(cx);
     }
 
     fn finish_trzsz_download_jobs(
@@ -1421,6 +1402,7 @@ impl NyaTermApp {
         fail_reason: Option<&str>,
         cx: &mut Context<Self>,
     ) {
+        let mut changed = false;
         self.transfer.visit_transfer_jobs_mut(|job| {
             let is_trzsz = matches!(
                 &job.kind,
@@ -1446,8 +1428,11 @@ impl NyaTermApp {
                     .map(|reason| format!("Failed: {reason}"))
                     .unwrap_or_else(|| "Failed".to_string());
             }
+            changed = true;
         });
-        cx.notify();
+        if changed {
+            self.defer_transfer_panel_snapshot_flush(cx);
+        }
     }
 
     fn finish_trzsz_upload_jobs(
@@ -1457,6 +1442,7 @@ impl NyaTermApp {
         fail_reason: Option<&str>,
         cx: &mut Context<Self>,
     ) {
+        let mut changed = false;
         self.transfer.visit_transfer_jobs_mut(|job| {
             let is_trzsz = matches!(
                 &job.kind,
@@ -1482,8 +1468,11 @@ impl NyaTermApp {
                     .map(|reason| format!("Failed: {reason}"))
                     .unwrap_or_else(|| "Failed".to_string());
             }
+            changed = true;
         });
-        cx.notify();
+        if changed {
+            self.defer_transfer_panel_snapshot_flush(cx);
+        }
     }
 }
 
