@@ -4,7 +4,7 @@ use gpui::{AnyElement, Context, IntoElement, SharedString, div, prelude::*, px, 
 use nyaterm_core::RiskLevel;
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{pages::settings::panel::SettingsPanel, text_inputs::TextInputSetup};
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::models::AiInputField;
 use crate::theme::ThemePalette;
 
@@ -24,26 +24,6 @@ impl SettingsPanel {
         let label: SharedString = label.into();
         let _ = (value, cx);
         self.existing_text_input_field(format!("ai.input.{}", field.input_key()), label, false)
-    }
-
-    /// Every AI settings input its section draws, with the value it seeds from.
-    fn ai_input_specs(&self) -> Vec<(AiInputField, String)> {
-        let config = self.ai.settings_config();
-        vec![(
-            AiInputField::RequestUserAgent,
-            config.request_user_agent.clone(),
-        )]
-    }
-
-    pub(in crate::features) fn ensure_ai_settings_inputs(&mut self, cx: &mut Context<Self>) {
-        for (field, value) in self.ai_input_specs() {
-            let setup = if field == AiInputField::ApiKey {
-                TextInputSetup::masked()
-            } else {
-                TextInputSetup::default()
-            };
-            self.ensure_text_input(format!("ai.input.{}", field.input_key()), &value, setup, cx);
-        }
     }
 
     pub(in crate::features) fn ai_settings_section(

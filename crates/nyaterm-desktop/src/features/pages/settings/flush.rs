@@ -60,7 +60,6 @@ impl NyaTermApp {
             settings: SettingsPresentation {
                 summary: Arc::new(self.settings.summary().clone()),
                 keyword_config: Arc::new(self.settings.keyword_config().clone()),
-                search_engines: Arc::from(self.settings.summary().search_custom_engines.clone()),
                 search_engine_presentation: self.settings.search_engine_presentation(),
                 keyword_highlight_presentation: self.settings.keyword_highlight_presentation(),
                 keybinding_presentation: self.settings.keybinding_presentation(),
@@ -82,23 +81,16 @@ impl NyaTermApp {
                 terminal_theme_is_dark: self.terminal_theme_is_dark(),
                 panel_multi_open: self.shell.panel_multi_open(),
             },
-            ai: {
-                let (_, discovery_credentials) = self.ai.discovery_settings();
-                AiSettingsPresentation {
-                    config: Arc::new(self.ai.settings_config_cloned()),
-                    model_query: self.ai.settings_model_query().to_string(),
-                    model_collapsed_groups: Arc::new(
-                        self.ai.settings_model_collapsed_groups().clone(),
-                    ),
-                    manual_model_drafts: Arc::new(self.ai.settings_manual_model_drafts().clone()),
-                    credential_secret_drafts: Arc::new(
-                        self.ai.settings_credential_secret_drafts().clone(),
-                    ),
-                    action_focus: self.ai.settings_action_focus().clone(),
-                    action_edit: self.ai.settings_action_edit(),
-                    discovery_pending: self.ai.discovery_is_pending(),
-                    discovery_credentials: Arc::from(discovery_credentials),
-                }
+            ai: AiSettingsPresentation {
+                config: Arc::new(self.ai.settings_config().clone()),
+                model_query: self.ai.settings_model_query().to_string(),
+                model_collapsed_groups: Arc::new(self.ai.settings_model_collapsed_groups().clone()),
+                manual_model_drafts: Arc::new(self.ai.settings_manual_model_drafts().clone()),
+                credential_secret_drafts: Arc::new(
+                    self.ai.settings_credential_secret_drafts().clone(),
+                ),
+                action_focus: self.ai.settings_action_focus().clone(),
+                discovery_pending: self.ai.discovery_is_pending(),
             },
             cloud_sync: CloudSyncPresentation {
                 settings: Arc::new(self.cloud_sync.settings().clone()),
@@ -115,7 +107,6 @@ impl NyaTermApp {
                 TranslationPresentation {
                     settings,
                     secret_draft,
-                    pending_settings: self.translation.pending_settings(),
                 }
             },
             transfer: TransferSettingsPresentation {

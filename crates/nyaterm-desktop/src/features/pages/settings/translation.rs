@@ -3,63 +3,13 @@ use rust_i18n::t;
 use gpui::{AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb};
 use nyaterm_ui::NyaSelectOption;
 
-use crate::features::{
-    pages::settings::panel::SettingsPanel, text_inputs::TextInputSetup,
-    text_inputs::secret_input_setup,
-};
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::models::TranslateInputField;
 use crate::widgets::{small_button, status_pill};
 
 use super::settings_form_section;
 
 impl SettingsPanel {
-    /// Every translation input, with the value it seeds from.
-    ///
-    /// Shared by `ensure_translation_inputs` and the section render so the two cannot
-    /// disagree about which fields exist or what they hold.
-    fn translation_input_specs(&self) -> Vec<(TranslateInputField, String)> {
-        let (settings, secret_draft) = self.translation.settings_draft_snapshot();
-        vec![
-            (
-                TranslateInputField::DeeplApiKey,
-                secret_draft.deepl_api_key.clone(),
-            ),
-            (
-                TranslateInputField::BaiduAppId,
-                settings.baidu_app_id.clone(),
-            ),
-            (
-                TranslateInputField::BaiduAppKey,
-                secret_draft.baidu_app_key.clone(),
-            ),
-            (TranslateInputField::AliAppId, settings.ali_app_id.clone()),
-            (
-                TranslateInputField::AliAppKey,
-                secret_draft.ali_app_key.clone(),
-            ),
-            (
-                TranslateInputField::YoudaoAppId,
-                settings.youdao_app_id.clone(),
-            ),
-            (
-                TranslateInputField::YoudaoAppKey,
-                secret_draft.youdao_app_key.clone(),
-            ),
-        ]
-    }
-
-    pub(in crate::features) fn ensure_translation_inputs(&mut self, cx: &mut Context<Self>) {
-        for (field, value) in self.translation_input_specs() {
-            let setup = translation_input_setup(field);
-            self.ensure_text_input(
-                format!("translation.input.{}", field.input_key()),
-                &value,
-                setup,
-                cx,
-            );
-        }
-    }
-
     fn translation_input(
         &mut self,
         _id: &'static str,
@@ -384,13 +334,4 @@ fn translation_target_languages() -> &'static [(&'static str, &'static str)] {
         ("th", "ไทย"),
         ("vi", "Tiếng Việt"),
     ]
-}
-
-/// The text being translated is a paragraph, not a line; the rest are secrets.
-fn translation_input_setup(field: TranslateInputField) -> TextInputSetup {
-    if field == TranslateInputField::Text {
-        TextInputSetup::multi_line("")
-    } else {
-        secret_input_setup(field.is_secret())
-    }
 }

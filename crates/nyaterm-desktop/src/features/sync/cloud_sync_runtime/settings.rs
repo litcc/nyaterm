@@ -30,7 +30,7 @@ impl NyaTermApp {
                 || (!self.settings.summary().has_master_password
                     && self.settings.master_password().draft.is_empty()))
         {
-            self.shell.set_settings_active_tab(SettingsTab::Security);
+            self.focus_settings_tab(SettingsTab::Security, cx);
             self.cloud_sync
                 .set_status("configure a master password before enabling cloud sync");
             self.shell.set_status(self.cloud_sync.status().to_string());

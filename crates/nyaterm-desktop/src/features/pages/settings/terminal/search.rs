@@ -37,8 +37,7 @@ impl SettingsPanel {
         // Built before the row closure, which only has `&self`: the inputs are
         // entities the app has to create, and only the expanded row shows them.
         let mut editor_inputs = expanded_index.and_then(|index| {
-            let _engine = engines.get(index)?.clone();
-            let _name_placeholder = t!("settings.engineName");
+            engines.get(index)?;
             let name = self
                 .existing_text_input_box(format!("settings.search-engine.{index}.name"), false)
                 .into_any_element();

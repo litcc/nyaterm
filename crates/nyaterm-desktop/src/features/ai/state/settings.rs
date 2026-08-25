@@ -258,10 +258,6 @@ impl AiFeatureState {
         self.settings.manual_model_edit_group = None;
     }
 
-    pub(in crate::features) fn settings_model_draft(&self) -> &str {
-        &self.settings.model_draft
-    }
-
     pub(in crate::features) fn settings_model_query(&self) -> &str {
         &self.settings.model_query
     }

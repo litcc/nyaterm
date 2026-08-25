@@ -51,7 +51,9 @@ impl NyaTermApp {
                 .map(|d| d.as_millis())
                 .unwrap_or(0)
         );
-        let focus = self.ai.add_settings_credential(id);
+        let focus = self.ai.add_settings_credential(id.clone());
+        // The new row draws three inputs, so the add is what builds them.
+        self.ensure_ai_credential_inputs(&id, cx);
         window.focus(&focus, cx);
         self.persist_ai_settings_now(cx);
     }

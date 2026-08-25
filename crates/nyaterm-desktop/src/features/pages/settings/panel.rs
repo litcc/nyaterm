@@ -9,11 +9,11 @@ use gpui::{
     Window, div, prelude::*, px, rgb,
 };
 use nyaterm_core::{
-    AiProviderCredential, AiSettings, AppSettingsSummary, CloudSyncSettings, CloudSyncState,
-    KeywordHighlightConfig, SearchEngineConfig, TranslationSettings,
+    AiSettings, AppSettingsSummary, CloudSyncSettings, CloudSyncState,
+    KeywordHighlightConfig, TranslationSettings,
 };
 use nyaterm_ui::{
-    NYA_FORM_CONTROL_HEIGHT_PX, NyaInputShell, NyaNumberInputOptions, NyaNumberInputState,
+    NYA_FORM_CONTROL_HEIGHT_PX, NyaInputShell, NyaNumberInputState,
     NyaSelect, NyaSelectOption, NyaSelectState, NyaSettingsLayout, NyaSettingsNavGroup,
     NyaSettingsNavItem,
 };
@@ -23,7 +23,7 @@ use crate::features::selects::SelectRegistry;
 use crate::features::settings::{
     KeybindingPresentationState, KeywordHighlightPresentationState, SearchEnginePresentationState,
 };
-use crate::features::text_inputs::{TextInputSetup, number_input_box_from_state};
+use crate::features::text_inputs::number_input_box_from_state;
 use crate::models::{
     AiActionEditorField, AiActionListKind, CloudSyncConflictState, CloudSyncSecretDraft,
     GithubGistAuthState, KeywordHighlightEditorField, SettingsTab, SnapshotPasswordPromptState,
@@ -90,6 +90,11 @@ impl PartialEq for SettingsSnapshot {
             && self.backup_prompt == other.backup_prompt
             && self.expanded_groups == other.expanded_groups
             && self.section == other.section
+            // The input handles are compared too: a flush whose only change is a newly
+            // built input must reach the panel, or the row that revealed it draws an
+            // empty box.
+            && self.text_inputs == other.text_inputs
+            && self.number_inputs == other.number_inputs
             && self.active_section_eq(other)
     }
 }
@@ -122,7 +127,6 @@ impl SettingsSnapshot {
 pub(in crate::features) struct SettingsPresentation {
     pub(in crate::features) summary: Arc<AppSettingsSummary>,
     pub(in crate::features) keyword_config: Arc<KeywordHighlightConfig>,
-    pub(in crate::features) search_engines: Arc<[SearchEngineConfig]>,
     pub(in crate::features) search_engine_presentation: SearchEnginePresentationState,
     pub(in crate::features) keyword_highlight_presentation: KeywordHighlightPresentationState,
     pub(in crate::features) keybinding_presentation: KeybindingPresentationState,
@@ -144,7 +148,6 @@ impl SettingsPresentation {
         Self {
             summary: Arc::new(AppSettingsSummary::default()),
             keyword_config: Arc::new(KeywordHighlightConfig::default()),
-            search_engines: Arc::from(Vec::<SearchEngineConfig>::new()),
             search_engine_presentation: SearchEnginePresentationState {
                 expanded_index: None,
                 icon_picker_index: None,
@@ -188,10 +191,6 @@ impl SettingsPresentation {
 
     pub(in crate::features) fn keyword_config(&self) -> &KeywordHighlightConfig {
         &self.keyword_config
-    }
-
-    pub(in crate::features) fn search_engines(&self) -> &[SearchEngineConfig] {
-        &self.search_engines
     }
 
     pub(in crate::features) fn search_engine_presentation(&self) -> SearchEnginePresentationState {
@@ -263,9 +262,7 @@ pub(in crate::features) struct AiSettingsPresentation {
     pub(in crate::features) manual_model_drafts: Arc<HashMap<String, String>>,
     pub(in crate::features) credential_secret_drafts: Arc<HashMap<String, String>>,
     pub(in crate::features) action_focus: gpui::FocusHandle,
-    pub(in crate::features) action_edit: Option<(AiActionListKind, String, AiActionEditorField)>,
     pub(in crate::features) discovery_pending: bool,
-    pub(in crate::features) discovery_credentials: Arc<[AiProviderCredential]>,
 }
 
 impl AiSettingsPresentation {
@@ -277,9 +274,7 @@ impl AiSettingsPresentation {
             manual_model_drafts: Arc::new(HashMap::new()),
             credential_secret_drafts: Arc::new(HashMap::new()),
             action_focus: cx.focus_handle(),
-            action_edit: None,
             discovery_pending: false,
-            discovery_credentials: Arc::from(Vec::<AiProviderCredential>::new()),
         }
     }
 }
@@ -287,10 +282,6 @@ impl AiSettingsPresentation {
 impl AiSettingsPresentation {
     pub(in crate::features) fn settings_config(&self) -> &AiSettings {
         &self.config
-    }
-
-    pub(in crate::features) fn settings_config_cloned(&self) -> AiSettings {
-        (*self.config).clone()
     }
 
     pub(in crate::features) fn settings_model_query(&self) -> &str {
@@ -315,30 +306,8 @@ impl AiSettingsPresentation {
         &self.action_focus
     }
 
-    pub(in crate::features) fn settings_action_edit(
-        &self,
-    ) -> Option<(AiActionListKind, String, AiActionEditorField)> {
-        self.action_edit.clone()
-    }
-
-    pub(in crate::features) fn settings_manual_model_draft(&self, group_key: &str) -> String {
-        self.manual_model_drafts
-            .get(group_key)
-            .cloned()
-            .unwrap_or_default()
-    }
-
     pub(in crate::features) fn discovery_is_pending(&self) -> bool {
         self.discovery_pending
-    }
-
-    pub(in crate::features) fn discovery_settings(
-        &self,
-    ) -> (AiSettings, Vec<AiProviderCredential>) {
-        (
-            (*self.config).clone(),
-            self.discovery_credentials.iter().cloned().collect(),
-        )
     }
 }
 
@@ -401,108 +370,12 @@ impl CloudSyncPresentation {
     pub(in crate::features) fn github_auth(&self) -> &GithubGistAuthState {
         &self.github_auth
     }
-
-    pub(in crate::features) fn input_value(
-        &self,
-        field: crate::models::CloudSyncInputField,
-    ) -> String {
-        match field {
-            crate::models::CloudSyncInputField::RemoteRoot => self.settings.remote_root.clone(),
-            crate::models::CloudSyncInputField::DeviceName => self.settings.device_name.clone(),
-            crate::models::CloudSyncInputField::WebdavEndpoint => {
-                self.settings.webdav.endpoint.clone()
-            }
-            crate::models::CloudSyncInputField::WebdavRoot => self.settings.webdav.root.clone(),
-            crate::models::CloudSyncInputField::WebdavUsername => {
-                self.settings.webdav.username.clone()
-            }
-            crate::models::CloudSyncInputField::WebdavPassword => {
-                self.secret_draft.webdav_password.clone()
-            }
-            crate::models::CloudSyncInputField::S3Endpoint => self.settings.s3.endpoint.clone(),
-            crate::models::CloudSyncInputField::S3Bucket => self.settings.s3.bucket.clone(),
-            crate::models::CloudSyncInputField::S3Region => self.settings.s3.region.clone(),
-            crate::models::CloudSyncInputField::S3Root => self.settings.s3.root.clone(),
-            crate::models::CloudSyncInputField::S3AccessKeyId => {
-                self.secret_draft.s3_access_key_id.clone()
-            }
-            crate::models::CloudSyncInputField::S3SecretAccessKey => {
-                self.secret_draft.s3_secret_access_key.clone()
-            }
-            crate::models::CloudSyncInputField::S3SessionToken => {
-                self.secret_draft.s3_session_token.clone()
-            }
-            crate::models::CloudSyncInputField::GoogleDriveRoot => {
-                self.settings.google_drive.root.clone()
-            }
-            crate::models::CloudSyncInputField::GoogleDriveAccessToken => {
-                self.secret_draft.google_drive_access_token.clone()
-            }
-            crate::models::CloudSyncInputField::GoogleDriveRefreshToken => {
-                self.secret_draft.google_drive_refresh_token.clone()
-            }
-            crate::models::CloudSyncInputField::GoogleDriveClientId => self
-                .settings
-                .google_drive
-                .client_id
-                .clone()
-                .unwrap_or_default(),
-            crate::models::CloudSyncInputField::GoogleDriveClientSecret => {
-                self.secret_draft.google_drive_client_secret.clone()
-            }
-            crate::models::CloudSyncInputField::OneDriveRoot => self.settings.onedrive.root.clone(),
-            crate::models::CloudSyncInputField::OneDriveAccessToken => {
-                self.secret_draft.onedrive_access_token.clone()
-            }
-            crate::models::CloudSyncInputField::OneDriveRefreshToken => {
-                self.secret_draft.onedrive_refresh_token.clone()
-            }
-            crate::models::CloudSyncInputField::OneDriveClientId => {
-                self.settings.onedrive.client_id.clone().unwrap_or_default()
-            }
-            crate::models::CloudSyncInputField::OneDriveClientSecret => {
-                self.secret_draft.onedrive_client_secret.clone()
-            }
-            crate::models::CloudSyncInputField::AliyunDriveRoot => {
-                self.settings.aliyun_drive.root.clone()
-            }
-            crate::models::CloudSyncInputField::AliyunDriveType => {
-                self.settings.aliyun_drive.drive_type.clone()
-            }
-            crate::models::CloudSyncInputField::AliyunDriveAccessToken => {
-                self.secret_draft.aliyun_drive_access_token.clone()
-            }
-            crate::models::CloudSyncInputField::AliyunDriveRefreshToken => {
-                self.secret_draft.aliyun_drive_refresh_token.clone()
-            }
-            crate::models::CloudSyncInputField::AliyunDriveClientId => self
-                .settings
-                .aliyun_drive
-                .client_id
-                .clone()
-                .unwrap_or_default(),
-            crate::models::CloudSyncInputField::AliyunDriveClientSecret => {
-                self.secret_draft.aliyun_drive_client_secret.clone()
-            }
-            crate::models::CloudSyncInputField::GiteeEndpoint => {
-                self.settings.gitee_snippet.api_endpoint.clone()
-            }
-            crate::models::CloudSyncInputField::GiteeGistId => {
-                self.settings.gitee_snippet.gist_id.clone()
-            }
-            crate::models::CloudSyncInputField::GiteeToken => self.secret_draft.gitee_token.clone(),
-            crate::models::CloudSyncInputField::GithubGistId => {
-                self.settings.github_gist.gist_id.clone()
-            }
-        }
-    }
 }
 
 #[derive(Clone, PartialEq)]
 pub(in crate::features) struct TranslationPresentation {
     pub(in crate::features) settings: TranslationSettings,
     pub(in crate::features) secret_draft: TranslationSecretDraft,
-    pub(in crate::features) pending_settings: TranslationSettings,
 }
 
 impl Default for TranslationPresentation {
@@ -510,7 +383,6 @@ impl Default for TranslationPresentation {
         Self {
             settings: TranslationSettings::default(),
             secret_draft: TranslationSecretDraft::default(),
-            pending_settings: TranslationSettings::default(),
         }
     }
 }
@@ -520,10 +392,6 @@ impl TranslationPresentation {
         &self,
     ) -> (TranslationSettings, TranslationSecretDraft) {
         (self.settings.clone(), self.secret_draft.clone())
-    }
-
-    pub(in crate::features) fn pending_settings(&self) -> TranslationSettings {
-        self.pending_settings.clone()
     }
 }
 
@@ -587,10 +455,12 @@ impl SettingsPanel {
         }
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn surface(&self) -> SettingsSurface {
         self.surface
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn snapshot(&self) -> Option<&SettingsSnapshot> {
         self.snapshot.as_ref()
     }
@@ -756,6 +626,11 @@ impl SettingsPanel {
             .expect("settings panel render requires a snapshot")
     }
 
+    /// An existing field, without creating one.
+    ///
+    /// The panel only ever looks inputs up: the entities are owned by `NyaTermApp`'s
+    /// registry and arrive here through the snapshot, so the boundary that reveals a
+    /// field is the boundary that builds it.
     pub(in crate::features) fn existing_text_input(
         &self,
         id: impl AsRef<str>,
@@ -763,6 +638,13 @@ impl SettingsPanel {
         self.text_inputs.get(id.as_ref()).cloned()
     }
 
+    /// The text input for `id`, which an activation boundary must already have built.
+    ///
+    /// Renders nothing if it is missing rather than creating one. That would be a bug
+    /// -- an input a tab or a revealed row draws but its ensure list forgot -- so it
+    /// trips a debug assertion, and the
+    /// `every_settings_surface_draws_only_inputs_it_built` test drives every tab and
+    /// every reveal boundary to catch it before a release build ever sees a gap.
     pub(in crate::features) fn existing_text_input_box(
         &self,
         id: impl Into<SharedString>,
@@ -785,6 +667,7 @@ impl SettingsPanel {
         }
     }
 
+    /// A caption above the input for `id`, looked up rather than built.
     pub(in crate::features) fn existing_text_input_field(
         &self,
         id: impl Into<SharedString>,
@@ -811,6 +694,10 @@ impl SettingsPanel {
             .into_any_element()
     }
 
+    /// The number input for `id`, looked up rather than built.
+    ///
+    /// Its range and disabled flag were frozen when the ensure boundary created it:
+    /// `NyaTermApp::number_input` returns early for an id it already has.
     pub(in crate::features) fn existing_number_input_box(
         &self,
         id: impl Into<SharedString>,
@@ -1286,35 +1173,6 @@ impl SettingsPanel {
 
     pub(in crate::features) fn terminal_theme_is_dark(&self) -> bool {
         self.settings.terminal_theme_is_dark()
-    }
-
-    pub(in crate::features) fn reset_text_input(
-        &mut self,
-        id: &str,
-        text: &str,
-        cx: &mut Context<Self>,
-    ) {
-        self.with_app(cx, |app, cx| app.reset_text_input(id, text, cx));
-    }
-
-    pub(in crate::features) fn ensure_text_input(
-        &mut self,
-        id: impl Into<SharedString>,
-        seed: &str,
-        setup: TextInputSetup,
-        cx: &mut Context<Self>,
-    ) {
-        self.with_app(cx, |app, cx| app.ensure_text_input(id, seed, setup, cx));
-    }
-
-    pub(in crate::features) fn ensure_number_input(
-        &mut self,
-        id: impl Into<SharedString>,
-        seed: &str,
-        setup: NyaNumberInputOptions,
-        cx: &mut Context<Self>,
-    ) {
-        self.with_app(cx, |app, cx| app.ensure_number_input(id, seed, setup, cx));
     }
 
     pub(in crate::features) fn clear_ai_model_search(&mut self, cx: &mut Context<Self>) {
@@ -1966,7 +1824,8 @@ mod tests {
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
-    use crate::models::{NavItem, SettingsTab};
+    use crate::features::pages::settings::inputs::ALL_SETTINGS_TABS;
+    use crate::models::{AiActionEditorField, AiActionListKind, NavItem, SettingsTab};
 
     use super::{SettingsPanel, SettingsSurface};
 
@@ -2325,5 +2184,150 @@ mod tests {
                 "both surfaces must receive the same authoritative state through separate panels"
             );
         });
+    }
+
+    fn activate(app: &Entity<NyaTermApp>, vcx: &mut VisualTestContext, tab: SettingsTab) {
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| app.focus_settings_tab(tab, cx));
+        });
+        draw(app, vcx);
+    }
+
+    /// Drive an app action the way one of the panel's own controls would.
+    ///
+    /// Every listener on the panel goes through `with_app`, which requests a snapshot
+    /// refresh afterwards, so a test that calls the action directly has to as well.
+    fn from_panel(
+        app: &Entity<NyaTermApp>,
+        vcx: &mut VisualTestContext,
+        f: impl FnOnce(&mut NyaTermApp, &mut gpui::Window, &mut gpui::Context<NyaTermApp>),
+    ) {
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                f(app, window, cx);
+                app.request_settings_panel_refresh(cx);
+            });
+        });
+        draw(app, vcx);
+    }
+
+    fn drawn_text_inputs(app: &Entity<NyaTermApp>, vcx: &mut VisualTestContext, ids: &[&str]) {
+        vcx.update(|_, cx| {
+            let panel = app.read(cx).settings_panel.read(cx);
+            let snapshot = panel.snapshot().expect("the panel drew with a snapshot");
+            for id in ids {
+                assert!(
+                    snapshot.text_inputs.contains_key(*id),
+                    "{id} is drawn but no boundary built it"
+                );
+            }
+        });
+    }
+
+    /// Every tab, and every row a tab can reveal, must draw only inputs that some
+    /// boundary already built.
+    ///
+    /// Drawing is most of the assertion: `existing_text_input_box` and
+    /// `existing_number_input_box` trip a `debug_assert!` on a miss and draw an empty
+    /// box, so this has to host a real window and paint each surface rather than only
+    /// count handles. The explicit checks keep it honest if it is ever run without
+    /// debug assertions.
+    #[test]
+    fn every_settings_surface_draws_only_inputs_it_built() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+
+        // First, before the loop below has visited Security: enabling cloud sync
+        // without a master password redirects there, and that jump is not the tab
+        // strip.
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| app.toggle_cloud_sync_enabled(cx));
+        });
+        draw(&app, vcx);
+        vcx.update(|_, cx| {
+            assert_eq!(
+                app.read(cx).shell.settings_active_tab(),
+                SettingsTab::Security,
+                "enabling cloud sync without a master password must land on Security"
+            );
+        });
+        drawn_text_inputs(&app, vcx, &["settings.security.master-password"]);
+
+        let before = vcx.update(|_, cx| paints(&app, cx));
+        for tab in ALL_SETTINGS_TABS {
+            activate(&app, vcx, tab);
+        }
+        assert!(
+            vcx.update(|_, cx| paints(&app, cx)) > before,
+            "the hosted panel must actually paint for this test to prove anything"
+        );
+
+        // Adding a custom engine expands its row, and only an expanded row draws the
+        // two fields. The ids carry the row index, so the add forgets the whole prefix
+        // and has to rebuild.
+        activate(&app, vcx, SettingsTab::Search);
+        from_panel(&app, vcx, |app, _, cx| app.add_search_engine(cx));
+        let engine_ids = [
+            "settings.search-engine.0.name",
+            "settings.search-engine.0.url",
+        ];
+        drawn_text_inputs(&app, vcx, &engine_ids);
+        // Closing and re-opening the row goes through the same boundary.
+        from_panel(&app, vcx, |app, _, cx| app.expand_search_engine(0, cx));
+        from_panel(&app, vcx, |app, _, cx| app.expand_search_engine(0, cx));
+        drawn_text_inputs(&app, vcx, &engine_ids);
+
+        // A freshly added provider credential draws three fields.
+        activate(&app, vcx, SettingsTab::AiModels);
+        from_panel(&app, vcx, |app, window, cx| app.add_ai_credential(window, cx));
+        let credential_id = vcx.update(|_, cx| {
+            app.read(cx)
+                .ai
+                .settings_config()
+                .provider_credentials
+                .last()
+                .expect("the credential was added")
+                .id
+                .clone()
+        });
+        drawn_text_inputs(
+            &app,
+            vcx,
+            &[
+                &format!("ai.credential.{credential_id}.name"),
+                &format!("ai.credential.{credential_id}.base-url"),
+                &format!("ai.credential.{credential_id}.api-key"),
+            ],
+        );
+
+        // A freshly added action draws a name and a prompt, in both lists.
+        activate(&app, vcx, SettingsTab::AiRules);
+        for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
+            from_panel(&app, vcx, |app, window, cx| app.add_ai_action(kind, window, cx));
+            let action_id = vcx.update(|_, cx| {
+                let config = app.read(cx).ai.settings_config().clone();
+                let actions = match kind {
+                    AiActionListKind::Terminal => config.terminal_ai_actions,
+                    AiActionListKind::File => config.file_ai_actions,
+                };
+                actions.last().expect("the action was added").id.clone()
+            });
+            drawn_text_inputs(
+                &app,
+                vcx,
+                &[
+                    &SettingsPanel::ai_action_text_input_id(
+                        kind,
+                        &action_id,
+                        AiActionEditorField::Name,
+                    ),
+                    &SettingsPanel::ai_action_text_input_id(
+                        kind,
+                        &action_id,
+                        AiActionEditorField::Prompt,
+                    ),
+                ],
+            );
+        }
     }
 }

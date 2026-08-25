@@ -10,8 +10,7 @@ use nyaterm_ui::NyaSelectOption;
 use crate::features::{
     formatting::compact_id, formatting::configured_cloud_sync_provider,
     formatting::format_cloud_provider, formatting::format_history_timestamp_ms,
-    pages::settings::panel::SettingsPanel, text_inputs::secret_input_setup,
-    view_widgets::dialog_action_button,
+    pages::settings::panel::SettingsPanel, view_widgets::dialog_action_button,
 };
 use crate::models::{
     CloudSyncConflictState, CloudSyncInputField, SettingsTab, SnapshotPasswordPromptKind,
@@ -49,52 +48,6 @@ impl SettingsPanel {
             cx,
         )
         .into_any_element()
-    }
-
-    /// Whether the debounce control is live.
-    ///
-    /// Shared with the section so the option baked into the input at creation matches
-    /// what the section believes it drew.
-    fn cloud_sync_debounce_is_enabled(&self) -> bool {
-        let settings = self.cloud_sync.settings();
-        self.cloud_sync_form_enabled() && settings.enabled && settings.auto_push_on_change
-    }
-
-    /// Every cloud-sync input its section draws, with the value it seeds from.
-    fn cloud_sync_input_specs(&self) -> Vec<(CloudSyncInputField, String)> {
-        // Every field, not just the current provider's: switching provider reveals a
-        // different set, and that switch is not a boundary that rebuilds inputs. The
-        // value comes from the state's own field mapping, the read-only twin of the
-        // one editing uses, so the two cannot disagree about where a field lives.
-        CloudSyncInputField::ALL
-            .iter()
-            .map(|field| (*field, self.cloud_sync.input_value(*field)))
-            .collect()
-    }
-
-    pub(in crate::features) fn ensure_cloud_sync_settings_inputs(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        for (field, value) in self.cloud_sync_input_specs() {
-            self.ensure_text_input(
-                format!("cloud-sync.input.{}", field.input_key()),
-                &value,
-                secret_input_setup(field.is_secret()),
-                cx,
-            );
-        }
-        let debounce_enabled = self.cloud_sync_debounce_is_enabled();
-        let debounce = self.cloud_sync.settings().sync_debounce_seconds.to_string();
-        self.ensure_number_input(
-            "cloud-sync.number.debounce",
-            &debounce,
-            nyaterm_ui::NyaNumberInputOptions::default()
-                .range(1.0, 3_600.0)
-                .step(1.0)
-                .disabled(!debounce_enabled),
-            cx,
-        );
     }
 
     pub(in crate::features) fn cloud_sync_input(
@@ -482,9 +435,8 @@ impl SettingsPanel {
                                     "cloud-open-security",
                                     t!("settings.openSecuritySettings"),
                                     cx.listener(|this, _, _, cx| {
-                                        this.with_app(cx, |app, _| {
-                                            app.shell
-                                                .set_settings_active_tab(SettingsTab::Security);
+                                        this.with_app(cx, |app, cx| {
+                                            app.focus_settings_tab(SettingsTab::Security, cx);
                                         });
                                     }),
                                 )),

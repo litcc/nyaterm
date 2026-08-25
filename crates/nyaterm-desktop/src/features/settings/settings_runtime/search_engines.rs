@@ -1,11 +1,49 @@
 use gpui::Context;
+use rust_i18n::t;
 
 use crate::features::NyaTermApp;
+use crate::features::text_inputs::TextInputSetup;
 use nyaterm_core::SearchEngineConfig;
 
 use super::helpers::{open_external_url_simple, urlencoding_query};
 
 impl NyaTermApp {
+    /// Build the two inputs an opened engine row draws.
+    ///
+    /// The row is the reveal boundary, so it is where they are created; the row's
+    /// render only looks them up. The ids carry the row index, so adding or removing
+    /// an engine forgets the whole prefix and this rebuilds for whatever row is open.
+    /// Keep the ids in step with the lookups in `terminal::search`.
+    pub(in crate::features) fn ensure_expanded_search_engine_inputs(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(index) = self.settings.search_engine_presentation().expanded_index else {
+            return;
+        };
+        let Some(engine) = self
+            .settings
+            .summary()
+            .search_custom_engines
+            .get(index)
+            .cloned()
+        else {
+            return;
+        };
+        self.ensure_text_input(
+            format!("settings.search-engine.{index}.name"),
+            &engine.name,
+            TextInputSetup::placeholder(t!("settings.engineName")),
+            cx,
+        );
+        self.ensure_text_input(
+            format!("settings.search-engine.{index}.url"),
+            &engine.url_template,
+            TextInputSetup::default(),
+            cx,
+        );
+    }
+
     /// Apply an edit from one of the engine editor's inputs.
     ///
     /// `rest` is what follows `settings.search-engine.` in the field id:
@@ -36,6 +74,7 @@ impl NyaTermApp {
         // The inputs are keyed by row index and every row just shifted down, so
         // they have to be rebuilt from the engines they now stand for.
         self.forget_text_inputs("settings.search-engine.");
+        self.ensure_expanded_search_engine_inputs(cx);
         self.save_terminal_settings(cx);
         self.shell.set_status("search engine added".to_string());
     }
@@ -49,6 +88,7 @@ impl NyaTermApp {
             return;
         }
         self.forget_text_inputs("settings.search-engine.");
+        self.ensure_expanded_search_engine_inputs(cx);
         self.save_terminal_settings(cx);
         self.shell.set_status("search engine removed".to_string());
     }
@@ -87,7 +127,13 @@ impl NyaTermApp {
             return;
         };
         if collapsed {
+            // Closing the row normalizes the engine, so its inputs are dropped and a
+            // later re-open rebuilds them from the trimmed values.
+            self.forget_text_inputs("settings.search-engine.");
             self.save_terminal_settings(cx);
+        } else {
+            // Opening the row is what reveals its two fields, so it is what builds them.
+            self.ensure_expanded_search_engine_inputs(cx);
         }
         cx.notify();
     }

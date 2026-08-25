@@ -17,7 +17,6 @@ use crate::features::session::{
 };
 use crate::features::view_widgets::dialog_action_button;
 use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
-use crate::models::{SnapshotPasswordPromptKind, SnapshotPasswordPromptState};
 use crate::widgets::small_button;
 
 impl NyaTermApp {
@@ -605,111 +604,6 @@ impl NyaTermApp {
                             this.submit_keyboard_interactive_prompt(cx);
                         }),
                     )),
-            )
-    }
-
-    pub(in crate::features) fn snapshot_password_prompt_banner(
-        &mut self,
-        prompt: SnapshotPasswordPromptState,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let palette = self.theme_palette();
-        let title = match prompt.kind {
-            SnapshotPasswordPromptKind::Export => t!("runtimePrompt.snapshotExport"),
-            SnapshotPasswordPromptKind::Import => t!("runtimePrompt.snapshotImport"),
-            SnapshotPasswordPromptKind::CloudForcePush => t!("runtimePrompt.cloudForcePush"),
-            SnapshotPasswordPromptKind::CloudForcePull => t!("runtimePrompt.cloudForcePull"),
-            SnapshotPasswordPromptKind::CloudProviderPush => {
-                t!("runtimePrompt.cloudProviderPush")
-            }
-            SnapshotPasswordPromptKind::CloudProviderPull => {
-                t!("runtimePrompt.cloudProviderPull")
-            }
-            SnapshotPasswordPromptKind::CloudProviderForcePush => {
-                t!("runtimePrompt.cloudProviderForcePush")
-            }
-            SnapshotPasswordPromptKind::CloudProviderForcePull => {
-                t!("runtimePrompt.cloudProviderForcePull")
-            }
-            SnapshotPasswordPromptKind::CloudRecoverCurrent
-            | SnapshotPasswordPromptKind::CloudProviderRecoverCurrent => {
-                t!("settings.useCurrentRemoteSnapshot")
-            }
-        };
-        let description = match prompt.kind {
-            SnapshotPasswordPromptKind::CloudForcePush
-            | SnapshotPasswordPromptKind::CloudForcePull
-            | SnapshotPasswordPromptKind::CloudProviderPush
-            | SnapshotPasswordPromptKind::CloudProviderPull
-            | SnapshotPasswordPromptKind::CloudProviderForcePush
-            | SnapshotPasswordPromptKind::CloudProviderForcePull
-            | SnapshotPasswordPromptKind::CloudRecoverCurrent
-            | SnapshotPasswordPromptKind::CloudProviderRecoverCurrent => {
-                t!("runtimePrompt.cloudSnapshotDescription")
-            }
-            _ => t!("runtimePrompt.localSnapshotDescription"),
-        };
-        let password_input = self.text_input_box(
-            "snapshot-password.value",
-            &prompt.value,
-            TextInputSetup::masked(),
-            cx,
-        );
-
-        div()
-            .id("snapshot-password-prompt")
-            .mt_3()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(palette.link))
-            .bg(rgb(palette.input))
-            .p_3()
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                cx.stop_propagation();
-                this.handle_snapshot_password_key_down(event, cx);
-            }))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(div().text_sm().font_weight(FontWeight(700.)).child(title))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(rgb(palette.text_muted))
-                                    .child(description),
-                            ),
-                    )
-                    .child(div().w(px(240.)).child(password_input))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(small_button(
-                                palette,
-                                "snapshot-password-cancel",
-                                t!("common.cancel"),
-                                cx.listener(|this, _, _, cx| {
-                                    this.cancel_snapshot_password_prompt(cx);
-                                }),
-                            ))
-                            .child(small_button(
-                                palette,
-                                "snapshot-password-submit",
-                                t!("runtimePrompt.submit"),
-                                cx.listener(|this, _, _, cx| {
-                                    this.submit_snapshot_password_prompt(cx);
-                                }),
-                            )),
-                    ),
             )
     }
 }

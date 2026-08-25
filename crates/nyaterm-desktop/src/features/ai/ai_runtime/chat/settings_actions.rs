@@ -129,14 +129,10 @@ impl NyaTermApp {
                 .unwrap_or(0)
         );
         self.ai.add_settings_action(kind, id.clone());
-        let input_id = Self::ai_action_text_input_id(kind, &id, AiActionEditorField::Name);
-        let input = self.text_input(
-            input_id,
-            "Custom AI action",
-            TextInputSetup::placeholder(t!("ai.actionName")),
-            cx,
-        );
-        window.focus(&input.read(cx).focus_handle(), cx);
+        // The new row draws a name and a prompt, so the add is what builds both.
+        self.ensure_ai_action_inputs(kind, &id, cx);
+        let name_id = Self::ai_action_text_input_id(kind, &id, AiActionEditorField::Name);
+        self.focus_text_input_if_present(&name_id, window, cx);
         self.persist_ai_settings_now(cx);
     }
 

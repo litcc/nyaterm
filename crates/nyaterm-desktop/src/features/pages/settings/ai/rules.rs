@@ -49,30 +49,6 @@ impl SettingsPanel {
             .child(file_actions)
     }
 
-    /// Every action-editor input the rules tab draws, with the value it seeds from.
-    ///
-    /// Both lists are drawn together, so both are built together.
-    pub(in crate::features) fn ai_action_input_specs(
-        &self,
-    ) -> Vec<(String, String, String, String)> {
-        let mut specs = Vec::new();
-        for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
-            let actions = match kind {
-                AiActionListKind::Terminal => self.ai.settings_config().terminal_ai_actions.clone(),
-                AiActionListKind::File => self.ai.settings_config().file_ai_actions.clone(),
-            };
-            for action in actions {
-                specs.push((
-                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Name),
-                    action.name.clone(),
-                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Prompt),
-                    action.prompt.clone(),
-                ));
-            }
-        }
-        specs
-    }
-
     fn ai_action_editor(
         &mut self,
         palette: crate::theme::ThemePalette,

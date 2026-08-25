@@ -46,7 +46,7 @@ impl NyaTermApp {
             SettingsTab::Interaction => self.ensure_interaction_inputs(cx),
             SettingsTab::Keybindings => self.ensure_keybinding_inputs(cx),
             SettingsTab::TerminalGeneral => self.ensure_terminal_inputs(cx),
-            SettingsTab::Search => {}
+            SettingsTab::Search => self.ensure_expanded_search_engine_inputs(cx),
             SettingsTab::Translation => self.ensure_translation_inputs(cx),
             SettingsTab::AiGeneral => self.ensure_ai_general_inputs(cx),
             SettingsTab::AiModels => self.ensure_ai_model_inputs(cx),
@@ -55,6 +55,22 @@ impl NyaTermApp {
             SettingsTab::Security => self.ensure_security_inputs(cx),
             SettingsTab::SyncBackup => self.ensure_cloud_sync_settings_inputs(cx),
         }
+    }
+
+    /// Activate a settings tab from somewhere other than the panel's own tab strip.
+    ///
+    /// `open_page` and the tab strip both build the tab's inputs and publish the switch
+    /// to the panel. A jump that only set the active tab would leave the panel on its
+    /// previous snapshot, and once it caught up it would land on a tab whose inputs were
+    /// never built, drawing every field it owns as an empty box.
+    pub(in crate::features) fn focus_settings_tab(
+        &mut self,
+        tab: SettingsTab,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_settings_tab_inputs(tab, cx);
+        self.shell.set_settings_active_tab(tab);
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn ensure_ai_settings_inputs(&mut self, cx: &mut Context<Self>) {
@@ -72,6 +88,9 @@ impl NyaTermApp {
         }
     }
 
+    /// Masking comes from `TranslateInputField::is_secret` rather than a list repeated
+    /// here, so a new `*-api-key` or `*-app-key` variant cannot be added to the enum and
+    /// silently seed an unmasked input.
     pub(in crate::features) fn ensure_translation_inputs(&mut self, cx: &mut Context<Self>) {
         let (settings, secret_draft) = self.translation.settings_draft_snapshot();
         for (field, value) in [
@@ -101,22 +120,10 @@ impl NyaTermApp {
                 secret_draft.youdao_app_key.clone(),
             ),
         ] {
-            let setup = if field.is_settings_field()
-                && matches!(
-                    field,
-                    TranslateInputField::DeeplApiKey
-                        | TranslateInputField::BaiduAppKey
-                        | TranslateInputField::AliAppKey
-                        | TranslateInputField::YoudaoAppKey
-                ) {
-                TextInputSetup::masked()
-            } else {
-                TextInputSetup::default()
-            };
             self.ensure_text_input(
                 format!("translation.input.{}", field.input_key()),
                 &value,
-                setup,
+                secret_input_setup(field.is_secret()),
                 cx,
             );
         }
@@ -149,25 +156,21 @@ impl NyaTermApp {
         );
     }
 
-    pub(in crate::features) fn ai_action_input_specs(
-        &self,
-    ) -> Vec<(String, String, String, String)> {
-        let mut specs = Vec::new();
+    /// Every action row the rules tab draws, in the order it draws them.
+    ///
+    /// Both lists are drawn together, so both are built together.
+    fn ai_action_ids(&self) -> Vec<(AiActionListKind, String)> {
+        let mut ids = Vec::new();
         for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
             let actions = match kind {
                 AiActionListKind::Terminal => self.ai.settings_config().terminal_ai_actions.clone(),
                 AiActionListKind::File => self.ai.settings_config().file_ai_actions.clone(),
             };
             for action in actions {
-                specs.push((
-                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Name),
-                    action.name.clone(),
-                    Self::ai_action_text_input_id(kind, &action.id, AiActionEditorField::Prompt),
-                    action.prompt.clone(),
-                ));
+                ids.push((kind, action.id.clone()));
             }
         }
-        specs
+        ids
     }
 
     fn ensure_appearance_inputs(&mut self, cx: &mut Context<Self>) {
@@ -478,27 +481,15 @@ impl NyaTermApp {
     }
 
     fn ensure_ai_model_inputs(&mut self, cx: &mut Context<Self>) {
-        // Three fields per provider credential, all drawn together.
-        let credentials = self.ai.settings_config().provider_credentials.clone();
-        let drafts = self.ai.settings_credential_secret_drafts().clone();
-        for credential in credentials {
-            let secret = drafts.get(&credential.id).cloned().unwrap_or_default();
-            for (suffix, value, secret_field) in [
-                ("name", credential.name.clone(), false),
-                (
-                    "base-url",
-                    credential.base_url.clone().unwrap_or_default(),
-                    false,
-                ),
-                ("api-key", secret, true),
-            ] {
-                self.ensure_text_input(
-                    format!("ai.credential.{}.{suffix}", credential.id),
-                    &value,
-                    crate::features::text_inputs::secret_input_setup(secret_field),
-                    cx,
-                );
-            }
+        let credential_ids: Vec<String> = self
+            .ai
+            .settings_config()
+            .provider_credentials
+            .iter()
+            .map(|credential| credential.id.clone())
+            .collect();
+        for credential_id in credential_ids {
+            self.ensure_ai_credential_inputs(&credential_id, cx);
         }
         let query = self.ai.settings_model_query().to_string();
         self.ensure_text_input(
@@ -509,11 +500,53 @@ impl NyaTermApp {
         );
     }
 
+    /// Build the three inputs a provider credential row draws.
+    ///
+    /// Adding a credential reveals a row, so the add is also a boundary that builds
+    /// them; keep the ids in step with the lookups in `ai::models::credential_rows`.
+    pub(in crate::features) fn ensure_ai_credential_inputs(
+        &mut self,
+        credential_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(credential) = self
+            .ai
+            .settings_config()
+            .provider_credentials
+            .iter()
+            .find(|credential| credential.id == credential_id)
+            .cloned()
+        else {
+            return;
+        };
+        let secret = self
+            .ai
+            .settings_credential_secret_drafts()
+            .get(credential_id)
+            .cloned()
+            .unwrap_or_default();
+        for (suffix, value, secret_field) in [
+            ("name", credential.name.clone(), false),
+            (
+                "base-url",
+                credential.base_url.clone().unwrap_or_default(),
+                false,
+            ),
+            ("api-key", secret, true),
+        ] {
+            self.ensure_text_input(
+                format!("ai.credential.{credential_id}.{suffix}"),
+                &value,
+                secret_input_setup(secret_field),
+                cx,
+            );
+        }
+    }
+
     fn ensure_ai_rule_inputs(&mut self, cx: &mut Context<Self>) {
-        // One name and one prompt per terminal action, all drawn together.
-        for (name_id, name, prompt_id, prompt) in self.ai_action_input_specs() {
-            self.ensure_text_input(name_id, &name, TextInputSetup::placeholder(""), cx);
-            self.ensure_text_input(prompt_id, &prompt, TextInputSetup::multi_line(""), cx);
+        // One name and one prompt per action, all drawn together.
+        for (kind, action_id) in self.ai_action_ids() {
+            self.ensure_ai_action_inputs(kind, &action_id, cx);
         }
         let file_size_mb =
             (self.ai.settings_config().max_ai_file_size_bytes / (1024 * 1024)).max(1);
@@ -524,11 +557,44 @@ impl NyaTermApp {
             cx,
         );
     }
+
+    /// Build the name and prompt inputs one action row draws.
+    ///
+    /// Adding an action reveals a row, so the add is also a boundary that builds them;
+    /// keep the ids in step with the lookups in `ai::rules`.
+    pub(in crate::features) fn ensure_ai_action_inputs(
+        &mut self,
+        kind: AiActionListKind,
+        action_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let actions = match kind {
+            AiActionListKind::Terminal => self.ai.settings_config().terminal_ai_actions.clone(),
+            AiActionListKind::File => self.ai.settings_config().file_ai_actions.clone(),
+        };
+        let Some(action) = actions.iter().find(|action| action.id == action_id) else {
+            return;
+        };
+        let name = action.name.clone();
+        let prompt = action.prompt.clone();
+        self.ensure_text_input(
+            Self::ai_action_text_input_id(kind, action_id, AiActionEditorField::Name),
+            &name,
+            TextInputSetup::placeholder(""),
+            cx,
+        );
+        self.ensure_text_input(
+            Self::ai_action_text_input_id(kind, action_id, AiActionEditorField::Prompt),
+            &prompt,
+            TextInputSetup::multi_line(""),
+            cx,
+        );
+    }
 }
 
-/// Every tab, so the test below cannot silently miss one that gets added.
+/// Every tab, so the tests below cannot silently miss one that gets added.
 #[cfg(test)]
-const ALL_SETTINGS_TABS: [SettingsTab; 13] = [
+pub(in crate::features::pages::settings) const ALL_SETTINGS_TABS: [SettingsTab; 13] = [
     SettingsTab::General,
     SettingsTab::Appearance,
     SettingsTab::Interaction,
