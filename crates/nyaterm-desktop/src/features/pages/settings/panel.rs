@@ -400,19 +400,10 @@ impl CloudSyncPresentation {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub(in crate::features) struct TranslationPresentation {
     pub(in crate::features) settings: TranslationSettings,
     pub(in crate::features) secret_draft: TranslationSecretDraft,
-}
-
-impl Default for TranslationPresentation {
-    fn default() -> Self {
-        Self {
-            settings: TranslationSettings::default(),
-            secret_draft: TranslationSecretDraft::default(),
-        }
-    }
 }
 
 impl TranslationPresentation {
@@ -2434,19 +2425,22 @@ mod tests {
     /// Every tab, and every row a tab can reveal, must draw only inputs that some
     /// boundary already built.
     ///
-    /// Drawing is most of the assertion: `existing_text_input_box` and
-    /// `existing_number_input_box` trip a `debug_assert!` on a miss and draw an empty
-    /// box, so this hosts a real window and paints each surface rather than only
-    /// counting handles. The explicit checks keep it honest if it is ever run without
-    /// debug assertions.
+    /// Ignored: with this fixture, activating a tab that holds a registry-backed input
+    /// never parks. `General` (selects only) is fine, while `Appearance` (number
+    /// inputs) and `Security` (a masked text input and a number input) both spin in the
+    /// window's effect flush. It reproduces with the snapshot's input-map comparison
+    /// reverted, so it is not that; the cause has not been identified. Note that those
+    /// same sections do render without spinning in
+    /// `inputs::tests::reveal_boundaries_build_the_inputs_their_rows_draw`, because
+    /// `open_page` opens the native settings window and that surface paints them -- so
+    /// the problem is something about this host, not the inputs themselves.
     ///
-    /// Ignored: painting any tab that contains a registry-backed text or number input
-    /// never parks. `Appearance` (number inputs) and `Security` (a masked text input
-    /// and a number input) both spin in the window's effect flush, while `General`
-    /// (selects only) is fine, so the livelock is in the input widgets rather than in
-    /// this panel. Reproduces without any of the seeding changes this test covers.
+    /// The boundary coverage this was written for lives in that `inputs.rs` test
+    /// instead: it asserts the published snapshot carries every id a revealed row looks
+    /// up, and the native settings window renders those rows, so a miss still trips the
+    /// `debug_assert!` in `existing_text_input_box`.
     #[test]
-    #[ignore = "painting a settings tab with a registry input never parks; see nyaterm-ui number/text input render"]
+    #[ignore = "this fixture never parks once a tab with a registry input is active; cause unknown"]
     fn every_settings_surface_draws_only_inputs_it_built() {
         let mut cx = TestAppContext::single();
         let (app, vcx) = hosted(&mut cx);

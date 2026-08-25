@@ -73,19 +73,19 @@ impl NyaTermApp {
         self.request_settings_panel_refresh(cx);
     }
 
+    /// The AI General tab draws exactly one registry text input.
+    ///
+    /// `AiInputField` has four variants, but `Model`, `BaseUrl` and `ApiKey` are edited
+    /// through the credential rows on the Models tab, not here.
     pub(in crate::features) fn ensure_ai_settings_inputs(&mut self, cx: &mut Context<Self>) {
-        let config = self.ai.settings_config();
-        for (field, value) in [(
-            AiInputField::RequestUserAgent,
-            config.request_user_agent.clone(),
-        )] {
-            let setup = if field == AiInputField::ApiKey {
-                TextInputSetup::masked()
-            } else {
-                TextInputSetup::default()
-            };
-            self.ensure_text_input(format!("ai.input.{}", field.input_key()), &value, setup, cx);
-        }
+        let field = AiInputField::RequestUserAgent;
+        let value = self.ai.settings_config().request_user_agent.clone();
+        self.ensure_text_input(
+            format!("ai.input.{}", field.input_key()),
+            &value,
+            TextInputSetup::default(),
+            cx,
+        );
     }
 
     /// Masking comes from `TranslateInputField::is_secret` rather than a list repeated
@@ -500,10 +500,13 @@ impl NyaTermApp {
         );
     }
 
-    /// Build the three inputs a provider credential row draws.
+    /// Build the inputs a provider credential row draws.
     ///
-    /// Adding a credential reveals a row, so the add is also a boundary that builds
-    /// them; keep the ids in step with the lookups in `ai::models::credential_rows`.
+    /// Three fields for the credential itself, plus the manual-model box its group
+    /// draws: `ai_model_groups` builds one group per enabled credential, keyed by the
+    /// credential id, and looks that box up whether or not the group is expanded.
+    /// Adding a credential reveals all four, so the add is also a boundary that builds
+    /// them; keep the ids in step with the lookups in `ai::models`.
     pub(in crate::features) fn ensure_ai_credential_inputs(
         &mut self,
         credential_id: &str,
@@ -541,6 +544,13 @@ impl NyaTermApp {
                 cx,
             );
         }
+        let manual_draft = self.ai.settings_manual_model_draft(credential_id);
+        self.ensure_text_input(
+            format!("ai.settings.manual-model.{credential_id}"),
+            &manual_draft,
+            TextInputSetup::placeholder(t!("ai.manualModelPlaceholder").to_string()),
+            cx,
+        );
     }
 
     fn ensure_ai_rule_inputs(&mut self, cx: &mut Context<Self>) {
@@ -612,12 +622,15 @@ pub(in crate::features::pages::settings) const ALL_SETTINGS_TABS: [SettingsTab; 
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, Entity, TestAppContext};
+    use gpui::{
+        AppContext as _, Context, Entity, IntoElement, Render, TestAppContext, VisualTestContext,
+        Window, div,
+    };
     use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
-    use crate::models::{NavItem, SettingsTab};
+    use crate::models::{AiActionEditorField, AiActionListKind, NavItem, SettingsTab};
 
     use super::ALL_SETTINGS_TABS;
 
@@ -734,6 +747,181 @@ mod tests {
         assert!(
             probe.upgrade().is_some(),
             "a static tab input is app-lifetime; page close must not release it"
+        );
+    }
+
+    /// A window with nothing in it, so a `Window` can be handed to actions that need
+    /// one without mounting the settings panel.
+    ///
+    /// Painting a settings tab that holds a registry input never parks -- see the
+    /// ignored `every_settings_surface_draws_only_inputs_it_built` in `panel.rs` -- so
+    /// these boundary tests assert on the published snapshot instead of on a paint.
+    struct BareHost;
+
+    impl Render for BareHost {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    fn flush(app: &Entity<NyaTermApp>, vcx: &mut VisualTestContext) {
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| app.flush_settings_panel_snapshots(cx));
+        });
+    }
+
+    #[track_caller]
+    fn assert_built(
+        app: &Entity<NyaTermApp>,
+        vcx: &mut VisualTestContext,
+        text: &[&str],
+        numbers: &[&str],
+    ) {
+        flush(app, vcx);
+        vcx.update(|_, cx| {
+            let panel = app.read(cx).settings_panel.read(cx);
+            let snapshot = panel.snapshot().expect("the panel has a snapshot");
+            for id in text {
+                assert!(
+                    snapshot.text_inputs.contains_key(*id),
+                    "{id} is drawn by its row but no boundary built it"
+                );
+            }
+            for id in numbers {
+                assert!(
+                    snapshot.number_inputs.contains_key(*id),
+                    "{id} is drawn by its row but no boundary built it"
+                );
+            }
+        });
+    }
+
+    #[track_caller]
+    fn assert_released(app: &Entity<NyaTermApp>, vcx: &mut VisualTestContext, text: &[&str]) {
+        flush(app, vcx);
+        vcx.update(|_, cx| {
+            let panel = app.read(cx).settings_panel.read(cx);
+            let snapshot = panel.snapshot().expect("the panel has a snapshot");
+            for id in text {
+                assert!(
+                    !snapshot.text_inputs.contains_key(*id),
+                    "{id} outlived the row that revealed it"
+                );
+            }
+        });
+    }
+
+    /// Every boundary that reveals a row must build the inputs that row draws.
+    ///
+    /// The tab-level list is covered by `ensure_settings_tab_inputs`; these are the
+    /// four boundaries that reveal a field without changing tab, each of which used to
+    /// leave the row's inputs unbuilt so it drew an empty box (and tripped a
+    /// `debug_assert!` in a debug build).
+    #[test]
+    fn reveal_boundaries_build_the_inputs_their_rows_draw() {
+        let mut cx = TestAppContext::single();
+        let app = hosted(&mut cx);
+        let (_, vcx) = cx.add_window_view(|_, _| BareHost);
+        let vcx: &mut VisualTestContext = vcx;
+
+        // A custom engine row. The ids carry the row index, so adding or removing an
+        // engine forgets the whole prefix and whatever row is open must be rebuilt.
+        let engine_ids = [
+            "settings.search-engine.0.name",
+            "settings.search-engine.0.url",
+        ];
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.focus_settings_tab(SettingsTab::Search, cx)
+            });
+        });
+        assert_released(&app, vcx, &engine_ids);
+        vcx.update(|_, cx| app.update(cx, |app, cx| app.add_search_engine(cx)));
+        assert_built(&app, vcx, &engine_ids, &[]);
+        vcx.update(|_, cx| app.update(cx, |app, cx| app.expand_search_engine(0, cx)));
+        assert_released(&app, vcx, &engine_ids);
+        vcx.update(|_, cx| app.update(cx, |app, cx| app.expand_search_engine(0, cx)));
+        assert_built(&app, vcx, &engine_ids, &[]);
+
+        // A freshly added provider credential draws three fields.
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.focus_settings_tab(SettingsTab::AiModels, cx)
+            });
+        });
+        vcx.update(|window, cx| app.update(cx, |app, cx| app.add_ai_credential(window, cx)));
+        let credential_id = vcx.update(|_, cx| {
+            app.read(cx)
+                .ai
+                .settings_config()
+                .provider_credentials
+                .last()
+                .expect("the credential was added")
+                .id
+                .clone()
+        });
+        assert_built(
+            &app,
+            vcx,
+            &[
+                &format!("ai.credential.{credential_id}.name"),
+                &format!("ai.credential.{credential_id}.base-url"),
+                &format!("ai.credential.{credential_id}.api-key"),
+            ],
+            &[],
+        );
+
+        // A freshly added action draws a name and a prompt, in both lists.
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.focus_settings_tab(SettingsTab::AiRules, cx)
+            });
+        });
+        for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
+            vcx.update(|window, cx| app.update(cx, |app, cx| app.add_ai_action(kind, window, cx)));
+            let action_id = vcx.update(|_, cx| {
+                let config = app.read(cx).ai.settings_config().clone();
+                let actions = match kind {
+                    AiActionListKind::Terminal => config.terminal_ai_actions,
+                    AiActionListKind::File => config.file_ai_actions,
+                };
+                actions.last().expect("the action was added").id.clone()
+            });
+            assert_built(
+                &app,
+                vcx,
+                &[
+                    &NyaTermApp::ai_action_text_input_id(
+                        kind,
+                        &action_id,
+                        AiActionEditorField::Name,
+                    ),
+                    &NyaTermApp::ai_action_text_input_id(
+                        kind,
+                        &action_id,
+                        AiActionEditorField::Prompt,
+                    ),
+                ],
+                &[],
+            );
+        }
+
+        // Enabling cloud sync without a master password redirects to Security, and that
+        // jump is neither `open_page` nor the tab strip. Security has not been visited
+        // above, so its inputs only exist if the jump built them.
+        vcx.update(|_, cx| app.update(cx, |app, cx| app.toggle_cloud_sync_enabled(cx)));
+        vcx.update(|_, cx| {
+            assert_eq!(
+                app.read(cx).shell.settings_active_tab(),
+                SettingsTab::Security,
+                "enabling cloud sync without a master password must land on Security"
+            );
+        });
+        assert_built(
+            &app,
+            vcx,
+            &["settings.security.master-password"],
+            &["settings.number.idle-lock-minutes"],
         );
     }
 }
