@@ -9,13 +9,12 @@ use gpui::{
     Window, div, prelude::*, px, rgb,
 };
 use nyaterm_core::{
-    AiSettings, AppSettingsSummary, CloudSyncSettings, CloudSyncState,
-    KeywordHighlightConfig, TranslationSettings,
+    AiSettings, AppSettingsSummary, CloudSyncSettings, CloudSyncState, KeywordHighlightConfig,
+    TranslationSettings,
 };
 use nyaterm_ui::{
-    NYA_FORM_CONTROL_HEIGHT_PX, NyaInputShell, NyaNumberInputState,
-    NyaSelect, NyaSelectOption, NyaSelectState, NyaSettingsLayout, NyaSettingsNavGroup,
-    NyaSettingsNavItem,
+    NYA_FORM_CONTROL_HEIGHT_PX, NyaInputShell, NyaNumberInputState, NyaSelect, NyaSelectOption,
+    NyaSelectState, NyaSettingsLayout, NyaSettingsNavGroup, NyaSettingsNavItem,
 };
 
 use crate::features::NyaTermApp;
@@ -2279,7 +2278,9 @@ mod tests {
 
         // A freshly added provider credential draws three fields.
         activate(&app, vcx, SettingsTab::AiModels);
-        from_panel(&app, vcx, |app, window, cx| app.add_ai_credential(window, cx));
+        from_panel(&app, vcx, |app, window, cx| {
+            app.add_ai_credential(window, cx)
+        });
         let credential_id = vcx.update(|_, cx| {
             app.read(cx)
                 .ai
@@ -2303,7 +2304,9 @@ mod tests {
         // A freshly added action draws a name and a prompt, in both lists.
         activate(&app, vcx, SettingsTab::AiRules);
         for kind in [AiActionListKind::Terminal, AiActionListKind::File] {
-            from_panel(&app, vcx, |app, window, cx| app.add_ai_action(kind, window, cx));
+            from_panel(&app, vcx, |app, window, cx| {
+                app.add_ai_action(kind, window, cx)
+            });
             let action_id = vcx.update(|_, cx| {
                 let config = app.read(cx).ai.settings_config().clone();
                 let actions = match kind {
