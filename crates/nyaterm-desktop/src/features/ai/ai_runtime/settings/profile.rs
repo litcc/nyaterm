@@ -21,6 +21,7 @@ impl NyaTermApp {
     ) {
         self.ai.set_settings_command_mode(mode);
         self.persist_ai_settings_now(cx);
+        cx.notify();
     }
 
     pub(in crate::features) fn toggle_ai_background_execution(&mut self, cx: &mut Context<Self>) {

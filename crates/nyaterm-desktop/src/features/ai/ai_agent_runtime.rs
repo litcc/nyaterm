@@ -42,7 +42,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.ai.toggle_agent_thought_expanded(step_index);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn toggle_ai_agent_output_expanded(
@@ -51,7 +51,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.ai.toggle_agent_output_expanded(step_index);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn record_ai_command_card_audit(
@@ -93,7 +93,8 @@ impl NyaTermApp {
                 let _ = this.update(cx, |this, cx| {
                     this.settings
                         .update_store_status(format!("AI audit save failed: {error}"), false);
-                    cx.notify();
+                    this.request_settings_panel_refresh(cx);
+                    this.defer_ai_panel_snapshot_flush(cx);
                 });
             } else {
                 let _ = this.update(cx, |this, cx| {
@@ -295,7 +296,7 @@ impl NyaTermApp {
                 });
             }
         });
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
         Ok(())
     }
 
@@ -321,7 +322,7 @@ impl NyaTermApp {
                     .await;
                 let Ok(keep_running) = this.update(cx, |this, cx| {
                     if this.drive_ai_agent_loop(cx) {
-                        cx.notify();
+                        this.defer_ai_panel_snapshot_flush(cx);
                     }
                     let running = this.ai.agent_loop_snapshot().is_some();
                     if !running {
@@ -439,6 +440,7 @@ impl NyaTermApp {
             observation_summary(&observation),
         );
         self.start_ai_agent_continuation(state, observation, cx);
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn note_ai_agent_output_discontinuity(
@@ -476,6 +478,7 @@ impl NyaTermApp {
             observation_summary(&observation),
         );
         self.start_ai_agent_continuation(state, observation, cx);
+        self.defer_ai_panel_snapshot_flush(cx);
         true
     }
 
@@ -546,6 +549,6 @@ impl NyaTermApp {
                 result,
             }));
         });
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 }

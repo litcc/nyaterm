@@ -17,7 +17,7 @@ impl NyaTermApp {
         let Some(card) = self.ai.command_card(index) else {
             self.ai
                 .set_panel_status("AI command card is no longer available");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         self.save_ai_command_card_value(card, cx);
@@ -31,7 +31,7 @@ impl NyaTermApp {
         let Some(card) = self.find_ai_command_card(&card_id) else {
             self.ai
                 .set_panel_status("AI command card is no longer available");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         self.save_ai_command_card_value(card, cx);
@@ -45,7 +45,7 @@ impl NyaTermApp {
         let command_text = card.command.trim().to_string();
         if command_text.is_empty() {
             self.ai.set_panel_status("AI command card has no command");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
 
@@ -146,7 +146,8 @@ impl NyaTermApp {
                             .update_store_status(this.ai.panel_status().to_string(), false);
                     }
                 }
-                cx.notify();
+                this.request_settings_panel_refresh(cx);
+                this.defer_ai_panel_snapshot_flush(cx);
             },
             cx,
         );

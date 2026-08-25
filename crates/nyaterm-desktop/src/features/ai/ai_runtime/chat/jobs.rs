@@ -18,36 +18,37 @@ impl NyaTermApp {
         self.sync_session_event_bridge_policy();
         self.settings
             .set_store_message(self.ai.panel_status().to_string());
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn start_ai_ask(&mut self, cx: &mut Context<Self>) {
         if self.ai.chat_is_pending() {
             self.ai
                 .reject_chat_start("AI request already running", false);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         if self.ai.agent_loop_snapshot().is_some() {
             self.ai
                 .reject_chat_start("AI Agent step already running", true);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         let Some(request_prompt) = self.ai.chat_request_prompt() else {
             self.ai.reject_chat_start("Enter a prompt first", false);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         if !self.ai.settings_enabled() {
             self.ai.reject_chat_start("AI assistant is disabled", false);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         let Some(model_id) = self.ai_selected_model_id() else {
             self.ai
                 .reject_chat_start("Enable an AI model before sending", true);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
 
@@ -58,7 +59,7 @@ impl NyaTermApp {
         if mode == AiMode::Agent && target_session_id.is_none() {
             self.ai
                 .reject_chat_start("Start a terminal session before running Agent mode", true);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         let prepared_request = self.ai.chat_prepared_request_cloned();
@@ -103,7 +104,7 @@ impl NyaTermApp {
                 result,
             }));
         });
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn ai_terminal_context(&self) -> AiContext {
@@ -188,13 +189,14 @@ impl NyaTermApp {
     pub(in crate::features) fn select_ai_model_choice(&mut self, cx: &mut Context<Self>) {
         let choices = self.ai_filtered_model_choices();
         let Some((model, _)) = choices.get(self.ai.discovery_index()).cloned() else {
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         self.ai.close_discovery_menu();
         self.set_ai_default_model(model.id.clone(), cx);
         self.ai
             .set_panel_status(format!("AI model selected: {}", model.name));
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn handle_ai_model_search_key_down(
@@ -216,21 +218,21 @@ impl NyaTermApp {
                 if self.ai.escape_discovery_search(selected_index) {
                     self.reset_text_input("ai.model-search", "", cx);
                 }
-                cx.notify();
+                self.defer_ai_panel_snapshot_flush(cx);
             }
             "up" => {
                 self.ai.move_discovery_index(choice_count, -1);
-                cx.notify();
+                self.defer_ai_panel_snapshot_flush(cx);
             }
             "down" => {
                 self.ai.move_discovery_index(choice_count, 1);
-                cx.notify();
+                self.defer_ai_panel_snapshot_flush(cx);
             }
             "enter" => {
                 if choice_count > 0 {
                     self.select_ai_model_choice(cx);
                 } else {
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                 }
             }
             _ => {}
@@ -244,7 +246,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.ai.set_discovery_query(text);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn ai_effective_target_session_id(&self) -> Option<String> {
@@ -375,19 +377,19 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.ai.remove_chat_target_session(&session_id);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn select_ai_mention_candidate(&mut self, cx: &mut Context<Self>) {
         let candidates = self.ai_mention_candidates();
         let Some(session) = candidates.get(self.ai.chat_mention_index()).cloned() else {
             self.ai.close_chat_mention();
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         let display_name = self.session.display_name_by_info(&session);
         self.ai.select_chat_mention(session.id, display_name);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn ai_terminal_context_for_session(
@@ -454,7 +456,7 @@ impl NyaTermApp {
         self.mark_user_activity();
         if self.ai.chat_or_agent_is_running() || !self.ai.settings_enabled() {
             self.ai.hide_chat_mention();
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         let keystroke = &event.keystroke;
@@ -469,17 +471,17 @@ impl NyaTermApp {
             match keystroke.key.as_str() {
                 "escape" => {
                     self.ai.close_chat_mention();
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                     return;
                 }
                 "up" => {
                     self.ai.move_chat_mention_index(candidate_count, -1);
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                     return;
                 }
                 "down" => {
                     self.ai.move_chat_mention_index(candidate_count, 1);
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                     return;
                 }
                 "enter" => {
@@ -496,7 +498,7 @@ impl NyaTermApp {
             "enter" if !keystroke.modifiers.shift => self.start_ai_ask(cx),
             "escape" => {
                 self.ai.blur_chat_prompt();
-                cx.notify();
+                self.defer_ai_panel_snapshot_flush(cx);
             }
             _ => {}
         }
@@ -514,7 +516,7 @@ impl NyaTermApp {
         let text = text.into();
         self.reset_text_input("ai.chat.prompt", &text, cx);
         self.ai.set_chat_prompt_draft(text);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     /// Apply an edit from the AI prompt box.
@@ -523,7 +525,7 @@ impl NyaTermApp {
             return;
         }
         self.ai.set_chat_prompt_draft(text);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     /// Deliver AI chat worker events as they arrive.
@@ -539,7 +541,7 @@ impl NyaTermApp {
                 if this
                     .update(cx, |this, cx| {
                         if this.ai.chat_event_is_wanted() && this.apply_ai_chat_event(event, cx) {
-                            cx.notify();
+                            this.flush_ai_panel_snapshot(cx);
                         }
                     })
                     .is_err()

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -390,7 +391,7 @@ fn history_completion_updates_history_and_chat_atomically() {
         created_at: String::new(),
         updated_at: String::new(),
     }];
-    state.chat.messages.push(AiMessage {
+    state.chat.messages.push(Arc::new(AiMessage {
         id: "assistant-a".to_string(),
         session_id: "session-a".to_string(),
         role: AiMessageRole::Assistant,
@@ -398,7 +399,7 @@ fn history_completion_updates_history_and_chat_atomically() {
         created_at: String::new(),
         reasoning_content: None,
         command_cards: Vec::new(),
-    });
+    }));
 
     let delete_job = state.begin_history_operation("delete").unwrap();
     assert_eq!(

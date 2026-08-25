@@ -1,7 +1,7 @@
 use nyaterm_core::AppRuntime;
 use nyaterm_store::{StoreBlockingClient, StoreUiClient};
 
-use super::ai::AiFeatureState;
+use super::ai::{AiFeatureState, AiPanel};
 use super::commands::CommandFeatureState;
 use super::connections::ConnectionFeatureState;
 use super::pages::connections::panel::ConnectionPanel;
@@ -55,6 +55,7 @@ pub struct NyaTermApp {
     pub(in crate::features) security: SecurityFeatureState,
     pub(in crate::features) settings: SettingsFeatureState,
     pub(in crate::features) ai: AiFeatureState,
+    pub(in crate::features) ai_panel: gpui::Entity<AiPanel>,
     pub(in crate::features) terminal: TerminalFeatureState,
     pub(in crate::features) send_command: SendCommandFeatureState,
     pub(in crate::features) transfer: TransferFeatureState,

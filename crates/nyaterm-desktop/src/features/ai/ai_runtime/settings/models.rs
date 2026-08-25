@@ -13,6 +13,7 @@ impl NyaTermApp {
     ) {
         self.ai.toggle_settings_model_enabled(&model_id);
         self.persist_ai_settings_now(cx);
+        cx.notify();
     }
 
     pub(in crate::features) fn apply_ai_settings_model_search(
@@ -21,7 +22,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.ai.set_settings_model_query(text);
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn set_ai_default_model(
@@ -31,6 +32,7 @@ impl NyaTermApp {
     ) {
         self.ai.set_settings_default_model(&model_id);
         self.persist_ai_settings_now(cx);
+        cx.notify();
     }
 
     pub(in crate::features) fn remove_ai_manual_model(
@@ -40,7 +42,7 @@ impl NyaTermApp {
     ) {
         match self.ai.remove_settings_manual_model(&model_id) {
             AiSettingsMutation::Ignored => {}
-            AiSettingsMutation::Notify => cx.notify(),
+            AiSettingsMutation::Notify => self.request_settings_panel_refresh(cx),
             AiSettingsMutation::Persist => self.persist_ai_settings_now(cx),
         }
     }
@@ -53,7 +55,7 @@ impl NyaTermApp {
     ) {
         match self.ai.add_settings_manual_model(&credential_id, &name) {
             AiSettingsMutation::Ignored => {}
-            AiSettingsMutation::Notify => cx.notify(),
+            AiSettingsMutation::Notify => self.request_settings_panel_refresh(cx),
             AiSettingsMutation::Persist => self.persist_ai_settings_now(cx),
         }
     }
@@ -75,7 +77,7 @@ impl NyaTermApp {
             ),
             cx,
         );
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn handle_ai_manual_model_key_down(
@@ -91,7 +93,7 @@ impl NyaTermApp {
             "escape" => {
                 let focus = self.ai.cancel_settings_manual_model_edit();
                 window.focus(&focus, cx);
-                cx.notify();
+                self.request_settings_panel_refresh(cx);
             }
             "enter" => {
                 if let Some((credential_id, name)) =
@@ -114,7 +116,7 @@ impl NyaTermApp {
         if !self.ai.apply_settings_manual_model_input(group_key, text) {
             return;
         }
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn focus_ai_manual_model_input(
@@ -132,7 +134,7 @@ impl NyaTermApp {
         );
         self.ai.focus_settings_manual_model_edit(group_key);
         window.focus(&input.read(cx).focus_handle(), cx);
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn clear_ai_manual_model_draft(
@@ -142,6 +144,6 @@ impl NyaTermApp {
     ) {
         self.ai.clear_settings_manual_model_draft(group_key);
         self.reset_text_input(&format!("ai.settings.manual-model.{group_key}"), "", cx);
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
     }
 }

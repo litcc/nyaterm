@@ -44,6 +44,7 @@ impl NyaTermApp {
         self.flush_remote_panel_snapshots(cx);
         self.flush_connection_panel_snapshot(cx);
         self.flush_transfer_panel_snapshot(cx);
+        self.flush_ai_panel_snapshot(cx);
         self.queue_wallpaper_refresh(cx);
     }
 

@@ -69,7 +69,11 @@ impl NyaTermApp {
                 .clone()
                 .cached(cached_panel_style())
                 .into_any_element(),
-            NavItem::AiAssistant => self.ai_assistant_panel(cx).into_any_element(),
+            NavItem::AiAssistant => self
+                .ai_panel
+                .clone()
+                .cached(cached_panel_style())
+                .into_any_element(),
             NavItem::ActiveSessions => {
                 let model = self.active_sessions_panel_model();
                 self.active_sessions_panel(model, cx).into_any_element()

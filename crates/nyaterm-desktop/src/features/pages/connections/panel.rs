@@ -204,7 +204,7 @@ impl ConnectionPanel {
     }
 
     #[cfg(test)]
-    fn paint_count(&self) -> usize {
+    pub(in crate::features) fn paint_count(&self) -> usize {
         self.paint_count
     }
 

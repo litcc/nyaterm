@@ -12,7 +12,7 @@ impl NyaTermApp {
             self.ai
                 .set_panel_status("AI model discovery already running".to_string());
             self.request_settings_panel_refresh(cx);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
 
@@ -22,16 +22,17 @@ impl NyaTermApp {
                 "AI model discovery requires an enabled custom provider".to_string(),
             );
             self.request_settings_panel_refresh(cx);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
 
         let Some(tx) = self.ai.begin_discovery_job() else {
             self.request_settings_panel_refresh(cx);
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         self.request_settings_panel_refresh(cx);
+        self.defer_ai_panel_snapshot_flush(cx);
         std::thread::spawn(move || {
             let mut discoveries = Vec::new();
             let mut errors = Vec::new();
@@ -51,7 +52,7 @@ impl NyaTermApp {
                 result,
             });
         });
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     /// Deliver AI model-discovery replies as they arrive.
@@ -68,7 +69,7 @@ impl NyaTermApp {
                         this.ai.note_discovery_event_delivered();
                         this.apply_ai_discovery_event(event, cx);
                         this.request_settings_panel_refresh(cx);
-                        cx.notify();
+                        this.defer_ai_panel_snapshot_flush(cx);
                     })
                     .is_err()
                 {

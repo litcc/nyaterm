@@ -5,9 +5,11 @@ use std::time::Duration;
 mod ai_agent_runtime;
 mod ai_jobs;
 mod ai_runtime;
+mod panel;
 mod state;
 
 pub(in crate::features) use ai_jobs::{ai_active_profile_drafts, is_agent_command_card};
+pub(in crate::features) use panel::AiPanel;
 pub(in crate::features) use state::{
     AiFeatureFocus, AiFeatureInit, AiFeatureState, AiSettingsMutation,
 };

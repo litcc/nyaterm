@@ -102,7 +102,7 @@ struct AiChatState {
     mention_index: usize,
     prepared_request: Option<AiPreparedRequest>,
     response_preview: String,
-    messages: Vec<AiMessage>,
+    messages: Vec<Arc<AiMessage>>,
     streaming_assistant_id: Option<String>,
     message_menu: Option<AiMessageMenuState>,
     quoted_text: Option<String>,
@@ -504,7 +504,7 @@ impl AiFeatureState {
         self.chat.command_cards.clear();
         let now = nyaterm_core::now_rfc3339();
         let assistant_id = format!("assistant-{}", uuid());
-        self.chat.messages.push(AiMessage {
+        self.chat.messages.push(Arc::new(AiMessage {
             id: format!("user-{}", uuid()),
             session_id: self.chat.session_id.clone(),
             role: AiMessageRole::User,
@@ -512,8 +512,8 @@ impl AiFeatureState {
             created_at: now.clone(),
             reasoning_content: None,
             command_cards: Vec::new(),
-        });
-        self.chat.messages.push(AiMessage {
+        }));
+        self.chat.messages.push(Arc::new(AiMessage {
             id: assistant_id.clone(),
             session_id: self.chat.session_id.clone(),
             role: AiMessageRole::Assistant,
@@ -521,7 +521,7 @@ impl AiFeatureState {
             created_at: now,
             reasoning_content: None,
             command_cards: Vec::new(),
-        });
+        }));
         self.chat.prompt_draft.clear();
         self.chat.quoted_text = None;
         self.chat.message_menu = None;
@@ -569,6 +569,7 @@ impl AiFeatureState {
                 .find(|message| message.id == assistant_id)
             && message.content.trim().is_empty()
         {
+            let message = Arc::make_mut(message);
             message.content = "AI request cancelled".to_string();
         }
         self.panel.status = "AI request cancelled".to_string();
@@ -619,6 +620,7 @@ impl AiFeatureState {
                 .rev()
                 .find(|message| message.id == assistant_id)
         {
+            let message = Arc::make_mut(message);
             message.content.push_str(text_delta);
             if let Some(delta) = reasoning_delta.filter(|delta| !delta.trim().is_empty()) {
                 let existing = message.reasoning_content.take().unwrap_or_default();
@@ -771,6 +773,7 @@ impl AiFeatureState {
                         .rev()
                         .find(|message| message.id == assistant_id)
                 {
+                    let message = Arc::make_mut(message);
                     if !output.text.trim().is_empty() {
                         message.content = output.text.clone();
                     } else if message.content.trim().is_empty() {
@@ -805,6 +808,7 @@ impl AiFeatureState {
                         .rev()
                         .find(|message| message.id == assistant_id)
                 {
+                    let message = Arc::make_mut(message);
                     message.content = format!("AI request failed: {error}");
                 }
                 if self.agent.task_prompt.is_some() {
@@ -838,7 +842,7 @@ impl AiFeatureState {
         self.chat.response_preview = preview.into();
     }
 
-    pub(in crate::features) fn chat_messages(&self) -> &[AiMessage] {
+    pub(in crate::features) fn chat_messages(&self) -> &[Arc<AiMessage>] {
         &self.chat.messages
     }
 
@@ -1052,7 +1056,7 @@ impl AiFeatureState {
         match result {
             Ok(messages) => {
                 self.chat.session_id = target_session_id;
-                self.chat.messages = messages;
+                self.chat.messages = messages.into_iter().map(Arc::new).collect();
                 self.chat.streaming_assistant_id = None;
                 self.history.open = false;
                 self.chat.message_menu = None;

@@ -26,7 +26,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         if self.ai.apply_settings_credential_input(rest, text) {
-            cx.notify();
+            self.request_settings_panel_refresh(cx);
         }
     }
 
@@ -63,7 +63,7 @@ impl NyaTermApp {
     ) {
         match self.ai.remove_settings_credential(&credential_id) {
             AiSettingsMutation::Ignored => {}
-            AiSettingsMutation::Notify => cx.notify(),
+            AiSettingsMutation::Notify => self.request_settings_panel_refresh(cx),
             AiSettingsMutation::Persist => self.persist_ai_settings_now(cx),
         }
     }

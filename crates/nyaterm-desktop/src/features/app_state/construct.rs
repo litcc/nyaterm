@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::NyaTermApp;
 use crate::features::ai::{
-    AiFeatureFocus, AiFeatureInit, AiFeatureState, ai_active_profile_drafts,
+    AiFeatureFocus, AiFeatureInit, AiFeatureState, AiPanel, ai_active_profile_drafts,
 };
 use crate::features::commands::{
     CommandFeatureInit, CommandFeatureState, QuickCommandFeatureFocus,
@@ -168,6 +168,7 @@ impl NyaTermApp {
         let connection_panel = cx.new(|_| ConnectionPanel::new(app_entity.downgrade()));
         let settings_panel = cx.new(|cx| SettingsPanel::new(app_entity.downgrade(), cx));
         let transfer_panel = cx.new(|_| TransferPanel::new(app_entity.downgrade()));
+        let ai_panel = cx.new(|_| AiPanel::new(app_entity.downgrade()));
 
         Self {
             stores,
@@ -233,6 +234,7 @@ impl NyaTermApp {
                     credential: cx.focus_handle(),
                 },
             ),
+            ai_panel,
             transfer: TransferFeatureState::new(
                 ".".to_string(),
                 String::new(),

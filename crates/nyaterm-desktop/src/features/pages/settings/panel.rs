@@ -595,6 +595,11 @@ impl SettingsPanel {
         self.snapshot.as_ref()
     }
 
+    #[cfg(test)]
+    pub(in crate::features) fn paint_count(&self) -> usize {
+        self.paint_count
+    }
+
     pub(in crate::features) fn set_snapshot(
         &mut self,
         snapshot: SettingsSnapshot,

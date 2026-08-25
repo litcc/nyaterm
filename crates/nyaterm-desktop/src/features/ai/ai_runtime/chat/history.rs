@@ -25,7 +25,7 @@ impl NyaTermApp {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if this.ai.finish_history_session_list(job_id, result) {
-                    cx.notify();
+                    this.defer_ai_panel_snapshot_flush(cx);
                 }
             });
         })
@@ -36,7 +36,7 @@ impl NyaTermApp {
         self.ai.start_new_chat();
         // The composer keeps its own buffer, so clearing the draft is not enough.
         self.reset_text_input("ai.chat.prompt", "", cx);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn load_ai_session_messages(
@@ -68,7 +68,7 @@ impl NyaTermApp {
                     result,
                     loaded_status,
                 ) {
-                    cx.notify();
+                    this.defer_ai_panel_snapshot_flush(cx);
                 }
             });
         })
@@ -102,7 +102,7 @@ impl NyaTermApp {
                     if succeeded {
                         this.refresh_ai_usage_counts(cx);
                     }
-                    cx.notify();
+                    this.defer_ai_panel_snapshot_flush(cx);
                 }
             });
         })
@@ -130,7 +130,7 @@ impl NyaTermApp {
                     if succeeded {
                         this.refresh_ai_usage_counts(cx);
                     }
-                    cx.notify();
+                    this.defer_ai_panel_snapshot_flush(cx);
                 }
             });
         })
@@ -143,7 +143,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.ai.set_history_query(text);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn refresh_ai_usage_counts(&mut self, cx: &mut Context<Self>) {
@@ -158,7 +158,7 @@ impl NyaTermApp {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 if this.ai.finish_history_usage_counts(job_id, result) {
-                    cx.notify();
+                    this.defer_ai_panel_snapshot_flush(cx);
                 }
             });
         })
@@ -171,7 +171,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> Option<u64> {
         let job_id = self.ai.begin_history_operation(status);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
         job_id
     }
 }

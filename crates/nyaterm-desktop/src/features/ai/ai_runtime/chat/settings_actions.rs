@@ -16,13 +16,16 @@ impl NyaTermApp {
     pub(in crate::features) fn persist_ai_settings_now(&mut self, cx: &mut Context<Self>) {
         if self.defer_settings_persistence(cx) {
             self.ai.set_panel_status("AI settings staged".to_string());
+            self.request_settings_panel_refresh(cx);
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         let snapshot = self.ai.settings_config_cloned();
         if let Some((generation, snapshot)) = self.ai.queue_settings_persistence(snapshot) {
             self.submit_ai_settings_save(generation, snapshot, cx);
         }
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     fn submit_ai_settings_save(
@@ -42,7 +45,8 @@ impl NyaTermApp {
                     .set_panel_status(format!("AI settings save was not queued: {error}"));
                 self.settings
                     .update_store_status(self.ai.panel_status().to_string(), false);
-                cx.notify();
+                self.request_settings_panel_refresh(cx);
+                self.defer_ai_panel_snapshot_flush(cx);
                 return;
             }
         };
@@ -73,7 +77,8 @@ impl NyaTermApp {
                 if let Some((generation, snapshot)) = completion.next {
                     this.submit_ai_settings_save(generation, snapshot, cx);
                 }
-                cx.notify();
+                this.request_settings_panel_refresh(cx);
+                this.defer_ai_panel_snapshot_flush(cx);
             });
         })
         .detach();
@@ -96,7 +101,7 @@ impl NyaTermApp {
         let input = self.text_input(input_id, &value, setup, cx);
         self.ai.focus_settings_action(kind, action_id, field);
         window.focus(&input.read(cx).focus_handle(), cx);
-        cx.notify();
+        self.request_settings_panel_refresh(cx);
     }
 
     pub(in crate::features) fn toggle_ai_action_enabled(
@@ -163,7 +168,7 @@ impl NyaTermApp {
             "escape" => {
                 let focus = self.ai.cancel_settings_action_edit();
                 window.focus(&focus, cx);
-                cx.notify();
+                self.request_settings_panel_refresh(cx);
             }
             "tab" => {
                 self.focus_ai_action_field(kind, action_id, field.next(), window, cx);

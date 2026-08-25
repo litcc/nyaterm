@@ -761,7 +761,7 @@ impl NyaTermApp {
                             !ai_running,
                             cx.listener(|this, _, _, cx| {
                                 this.ai.toggle_execution_menu();
-                                cx.notify();
+                                this.defer_ai_panel_snapshot_flush(cx);
                             }),
                         ))
                         .child(header_svg_icon_button(
@@ -785,7 +785,7 @@ impl NyaTermApp {
                                 } else {
                                     this.forget_text_inputs("ai.history-search");
                                 }
-                                cx.notify();
+                                this.defer_ai_panel_snapshot_flush(cx);
                             }),
                         ))
                         .child(header_svg_icon_button(

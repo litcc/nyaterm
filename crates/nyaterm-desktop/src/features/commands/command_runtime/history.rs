@@ -95,7 +95,7 @@ impl NyaTermApp {
         let Some(card) = self.ai.command_card(index) else {
             self.ai
                 .set_panel_status("AI command card is no longer available");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         self.apply_ai_command_card_value(card, execute, cx);
@@ -110,7 +110,7 @@ impl NyaTermApp {
         let Some(card) = self.find_ai_command_card(&card_id) else {
             self.ai
                 .set_panel_status("AI command card is no longer available");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         self.apply_ai_command_card_value(card, execute, cx);
@@ -125,13 +125,13 @@ impl NyaTermApp {
         let Some(target_session_id) = self.ai_effective_target_session_id() else {
             self.ai
                 .set_panel_status("Start a terminal session before using an AI command");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         };
         let mut command = card.command.trim().to_string();
         if command.is_empty() {
             self.ai.set_panel_status("AI command card has no command");
-            cx.notify();
+            self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
         let should_continue_agent = execute && is_agent_command_card(&card);
@@ -139,7 +139,7 @@ impl NyaTermApp {
             match self.begin_ai_agent_background_execution(&card.command, cx) {
                 Ok(()) => {
                     self.record_ai_command_card_audit(&card, true, false, cx);
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                 }
                 Err(error) => {
                     self.ai.set_panel_status(error);
@@ -150,7 +150,7 @@ impl NyaTermApp {
                         "Failed",
                         self.ai.panel_status().to_string(),
                     );
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                 }
             }
             return;
@@ -171,7 +171,7 @@ impl NyaTermApp {
                         "Failed",
                         self.ai.panel_status().to_string(),
                     );
-                    cx.notify();
+                    self.defer_ai_panel_snapshot_flush(cx);
                     return;
                 }
             }
@@ -204,7 +204,7 @@ impl NyaTermApp {
             format!("Inserted AI command card '{}'", card.title)
         };
         self.ai.set_panel_status(status);
-        cx.notify();
+        self.defer_ai_panel_snapshot_flush(cx);
     }
 
     pub(in crate::features) fn record_command_history_from_bytes(
