@@ -12,7 +12,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/actions/**'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/native-checks.yml'
       - '.github/workflows/native-package.yml'
   pull_request:
     branches: [main, migration/gpui]
@@ -24,7 +24,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/actions/**'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/native-checks.yml'
       - '.github/workflows/native-package.yml'
 
 permissions:
