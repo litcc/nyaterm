@@ -14,12 +14,14 @@ use super::super::super::state::AiAgentBackgroundEffect;
 
 impl NyaTermApp {
     pub(in crate::features) fn cancel_ai_chat(&mut self, cx: &mut Context<Self>) {
+        let before = self.ai_header_presentation();
         self.ai.cancel_chat_and_agent();
         self.sync_session_event_bridge_policy();
         self.settings
             .set_store_message(self.ai.panel_status().to_string());
         self.request_settings_panel_refresh(cx);
         self.defer_ai_panel_snapshot_flush(cx);
+        self.notify_root_if_ai_header_changed(before, cx);
     }
 
     pub(in crate::features) fn start_ai_ask(&mut self, cx: &mut Context<Self>) {
@@ -88,6 +90,7 @@ impl NyaTermApp {
             context,
             options: Default::default(),
         };
+        let before = self.ai_header_presentation();
         let store = self.store_blocking_client();
         let launch =
             self.ai
@@ -105,6 +108,7 @@ impl NyaTermApp {
             }));
         });
         self.defer_ai_panel_snapshot_flush(cx);
+        self.notify_root_if_ai_header_changed(before, cx);
     }
 
     pub(in crate::features) fn ai_terminal_context(&self) -> AiContext {
@@ -540,8 +544,10 @@ impl NyaTermApp {
             while let Some(event) = rx.next().await {
                 if this
                     .update(cx, |this, cx| {
+                        let before = this.ai_header_presentation();
                         if this.ai.chat_event_is_wanted() && this.apply_ai_chat_event(event, cx) {
                             this.flush_ai_panel_snapshot(cx);
+                            this.notify_root_if_ai_header_changed(before, cx);
                         }
                     })
                     .is_err()

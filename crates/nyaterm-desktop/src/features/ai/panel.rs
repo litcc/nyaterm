@@ -106,11 +106,21 @@ pub(in crate::features) struct AiPanelSnapshot {
     pub background_execution_enabled: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::features) struct AiHeaderPresentation {
+    pub running: bool,
+    pub selected_model_id: Option<String>,
+    pub model_label: String,
+    pub execution_mode: AgentCommandExecutionMode,
+}
+
 pub(in crate::features) struct AiPanel {
     app: WeakEntity<NyaTermApp>,
     snapshot: Option<AiPanelSnapshot>,
     #[cfg(test)]
     paint_count: usize,
+    #[cfg(test)]
+    snapshot_set_count: usize,
 }
 
 impl AiPanel {
@@ -120,6 +130,8 @@ impl AiPanel {
             snapshot: None,
             #[cfg(test)]
             paint_count: 0,
+            #[cfg(test)]
+            snapshot_set_count: 0,
         }
     }
 
@@ -129,6 +141,10 @@ impl AiPanel {
         cx: &mut Context<Self>,
     ) {
         self.snapshot = Some(snapshot);
+        #[cfg(test)]
+        {
+            self.snapshot_set_count += 1;
+        }
         cx.notify();
     }
 
@@ -140,6 +156,11 @@ impl AiPanel {
     #[cfg(test)]
     pub(in crate::features) fn paint_count(&self) -> usize {
         self.paint_count
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn snapshot_set_count(&self) -> usize {
+        self.snapshot_set_count
     }
 
     pub(in crate::features) fn with_app<R: Default>(
@@ -2199,6 +2220,43 @@ impl gpui::Render for AiPanel {
 }
 
 impl NyaTermApp {
+    pub(in crate::features) fn ai_header_presentation(&self) -> AiHeaderPresentation {
+        let selected_model_id = self.ai_selected_model_id();
+        let model_label = selected_model_id
+            .as_deref()
+            .and_then(|model_id| {
+                self.ai
+                    .settings_config()
+                    .models
+                    .iter()
+                    .find(|model| model.id == model_id)
+                    .map(|model| truncate_preview(&model.name, 28))
+            })
+            .unwrap_or_else(|| t!("ai.notConfigured").to_string());
+        AiHeaderPresentation {
+            running: self.ai.chat_or_agent_is_running(),
+            selected_model_id,
+            model_label,
+            execution_mode: self
+                .ai
+                .settings_config()
+                .agent_command_execution_mode
+                .clone(),
+        }
+    }
+
+    pub(in crate::features) fn notify_root_if_ai_header_changed(
+        &self,
+        before: AiHeaderPresentation,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if before == self.ai_header_presentation() {
+            return false;
+        }
+        cx.notify();
+        true
+    }
+
     pub(in crate::features) fn dismiss_ai_detected_error(&mut self, cx: &mut Context<Self>) {
         self.ai.dismiss_detected_error();
         self.defer_ai_panel_snapshot_flush(cx);
@@ -2318,22 +2376,30 @@ impl NyaTermApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        let before = self.ai_header_presentation();
         if !self.ai.confirm_agent_auto_execution() {
             return false;
         }
         self.persist_ai_settings_now(cx);
         self.defer_ai_panel_snapshot_flush(cx);
-        cx.notify();
+        self.notify_root_if_ai_header_changed(before, cx);
         true
     }
 
-    pub(in crate::features) fn defer_ai_panel_snapshot_flush(&self, cx: &mut Context<Self>) {
+    pub(in crate::features) fn defer_ai_panel_snapshot_flush(&mut self, cx: &mut Context<Self>) {
+        if !self.ai.request_panel_refresh() {
+            return;
+        }
         self.defer_app_update(cx, |app, cx| {
+            if !app.ai.take_panel_refresh_request() {
+                return;
+            }
             app.flush_ai_panel_snapshot(cx);
         });
     }
 
     pub(in crate::features) fn flush_ai_panel_snapshot(&mut self, cx: &mut Context<Self>) {
+        self.ai.clear_panel_refresh_request();
         let snapshot = self.build_ai_panel_snapshot(cx);
         let panel = self.ai_panel.clone();
         panel.update(cx, |panel, cx| panel.set_snapshot(snapshot, cx));
@@ -2466,7 +2532,7 @@ impl NyaTermApp {
                 .ai
                 .chat_prepared_request()
                 .is_some_and(|request| request.action == AiAction::CustomFileAction),
-            messages: self.ai.chat_messages().to_vec().into(),
+            messages: self.ai.chat_snapshot_messages(),
             streaming_assistant_id: self.ai.chat_streaming_assistant_id().map(str::to_string),
             command_cards: self.ai.chat_command_cards().to_vec().into(),
             agent_steps: self
@@ -2697,11 +2763,14 @@ mod tests {
         AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, div, px,
     };
-    use nyaterm_core::{AiMode, AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{
+        AgentCommandExecutionMode, AiMode, AiModelConfigItem, AiModelSource, AiProviderKind,
+        AiSettings, AppRuntime, RuntimeMode, uuid,
+    };
     use nyaterm_ui::NyaInputEvent;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
-    use crate::features::NyaTermApp;
+    use crate::features::{NyaTermApp, runtime_jobs::AiChatJobOutput};
 
     fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
         let root = std::env::temp_dir().join(format!(
@@ -2808,6 +2877,10 @@ mod tests {
         app.read(cx).ai_panel.read(cx).paint_count()
     }
 
+    fn ai_snapshot_sets(app: &Entity<NyaTermApp>, cx: &mut gpui::App) -> usize {
+        app.read(cx).ai_panel.read(cx).snapshot_set_count()
+    }
+
     fn connection_paints(app: &Entity<NyaTermApp>, cx: &mut gpui::App) -> usize {
         app.read(cx).connection_panel.read(cx).paint_count()
     }
@@ -2818,6 +2891,163 @@ mod tests {
 
     fn settings_paints(app: &Entity<NyaTermApp>, cx: &mut gpui::App) -> usize {
         app.read(cx).settings_panel.read(cx).paint_count()
+    }
+
+    #[test]
+    fn repeated_ai_refresh_requests_coalesce() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let before = vcx.update(|_, cx| ai_snapshot_sets(&app, cx));
+
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.defer_ai_panel_snapshot_flush(cx);
+                app.defer_ai_panel_snapshot_flush(cx);
+                app.defer_ai_panel_snapshot_flush(cx);
+            });
+        });
+        vcx.run_until_parked();
+
+        let after = vcx.update(|_, cx| ai_snapshot_sets(&app, cx));
+        assert_eq!(
+            after,
+            before + 1,
+            "same-cycle refresh requests should build/set one snapshot"
+        );
+
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                app.defer_ai_panel_snapshot_flush(cx);
+            });
+        });
+        vcx.run_until_parked();
+
+        assert_eq!(
+            vcx.update(|_, cx| ai_snapshot_sets(&app, cx)),
+            after + 1,
+            "a completed flush must not lock out the next refresh request"
+        );
+
+        let after_single = vcx.update(|_, cx| ai_snapshot_sets(&app, cx));
+        vcx.update(|_, cx| {
+            let panel = app.read(cx).ai_panel.clone();
+            panel.update(cx, |panel, cx| {
+                panel.with_app(cx, |app, cx| {
+                    app.defer_ai_panel_snapshot_flush(cx);
+                });
+            });
+        });
+        vcx.run_until_parked();
+
+        assert_eq!(
+            vcx.update(|_, cx| ai_snapshot_sets(&app, cx)),
+            after_single + 1,
+            "with_app fallback plus an explicit refresh should still coalesce"
+        );
+    }
+
+    #[test]
+    fn ai_header_running_transition_notifies_root() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+
+            let idle = app.ai_header_presentation();
+            assert!(!idle.running);
+            let launch = app
+                .ai
+                .begin_chat_request("inspect".to_string(), AiMode::Ask, None);
+            let running = app.ai_header_presentation();
+            assert!(running.running);
+            assert_ne!(idle, running, "idle -> running should move the header");
+
+            assert!(app.ai.apply_chat_delta(launch.job_id, "hello", None));
+            assert_eq!(
+                app.ai_header_presentation(),
+                running,
+                "ordinary streaming deltas must not move the root header projection"
+            );
+
+            app.ai
+                .finish_chat_job(
+                    launch.job_id,
+                    launch.session_id,
+                    Ok(AiChatJobOutput {
+                        mode: AiMode::Ask,
+                        text: "done".to_string(),
+                        reasoning: None,
+                        command_cards: Vec::new(),
+                        auto_execute_first: false,
+                        approval_note: None,
+                    }),
+                )
+                .expect("matching job should finish");
+            let finished = app.ai_header_presentation();
+            assert!(!finished.running);
+            assert_ne!(running, finished, "running -> idle should move the header");
+
+            let cancel_launch =
+                app.ai
+                    .begin_chat_request("cancel me".to_string(), AiMode::Ask, None);
+            let cancel_running = app.ai_header_presentation();
+            assert!(cancel_running.running);
+            app.ai.cancel_chat_and_agent();
+            assert!(
+                cancel_launch
+                    .cancel
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+            let cancelled = app.ai_header_presentation();
+            assert!(!cancelled.running);
+            assert_ne!(
+                cancel_running, cancelled,
+                "cancel should move running back to idle"
+            );
+
+            let execution_before = app.ai_header_presentation();
+            app.ai
+                .set_settings_command_mode(AgentCommandExecutionMode::Auto);
+            let execution_after = app.ai_header_presentation();
+            assert_ne!(
+                execution_before, execution_after,
+                "execution mode is part of the root header projection"
+            );
+
+            let settings = AiSettings {
+                models: vec![
+                    AiModelConfigItem {
+                        id: "openai:model-a".to_string(),
+                        name: "Model A".to_string(),
+                        provider_kind: Some(AiProviderKind::Openai),
+                        credential_id: None,
+                        enabled: true,
+                        source: AiModelSource::Manual,
+                        last_seen_at: None,
+                    },
+                    AiModelConfigItem {
+                        id: "openai:model-b".to_string(),
+                        name: "Model B".to_string(),
+                        provider_kind: Some(AiProviderKind::Openai),
+                        credential_id: None,
+                        enabled: true,
+                        source: AiModelSource::Manual,
+                        last_seen_at: None,
+                    },
+                ],
+                default_model_id: Some("openai:model-a".to_string()),
+                ..AiSettings::default()
+            };
+            app.ai.replace_settings_config(settings, true);
+            let model_before = app.ai_header_presentation();
+            app.ai.set_settings_default_model("openai:model-b");
+            let model_after = app.ai_header_presentation();
+            assert_ne!(
+                model_before, model_after,
+                "selected model is part of the root header projection"
+            );
+            assert_eq!(model_after.model_label, "Model B");
+        });
     }
 
     #[test]

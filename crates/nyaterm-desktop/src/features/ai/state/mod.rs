@@ -192,6 +192,7 @@ struct AiPanelState {
     focused_field: AiInputField,
     detected_error: Option<AiDetectedErrorState>,
     error_notice_at: HashMap<String, Instant>,
+    panel_refresh_requested: bool,
 }
 
 impl AiFeatureState {
@@ -285,6 +286,7 @@ impl AiFeatureState {
                 focused_field: AiInputField::Model,
                 detected_error: None,
                 error_notice_at: HashMap::new(),
+                panel_refresh_requested: false,
             },
         }
     }
@@ -844,6 +846,21 @@ impl AiFeatureState {
 
     pub(in crate::features) fn chat_messages(&self) -> &[Arc<AiMessage>] {
         &self.chat.messages
+    }
+
+    pub(in crate::features) fn chat_snapshot_messages(&self) -> Arc<[Arc<AiMessage>]> {
+        let streaming_id = self.chat_streaming_assistant_id();
+        self.chat_messages()
+            .iter()
+            .map(|message| {
+                if streaming_id == Some(message.id.as_str()) {
+                    Arc::new((**message).clone())
+                } else {
+                    Arc::clone(message)
+                }
+            })
+            .collect::<Vec<_>>()
+            .into()
     }
 
     pub(in crate::features) fn chat_streaming_assistant_id(&self) -> Option<&str> {
@@ -1560,6 +1577,22 @@ impl AiFeatureState {
 
     pub(in crate::features) fn set_agent_loop_clock_armed(&mut self, armed: bool) {
         self.agent.loop_clock_armed = armed;
+    }
+
+    pub(in crate::features) fn request_panel_refresh(&mut self) -> bool {
+        if self.panel.panel_refresh_requested {
+            return false;
+        }
+        self.panel.panel_refresh_requested = true;
+        true
+    }
+
+    pub(in crate::features) fn take_panel_refresh_request(&mut self) -> bool {
+        std::mem::take(&mut self.panel.panel_refresh_requested)
+    }
+
+    pub(in crate::features) fn clear_panel_refresh_request(&mut self) {
+        self.panel.panel_refresh_requested = false;
     }
 
     pub(in crate::features) fn process_agent_output(

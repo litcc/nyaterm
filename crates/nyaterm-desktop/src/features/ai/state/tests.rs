@@ -530,6 +530,35 @@ fn chat_start_stream_and_finish_are_reduced_by_the_owner() {
 }
 
 #[test]
+fn streaming_snapshot_does_not_share_mutable_message_arc() {
+    let cx = TestAppContext::single();
+    let mut state = state(&cx);
+    let launch = state.begin_chat_request("inspect".to_string(), AiMode::Ask, None);
+    assert!(state.apply_chat_delta(launch.job_id, "hello", None));
+
+    let snapshot_messages = state.chat_snapshot_messages();
+    let state_messages = state.chat_messages();
+    assert_eq!(state_messages.len(), 2);
+    assert_eq!(snapshot_messages.len(), 2);
+    assert!(
+        Arc::ptr_eq(&state_messages[0], &snapshot_messages[0]),
+        "completed user messages should stay shared with the snapshot"
+    );
+    assert!(
+        !Arc::ptr_eq(&state_messages[1], &snapshot_messages[1]),
+        "the active streaming assistant message should be copied for snapshots"
+    );
+    assert_eq!(snapshot_messages[1].content, "hello");
+
+    assert!(state.apply_chat_delta(launch.job_id, " world", None));
+    assert_eq!(state.chat_messages()[1].content, "hello world");
+    assert_eq!(
+        snapshot_messages[1].content, "hello",
+        "old snapshots should remain immutable after later streaming deltas"
+    );
+}
+
+#[test]
 fn chat_cancel_invalidates_the_job_and_clears_agent_lifecycle() {
     let cx = TestAppContext::single();
     let mut state = state(&cx);

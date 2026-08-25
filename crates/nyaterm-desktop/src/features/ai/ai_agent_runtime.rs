@@ -110,6 +110,7 @@ impl NyaTermApp {
         command: &str,
         cx: &mut Context<Self>,
     ) -> Result<Option<String>, String> {
+        let before = self.ai_header_presentation();
         let Some(terminal_session_id) = self.ai_effective_target_session_id() else {
             return Ok(None);
         };
@@ -173,6 +174,7 @@ impl NyaTermApp {
             "Running",
             truncate_preview(command.trim(), 140),
         );
+        self.notify_root_if_ai_header_changed(before, cx);
         Ok(wrapped_command)
     }
 
@@ -181,6 +183,7 @@ impl NyaTermApp {
         command: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
+        let before = self.ai_header_presentation();
         let Some(terminal_session_id) = self.ai_effective_target_session_id() else {
             return Err(
                 "Start a terminal session before using AI Agent background execution".to_string(),
@@ -297,6 +300,7 @@ impl NyaTermApp {
             }
         });
         self.defer_ai_panel_snapshot_flush(cx);
+        self.notify_root_if_ai_header_changed(before, cx);
         Ok(())
     }
 
@@ -321,6 +325,7 @@ impl NyaTermApp {
                     .timer(AGENT_OBSERVATION_POLL_INTERVAL)
                     .await;
                 let Ok(keep_running) = this.update(cx, |this, cx| {
+                    let before = this.ai_header_presentation();
                     if this.drive_ai_agent_loop(cx) {
                         this.defer_ai_panel_snapshot_flush(cx);
                     }
@@ -328,6 +333,7 @@ impl NyaTermApp {
                     if !running {
                         this.ai.set_agent_loop_clock_armed(false);
                     }
+                    this.notify_root_if_ai_header_changed(before, cx);
                     running
                 }) else {
                     break;

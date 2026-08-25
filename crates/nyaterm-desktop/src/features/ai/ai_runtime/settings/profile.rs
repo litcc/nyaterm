@@ -19,9 +19,10 @@ impl NyaTermApp {
         mode: AgentCommandExecutionMode,
         cx: &mut Context<Self>,
     ) {
+        let before = self.ai_header_presentation();
         self.ai.set_settings_command_mode(mode);
         self.persist_ai_settings_now(cx);
-        cx.notify();
+        self.notify_root_if_ai_header_changed(before, cx);
     }
 
     pub(in crate::features) fn toggle_ai_background_execution(&mut self, cx: &mut Context<Self>) {

@@ -635,20 +635,7 @@ impl NyaTermApp {
     fn side_panel_meta(&self, _side: PanelSide, panel: NavItem) -> SharedString {
         match panel {
             NavItem::Connections => SharedString::from(""),
-            NavItem::AiAssistant => {
-                let label = self
-                    .ai_selected_model_id()
-                    .and_then(|model_id| {
-                        self.ai
-                            .settings_config()
-                            .models
-                            .iter()
-                            .find(|model| model.id == model_id)
-                            .map(|model| truncate_preview(&model.name, 28))
-                    })
-                    .unwrap_or_else(|| t!("ai.notConfigured").to_string());
-                SharedString::from(label)
-            }
+            NavItem::AiAssistant => SharedString::from(self.ai_header_presentation().model_label),
             NavItem::ActiveSessions => SharedString::from(""),
             // Tauri NetworkPanel header shows active tab profile count.
             NavItem::Tunnels => {

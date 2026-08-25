@@ -11,9 +11,10 @@ impl NyaTermApp {
         model_id: String,
         cx: &mut Context<Self>,
     ) {
+        let before = self.ai_header_presentation();
         self.ai.toggle_settings_model_enabled(&model_id);
         self.persist_ai_settings_now(cx);
-        cx.notify();
+        self.notify_root_if_ai_header_changed(before, cx);
     }
 
     pub(in crate::features) fn apply_ai_settings_model_search(
@@ -30,9 +31,10 @@ impl NyaTermApp {
         model_id: String,
         cx: &mut Context<Self>,
     ) {
+        let before = self.ai_header_presentation();
         self.ai.set_settings_default_model(&model_id);
         self.persist_ai_settings_now(cx);
-        cx.notify();
+        self.notify_root_if_ai_header_changed(before, cx);
     }
 
     pub(in crate::features) fn remove_ai_manual_model(
