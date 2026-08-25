@@ -1,4 +1,47 @@
-use nyaterm_transport::RemoteDockerOverview;
+use nyaterm_transport::{RemoteDockerOverview, SshMultiplexHandle, SshSessionConfig};
+
+use crate::features::NyaTermApp;
+
+pub(in crate::features) struct ActiveSshRuntimeContext {
+    pub(in crate::features) session_id: String,
+    pub(in crate::features) config: SshSessionConfig,
+    pub(in crate::features) multiplex: SshMultiplexHandle,
+}
+
+impl NyaTermApp {
+    pub(in crate::features) fn active_ssh_runtime_context(
+        &mut self,
+        action: &str,
+    ) -> Result<ActiveSshRuntimeContext, String> {
+        let session_id = self
+            .session
+            .active_id_owned()
+            .ok_or_else(|| format!("start an SSH session before {action}"))?;
+        let config = self
+            .session
+            .active_ssh_config_owned()
+            .ok_or_else(|| format!("start an SSH session before {action}"))?;
+        let has_multiplex_key = self
+            .session
+            .metadata(&session_id)
+            .and_then(|metadata| metadata.ssh_multiplex_key.as_ref())
+            .is_some();
+        if let Some(multiplex) = self.session.ssh_multiplex_handle_for_session(&session_id) {
+            return Ok(ActiveSshRuntimeContext {
+                session_id,
+                config,
+                multiplex,
+            });
+        }
+        if has_multiplex_key {
+            Err(format!("reconnect the SSH session before {action}"))
+        } else {
+            Err(format!(
+                "reconnect this SSH session to enable shared transport before {action}"
+            ))
+        }
+    }
+}
 
 pub(super) const DOCKER_SHELL_SELECTOR: &str = "if command -v bash >/dev/null 2>&1; then exec bash; elif command -v zsh >/dev/null 2>&1; then exec zsh; elif command -v fish >/dev/null 2>&1; then exec fish; elif command -v ash >/dev/null 2>&1; then exec ash; else exec sh; fi";
 

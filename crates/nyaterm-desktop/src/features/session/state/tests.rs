@@ -5,8 +5,9 @@ use gpui::TestAppContext;
 use nyaterm_core::{AiExecutionProfile, uuid};
 use nyaterm_store::{StoreConfig, StoreRuntime};
 use nyaterm_transport::{
-    LocalSessionConfig, SessionEvent, SessionKind, SessionManager, SshCredentialPrompt,
-    SshCredentialPromptKind, SshCredentialPromptReason, SshHostKey, SshKeyboardInteractivePrompt,
+    LocalSessionConfig, RemoteFileBackendPreference, RemoteFileBackendPreferenceStore,
+    SessionEvent, SessionKind, SessionManager, SshCredentialPrompt, SshCredentialPromptKind,
+    SshCredentialPromptReason, SshHostKey, SshKeyboardInteractivePrompt,
     SshKeyboardInteractiveRequest, SshSessionConfig,
 };
 
@@ -100,6 +101,25 @@ fn session_metadata(name: &str, multiplex_key: Option<&str>) -> SessionRuntimeMe
         ai_execution_profile: AiExecutionProfile::Posix,
         launch_config: SessionLaunchConfig::Local(config),
         disconnected: false,
+    }
+}
+
+struct EmptyRemoteFilePreferenceStore;
+
+impl RemoteFileBackendPreferenceStore for EmptyRemoteFilePreferenceStore {
+    fn load_backend(
+        &self,
+        _endpoint_key: &str,
+    ) -> anyhow::Result<Option<RemoteFileBackendPreference>> {
+        Ok(None)
+    }
+
+    fn save_backend(
+        &self,
+        _endpoint_key: &str,
+        _preference: &RemoteFileBackendPreference,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
@@ -760,6 +780,31 @@ fn session_disconnect_transition_is_idempotent_and_reports_multiplex_owner() {
         .mark_session_disconnected("session-b")
         .expect("shared session should transition");
     assert!(!sessions.other_live_session_uses_multiplex_key("session-a", "multiplex-a"));
+}
+
+#[test]
+fn remote_file_service_requires_live_multiplex_for_session_scoped_ssh() {
+    let cx = TestAppContext::single();
+    let mut sessions = session_state(&cx);
+    let config = SshSessionConfig {
+        name: "ssh".to_string(),
+        host: "example.test".to_string(),
+        username: "tester".to_string(),
+        ..SshSessionConfig::default()
+    };
+    let mut metadata = session_metadata("ssh", Some("multiplex-a"));
+    metadata.ssh_config = Some(config.clone());
+    metadata.launch_config = SessionLaunchConfig::Ssh(Box::new(config.clone()));
+    sessions.register_session_metadata("session-a", metadata);
+
+    let error = sessions
+        .remote_file_service_for_session(
+            "session-a",
+            config,
+            Arc::new(EmptyRemoteFilePreferenceStore),
+        )
+        .expect_err("missing session-scoped handle should not fall back to dedicated SSH");
+    assert!(error.to_string().contains("reconnect the SSH session"));
 }
 
 #[test]

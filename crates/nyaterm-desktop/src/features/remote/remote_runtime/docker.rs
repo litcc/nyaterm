@@ -10,25 +10,35 @@ use crate::features::runtime_jobs::{DockerJobOutput, DockerJobResult};
 use crate::models::{DockerConfirmAction, DockerConfirmState, NavItem};
 
 use super::helpers::{
-    DOCKER_SHELL_SELECTOR, docker_compose_terminal_base, docker_overview_status, shell_quote,
+    ActiveSshRuntimeContext, DOCKER_SHELL_SELECTOR, docker_compose_terminal_base,
+    docker_overview_status, shell_quote,
 };
 
 impl NyaTermApp {
+    fn active_docker_runtime_context(
+        &mut self,
+        action: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<ActiveSshRuntimeContext> {
+        match self.active_ssh_runtime_context(action) {
+            Ok(context) => Some(context),
+            Err(message) => {
+                self.remote_ops.set_docker_status(message);
+                self.shell
+                    .set_status(self.remote_ops.docker_status().to_string());
+                cx.notify();
+                None
+            }
+        }
+    }
+
     pub(in crate::features) fn refresh_docker(&mut self, cx: &mut Context<Self>) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before inspecting Docker");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("inspecting Docker", cx) else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before inspecting Docker");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -40,10 +50,12 @@ impl NyaTermApp {
         self.remote_ops.mark_docker_refresh_started();
         self.remote_ops.set_docker_status("loading Docker overview");
         std::thread::spawn(move || {
-            let result = DockerService::new(config)
-                .overview()
-                .map(DockerJobOutput::Overview)
-                .map_err(|error| error.to_string());
+            let result = (|| {
+                Ok(DockerService::with_multiplex(config, multiplex)?
+                    .overview()
+                    .map(DockerJobOutput::Overview)?)
+            })()
+            .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
@@ -60,20 +72,12 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing containers");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("changing containers", cx) else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing containers");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -88,7 +92,7 @@ impl NyaTermApp {
         ));
         std::thread::spawn(move || {
             let result = (|| {
-                let service = DockerService::new(config);
+                let service = DockerService::with_multiplex(config, multiplex)?;
                 service.container_action(&container_id, action)?;
                 let overview = service.overview()?;
                 Ok(DockerJobOutput::RefreshedAfterAction {
@@ -111,20 +115,12 @@ impl NyaTermApp {
         container_id: String,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before reading Docker details");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("reading Docker details", cx) else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before reading Docker details");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -138,13 +134,15 @@ impl NyaTermApp {
             format!("loading details for {}", compact_id(&container_id)),
         );
         std::thread::spawn(move || {
-            let result = DockerService::new(config)
-                .container_details(&container_id)
-                .map(|details| DockerJobOutput::Details {
-                    container_id,
-                    details,
-                })
-                .map_err(|error| error.to_string());
+            let result = (|| {
+                Ok(DockerService::with_multiplex(config, multiplex)?
+                    .container_details(&container_id)
+                    .map(|details| DockerJobOutput::Details {
+                        container_id,
+                        details,
+                    })?)
+            })()
+            .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
@@ -258,20 +256,13 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before reading compose services");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("reading compose services", cx)
+        else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before reading compose services");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -285,14 +276,16 @@ impl NyaTermApp {
             .set_docker_status(format!("loading compose services for {project_name}"));
         self.remote_ops.clear_compose_service_error(&key);
         std::thread::spawn(move || {
-            let result = DockerService::new(config)
-                .compose_services(&project_name, config_files.as_deref())
-                .map(|services| DockerJobOutput::ComposeServices {
-                    key,
-                    project_name,
-                    services,
-                })
-                .map_err(|error| error.to_string());
+            let result = (|| {
+                Ok(DockerService::with_multiplex(config, multiplex)?
+                    .compose_services(&project_name, config_files.as_deref())
+                    .map(|services| DockerJobOutput::ComposeServices {
+                        key,
+                        project_name,
+                        services,
+                    })?)
+            })()
+            .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(DockerJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
@@ -311,20 +304,13 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing compose services");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("changing compose services", cx)
+        else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing compose services");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -338,7 +324,7 @@ impl NyaTermApp {
             .set_docker_status(format!("compose {action} {service_name}"));
         std::thread::spawn(move || {
             let result = (|| {
-                let service = DockerService::new(config);
+                let service = DockerService::with_multiplex(config, multiplex)?;
                 service.compose_service_action(
                     &project_name,
                     config_files.as_deref(),
@@ -373,20 +359,13 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing compose projects");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("changing compose projects", cx)
+        else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing compose projects");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -401,7 +380,7 @@ impl NyaTermApp {
         self.remote_ops.clear_compose_service_error(&key);
         std::thread::spawn(move || {
             let result = (|| {
-                let service = DockerService::new(config);
+                let service = DockerService::with_multiplex(config, multiplex)?;
                 service.compose_action(&project_name, config_files.as_deref(), action)?;
                 let overview = service.overview()?;
                 let service_result =
@@ -459,20 +438,13 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing Docker resources");
-            self.shell
-                .set_status(self.remote_ops.docker_status().to_string());
-            cx.notify();
+        let Some(context) = self.active_docker_runtime_context("changing Docker resources", cx)
+        else {
             return;
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_docker_status("start an SSH session before changing Docker resources");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.docker_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_docker_status("Docker operation already running");
@@ -486,7 +458,7 @@ impl NyaTermApp {
         std::thread::spawn(move || {
             let result = (|| {
                 let label = confirm.title.clone();
-                let service = DockerService::new(config);
+                let service = DockerService::with_multiplex(config, multiplex)?;
                 match confirm.action {
                     DockerConfirmAction::ContainerAction {
                         container_id,

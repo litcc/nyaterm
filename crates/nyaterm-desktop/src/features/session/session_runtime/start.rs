@@ -7,6 +7,7 @@ use nyaterm_core::{
     AiExecutionProfile, ConnectionAuth, ConnectionType, SavedConnection, SftpCwdFollowMode,
     SftpSettings, SshAgentForwardingConfig as CoreSshAgentForwardingConfig, SshAlgorithmMode,
     SshAlgorithmPreferences, SshProfile, normalize_ssh_agent_endpoint, resolve_ssh_terminal_type,
+    uuid,
 };
 use nyaterm_store::{StoreBlockingClient, StoreDomain, store_request};
 use nyaterm_transport::{
@@ -15,8 +16,8 @@ use nyaterm_transport::{
     SshAgentStoredKeySnapshot, SshKeyAuthConfig, SshProxyConfig, SshSessionConfig,
     SshSessionProfile, TelnetAutoLoginConfig, TelnetSessionConfig, VncClipboardConfig,
     VncDisplayConfig, VncReconnectConfig, VncSecurityConfig, VncSessionConfig,
-    parse_rdp_certificate_policy, parse_rdp_clipboard_mode, parse_rdp_display_mode,
-    parse_vnc_scale_mode, parse_vnc_security_mode,
+    open_ssh_multiplex_handle, parse_rdp_certificate_policy, parse_rdp_clipboard_mode,
+    parse_rdp_display_mode, parse_vnc_scale_mode, parse_vnc_security_mode,
 };
 
 use super::super::NativeHostKeyVerifier;
@@ -601,6 +602,7 @@ impl NyaTermApp {
         let desired_geometry =
             self.desired_terminal_resize_geometry_for_session_hint(geometry_session_hint);
         let build_context = self.ssh_session_config_build_context();
+        let multiplex_key = format!("ssh-session:{}", uuid());
         let request_id = self.register_pending_session_start(
             PendingSessionStartRegistration {
                 connection_name: connection_name.clone(),
@@ -614,7 +616,7 @@ impl NyaTermApp {
                 insert_index,
                 seed_output,
                 startup_command,
-                multiplex_key: None,
+                multiplex_key: Some(multiplex_key),
                 source_connection_id,
                 reconnect_session_id,
                 workspace_split,
@@ -643,12 +645,25 @@ impl NyaTermApp {
                     config.pixel_width = geometry.pixel_width;
                     config.pixel_height = geometry.pixel_height;
                 }
-                let session_info = session_manager
-                    .create_ssh_session(config.clone())
-                    .map_err(|error| error.to_string())?;
+                let multiplex =
+                    open_ssh_multiplex_handle(config.clone()).map_err(|error| error.to_string())?;
+                let session_info = match session_manager
+                    .create_ssh_session_with_multiplex(config.clone(), multiplex.clone())
+                {
+                    Ok(info) => info,
+                    Err(error) => {
+                        if let Err(disconnect_error) = multiplex.disconnect() {
+                            tracing::warn!(
+                                error = %disconnect_error,
+                                "failed to disconnect unused SSH multiplex handle after session start failure"
+                            );
+                        }
+                        return Err(error.to_string());
+                    }
+                };
                 Ok(SessionStartSuccess {
                     session_info,
-                    multiplex_handle: None,
+                    multiplex_handle: Some(multiplex),
                     launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
                 })
             })();

@@ -7,14 +7,18 @@ use crate::features::runtime_jobs::StatsJobResult;
 
 impl NyaTermApp {
     pub(in crate::features) fn refresh_stats(&mut self, cx: &mut Context<Self>) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_stats_status("start an SSH session before inspecting stats");
-            self.shell
-                .set_status(self.remote_ops.stats_status().to_string());
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("inspecting stats") {
+            Ok(context) => context,
+            Err(message) => {
+                self.remote_ops.set_stats_status(message);
+                self.shell
+                    .set_status(self.remote_ops.stats_status().to_string());
+                cx.notify();
+                return;
+            }
         };
+        let config = context.config;
+        let multiplex = context.multiplex;
         if !config.remote_stats_enabled() {
             self.remote_ops
                 .set_stats_status("remote stats are unavailable for network device sessions");
@@ -23,12 +27,7 @@ impl NyaTermApp {
             cx.notify();
             return;
         }
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_stats_status("start an SSH session before inspecting stats");
-            cx.notify();
-            return;
-        };
+        let job_session_id = context.session_id;
         if self.remote_ops.stats_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_stats_status("stats refresh already running");
@@ -41,8 +40,7 @@ impl NyaTermApp {
         self.remote_ops
             .set_stats_status("loading remote system stats");
         std::thread::spawn(move || {
-            let result = RemoteStatsService::new(config)
-                .snapshot()
+            let result = (|| RemoteStatsService::with_multiplex(config, multiplex)?.snapshot())()
                 .map_err(|error| error.to_string());
             let _ = ticket.tx.unbounded_send(StatsJobResult {
                 job_id: ticket.job_id,

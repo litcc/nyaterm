@@ -94,7 +94,7 @@ impl ShellRemote {
         let operation = async move {
             tokio::time::timeout(REMOTE_FILE_COMMAND_TIMEOUT, async move {
                 if let Some(multiplex) = multiplex {
-                    let handle = multiplex.target_handle();
+                    let handle = multiplex.exec_target_handle().await;
                     let mut channel = {
                         let handle = handle.lock().await;
                         handle.channel_open_session().await?

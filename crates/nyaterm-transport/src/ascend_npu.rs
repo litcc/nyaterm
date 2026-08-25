@@ -3,8 +3,8 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::{
-    RemoteCommandOutput, SshSessionConfig, ensure_remote_command_success, exec_ssh_command,
-    run_ssh_exec_operation,
+    RemoteCommandOutput, SshMultiplexHandle, SshSessionConfig, ensure_remote_command_success,
+    run_ssh_command,
 };
 
 const ASCEND_NPU_TIMEOUT: Duration = Duration::from_secs(15);
@@ -52,6 +52,7 @@ pub struct RemoteNpuProcess {
 #[derive(Debug, Clone)]
 pub struct RemoteNpuService {
     config: SshSessionConfig,
+    multiplex: Option<SshMultiplexHandle>,
 }
 
 pub const ASCEND_NPU_OVERVIEW_SCRIPT: &str = r#"sh -s <<'NYATERM_ASCEND_NPU_SCRIPT'
@@ -139,7 +140,21 @@ NYATERM_ASCEND_NPU_SCRIPT
 
 impl RemoteNpuService {
     pub fn new(config: SshSessionConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            multiplex: None,
+        }
+    }
+
+    pub fn with_multiplex(
+        config: SshSessionConfig,
+        multiplex: SshMultiplexHandle,
+    ) -> anyhow::Result<Self> {
+        multiplex.ensure_matches_config(&config)?;
+        Ok(Self {
+            config,
+            multiplex: Some(multiplex),
+        })
     }
 
     pub fn overview(&self) -> anyhow::Result<RemoteNpuOverview> {
@@ -151,11 +166,12 @@ impl RemoteNpuService {
     }
 
     fn exec_success(&self, command: &str, context: &str) -> anyhow::Result<RemoteCommandOutput> {
-        let output = run_ssh_exec_operation(exec_ssh_command(
+        let output = run_ssh_command(
             self.config.clone(),
+            self.multiplex.clone(),
             command.as_bytes().to_vec(),
             ASCEND_NPU_TIMEOUT,
-        ))?;
+        )?;
         ensure_remote_command_success(output, context)
     }
 }

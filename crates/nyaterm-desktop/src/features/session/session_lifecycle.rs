@@ -1,6 +1,6 @@
 use gpui::{Context, Window};
 
-use crate::features::formatting::{short_id, ssh_multiplex_key};
+use crate::features::formatting::short_id;
 use crate::features::{NyaTermApp, session::SavedConnectionStartOptions};
 use crate::models::{SessionLaunchConfig, StartupCommandRequest};
 
@@ -163,8 +163,10 @@ impl NyaTermApp {
             cx.notify();
             return;
         };
-        let multiplex_key = ssh_multiplex_key(&config);
-        let existing_multiplex = self.session.reusable_multiplex_handle(&multiplex_key);
+        let existing_multiplex_key = metadata.ssh_multiplex_key.clone();
+        let existing_multiplex = self
+            .session
+            .ssh_multiplex_handle_for_session(&source_session_id);
         let custom_name = self
             .session
             .custom_name(&source_session_id)
@@ -184,6 +186,7 @@ impl NyaTermApp {
                     ..Default::default()
                 },
                 existing_multiplex,
+                existing_multiplex_key,
             },
             cx,
         );

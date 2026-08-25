@@ -145,20 +145,19 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn refresh_processes(&mut self, cx: &mut Context<Self>) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_process_status("start an SSH session before listing processes");
-            self.shell
-                .set_status(self.remote_ops.process_status().to_string());
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("listing processes") {
+            Ok(context) => context,
+            Err(message) => {
+                self.remote_ops.set_process_status(message);
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
+                cx.notify();
+                return;
+            }
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_process_status("start an SSH session before listing processes");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.process_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_process_status("process operation already running");
@@ -172,10 +171,12 @@ impl NyaTermApp {
         self.remote_ops
             .set_process_status("listing remote processes");
         std::thread::spawn(move || {
-            let result = SshProcessService::new(config)
-                .list_processes()
-                .map(ProcessJobOutput::Listed)
-                .map_err(|error| error.to_string());
+            let result = (|| {
+                Ok(SshProcessService::with_multiplex(config, multiplex)?
+                    .list_processes()
+                    .map(ProcessJobOutput::Listed)?)
+            })()
+            .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(ProcessJobResult {
                 job_id: ticket.job_id,
                 session_id: job_session_id,
@@ -192,20 +193,19 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_process_status("start an SSH session before signalling processes");
-            self.shell
-                .set_status(self.remote_ops.process_status().to_string());
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("signalling processes") {
+            Ok(context) => context,
+            Err(message) => {
+                self.remote_ops.set_process_status(message);
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
+                cx.notify();
+                return;
+            }
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_process_status("start an SSH session before signalling processes");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.process_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_process_status("process operation already running");
@@ -218,7 +218,7 @@ impl NyaTermApp {
             .set_process_status(format!("sending {signal} to pid {pid}"));
         std::thread::spawn(move || {
             let result = (|| {
-                let service = SshProcessService::new(config);
+                let service = SshProcessService::with_multiplex(config, multiplex)?;
                 service.signal_process(pid, signal)?;
                 let processes = service.list_processes()?;
                 Ok(ProcessJobOutput::Signalled {
@@ -244,20 +244,19 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_process_status("start an SSH session before renicing processes");
-            self.shell
-                .set_status(self.remote_ops.process_status().to_string());
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("renicing processes") {
+            Ok(context) => context,
+            Err(message) => {
+                self.remote_ops.set_process_status(message);
+                self.shell
+                    .set_status(self.remote_ops.process_status().to_string());
+                cx.notify();
+                return;
+            }
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_process_status("start an SSH session before renicing processes");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if self.remote_ops.process_is_pending_for(&job_session_id) {
             self.remote_ops
                 .set_process_status("process operation already running");
@@ -270,7 +269,7 @@ impl NyaTermApp {
             .set_process_status(format!("renicing pid {pid} to {nice}"));
         std::thread::spawn(move || {
             let result = (|| {
-                let service = SshProcessService::new(config);
+                let service = SshProcessService::with_multiplex(config, multiplex)?;
                 service.renice_process(pid, nice)?;
                 let processes = service.list_processes()?;
                 Ok(ProcessJobOutput::Reniced {

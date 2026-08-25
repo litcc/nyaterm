@@ -11,6 +11,7 @@ pub(in crate::features) struct MultiplexSshStartRequest {
     pub ai_execution_profile: AiExecutionProfile,
     pub options: SavedConnectionStartOptions,
     pub existing_multiplex: Option<SshMultiplexHandle>,
+    pub existing_multiplex_key: Option<String>,
 }
 
 pub(in crate::features) struct PendingSessionStartRegistration {

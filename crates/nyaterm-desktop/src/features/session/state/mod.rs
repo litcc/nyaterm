@@ -739,23 +739,24 @@ impl SessionFeatureState {
         self.active_ssh_config()
     }
 
-    pub(in crate::features) fn active_ssh_multiplex_handle(
-        &mut self,
-    ) -> Option<SshMultiplexHandle> {
-        let session_id = self.active_id_owned()?;
-        self.ssh_multiplex_handle_for_session(&session_id)
-    }
-
     pub(in crate::features) fn remote_file_service_for_session(
         &mut self,
         session_id: &str,
         config: SshSessionConfig,
         preference_store: std::sync::Arc<dyn RemoteFileBackendPreferenceStore>,
     ) -> anyhow::Result<RemoteFileService> {
+        let has_multiplex_key = self
+            .metadata(session_id)
+            .and_then(|metadata| metadata.ssh_multiplex_key.as_ref())
+            .is_some();
+        let multiplex = self.ssh_multiplex_handle_for_session(session_id);
+        if has_multiplex_key && multiplex.is_none() {
+            self.protocols.remote_files.remove(session_id);
+            anyhow::bail!("reconnect the SSH session before browsing remote files");
+        }
         if let Some(service) = self.protocols.remote_files.get(session_id) {
             return Ok(service.clone());
         }
-        let multiplex = self.ssh_multiplex_handle_for_session(session_id);
         let service =
             RemoteFileService::with_preference_store(config, multiplex, preference_store)?;
         self.protocols

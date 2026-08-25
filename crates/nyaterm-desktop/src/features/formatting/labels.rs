@@ -6,9 +6,7 @@ use nyaterm_core::{
     AppSettingsSummary, CloudSyncError, CloudSyncHistoryEntry, CloudSyncSettings, RiskLevel,
     TunnelConfig,
 };
-use nyaterm_transport::{
-    SessionKind, SshSessionConfig, SshTunnelMode, TelnetEnterMode, safe_recording_name,
-};
+use nyaterm_transport::{SessionKind, SshTunnelMode, TelnetEnterMode, safe_recording_name};
 
 use crate::features::runtime_jobs::AiAgentStepStatus;
 use crate::theme::ThemePalette;
@@ -587,15 +585,6 @@ pub(in crate::features) fn trim_terminal_output_to(output: &mut String, max_byte
         .find_map(|(index, _)| (index >= output.len() - max_bytes).then_some(index))
         .unwrap_or(0);
     output.drain(..drain_to);
-}
-
-pub(in crate::features) fn ssh_multiplex_key(config: &SshSessionConfig) -> String {
-    format!(
-        "{}@{}:{}",
-        config.username.trim(),
-        config.host.trim().to_ascii_lowercase(),
-        config.port
-    )
 }
 
 pub(in crate::features) fn format_last_used_ms(last_used_at_ms: Option<u64>) -> String {

@@ -1,10 +1,9 @@
 use std::time::{Duration, Instant};
 
 use gpui::Context;
-use nyaterm_transport::SftpCwdFollowMode;
+use nyaterm_transport::{SftpCwdFollowMode, SshProcessService};
 
 use crate::features::NyaTermApp;
-use crate::features::transfers::session_ssh_process_service;
 use crate::models::{
     NavItem, TransferBrowserChildrenMenuStatus, TransferBrowserNavigationSnapshot,
     TransferBrowserPathMenuKind, TransferBrowserPathMenuState, TransferJobEvent, TransferJobKind,
@@ -169,13 +168,19 @@ impl NyaTermApp {
             cx.notify();
             return;
         }
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.shell
-                .set_status("start an SSH session first".to_string());
-            self.ensure_panel_open(NavItem::Transfers);
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("syncing remote cwd") {
+            Ok(context) => context,
+            Err(message) => {
+                self.shell.set_status(message.clone());
+                self.transfer.browser.status = message;
+                self.transfer.browser.loading = false;
+                cx.notify();
+                return;
+            }
         };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = Some(context.session_id);
         let shell_cwd = match config.sftp.cwd_follow_mode {
             SftpCwdFollowMode::Off => {
                 self.transfer.browser.status =
@@ -211,10 +216,8 @@ impl NyaTermApp {
             }
             SftpCwdFollowMode::RcFile => None,
         };
-        let multiplex = self.session.active_ssh_multiplex_handle();
         self.transfer.browser.auto_sync_cwd_last_at = Some(Instant::now());
         let id = self.transfer.next_transfer_job_id("sftp-sync-cwd");
-        let job_session_id = self.session.active_id_owned();
         self.transfer
             .browser
             .navigation_jobs
@@ -254,10 +257,11 @@ impl NyaTermApp {
                         let timeout = Duration::from_millis(
                             config.sftp.shell_detection_timeout_ms.clamp(100, 60_000),
                         );
-                        let output = session_ssh_process_service(config.clone(), multiplex.clone())
-                            .map_err(|error| error.to_string())?
-                            .run_command("pwd -P", timeout)
-                            .map_err(|error| error.to_string())?;
+                        let output =
+                            SshProcessService::with_multiplex(config.clone(), multiplex.clone())
+                                .map_err(|error| error.to_string())?
+                                .run_command("pwd -P", timeout)
+                                .map_err(|error| error.to_string())?;
                         if output.exit_status.is_some_and(|status| status != 0) {
                             let detail = output
                                 .stderr

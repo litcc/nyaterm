@@ -10,18 +10,19 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use super::{
-    DO, ForwardedTcpIpDispatch, IAC, LocalSessionConfig, OPT_SUPPRESS_GO_AHEAD,
-    QueuedTransportWriter, SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT,
-    SESSION_EVENT_QUEUE_OUTPUT_LIMIT, SerialSessionConfig, SessionError, SessionEvent,
-    SessionEventQueue, SessionManager, SftpService, SftpSettings, SshAlgorithmListKind,
-    SshAlgorithmMode, SshAlgorithmPreferences, SshAlgorithmRisk, SshAlgorithmValidationError,
-    SshCommand, SshKeyAuthConfig, SshProxyConfig, SshPtyDimensions, SshSessionConfig,
-    SshSessionProfile, TelnetSessionConfig, WILL, cipher, defaults_from_preferred,
-    drain_deferred_ssh_open_commands, expand_proxy_command, forwarded_tcpip_sender_for,
-    has_password_prompt, has_username_prompt, is_process_list_unsupported, kex, local_pty_size,
-    mac, normalize_process_signal, parse_process_output, remap_del_to_bs,
-    resolve_preferred_algorithms, run_local_command, ssh_client_config, ssh_host_identifier,
-    supported_ssh_algorithms, validate_ssh_algorithm_preferences,
+    DO, DockerService, ForwardedTcpIpDispatch, IAC, LocalSessionConfig, OPT_SUPPRESS_GO_AHEAD,
+    PrimarySessionGate, QueuedTransportWriter, RemoteGpuService, RemoteNpuService,
+    RemoteStatsService, SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT, SESSION_EVENT_QUEUE_OUTPUT_LIMIT,
+    SerialSessionConfig, SessionError, SessionEvent, SessionEventQueue, SessionManager,
+    SftpService, SftpSettings, SshAlgorithmListKind, SshAlgorithmMode, SshAlgorithmPreferences,
+    SshAlgorithmRisk, SshAlgorithmValidationError, SshCommand, SshKeyAuthConfig, SshProxyConfig,
+    SshPtyDimensions, SshSessionConfig, SshSessionProfile, TelnetSessionConfig, WILL, cipher,
+    defaults_from_preferred, drain_deferred_ssh_open_commands, expand_proxy_command,
+    forwarded_tcpip_sender_for, has_password_prompt, has_username_prompt,
+    is_process_list_unsupported, kex, local_pty_size, mac, normalize_process_signal,
+    parse_process_output, register_x11_sender, remap_del_to_bs, resolve_preferred_algorithms,
+    run_local_command, ssh_client_config, ssh_host_identifier, supported_ssh_algorithms,
+    unregister_x11_sender, validate_ssh_algorithm_preferences,
 };
 
 /// A push must hand the event straight to a parked consumer. Before the
@@ -599,6 +600,125 @@ fn sftp_service_rejects_network_device_profile_even_when_saved_enabled() {
         .expect_err("network device SFTP must be disabled before connecting");
 
     assert!(error.to_string().contains("SFTP is disabled"));
+}
+
+#[test]
+fn x11_registry_replaces_stale_sender_and_rejects_concurrent_owner() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        let registry = Arc::new(tokio::sync::Mutex::new(None));
+        let (first_tx, first_rx) = tokio_mpsc::unbounded_channel();
+
+        register_x11_sender(&registry, "session-a", first_tx)
+            .await
+            .expect("first registration");
+        let (same_owner_tx, _same_owner_rx) = tokio_mpsc::unbounded_channel();
+        let error = register_x11_sender(&registry, "session-a", same_owner_tx)
+            .await
+            .expect_err("same live owner should be rejected");
+        assert!(error.to_string().contains("already active"));
+
+        let (second_tx, _second_rx) = tokio_mpsc::unbounded_channel();
+        let error = register_x11_sender(&registry, "session-b", second_tx)
+            .await
+            .expect_err("second live owner should be rejected");
+        assert!(error.to_string().contains("already active"));
+
+        drop(first_rx);
+        let (replacement_tx, replacement_rx) = tokio_mpsc::unbounded_channel();
+        register_x11_sender(&registry, "session-b", replacement_tx)
+            .await
+            .expect("stale sender should be replaced");
+
+        unregister_x11_sender(&registry, "session-a").await;
+        assert!(
+            registry
+                .lock()
+                .await
+                .as_ref()
+                .is_some_and(|registration| registration.session_id == "session-b")
+        );
+        unregister_x11_sender(&registry, "session-b").await;
+        assert!(registry.lock().await.is_none());
+        drop(replacement_rx);
+    });
+}
+
+/// `sshd` hands the PAM login banner to the first session channel on a
+/// connection and clears its buffer right afterwards, so an auxiliary channel
+/// that opens before the terminal's shell silently swallows the whole MOTD.
+/// Session-scoped multiplexing put Stats/Docker/SFTP in that race -- with a
+/// deferred PTY the shell channel is not opened until the first resize arrives
+/// -- so the gate has to hold them until the shell has its channel.
+#[test]
+fn primary_session_gate_holds_auxiliary_channels_until_the_shell_claims_the_slot() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        let gate = Arc::new(PrimarySessionGate::new());
+        tokio::time::timeout(Duration::from_millis(250), gate.wait())
+            .await
+            .expect("a gate no interactive session claimed must never block");
+
+        let claim = PrimarySessionGate::claim(&gate).expect("first claim");
+        assert!(
+            PrimarySessionGate::claim(&gate).is_none(),
+            "only the connection's first interactive session may own the slot"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), gate.wait())
+                .await
+                .is_err(),
+            "auxiliary channels must wait while the shell still holds the claim"
+        );
+
+        drop(claim);
+        tokio::time::timeout(Duration::from_millis(250), gate.wait())
+            .await
+            .expect("releasing the claim must let queued channels through");
+        tokio::time::timeout(Duration::from_millis(250), gate.wait())
+            .await
+            .expect("a released gate stays open for later channels");
+    });
+}
+
+/// A session abandoned during the deferred-PTY wait drops its claim without ever
+/// opening a channel. Nothing else would release the gate in that case, so the
+/// drop -- not the shell request -- has to be what opens it.
+#[test]
+fn primary_session_gate_opens_when_a_pending_session_is_abandoned() {
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        let gate = Arc::new(PrimarySessionGate::new());
+        let claim = PrimarySessionGate::claim(&gate).expect("claim");
+        let waiter = {
+            let gate = gate.clone();
+            tokio::spawn(async move { gate.wait().await })
+        };
+        drop(claim);
+        tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .expect("waiter must be released once the claim is dropped")
+            .expect("waiter task");
+    });
+}
+
+#[test]
+fn remote_services_keep_dedicated_fallback_constructors() {
+    let config = SshSessionConfig {
+        name: "fallback".to_string(),
+        host: "example.test".to_string(),
+        username: "tester".to_string(),
+        ..Default::default()
+    };
+
+    let stats = format!("{:?}", RemoteStatsService::new(config.clone()));
+    let gpu = format!("{:?}", RemoteGpuService::new(config.clone()));
+    let npu = format!("{:?}", RemoteNpuService::new(config.clone()));
+    let docker = format!("{:?}", DockerService::new(config));
+
+    for debug in [stats, gpu, npu, docker] {
+        assert!(debug.contains("multiplex: None"));
+    }
 }
 
 #[test]

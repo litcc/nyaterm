@@ -42,20 +42,19 @@ impl NyaTermApp {
     }
 
     fn refresh_gpu_with_mode(&mut self, skip_unavailable: bool, cx: &mut Context<Self>) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_gpu_status("start an SSH session before inspecting GPU");
-            self.shell
-                .set_status(self.remote_ops.gpu_status().to_string());
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("inspecting GPU") {
+            Ok(context) => context,
+            Err(message) => {
+                self.remote_ops.set_gpu_status(message);
+                self.shell
+                    .set_status(self.remote_ops.gpu_status().to_string());
+                cx.notify();
+                return;
+            }
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_gpu_status("start an SSH session before inspecting GPU");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if skip_unavailable && self.remote_ops.gpu_unavailable_for(&job_session_id) {
             return;
         }
@@ -71,8 +70,7 @@ impl NyaTermApp {
         self.remote_ops
             .set_gpu_status("loading NVIDIA GPU overview");
         std::thread::spawn(move || {
-            let result = RemoteGpuService::new(config)
-                .overview()
+            let result = (|| RemoteGpuService::with_multiplex(config, multiplex)?.overview())()
                 .map_err(|error| error.to_string());
             let _ = ticket.tx.unbounded_send(GpuJobResult {
                 job_id: ticket.job_id,
@@ -156,20 +154,19 @@ impl NyaTermApp {
     }
 
     fn refresh_npu_with_mode(&mut self, skip_unavailable: bool, cx: &mut Context<Self>) {
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.remote_ops
-                .set_npu_status("start an SSH session before inspecting NPU");
-            self.shell
-                .set_status(self.remote_ops.npu_status().to_string());
-            cx.notify();
-            return;
+        let context = match self.active_ssh_runtime_context("inspecting NPU") {
+            Ok(context) => context,
+            Err(message) => {
+                self.remote_ops.set_npu_status(message);
+                self.shell
+                    .set_status(self.remote_ops.npu_status().to_string());
+                cx.notify();
+                return;
+            }
         };
-        let Some(job_session_id) = self.session.active_id_owned() else {
-            self.remote_ops
-                .set_npu_status("start an SSH session before inspecting NPU");
-            cx.notify();
-            return;
-        };
+        let config = context.config;
+        let multiplex = context.multiplex;
+        let job_session_id = context.session_id;
         if skip_unavailable && self.remote_ops.npu_unavailable_for(&job_session_id) {
             return;
         }
@@ -185,8 +182,7 @@ impl NyaTermApp {
         self.remote_ops
             .set_npu_status("loading Ascend NPU overview");
         std::thread::spawn(move || {
-            let result = RemoteNpuService::new(config)
-                .overview()
+            let result = (|| RemoteNpuService::with_multiplex(config, multiplex)?.overview())()
                 .map_err(|error| error.to_string());
             let _ = ticket.tx.unbounded_send(NpuJobResult {
                 job_id: ticket.job_id,

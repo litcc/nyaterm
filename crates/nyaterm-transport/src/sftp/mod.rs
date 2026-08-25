@@ -339,7 +339,7 @@ async fn open_sftp_session_with_client_config(
 ) -> anyhow::Result<OpenSftpSession> {
     let (channel, connection) = if let Some(multiplex) = multiplex {
         multiplex.ensure_matches_config(config)?;
-        let handle = multiplex.target_handle();
+        let handle = multiplex.exec_target_handle().await;
         let channel = open_multiplex_sftp_channel(&handle).await?;
         (channel, OpenSftpConnection::Multiplex)
     } else {

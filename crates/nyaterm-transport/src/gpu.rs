@@ -4,8 +4,8 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::{
-    RemoteCommandOutput, SshSessionConfig, ensure_remote_command_success, exec_ssh_command,
-    run_ssh_exec_operation,
+    RemoteCommandOutput, SshMultiplexHandle, SshSessionConfig, ensure_remote_command_success,
+    run_ssh_command,
 };
 
 const GPU_TIMEOUT: Duration = Duration::from_secs(15);
@@ -48,6 +48,7 @@ pub struct RemoteGpuProcess {
 #[derive(Debug, Clone)]
 pub struct RemoteGpuService {
     config: SshSessionConfig,
+    multiplex: Option<SshMultiplexHandle>,
 }
 
 pub const GPU_OVERVIEW_SCRIPT: &str = r#"sh -s <<'NYATERM_GPU_SCRIPT'
@@ -90,7 +91,21 @@ NYATERM_GPU_SCRIPT
 
 impl RemoteGpuService {
     pub fn new(config: SshSessionConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            multiplex: None,
+        }
+    }
+
+    pub fn with_multiplex(
+        config: SshSessionConfig,
+        multiplex: SshMultiplexHandle,
+    ) -> anyhow::Result<Self> {
+        multiplex.ensure_matches_config(&config)?;
+        Ok(Self {
+            config,
+            multiplex: Some(multiplex),
+        })
     }
 
     pub fn overview(&self) -> anyhow::Result<RemoteGpuOverview> {
@@ -99,11 +114,12 @@ impl RemoteGpuService {
     }
 
     fn exec_success(&self, command: &str, context: &str) -> anyhow::Result<RemoteCommandOutput> {
-        let output = run_ssh_exec_operation(exec_ssh_command(
+        let output = run_ssh_command(
             self.config.clone(),
+            self.multiplex.clone(),
             command.as_bytes().to_vec(),
             GPU_TIMEOUT,
-        ))?;
+        )?;
         ensure_remote_command_success(output, context)
     }
 }

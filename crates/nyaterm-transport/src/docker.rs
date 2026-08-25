@@ -2,8 +2,8 @@ use serde::Serialize;
 use std::time::Duration;
 
 use crate::{
-    RemoteCommandOutput, SshSessionConfig, ensure_remote_command_success, exec_ssh_command,
-    run_ssh_exec_operation,
+    RemoteCommandOutput, SshMultiplexHandle, SshSessionConfig, ensure_remote_command_success,
+    run_ssh_command,
 };
 
 const DOCKER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -121,6 +121,7 @@ pub struct RemoteDockerOverview {
 #[derive(Debug, Clone)]
 pub struct DockerService {
     config: SshSessionConfig,
+    multiplex: Option<SshMultiplexHandle>,
 }
 
 pub const DOCKER_OVERVIEW_SCRIPT: &str = r#"sh -c '
@@ -167,7 +168,21 @@ pub const DOCKER_CONTAINER_DETAILS_STATS_END: &str = "CONTAINER_STATS_END";
 
 impl DockerService {
     pub fn new(config: SshSessionConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            multiplex: None,
+        }
+    }
+
+    pub fn with_multiplex(
+        config: SshSessionConfig,
+        multiplex: SshMultiplexHandle,
+    ) -> anyhow::Result<Self> {
+        multiplex.ensure_matches_config(&config)?;
+        Ok(Self {
+            config,
+            multiplex: Some(multiplex),
+        })
     }
 
     pub fn overview(&self) -> anyhow::Result<RemoteDockerOverview> {
@@ -346,11 +361,12 @@ impl DockerService {
     }
 
     fn exec(&self, command: &str, timeout: Duration) -> anyhow::Result<RemoteCommandOutput> {
-        run_ssh_exec_operation(exec_ssh_command(
+        run_ssh_command(
             self.config.clone(),
+            self.multiplex.clone(),
             command.as_bytes().to_vec(),
             timeout,
-        ))
+        )
     }
 
     fn exec_success(

@@ -227,14 +227,12 @@ impl SshProcessService {
         command: Vec<u8>,
         timeout: Duration,
     ) -> anyhow::Result<RemoteCommandOutput> {
-        if let Some(multiplex) = self.multiplex.clone() {
-            return multiplex.block_on(exec_ssh_command_with_multiplex(
-                multiplex.clone(),
-                command,
-                timeout,
-            ));
-        }
-        run_ssh_exec_operation(exec_ssh_command(self.config.clone(), command, timeout))
+        run_ssh_command(
+            self.config.clone(),
+            self.multiplex.clone(),
+            command,
+            timeout,
+        )
     }
 
     pub fn list_processes(&self) -> anyhow::Result<Vec<RemoteProcess>> {
@@ -370,13 +368,30 @@ pub(crate) async fn exec_ssh_command(
     .map_err(|_| anyhow::anyhow!("remote command timed out"))?
 }
 
-async fn exec_ssh_command_with_multiplex(
+pub(crate) fn run_ssh_command(
+    config: SshSessionConfig,
+    multiplex: Option<SshMultiplexHandle>,
+    command: Vec<u8>,
+    timeout: Duration,
+) -> anyhow::Result<RemoteCommandOutput> {
+    if let Some(multiplex) = multiplex {
+        multiplex.ensure_matches_config(&config)?;
+        return multiplex.block_on(exec_ssh_command_with_multiplex(
+            multiplex.clone(),
+            command,
+            timeout,
+        ));
+    }
+    run_ssh_exec_operation(exec_ssh_command(config, command, timeout))
+}
+
+pub(crate) async fn exec_ssh_command_with_multiplex(
     multiplex: SshMultiplexHandle,
     command: Vec<u8>,
     timeout: Duration,
 ) -> anyhow::Result<RemoteCommandOutput> {
     tokio::time::timeout(timeout, async move {
-        let handle = multiplex.target_handle();
+        let handle = multiplex.exec_target_handle().await;
         let channel = {
             let handle = handle.lock().await;
             open_exec_channel_on_handle(&handle, command).await?

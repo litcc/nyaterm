@@ -16,7 +16,7 @@ use std::sync::Arc;
 use nyaterm_store::{StoreBlockingClient, StoreDomain};
 use nyaterm_transport::{
     RemoteFileBackendKind, RemoteFileBackendPreference, RemoteFileBackendPreferenceStore,
-    RemoteFileService, SshMultiplexHandle, SshProcessService, SshSessionConfig,
+    RemoteFileService, SshSessionConfig,
 };
 
 use crate::features::NyaTermApp;
@@ -115,16 +115,6 @@ impl NyaTermApp {
             .ok_or_else(|| anyhow::anyhow!("source SSH session is unavailable"))?
             .to_string();
         self.remote_file_service_for_session(&session_id, config)
-    }
-}
-
-pub(in crate::features) fn session_ssh_process_service(
-    config: SshSessionConfig,
-    multiplex: Option<SshMultiplexHandle>,
-) -> anyhow::Result<SshProcessService> {
-    match multiplex {
-        Some(multiplex) => SshProcessService::with_multiplex(config, multiplex),
-        None => Ok(SshProcessService::new(config)),
     }
 }
 

@@ -10,7 +10,7 @@ use nyaterm_transport::{
 
 use super::super::state::{failed_session_start_display_name, pending_session_start_display_name};
 use super::{MultiplexSshStartRequest, PendingSessionStartRegistration};
-use crate::features::formatting::{session_kind_label, short_id, ssh_multiplex_key};
+use crate::features::formatting::{session_kind_label, short_id};
 use crate::features::{
     NyaTermApp, runtime_jobs::SessionStartResult, runtime_jobs::SessionStartSuccess,
     session::PendingSessionStart, session::SavedConnectionStartOptions,
@@ -198,6 +198,8 @@ impl NyaTermApp {
             tab_placement,
         } = options;
         let kind = session_kind_for_launch_config(&launch_config);
+        let multiplex_key = matches!(launch_config, SessionLaunchConfig::Ssh(_))
+            .then(|| format!("ssh-session:{}", uuid()));
         let request_id = self.register_pending_session_start(
             PendingSessionStartRegistration {
                 connection_name: connection_name.clone(),
@@ -211,7 +213,7 @@ impl NyaTermApp {
                 insert_index,
                 seed_output,
                 startup_command,
-                multiplex_key: None,
+                multiplex_key,
                 source_connection_id,
                 reconnect_session_id,
                 workspace_split,
@@ -228,10 +230,9 @@ impl NyaTermApp {
         std::thread::spawn(move || {
             let worker_started_at = Instant::now();
             let result = create_session_from_launch_config(&session_manager, launch_config.clone())
-                .map(|session_info| SessionStartSuccess {
-                    session_info,
-                    multiplex_handle: None,
+                .map(|success| SessionStartSuccess {
                     launch_config: Some(launch_config),
+                    ..success
                 })
                 .map_err(|error| error.to_string());
             let worker_finished_at = Instant::now();
@@ -280,6 +281,7 @@ impl NyaTermApp {
             config.pixel_width = geometry.pixel_width;
             config.pixel_height = geometry.pixel_height;
         }
+        let multiplex_key = format!("ssh-session:{}", uuid());
         let request_id = self.register_pending_session_start(
             PendingSessionStartRegistration {
                 connection_name: connection_name.clone(),
@@ -293,7 +295,7 @@ impl NyaTermApp {
                 insert_index,
                 seed_output,
                 startup_command,
-                multiplex_key: None,
+                multiplex_key: Some(multiplex_key),
                 source_connection_id,
                 reconnect_session_id,
                 workspace_split,
@@ -309,14 +311,28 @@ impl NyaTermApp {
         let request_id_for_worker = request_id.clone();
         std::thread::spawn(move || {
             let worker_started_at = Instant::now();
-            let result = session_manager
-                .create_ssh_session(config.clone())
-                .map(|info| SessionStartSuccess {
-                    session_info: info,
-                    multiplex_handle: None,
-                    launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
-                })
-                .map_err(|error| error.to_string());
+            let result = (|| {
+                let multiplex =
+                    open_ssh_multiplex_handle(config.clone()).map_err(|error| error.to_string())?;
+                match session_manager
+                    .create_ssh_session_with_multiplex(config.clone(), multiplex.clone())
+                {
+                    Ok(info) => Ok(SessionStartSuccess {
+                        session_info: info,
+                        multiplex_handle: Some(multiplex),
+                        launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
+                    }),
+                    Err(error) => {
+                        if let Err(disconnect_error) = multiplex.disconnect() {
+                            tracing::warn!(
+                                error = %disconnect_error,
+                                "failed to disconnect unused SSH multiplex handle after session start failure"
+                            );
+                        }
+                        Err(error.to_string())
+                    }
+                }
+            })();
             let worker_finished_at = Instant::now();
             let _ = session_start_tx.unbounded_send(SessionStartResult {
                 request_id: request_id_for_worker,
@@ -341,6 +357,7 @@ impl NyaTermApp {
             ai_execution_profile,
             options,
             existing_multiplex,
+            existing_multiplex_key,
         } = request;
         let options = self.prepare_session_start_options(options);
         let SavedConnectionStartOptions {
@@ -367,7 +384,9 @@ impl NyaTermApp {
             config.pixel_width = geometry.pixel_width;
             config.pixel_height = geometry.pixel_height;
         }
-        let multiplex_key = ssh_multiplex_key(&config);
+        let multiplex_key = existing_multiplex_key
+            .filter(|_| existing_multiplex.is_some())
+            .unwrap_or_else(|| format!("ssh-session:{}", uuid()));
         let request_id = self.register_pending_session_start(
             PendingSessionStartRegistration {
                 connection_name: connection_name.clone(),
@@ -398,19 +417,32 @@ impl NyaTermApp {
         std::thread::spawn(move || {
             let worker_started_at = Instant::now();
             let result = (|| {
-                let multiplex = match existing_multiplex {
-                    Some(handle) if !handle.is_closed() => handle,
-                    _ => open_ssh_multiplex_handle(config.clone())
-                        .map_err(|error| error.to_string())?,
+                let (multiplex, reused_multiplex) = match existing_multiplex {
+                    Some(handle) if !handle.is_closed() => (handle, true),
+                    _ => (
+                        open_ssh_multiplex_handle(config.clone())
+                            .map_err(|error| error.to_string())?,
+                        false,
+                    ),
                 };
-                let info = session_manager
+                match session_manager
                     .create_ssh_session_with_multiplex(config.clone(), multiplex.clone())
-                    .map_err(|error| error.to_string())?;
-                Ok(SessionStartSuccess {
-                    session_info: info,
-                    multiplex_handle: Some(multiplex),
-                    launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
-                })
+                {
+                    Ok(info) => Ok(SessionStartSuccess {
+                        session_info: info,
+                        multiplex_handle: Some(multiplex),
+                        launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
+                    }),
+                    Err(error) => {
+                        if !reused_multiplex && let Err(disconnect_error) = multiplex.disconnect() {
+                            tracing::warn!(
+                                error = %disconnect_error,
+                                "failed to disconnect unused SSH multiplex handle after session start failure"
+                            );
+                        }
+                        Err(error.to_string())
+                    }
+                }
             })();
             let worker_finished_at = Instant::now();
             let _ = session_start_tx.unbounded_send(SessionStartResult {
@@ -544,6 +576,9 @@ impl NyaTermApp {
                     .as_deref()
                     .is_some_and(|stale_id| !self.session.has_session(stale_id))
                 {
+                    if let Some(handle) = success.multiplex_handle {
+                        super::super::disconnect_multiplex_handle(handle);
+                    }
                     if let Err(error) = self.session.manager().close(&session_id) {
                         tracing::warn!(
                             request_id = %request_id,
@@ -778,12 +813,53 @@ const SESSION_START_SLOW_THRESHOLD: Duration = Duration::from_millis(500);
 fn create_session_from_launch_config(
     session_manager: &SessionManager,
     launch_config: SessionLaunchConfig,
-) -> Result<SessionInfo, nyaterm_transport::SessionError> {
+) -> Result<SessionStartSuccess, String> {
     match launch_config {
-        SessionLaunchConfig::Local(config) => session_manager.create_local_session(config),
-        SessionLaunchConfig::Ssh(config) => session_manager.create_ssh_session(*config),
-        SessionLaunchConfig::Telnet(config) => session_manager.create_telnet_session(config),
-        SessionLaunchConfig::Serial(config) => session_manager.create_serial_session(config),
+        SessionLaunchConfig::Local(config) => session_manager
+            .create_local_session(config)
+            .map(|session_info| SessionStartSuccess {
+                session_info,
+                multiplex_handle: None,
+                launch_config: None,
+            })
+            .map_err(|error| error.to_string()),
+        SessionLaunchConfig::Ssh(config) => {
+            let config = *config;
+            let multiplex =
+                open_ssh_multiplex_handle(config.clone()).map_err(|error| error.to_string())?;
+            match session_manager.create_ssh_session_with_multiplex(config, multiplex.clone()) {
+                Ok(session_info) => Ok(SessionStartSuccess {
+                    session_info,
+                    multiplex_handle: Some(multiplex),
+                    launch_config: None,
+                }),
+                Err(error) => {
+                    if let Err(disconnect_error) = multiplex.disconnect() {
+                        tracing::warn!(
+                            error = %disconnect_error,
+                            "failed to disconnect unused SSH multiplex handle after session start failure"
+                        );
+                    }
+                    Err(error.to_string())
+                }
+            }
+        }
+        SessionLaunchConfig::Telnet(config) => session_manager
+            .create_telnet_session(config)
+            .map(|session_info| SessionStartSuccess {
+                session_info,
+                multiplex_handle: None,
+                launch_config: None,
+            })
+            .map_err(|error| error.to_string()),
+        SessionLaunchConfig::Serial(config) => session_manager
+            .create_serial_session(config)
+            .map(|session_info| SessionStartSuccess {
+                session_info,
+                multiplex_handle: None,
+                launch_config: None,
+            })
+            .map_err(|error| error.to_string()),
         SessionLaunchConfig::Rdp(_) | SessionLaunchConfig::Vnc(_) => {
             unreachable!("remote desktop sessions are created by RemoteDesktopFeatureState")
         }

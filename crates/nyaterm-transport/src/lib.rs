@@ -171,7 +171,7 @@ pub use remote_process::{
     normalize_process_signal, parse_process_output, run_local_command,
 };
 pub(crate) use remote_process::{
-    PROCESS_TIMEOUT, ensure_remote_command_success, exec_ssh_command, run_ssh_exec_operation,
+    PROCESS_TIMEOUT, ensure_remote_command_success, run_ssh_command, run_ssh_exec_operation,
 };
 #[cfg(test)]
 use ssh_shell_integration::{
@@ -204,6 +204,7 @@ pub struct SshMultiplexHandle {
 
 type SharedSshHandle = Arc<tokio::sync::Mutex<client::Handle<SshClientHandler>>>;
 type ForwardedTcpIpRegistry = Arc<tokio::sync::Mutex<ForwardedTcpIpDispatch>>;
+type X11Registry = Arc<tokio::sync::Mutex<Option<X11Registration>>>;
 
 struct SshMultiplexInner {
     runtime: Arc<tokio::runtime::Runtime>,
@@ -215,6 +216,8 @@ struct SshMultiplexInner {
     agent_forwarding_config: Option<SshAgentForwardingConfig>,
     agent_stored_key_revision: Option<u64>,
     forwarded_tcpip: ForwardedTcpIpRegistry,
+    x11: X11Registry,
+    primary_session: Arc<PrimarySessionGate>,
     closed: AtomicBool,
 }
 
@@ -222,6 +225,75 @@ struct SshMultiplexInner {
 struct ForwardedTcpIpDispatch {
     fallback: Option<tokio_mpsc::UnboundedSender<ForwardedTcpIpChannel>>,
     by_listener: HashMap<(String, u32), tokio_mpsc::UnboundedSender<ForwardedTcpIpChannel>>,
+}
+
+struct X11Registration {
+    session_id: String,
+    tx: tokio_mpsc::UnboundedSender<X11ChannelOpen>,
+}
+
+/// How long an auxiliary channel waits for the interactive shell to take the
+/// connection's first session channel before opening anyway.
+///
+/// `sshd` hands the PAM login message (`pam_motd`, i.e. the whole
+/// `/etc/update-motd.d` banner) to the first session channel that runs `do_exec`
+/// and clears its buffer afterwards, so only one channel per connection can ever
+/// print it. Before multiplexing the terminal owned its connection and always
+/// won that slot; now Stats/Docker/GPU/SFTP share the connection and would
+/// silently eat the banner if one of them opened a channel first.
+const PRIMARY_SESSION_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Holds auxiliary channels back until the interactive shell has requested its
+/// channel on a freshly authenticated connection.
+struct PrimarySessionGate {
+    claimed: AtomicBool,
+    /// A zero-permit semaphore, used only for its closed state: closing releases
+    /// every waiter, including the ones that start waiting afterwards.
+    opened: tokio::sync::Semaphore,
+}
+
+impl PrimarySessionGate {
+    fn new() -> Self {
+        Self {
+            claimed: AtomicBool::new(false),
+            opened: tokio::sync::Semaphore::new(0),
+        }
+    }
+
+    /// Take the first-channel slot, or `None` if it is already spoken for.
+    ///
+    /// Only the connection's first interactive session can claim it; a second
+    /// terminal on the same multiplex handle gets `None` and proceeds at once,
+    /// which matches OpenSSH's own `ControlMaster` behaviour of printing the
+    /// banner once per connection.
+    fn claim(gate: &Arc<Self>) -> Option<PrimarySessionClaim> {
+        gate.claimed
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+            .then(|| PrimarySessionClaim { gate: gate.clone() })
+    }
+
+    async fn wait(&self) {
+        if !self.claimed.load(Ordering::SeqCst) {
+            return;
+        }
+        // Permits are never added, so this only resolves once the claim is
+        // dropped and closes the semaphore. The timeout keeps a wedged shell
+        // from stalling every other feature on the connection forever.
+        let _ = tokio::time::timeout(PRIMARY_SESSION_WAIT_TIMEOUT, self.opened.acquire()).await;
+    }
+}
+
+/// Released once the interactive shell holds its channel -- or has given up --
+/// which lets the queued auxiliary channels through.
+struct PrimarySessionClaim {
+    gate: Arc<PrimarySessionGate>,
+}
+
+impl Drop for PrimarySessionClaim {
+    fn drop(&mut self) {
+        self.gate.opened.close();
+    }
 }
 
 impl std::fmt::Debug for SshMultiplexHandle {
@@ -294,12 +366,50 @@ impl SshMultiplexHandle {
         })
     }
 
+    /// The shared connection, for channels whose ordering does not matter.
+    ///
+    /// Only two callers qualify: the interactive terminal, which is the channel
+    /// everything else is ordered behind, and `direct-tcpip` forwards, which
+    /// never make the server run `do_exec`. Anything that will `exec` a command
+    /// or start a subsystem must use [`Self::exec_target_handle`] instead.
     fn target_handle(&self) -> SharedSshHandle {
+        self.inner.target.clone()
+    }
+
+    /// The shared connection, for a channel that will `exec` or start a
+    /// subsystem, once the interactive shell has taken its own channel.
+    ///
+    /// `sshd` hands the PAM login banner to whichever session channel runs
+    /// `do_exec` first and clears its buffer afterwards, so a Stats, Docker or
+    /// SFTP channel that opens ahead of the terminal costs the user their whole
+    /// MOTD. Waiting here is what keeps the terminal first.
+    async fn exec_target_handle(&self) -> SharedSshHandle {
+        self.inner.primary_session.wait().await;
         self.inner.target.clone()
     }
 
     fn forwarded_tcpip_registry(&self) -> ForwardedTcpIpRegistry {
         self.inner.forwarded_tcpip.clone()
+    }
+
+    /// Reserve the connection's first session channel for an interactive shell.
+    fn claim_primary_session(&self) -> Option<PrimarySessionClaim> {
+        PrimarySessionGate::claim(&self.inner.primary_session)
+    }
+
+    async fn register_x11_sender(
+        &self,
+        session_id: &str,
+        tx: tokio_mpsc::UnboundedSender<X11ChannelOpen>,
+    ) -> anyhow::Result<()> {
+        if self.is_closed() {
+            anyhow::bail!("SSH multiplex handle is closed");
+        }
+        register_x11_sender(&self.inner.x11, session_id, tx).await
+    }
+
+    async fn unregister_x11_sender(&self, session_id: &str) {
+        unregister_x11_sender(&self.inner.x11, session_id).await;
     }
 
     fn block_on<T, F>(&self, operation: F) -> anyhow::Result<T>
@@ -311,6 +421,41 @@ impl SshMultiplexHandle {
             anyhow::bail!("SSH multiplex handle is closed");
         }
         self.inner.runtime.block_on(operation)
+    }
+}
+
+async fn register_x11_sender(
+    registry: &X11Registry,
+    session_id: &str,
+    tx: tokio_mpsc::UnboundedSender<X11ChannelOpen>,
+) -> anyhow::Result<()> {
+    let mut registration = registry.lock().await;
+    if registration
+        .as_ref()
+        .is_some_and(|registration| registration.tx.is_closed())
+    {
+        *registration = None;
+    }
+    if let Some(registration) = registration.as_ref() {
+        if registration.session_id == session_id {
+            anyhow::bail!("X11 forwarding is already active for this multiplexed SSH session");
+        }
+        anyhow::bail!("X11 forwarding is already active for another multiplexed SSH session");
+    }
+    *registration = Some(X11Registration {
+        session_id: session_id.to_string(),
+        tx,
+    });
+    Ok(())
+}
+
+async fn unregister_x11_sender(registry: &X11Registry, session_id: &str) {
+    let mut registration = registry.lock().await;
+    if registration
+        .as_ref()
+        .is_some_and(|registration| registration.session_id == session_id)
+    {
+        *registration = None;
     }
 }
 
@@ -337,10 +482,11 @@ pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<Ssh
             .map_err(|error| anyhow::anyhow!("failed to start SSH multiplex runtime: {error}"))?,
     );
     let forwarded_tcpip = Arc::new(tokio::sync::Mutex::new(ForwardedTcpIpDispatch::default()));
+    let x11 = Arc::new(tokio::sync::Mutex::new(None));
     let (target, jumps) = runtime.block_on(open_authenticated_ssh_handle_with_sender_registry(
         &config,
         Some(forwarded_tcpip.clone()),
-        None,
+        Some(x11.clone()),
     ))?;
     let info = SshMultiplexInfo {
         name: config.name,
@@ -362,6 +508,8 @@ pub fn open_ssh_multiplex_handle(config: SshSessionConfig) -> anyhow::Result<Ssh
             agent_forwarding_config,
             agent_stored_key_revision,
             forwarded_tcpip,
+            x11,
+            primary_session: Arc::new(PrimarySessionGate::new()),
             closed: AtomicBool::new(false),
         }),
     })
@@ -534,6 +682,7 @@ struct OpenSshShellSession {
     jump_handles: Vec<client::Handle<SshClientHandler>>,
     disconnect_on_close: bool,
     x11_forwarder: Option<X11Forwarder>,
+    x11_multiplex_registration: Option<SshMultiplexHandle>,
     local_notice: Option<Vec<u8>>,
     injection_script: Option<Vec<u8>>,
     ready_marker: String,
@@ -550,7 +699,12 @@ struct PendingOpenSshShellSession {
     handle: SshShellHandle,
     jump_handles: Vec<client::Handle<SshClientHandler>>,
     disconnect_on_close: bool,
+    multiplex: Option<SshMultiplexHandle>,
+    /// Held from before the deferred-PTY wait until the shell request lands, so
+    /// no shared-connection feature can open a channel ahead of the terminal.
+    primary_claim: Option<PrimarySessionClaim>,
     x11_config: Option<X11ForwardingConfig>,
+    x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
     x11_rx: Option<tokio_mpsc::UnboundedReceiver<X11ChannelOpen>>,
 }
 
@@ -1680,6 +1834,7 @@ async fn run_open_ssh_shell_session(
         jump_handles,
         disconnect_on_close,
         x11_forwarder,
+        x11_multiplex_registration,
         local_notice,
         injection_script,
         ready_marker,
@@ -1702,7 +1857,14 @@ async fn run_open_ssh_shell_session(
         while let Some(data) = pending_writes.pop_front() {
             if let Err(error) = channel.data_bytes(data).await {
                 send_session_error(&event_queue, &session_id, error);
-                disconnect_open_ssh_shell(handle, jump_handles, disconnect_on_close).await;
+                disconnect_open_ssh_shell(
+                    &session_id,
+                    handle,
+                    jump_handles,
+                    disconnect_on_close,
+                    x11_multiplex_registration,
+                )
+                .await;
                 return;
             }
         }
@@ -1830,7 +1992,14 @@ async fn run_open_ssh_shell_session(
         }
     }
 
-    disconnect_open_ssh_shell(handle, jump_handles, disconnect_on_close).await;
+    disconnect_open_ssh_shell(
+        &session_id,
+        handle,
+        jump_handles,
+        disconnect_on_close,
+        x11_multiplex_registration,
+    )
+    .await;
 }
 
 fn push_ssh_integration_output(
@@ -1896,16 +2065,21 @@ async fn open_pending_ssh_shell(
     } else {
         (None, None)
     };
+    let mut pending_multiplex = None;
+    let mut primary_claim = None;
     let (handle, jump_handles, disconnect_on_close) = if let Some(multiplex) = multiplex {
         multiplex.ensure_matches_config(config)?;
-        if x11_tx.is_some() {
-            anyhow::bail!("X11 forwarding is not supported for multiplexed SSH shell sessions");
-        }
+        pending_multiplex = Some(multiplex.clone());
+        // Claimed here rather than next to the channel open: the desktop reports
+        // the session ready as soon as this returns, and with a deferred PTY the
+        // channel is not opened until the first resize arrives.
+        primary_claim = multiplex.claim_primary_session();
         let handle = multiplex.target_handle();
         (SshShellHandle::Multiplexed(handle), Vec::new(), false)
     } else {
         let (handle, jump_handles) =
-            open_authenticated_ssh_handle_with_channel_senders(config, None, x11_tx).await?;
+            open_authenticated_ssh_handle_with_channel_senders(config, None, x11_tx.clone())
+                .await?;
         (SshShellHandle::Dedicated(handle), jump_handles, true)
     };
 
@@ -1913,7 +2087,10 @@ async fn open_pending_ssh_shell(
         handle,
         jump_handles,
         disconnect_on_close,
+        multiplex: pending_multiplex,
+        primary_claim,
         x11_config,
+        x11_tx,
         x11_rx,
     })
 }
@@ -1928,7 +2105,10 @@ async fn open_ssh_shell_from_pending(
         mut handle,
         jump_handles,
         disconnect_on_close,
+        multiplex,
+        primary_claim,
         x11_config,
+        x11_tx,
         x11_rx,
     } = pending;
     let ready_marker = build_ssh_ready_marker(session_id);
@@ -1938,7 +2118,10 @@ async fn open_ssh_shell_from_pending(
         SshShellHandle::Multiplexed(handle) => handle.lock().await.channel_open_session().await?,
     };
     if effective_agent_forwarding_config(config).is_some_and(|forwarding| forwarding.enabled) {
-        channel.agent_forward(false).await?;
+        if let Err(error) = channel.agent_forward(false).await {
+            let _ = channel.close().await;
+            return Err(error.into());
+        }
     }
     tracing::debug!(
         stage = "interactive-channel",
@@ -1947,18 +2130,34 @@ async fn open_ssh_shell_from_pending(
         profile = ?config.profile,
         "opened SSH session channel"
     );
-    let (x11_forwarder, local_notice) = if let (Some(config), Some(rx)) = (x11_config, x11_rx) {
-        match channel
-            .request_x11(true, false, MIT_MAGIC_COOKIE, &config.fake_cookie_hex, 0)
-            .await
-        {
-            Ok(()) => (Some(X11Forwarder { rx, config }), None),
-            Err(_) => (None, Some(enable_x11_failed_message().into_bytes())),
-        }
-    } else {
-        (None, None)
-    };
-    channel
+    let (x11_forwarder, x11_multiplex_registration, local_notice) =
+        if let (Some(config), Some(rx)) = (x11_config, x11_rx) {
+            if let Some(multiplex) = multiplex.as_ref() {
+                let Some(tx) = x11_tx.clone() else {
+                    let _ = channel.close().await;
+                    anyhow::bail!("X11 forwarding sender is unavailable");
+                };
+                if let Err(error) = multiplex.register_x11_sender(session_id, tx).await {
+                    let _ = channel.close().await;
+                    return Err(error);
+                }
+            }
+            match channel
+                .request_x11(true, false, MIT_MAGIC_COOKIE, &config.fake_cookie_hex, 0)
+                .await
+            {
+                Ok(()) => (Some(X11Forwarder { rx, config }), multiplex.clone(), None),
+                Err(_) => {
+                    if let Some(multiplex) = multiplex.as_ref() {
+                        multiplex.unregister_x11_sender(session_id).await;
+                    }
+                    (None, None, Some(enable_x11_failed_message().into_bytes()))
+                }
+            }
+        } else {
+            (None, None, None)
+        };
+    if let Err(error) = channel
         .request_pty(
             false,
             &config.term,
@@ -1968,7 +2167,14 @@ async fn open_ssh_shell_from_pending(
             dimensions.pixel_height.into(),
             &[],
         )
-        .await?;
+        .await
+    {
+        if let Some(multiplex) = x11_multiplex_registration.as_ref() {
+            multiplex.unregister_x11_sender(session_id).await;
+        }
+        let _ = channel.close().await;
+        return Err(error.into());
+    }
     tracing::debug!(
         stage = "pty",
         host = %config.host,
@@ -1979,7 +2185,17 @@ async fn open_ssh_shell_from_pending(
         rows = dimensions.rows,
         "SSH PTY accepted"
     );
-    channel.request_shell(true).await?;
+    if let Err(error) = channel.request_shell(true).await {
+        if let Some(multiplex) = x11_multiplex_registration.as_ref() {
+            multiplex.unregister_x11_sender(session_id).await;
+        }
+        let _ = channel.close().await;
+        return Err(error.into());
+    }
+    // `request_shell` waited for the server's reply, so `sshd` has already run
+    // `do_exec` for this channel and flushed the login banner into it. Anything
+    // else on this connection is free to open its own channel now.
+    drop(primary_claim);
     tracing::debug!(
         stage = "shell",
         host = %config.host,
@@ -2033,6 +2249,7 @@ async fn open_ssh_shell_from_pending(
         jump_handles,
         disconnect_on_close,
         x11_forwarder,
+        x11_multiplex_registration,
         local_notice,
         injection_script,
         ready_marker,
@@ -2057,10 +2274,15 @@ async fn disconnect_pending_ssh_shell(session: PendingOpenSshShellSession) {
 }
 
 async fn disconnect_open_ssh_shell(
+    session_id: &str,
     handle: Option<client::Handle<SshClientHandler>>,
     jump_handles: Vec<client::Handle<SshClientHandler>>,
     disconnect_on_close: bool,
+    x11_multiplex_registration: Option<SshMultiplexHandle>,
 ) {
+    if let Some(multiplex) = x11_multiplex_registration {
+        multiplex.unregister_x11_sender(session_id).await;
+    }
     if disconnect_on_close {
         if let Some(handle) = handle {
             let _ = handle
@@ -2142,13 +2364,19 @@ fn open_authenticated_ssh_handle_with_channel_senders(
             by_listener: HashMap::new(),
         }))
     });
-    open_authenticated_ssh_handle_with_sender_registry(config, forwarded_tcpip, x11_tx)
+    let x11 = x11_tx.map(|tx| {
+        Arc::new(tokio::sync::Mutex::new(Some(X11Registration {
+            session_id: String::new(),
+            tx,
+        })))
+    });
+    open_authenticated_ssh_handle_with_sender_registry(config, forwarded_tcpip, x11)
 }
 
 fn open_authenticated_ssh_handle_with_sender_registry(
     config: &SshSessionConfig,
     forwarded_tcpip: Option<ForwardedTcpIpRegistry>,
-    x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
+    x11: Option<X11Registry>,
 ) -> Pin<Box<dyn Future<Output = anyhow::Result<SshHandleChain>> + Send + '_>> {
     Box::pin(async move {
         if let Some(jump_config) = config.proxy_jump.as_deref() {
@@ -2175,7 +2403,7 @@ fn open_authenticated_ssh_handle_with_sender_registry(
                         port: config.port,
                         verifier: config.host_key_verifier.clone(),
                         forwarded_tcpip: forwarded_tcpip.clone(),
-                        x11_tx: x11_tx.clone(),
+                        x11: x11.clone(),
                         agent_forwarding_config: effective_agent_forwarding_config(config),
                         agent_stored_key_provider: config.agent_stored_key_provider.clone(),
                     },
@@ -2198,7 +2426,7 @@ fn open_authenticated_ssh_handle_with_sender_registry(
 
         let mut handle = tokio::time::timeout(
             Duration::from_secs(30),
-            connect_ssh_transport(config, forwarded_tcpip.clone(), x11_tx.clone()),
+            connect_ssh_transport(config, forwarded_tcpip.clone(), x11.clone()),
         )
         .await
         .map_err(|_| anyhow::anyhow!("SSH connection timed out"))??;
@@ -2219,14 +2447,14 @@ fn open_authenticated_ssh_handle_with_sender_registry(
 async fn connect_ssh_transport(
     config: &SshSessionConfig,
     forwarded_tcpip: Option<ForwardedTcpIpRegistry>,
-    x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
+    x11: Option<X11Registry>,
 ) -> anyhow::Result<client::Handle<SshClientHandler>> {
     let handler = SshClientHandler {
         host: config.host.clone(),
         port: config.port,
         verifier: config.host_key_verifier.clone(),
         forwarded_tcpip,
-        x11_tx,
+        x11,
         agent_forwarding_config: effective_agent_forwarding_config(config),
         agent_stored_key_provider: config.agent_stored_key_provider.clone(),
     };
@@ -2477,7 +2705,7 @@ struct SshClientHandler {
     port: u16,
     verifier: Option<Arc<dyn SshHostKeyVerifier>>,
     forwarded_tcpip: Option<ForwardedTcpIpRegistry>,
-    x11_tx: Option<tokio_mpsc::UnboundedSender<X11ChannelOpen>>,
+    x11: Option<X11Registry>,
     agent_forwarding_config: Option<SshAgentForwardingConfig>,
     agent_stored_key_provider: Option<Arc<dyn SshAgentStoredKeyProvider>>,
 }
@@ -2561,12 +2789,29 @@ impl client::Handler for SshClientHandler {
         reply: russh::client::ChannelOpenHandle,
         _session: &mut russh::client::Session,
     ) -> Result<(), Self::Error> {
-        let Some(tx) = self.x11_tx.as_ref() else {
+        let Some(registry) = self.x11.as_ref() else {
             reply
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
                 .await;
             return Ok(());
         };
+        let mut registration = registry.lock().await;
+        if registration
+            .as_ref()
+            .is_some_and(|registration| registration.tx.is_closed())
+        {
+            *registration = None;
+        }
+        let Some(tx) = registration
+            .as_ref()
+            .map(|registration| registration.tx.clone())
+        else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        drop(registration);
         if tx
             .send(X11ChannelOpen {
                 channel,
