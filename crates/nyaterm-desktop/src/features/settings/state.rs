@@ -1,6 +1,7 @@
 //! Authoritative application settings and grouped state for the settings experience.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use gpui::FocusHandle;
 use nyaterm_core::{
@@ -13,6 +14,10 @@ use crate::models::{
     KeywordHighlightPathPromptKind, SnapshotPasswordPromptState,
 };
 
+use super::super::{
+    FontCatalogKind, FontCatalogLoadState, FontCatalogSnapshot, FontCatalogState,
+    FontResolutionStatus,
+};
 use super::catalog::{SettingsMasterPasswordState, StoreStatus};
 
 pub(in crate::features) struct SettingsFeatureState {
@@ -137,16 +142,7 @@ struct KeywordHighlightSettingsState {
 }
 
 struct AppearanceSettingsState {
-    ui_font_options: Vec<String>,
-    terminal_font_options: Vec<String>,
-    font_options_load_state: FontOptionsLoadState,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FontOptionsLoadState {
-    Unloaded,
-    Loading,
-    Loaded,
+    font_catalog: FontCatalogState,
 }
 
 struct KeybindingSettingsState {
@@ -196,12 +192,6 @@ impl SettingsFeatureState {
         } = init;
         crate::i18n::apply_locale(&summary.language);
         let master_password = SettingsMasterPasswordState::new(summary.has_master_password);
-        let font_options_load_state =
-            if ui_font_options.is_empty() && terminal_font_options.is_empty() {
-                FontOptionsLoadState::Unloaded
-            } else {
-                FontOptionsLoadState::Loaded
-            };
         Self {
             summary,
             keyword_config,
@@ -224,9 +214,7 @@ impl SettingsFeatureState {
                 focus: focus.keyword_highlight,
             },
             appearance: AppearanceSettingsState {
-                ui_font_options,
-                terminal_font_options,
-                font_options_load_state,
+                font_catalog: FontCatalogState::new(ui_font_options, terminal_font_options),
             },
             keybindings: KeybindingSettingsState {
                 recording_id: None,
@@ -1308,29 +1296,81 @@ impl SettingsFeatureState {
     }
 
     pub(in crate::features) fn ui_font_options(&self) -> &[String] {
-        &self.appearance.ui_font_options
+        self.appearance.font_catalog.snapshot().ui_options()
     }
 
     pub(in crate::features) fn terminal_font_options(&self) -> &[String] {
-        &self.appearance.terminal_font_options
+        self.appearance.font_catalog.snapshot().terminal_options()
     }
 
-    pub(in crate::features) fn begin_font_options_load(&mut self) -> bool {
-        if self.appearance.font_options_load_state != FontOptionsLoadState::Unloaded {
-            return false;
-        }
-        self.appearance.font_options_load_state = FontOptionsLoadState::Loading;
-        true
+    pub(in crate::features) fn font_catalog_state(&self) -> FontCatalogLoadState {
+        self.appearance.font_catalog.state()
+    }
+
+    pub(in crate::features) fn font_catalog_generation(&self) -> u64 {
+        self.appearance.font_catalog.generation()
+    }
+
+    pub(in crate::features) fn font_catalog_snapshot(&self) -> Arc<FontCatalogSnapshot> {
+        self.appearance.font_catalog.snapshot_arc()
+    }
+
+    pub(in crate::features) fn resolve_font_stack(
+        &self,
+        families: &[String],
+        terminal: bool,
+        platform_default: &str,
+    ) -> Option<FontResolutionStatus> {
+        self.appearance.font_catalog.resolve_stack(
+            families,
+            if terminal {
+                FontCatalogKind::Terminal
+            } else {
+                FontCatalogKind::Ui
+            },
+            platform_default,
+        )
+    }
+
+    pub(in crate::features) fn begin_font_options_load(&mut self) -> Option<u64> {
+        self.appearance.font_catalog.begin_load()
+    }
+
+    pub(in crate::features) fn refresh_font_options_load(&mut self) -> Option<u64> {
+        self.appearance.font_catalog.begin_refresh()
+    }
+
+    pub(in crate::features) fn begin_font_names_fingerprint_check(&mut self) -> bool {
+        self.appearance
+            .font_catalog
+            .begin_font_names_fingerprint_check()
+    }
+
+    pub(in crate::features) fn finish_font_names_fingerprint_check(
+        &mut self,
+        fingerprint: u64,
+    ) -> bool {
+        self.appearance
+            .font_catalog
+            .finish_font_names_fingerprint_check(fingerprint)
+    }
+
+    pub(in crate::features) fn cancel_font_names_fingerprint_check(&mut self) {
+        self.appearance
+            .font_catalog
+            .cancel_font_names_fingerprint_check();
     }
 
     pub(in crate::features) fn finish_font_options_load(
         &mut self,
-        ui_font_options: Vec<String>,
-        terminal_font_options: Vec<String>,
-    ) {
-        self.appearance.ui_font_options = ui_font_options;
-        self.appearance.terminal_font_options = terminal_font_options;
-        self.appearance.font_options_load_state = FontOptionsLoadState::Loaded;
+        generation: u64,
+        snapshot: FontCatalogSnapshot,
+    ) -> bool {
+        self.appearance.font_catalog.commit(generation, snapshot)
+    }
+
+    pub(in crate::features) fn fail_font_options_load(&mut self, generation: u64) -> bool {
+        self.appearance.font_catalog.fail(generation)
     }
 
     pub(in crate::features) fn config_path_prompt_active(&self) -> bool {
@@ -1465,8 +1505,12 @@ mod tests {
     };
 
     use super::{
-        FontOptionsLoadState, SearchEngineMenu, SettingsFeatureFocus, SettingsFeatureInit,
-        SettingsFeatureState, SettingsPersistenceDomain, UiLayoutSettingsUpdate,
+        SearchEngineMenu, SettingsFeatureFocus, SettingsFeatureInit, SettingsFeatureState,
+        SettingsPersistenceDomain, UiLayoutSettingsUpdate,
+    };
+    use crate::features::{
+        FontAvailability, FontAvailabilityReason, FontCatalogEntry, FontCatalogSnapshot,
+        FontCatalogState,
     };
     use crate::models::{
         ConfigPathPromptKind, KeywordHighlightEditorField, SnapshotPasswordPromptKind,
@@ -1534,23 +1578,52 @@ mod tests {
     #[test]
     fn appearance_font_options_load_once_and_replace_the_catalog() {
         let mut state = settings_state();
-        state.appearance.ui_font_options.clear();
-        state.appearance.terminal_font_options.clear();
-        state.appearance.font_options_load_state = FontOptionsLoadState::Unloaded;
+        state.appearance.font_catalog = FontCatalogState::new(Vec::new(), Vec::new());
 
-        assert!(state.begin_font_options_load());
-        assert!(!state.begin_font_options_load());
+        let generation = state.begin_font_options_load().expect("font catalog load");
+        assert!(state.begin_font_options_load().is_none());
         state.finish_font_options_load(
-            vec!["Inter".to_string(), "Noto Sans".to_string()],
-            vec!["JetBrains Mono".to_string(), "monospace".to_string()],
+            generation,
+            FontCatalogSnapshot::from_entries(
+                generation,
+                [
+                    FontCatalogEntry::new(
+                        "Inter".to_string(),
+                        FontAvailability::Available {
+                            resolved_family: "Inter".into(),
+                        },
+                        FontAvailability::Unavailable {
+                            reason: FontAvailabilityReason::NotMonospaced,
+                        },
+                    ),
+                    FontCatalogEntry::new(
+                        "Noto Sans".to_string(),
+                        FontAvailability::Available {
+                            resolved_family: "Noto Sans".into(),
+                        },
+                        FontAvailability::Unavailable {
+                            reason: FontAvailabilityReason::NotMonospaced,
+                        },
+                    ),
+                    FontCatalogEntry::new(
+                        "JetBrains Mono".to_string(),
+                        FontAvailability::Available {
+                            resolved_family: "JetBrains Mono".into(),
+                        },
+                        FontAvailability::Available {
+                            resolved_family: "JetBrains Mono".into(),
+                        },
+                    ),
+                ],
+            ),
         );
 
-        assert_eq!(state.ui_font_options(), ["Inter", "Noto Sans"]);
         assert_eq!(
-            state.terminal_font_options(),
-            ["JetBrains Mono", "monospace"]
+            state.ui_font_options(),
+            ["Inter", "JetBrains Mono", "Noto Sans"]
         );
-        assert!(!state.begin_font_options_load());
+        assert_eq!(state.terminal_font_options(), ["JetBrains Mono"]);
+        assert!(state.begin_font_options_load().is_none());
     }
 
     #[test]

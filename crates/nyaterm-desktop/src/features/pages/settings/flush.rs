@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui::Context;
 
-use crate::features::NyaTermApp;
+use crate::features::{FontCatalogPresentation, NyaTermApp};
 use crate::models::{SettingsTab, SnapshotPasswordPromptKind};
 
 use super::panel::{
@@ -70,8 +70,11 @@ impl NyaTermApp {
                         draft: master_password.draft.to_string(),
                     }
                 },
-                ui_font_options: Arc::from(self.settings.ui_font_options().to_vec()),
-                terminal_font_options: Arc::from(self.settings.terminal_font_options().to_vec()),
+                font_catalog: FontCatalogPresentation::new(
+                    self.settings.font_catalog_state(),
+                    self.settings.font_catalog_generation(),
+                    self.settings.font_catalog_snapshot(),
+                ),
                 search_engine_focus: self.settings.search_engine_focus().clone(),
                 keyword_highlight_focus: self.settings.keyword_highlight_focus().clone(),
                 keybinding_focus: self.settings.keybinding_focus().clone(),

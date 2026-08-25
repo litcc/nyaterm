@@ -236,6 +236,9 @@ impl AppShell {
         let Some(app) = self.app.clone() else {
             return;
         };
+        // Prepare the font catalog asynchronously after the window becomes ready so
+        // the first terminal refresh does not enumerate system fonts.
+        app.update(cx, |app, cx| app.ensure_appearance_font_options(cx));
         let should_start_restore = self.startup_restore.update(cx, |store, cx| {
             if store.mark_started_after_window_open() {
                 cx.notify();

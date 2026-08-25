@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
+use crate::sizing::{form_control_height, form_control_size};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable,
     IntoElement, ParentElement as _, Render, RenderOnce, SharedString, Styled as _, Subscription,
-    Window, div, prelude::FluentBuilder as _,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable, IndexPath, Sizable,
@@ -10,8 +13,6 @@ use gpui_component::{
     select::{SearchableVec, Select, SelectEvent, SelectState},
     switch::Switch,
 };
-
-use crate::sizing::{form_control_height, form_control_size};
 
 type NyaToggleHandler = Box<dyn Fn(&bool, &mut Window, &mut App)>;
 type NyaIndexSelectHandler = Box<dyn Fn(&usize, &mut Window, &mut App)>;
@@ -291,7 +292,7 @@ pub enum NyaSelectEvent {
 
 pub struct NyaSelectState {
     state: Option<Entity<SelectState<SearchableVec<NyaSelectItem>>>>,
-    options: Vec<NyaSelectOption>,
+    options: Arc<[NyaSelectOption]>,
     selected_value: Option<String>,
     placeholder: SharedString,
     search_placeholder: Option<SharedString>,
@@ -310,9 +311,18 @@ impl NyaSelectState {
         options: impl Into<Vec<NyaSelectOption>>,
         selected_value: Option<String>,
     ) -> Self {
+        Self::new_shared(cx, options.into().into(), selected_value)
+    }
+
+    /// Creates a select state from an immutable catalog shared by sibling controls.
+    pub fn new_shared(
+        cx: &mut Context<Self>,
+        options: Arc<[NyaSelectOption]>,
+        selected_value: Option<String>,
+    ) -> Self {
         Self {
             state: None,
-            options: options.into(),
+            options,
             selected_value,
             placeholder: SharedString::default(),
             search_placeholder: None,
@@ -356,7 +366,20 @@ impl NyaSelectState {
         cx: &mut Context<Self>,
     ) {
         let options = options.into();
-        if self.options != options {
+        if self.options.as_ref() != options.as_slice() {
+            self.options = options.into();
+            self.options_dirty = self.state.is_some();
+            self.selected_dirty = self.state.is_some();
+            cx.notify();
+        }
+    }
+
+    /// Reuses an immutable option catalog when several controls share the same choices.
+    ///
+    /// Pointer equality makes the steady-state render path constant-time. A content comparison
+    /// remains for callers that rebuild an equivalent `Arc` instead of retaining the shared one.
+    pub fn set_options_shared(&mut self, options: Arc<[NyaSelectOption]>, cx: &mut Context<Self>) {
+        if !Arc::ptr_eq(&self.options, &options) && self.options.as_ref() != options.as_ref() {
             self.options = options;
             self.options_dirty = self.state.is_some();
             self.selected_dirty = self.state.is_some();
@@ -540,6 +563,7 @@ impl Render for NyaSelectState {
 pub struct NyaSelect {
     state: Entity<NyaSelectState>,
     appearance: bool,
+    placeholder_content: Option<AnyElement>,
 }
 
 impl NyaSelect {
@@ -547,6 +571,7 @@ impl NyaSelect {
         Self {
             state: state.clone(),
             appearance: true,
+            placeholder_content: None,
         }
     }
 
@@ -554,11 +579,20 @@ impl NyaSelect {
         self.appearance = appearance;
         self
     }
+
+    pub fn placeholder_content(mut self, content: impl IntoElement) -> Self {
+        self.placeholder_content = Some(content.into_any_element());
+        self
+    }
 }
 
 impl RenderOnce for NyaSelect {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let Self { state, appearance } = self;
+        let Self {
+            state,
+            appearance,
+            placeholder_content,
+        } = self;
         let (state, placeholder, search_placeholder, disabled) = state.update(cx, |state, cx| {
             let component = state.ensure_component(window, cx);
             state.sync_component(window, cx);
@@ -569,20 +603,52 @@ impl RenderOnce for NyaSelect {
                 state.disabled,
             )
         });
-        Select::new(&state)
+        let select = Select::new(&state)
             .with_size(form_control_size())
             .h(form_control_height())
             .appearance(appearance)
-            .placeholder(placeholder)
+            .placeholder(if placeholder_content.is_some() {
+                SharedString::default()
+            } else {
+                placeholder.clone()
+            })
             .when_some(search_placeholder, |this, placeholder| {
                 this.search_placeholder(placeholder)
             })
-            .disabled(disabled)
+            .disabled(disabled);
+        // GPUI's select fixes placeholder text to the muted theme color. Overlay only the
+        // opt-in placeholder content so saved values can use distinct status styling without
+        // changing menu data.
+        if let Some(content) = placeholder_content {
+            div()
+                .relative()
+                .size_full()
+                .child(select)
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(12.))
+                        .right(px(32.))
+                        .flex()
+                        .items_center()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .child(content),
+                )
+                .into_any_element()
+        } else {
+            select.into_any_element()
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use gpui::{AppContext as _, TestAppContext};
 
     use super::{NyaSelectOption, NyaSelectState};
@@ -618,6 +684,25 @@ mod tests {
                 .map(str::to_string)),
             Some("dark".to_string())
         );
+    }
+
+    #[test]
+    fn shared_options_keep_the_same_catalog_arc() {
+        let mut cx = TestAppContext::single();
+        let options: Arc<[NyaSelectOption]> = vec![
+            NyaSelectOption::new("light", "Light"),
+            NyaSelectOption::new("dark", "Dark"),
+        ]
+        .into();
+        let select = cx.new(|cx| {
+            NyaSelectState::new_shared(cx, Arc::clone(&options), Some("light".to_string()))
+        });
+
+        select.update(&mut cx, |select, cx| {
+            select.set_options_shared(Arc::clone(&options), cx);
+            assert!(Arc::ptr_eq(&select.options, &options));
+            assert!(!select.options_dirty);
+        });
     }
 
     #[gpui::test]

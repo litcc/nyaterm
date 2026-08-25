@@ -1,19 +1,38 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use rust_i18n::t;
 
 use gpui::{
-    App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div, prelude::*, px,
-    rgb, rgba, svg,
+    AnyElement, App, ClickEvent, Context, FontWeight, IntoElement, SharedString, Window, div,
+    prelude::*, px, rgb, rgba, svg,
 };
-use nyaterm_ui::NyaSelectOption;
+use nyaterm_ui::{NYA_FORM_CONTROL_HEIGHT_PX, NyaSelectOption};
 
 use crate::features::{
-    pages::settings::panel::SettingsPanel, selects::FOLLOW_UI_THEME_VALUE,
-    shell::appearance_font_stack,
+    FontAvailability, FontCatalogLoadState, FontResolutionSource, FontResolutionStatus,
+    normalize_font_family,
+    pages::settings::panel::SettingsPanel,
+    selects::FOLLOW_UI_THEME_VALUE,
+    shell::{
+        appearance_font_stack, configured_appearance_font_stack, gpui_terminal_font_fallback,
+        gpui_ui_font_fallback,
+    },
 };
 use crate::theme::{APPEARANCE_THEME_IDS, ThemePalette, appearance_theme_label};
 use nyaterm_ui::NyaTooltip;
 
 use super::super::{settings_form_row, settings_form_section, settings_switch};
+
+struct AppearanceFontStackPresentation {
+    terminal: bool,
+    kind: &'static str,
+    normalized_options: Arc<HashMap<String, String>>,
+    select_options: Arc<[NyaSelectOption]>,
+    primary_label: String,
+    fallback_label: String,
+    remove_label: String,
+}
 
 impl SettingsPanel {
     pub(in crate::features) fn appearance_settings_section(
@@ -196,13 +215,12 @@ impl SettingsPanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
-        let (title, desc, raw, fallback, mut options) = if terminal {
+        let (title, desc, raw, fallback) = if terminal {
             (
                 t!("settings.terminalFontFamily"),
                 t!("settings.terminalFontFamilyDesc"),
                 self.settings.summary().terminal_font_family.clone(),
                 "JetBrains Mono",
-                self.settings.terminal_font_options().to_vec(),
             )
         } else {
             (
@@ -210,18 +228,10 @@ impl SettingsPanel {
                 t!("settings.uiFontFamilyDesc"),
                 self.settings.summary().ui_font_family.clone(),
                 "Inter",
-                self.settings.ui_font_options().to_vec(),
             )
         };
         let fonts = appearance_font_stack(&raw, fallback);
-        for family in &fonts {
-            if !options
-                .iter()
-                .any(|option| option.eq_ignore_ascii_case(family))
-            {
-                options.insert(0, family.clone());
-            }
-        }
+        let (select_options, normalized_options) = self.font_select_option_catalog(terminal);
         let kind = if terminal { "terminal" } else { "ui" };
         let add_id = if terminal {
             "appearance-terminal-font-add"
@@ -241,73 +251,34 @@ impl SettingsPanel {
         let primary_label = t!("settings.fontPrimary");
         let fallback_label = t!("settings.fontFallback");
         let remove_label = t!("common.remove");
+        let effective_summary = self.appearance_font_resolution_summary(terminal);
+        let font_rows = self.appearance_font_stack_rows(
+            &fonts,
+            AppearanceFontStackPresentation {
+                terminal,
+                kind,
+                normalized_options,
+                select_options,
+                primary_label: primary_label.to_string(),
+                fallback_label: fallback_label.to_string(),
+                remove_label: remove_label.to_string(),
+            },
+            cx,
+        );
 
-        let mut content =
-            div()
-                .flex()
-                .flex_col()
-                .gap_3()
-                .children(fonts.into_iter().enumerate().map(|(index, family)| {
-                    let menu_id = format!("appearance-{kind}-font-{index}");
-                    let select_options = options
-                        .iter()
-                        .map(|option| {
-                            NyaSelectOption::new(option.clone(), option.clone())
-                                .font_family(option.clone())
-                        })
-                        .collect::<Vec<_>>();
-                    let selected_family = family.clone();
-                    let delete_id = format!("appearance-{kind}-font-delete-{index}");
-                    let delete: AppearanceClickHandler =
-                        Box::new(cx.listener(move |this, _, _, cx| {
-                            this.remove_appearance_font_stack_entry(terminal, index, cx);
-                        }));
-                    let row_label = if index == 0 {
-                        primary_label.to_string()
-                    } else {
-                        format!("{fallback_label} {index}")
-                    };
-
+        let mut content = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .when_some(effective_summary, |this, summary| {
+                this.child(
                     div()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(rgb(palette.border))
-                        .bg(rgb(palette.input))
-                        .p_3()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .items_center()
-                                .gap_3()
-                                .child(
-                                    div()
-                                        .w(px(96.))
-                                        .flex_none()
-                                        .text_size(px(11.))
-                                        .font_weight(FontWeight(500.))
-                                        .text_color(rgb(palette.text_muted))
-                                        .child(row_label),
-                                )
-                                .child(div().flex_1().min_w(px(220.)).child(self.select_control(
-                                    menu_id,
-                                    select_options,
-                                    Some(selected_family),
-                                    false,
-                                    cx,
-                                )))
-                                .child(appearance_icon_button(
-                                    palette,
-                                    delete_id,
-                                    "icons/fe/delete.svg",
-                                    remove_label.clone(),
-                                    delete,
-                                )),
-                        )
-                }));
+                        .text_size(px(11.))
+                        .text_color(rgb(palette.text_muted))
+                        .child(summary),
+                )
+            })
+            .child(font_rows);
 
         if terminal {
             let _font_size_label = self.settings.summary().terminal_font_size.to_string();
@@ -343,6 +314,210 @@ impl SettingsPanel {
         }
 
         appearance_form_section_with_action(palette, title, desc, add_action, content)
+    }
+
+    fn appearance_font_stack_rows(
+        &mut self,
+        fonts: &[String],
+        presentation: AppearanceFontStackPresentation,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let rows = fonts
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, family)| self.appearance_font_stack_row(&presentation, index, family, cx))
+            .collect::<Vec<_>>();
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .children(rows)
+            .into_any_element()
+    }
+
+    fn appearance_font_stack_row(
+        &mut self,
+        presentation: &AppearanceFontStackPresentation,
+        index: usize,
+        family: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let palette = self.theme_palette();
+        let menu_id = format!("appearance-{}-font-{index}", presentation.kind);
+        let select_options = Arc::clone(&presentation.select_options);
+        let selected_option = presentation
+            .normalized_options
+            .get(&normalize_font_family(&family))
+            .cloned();
+        let selected_value = selected_option.unwrap_or_else(|| family.clone());
+        let availability = self
+            .settings
+            .font_availability(&family, presentation.terminal);
+        let placeholder_content = matches!(availability, FontAvailability::Unavailable { .. })
+            .then(|| {
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .truncate()
+                            .text_color(rgb(palette.text_muted))
+                            .child(family.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(rgb(palette.danger))
+                            .child(t!("settings.fontUnavailableSuffix")),
+                    )
+                    .into_any_element()
+            });
+        let delete_id = format!("appearance-{}-font-delete-{index}", presentation.kind);
+        let terminal = presentation.terminal;
+        let delete: AppearanceClickHandler = Box::new(cx.listener(move |this, _, _, cx| {
+            this.remove_appearance_font_stack_entry(terminal, index, cx);
+        }));
+        let row_label = if index == 0 {
+            presentation.primary_label.clone()
+        } else {
+            format!("{} {index}", presentation.fallback_label)
+        };
+        let select = self.font_select_control(
+            menu_id,
+            select_options,
+            Some(selected_value),
+            placeholder_content,
+            false,
+            cx,
+        );
+
+        div()
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(rgb(palette.input))
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .gap_3()
+                    .child(
+                        div()
+                            .w(px(96.))
+                            .h(px(NYA_FORM_CONTROL_HEIGHT_PX))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight(500.))
+                            .text_color(rgb(palette.text_muted))
+                            .child(row_label),
+                    )
+                    .child(div().flex_1().min_w(px(220.)).child(select))
+                    .child(appearance_icon_button(
+                        palette,
+                        delete_id,
+                        "icons/fe/delete.svg",
+                        presentation.remove_label.clone(),
+                        delete,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn appearance_font_resolution_summary(&self, terminal: bool) -> Option<String> {
+        match self.settings.font_catalog_state() {
+            FontCatalogLoadState::Unloaded | FontCatalogLoadState::Loading => {
+                return Some(t!("settings.fontAvailabilityChecking").to_string());
+            }
+            FontCatalogLoadState::Failed => {
+                return Some(t!("settings.fontCatalogUnavailable").to_string());
+            }
+            FontCatalogLoadState::Loaded => {}
+        }
+        let status = self.appearance_font_resolution(terminal)?;
+        let configured_families = if terminal {
+            configured_appearance_font_stack(
+                &self.settings.summary().terminal_font_family,
+                "JetBrains Mono",
+            )
+        } else {
+            let raw = if self.settings.summary().ui_font_family.trim().is_empty() {
+                self.settings.summary().terminal_font_family.as_str()
+            } else {
+                self.settings.summary().ui_font_family.as_str()
+            };
+            configured_appearance_font_stack(raw, "Inter")
+        };
+        let mut effective_families = configured_families
+            .into_iter()
+            .filter_map(
+                |family| match self.settings.font_availability(&family, terminal) {
+                    FontAvailability::Available { resolved_family } => {
+                        Some(resolved_family.to_string())
+                    }
+                    FontAvailability::Internal => Some(family),
+                    FontAvailability::Unavailable { .. } | FontAvailability::Checking => None,
+                },
+            )
+            .fold(Vec::<String>::new(), |mut families, family| {
+                if !families.iter().any(|existing| {
+                    normalize_font_family(existing) == normalize_font_family(&family)
+                }) {
+                    families.push(family);
+                }
+                families
+            });
+        if effective_families.is_empty()
+            || matches!(
+                status.source,
+                FontResolutionSource::PlatformDefault
+                    | FontResolutionSource::EmergencyMetricsFallback
+            )
+        {
+            effective_families = vec![status.effective_family];
+        }
+        Some(
+            t!(
+                "settings.effectiveFont",
+                families = effective_families.join(", ")
+            )
+            .to_string(),
+        )
+    }
+
+    fn appearance_font_resolution(&self, terminal: bool) -> Option<FontResolutionStatus> {
+        let (raw, fallback, platform_default) = if terminal {
+            (
+                self.settings.summary().terminal_font_family.as_str(),
+                "JetBrains Mono",
+                gpui_terminal_font_fallback(),
+            )
+        } else {
+            (
+                if self.settings.summary().ui_font_family.trim().is_empty() {
+                    self.settings.summary().terminal_font_family.as_str()
+                } else {
+                    self.settings.summary().ui_font_family.as_str()
+                },
+                "Inter",
+                gpui_ui_font_fallback(),
+            )
+        };
+        let families = configured_appearance_font_stack(raw, fallback);
+        self.settings
+            .resolve_font_stack(&families, terminal, platform_default)
     }
 
     fn appearance_opacity_slider(

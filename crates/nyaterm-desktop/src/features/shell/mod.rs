@@ -26,7 +26,10 @@ mod workspace_runtime;
 pub(in crate::features) use activity_bar_runtime::{
     ActivityBarDragPayload, ActivityBarDragPreview,
 };
-pub(in crate::features) use appearance::{appearance_font_stack, gpui_code_font_family};
+pub(in crate::features) use appearance::{
+    appearance_font_stack, configured_appearance_font_stack, gpui_code_font_family,
+    gpui_terminal_font_fallback, gpui_ui_font_fallback,
+};
 #[cfg(test)]
 pub(in crate::features) use state::ResizeHandleHoverState;
 pub(in crate::features) use state::{ShellFeatureInit, ShellFeatureState};

@@ -2,6 +2,7 @@ mod ai;
 mod app_state;
 mod commands;
 mod connections;
+mod font_catalog;
 mod formatting;
 mod icons;
 mod inspector;
@@ -33,3 +34,8 @@ pub(crate) fn init(cx: &mut gpui::App) {
 }
 
 pub use app_state::NyaTermApp;
+pub(in crate::features) use font_catalog::{
+    FontAvailability, FontAvailabilityReason, FontCatalogEntry, FontCatalogKind,
+    FontCatalogLoadState, FontCatalogPresentation, FontCatalogSnapshot, FontCatalogState,
+    FontResolutionSource, FontResolutionStatus, font_names_fingerprint, normalize_font_family,
+};

@@ -16,6 +16,7 @@ use super::assist_state::TerminalAssistState;
 use super::terminal_surface::TerminalScrollbarDragState;
 use super::terminal_surface_entity::TerminalSurface;
 use super::window_state::TerminalWindowState;
+use crate::features::{FontResolutionStatus, terminal::ResolvedAppearanceFont};
 use crate::models::{
     ActionLinkMenuState, ActionLinkTooltipState, MultiLinePasteDraft, RecordingHistorySearchEvent,
     RecordingHistorySearchKey, TerminalFrameEvent, TerminalFramePipeline, TerminalSearchMode,
@@ -128,6 +129,26 @@ pub(super) struct TerminalLayoutState {
     pub(super) session_scrollbar_track_bounds: HashMap<String, gpui::Bounds<gpui::Pixels>>,
     pub(super) scale_factor: f32,
     pub(super) cell_metrics: Option<(f32, f32)>,
+    pub(super) font_metrics_cache: Option<TerminalFontMetricsCache>,
+    /// Runtime-only fallback used when the configured font is unavailable or proportional.
+    pub(super) terminal_font_override: Option<ResolvedAppearanceFont>,
+    pub(super) terminal_font_resolution: Option<FontResolutionStatus>,
+}
+
+/// Runtime validation cache for one configured family, size, and weight tuple.
+///
+/// Font enumeration and glyph measurement are expensive TextSystem operations. Keep
+/// the result in runtime state without changing persisted appearance settings.
+#[derive(Clone, Debug)]
+pub(super) struct TerminalFontMetricsCache {
+    pub(super) configured_family: String,
+    pub(super) font_size: u16,
+    pub(super) font_weight: u16,
+    pub(super) catalog_generation: u64,
+    pub(super) configured_font_valid: bool,
+    pub(super) resolved_font: Option<ResolvedAppearanceFont>,
+    pub(super) resolution: FontResolutionStatus,
+    pub(super) cell_width: f32,
 }
 
 /// Terminal actions overlay and context menu.
@@ -231,6 +252,9 @@ impl TerminalFeatureState {
                 session_scrollbar_track_bounds: HashMap::new(),
                 scale_factor,
                 cell_metrics: None,
+                font_metrics_cache: None,
+                terminal_font_override: None,
+                terminal_font_resolution: None,
             },
             menus: TerminalMenuState {
                 actions_open: false,
@@ -360,6 +384,49 @@ impl TerminalFeatureState {
 
     pub(in crate::features) fn invalidate_cell_metrics(&mut self) {
         self.layout.cell_metrics = None;
+        self.layout.font_metrics_cache = None;
+        self.layout.terminal_font_override = None;
+        self.layout.terminal_font_resolution = None;
+    }
+
+    pub(in crate::features) fn terminal_font_override(&self) -> Option<&ResolvedAppearanceFont> {
+        self.layout.terminal_font_override.as_ref()
+    }
+
+    pub(in crate::features) fn terminal_font_resolution(&self) -> Option<&FontResolutionStatus> {
+        self.layout.terminal_font_resolution.as_ref()
+    }
+
+    pub(in crate::features) fn terminal_font_metrics_need_catalog_refresh(
+        &self,
+        catalog_generation: u64,
+    ) -> bool {
+        self.layout
+            .font_metrics_cache
+            .as_ref()
+            .is_some_and(|cache| {
+                // The first catalog commit only validates the system list. A valid metric
+                // cache from generation zero already measured the same TextSystem, so do not
+                // trigger an avoidable terminal resize. Later catalog generations represent a
+                // real system-font change and must invalidate the cache.
+                !cache.configured_font_valid
+                    || (cache.catalog_generation != 0
+                        && cache.catalog_generation != catalog_generation)
+            })
+    }
+
+    pub(in crate::features) fn set_terminal_font_override(
+        &mut self,
+        font: Option<ResolvedAppearanceFont>,
+    ) {
+        self.layout.terminal_font_override = font;
+    }
+
+    pub(in crate::features) fn set_terminal_font_resolution(
+        &mut self,
+        resolution: FontResolutionStatus,
+    ) {
+        self.layout.terminal_font_resolution = Some(resolution);
     }
 
     pub(in crate::features) fn move_session_surface_bounds(&mut self, from: &str, to: String) {

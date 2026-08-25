@@ -1,5 +1,9 @@
 //! GPUI terminal painting helpers (element + line rendering).
 
+use std::sync::{Arc, OnceLock};
+
+use gpui::FontFeatures;
+
 mod types;
 
 mod ansi;
@@ -8,6 +12,26 @@ mod images;
 mod input;
 mod keywords;
 mod paint;
+
+static TERMINAL_FONT_FEATURES: OnceLock<FontFeatures> = OnceLock::new();
+
+/// Returns the OpenType feature set used by the fixed-width terminal.
+///
+/// Terminal columns are determined by a character grid, so shaping must disable
+/// features that merge characters or otherwise change glyph count during both
+/// measurement and painting.
+pub fn terminal_font_features() -> FontFeatures {
+    TERMINAL_FONT_FEATURES
+        .get_or_init(|| {
+            FontFeatures(Arc::new(
+                [("calt", 0), ("clig", 0), ("liga", 0)]
+                    .into_iter()
+                    .map(|(tag, value)| (tag.to_string(), value))
+                    .collect(),
+            ))
+        })
+        .clone()
+}
 
 fn resolve_cell_fg(palette: nyaterm_ui::ThemePalette, style: nyaterm_terminal::CellStyle) -> u32 {
     if style.reverse {

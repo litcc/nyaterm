@@ -23,6 +23,7 @@ use crate::paint::{
     terminal_highlight_spans_compiled, terminal_highlight_spans_with_keyword_ranges,
     terminal_keyword_exclusion_ranges, terminal_run_font,
 };
+use crate::terminal_font_features;
 use crate::types::{TerminalHighlightSpan, TerminalPaintGeometry};
 
 #[derive(Debug, Clone)]
@@ -1228,6 +1229,7 @@ impl Element for NyaTerminalElement {
         let font_size = px(self.font_size.max(8.));
         let mut base_font = font(SharedString::from(self.font_family.clone()));
         base_font.fallbacks = self.font_fallbacks.clone();
+        base_font.features = terminal_font_features();
         let keyword_rules_key = if let Some(highlights) = self.keyword_highlights.as_ref() {
             highlights.rules_key()
         } else if self.keyword_rules.is_empty() {

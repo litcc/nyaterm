@@ -9,6 +9,7 @@ mod input_runtime;
 mod send_command_runtime;
 mod state;
 mod terminal_context_menu_runtime;
+mod terminal_font;
 pub(in crate::features) mod terminal_runtime;
 mod terminal_search_runtime;
 mod terminal_selection_runtime;
@@ -33,6 +34,11 @@ pub(in crate::features) fn init_key_bindings(cx: &mut App) {
 pub(in crate::features) use state::{
     LostTerminalSelectionRecovery, TerminalFeatureFocus, TerminalFeatureState,
 };
+pub(in crate::features) use terminal_font::{
+    ResolvedAppearanceFont, TerminalFontMeasurement, TerminalFontMeasurementFailure,
+    is_generic_terminal_font_family,
+};
+pub(in crate::features) use terminal_selection_runtime::measure_terminal_font;
 pub(in crate::features) use terminal_surface_entity::{
     FULL_SHELL_PAINT_COUNT, terminal_surface_paint_count,
 };
@@ -44,7 +50,9 @@ pub(in crate::features) use window_state::{
 mod tests {
     use gpui::{KeyBinding, KeyContext, Keymap, actions};
 
-    use super::{TERMINAL_KEY_CONTEXT, TerminalControlC, TerminalShiftTab, TerminalTab};
+    #[cfg(not(target_os = "macos"))]
+    use super::TerminalControlC;
+    use super::{TERMINAL_KEY_CONTEXT, TerminalShiftTab, TerminalTab};
 
     actions!(terminal_test, [RootTab, RootShiftTab, RootCopy, InputCopy]);
 
