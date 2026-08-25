@@ -168,10 +168,14 @@ class PackageNativeTests(unittest.TestCase):
         self.assertEqual(command.count("-e"), len(binaries))
 
     def test_release_binary_respects_absolute_cargo_target_dir(self) -> None:
-        with mock.patch.dict("os.environ", {"CARGO_TARGET_DIR": "/cache/cargo"}):
+        # Build the absolute path for the running platform: Path("/cache/cargo") has
+        # no drive letter, so is_absolute() is False on Windows and the assertion
+        # would compare against a path joined onto the repository root instead.
+        target_dir = Path(tempfile.gettempdir(), "nyaterm-cargo-target").resolve()
+        with mock.patch.dict("os.environ", {"CARGO_TARGET_DIR": str(target_dir)}):
             path = package_native.release_binary_path("x86_64-unknown-linux-gnu")
         self.assertEqual(
-            path.as_posix(), "/cache/cargo/x86_64-unknown-linux-gnu/release/nyaterm"
+            path, target_dir / "x86_64-unknown-linux-gnu" / "release" / "nyaterm"
         )
 
     def test_platform_package_versions_are_normalized(self) -> None:

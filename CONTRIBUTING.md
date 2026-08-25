@@ -2,11 +2,10 @@
 
 ## Before changing code
 
-Read `AGENTS.md` and the relevant crate-level architecture in
-`docs/architecture/gpui-migration-status.md`. Keep one authoritative owner for
-each piece of state. Do not introduce WebView/Tauri layers, `#[path]` module
-aliases, `use super::*`, snapshot-only stores, or direct database access from
-GPUI views.
+Read `AGENTS.md` and the relevant crate-level architecture notes. Keep one
+authoritative owner for each piece of state. Do not introduce WebView/Tauri
+layers, `#[path]` module aliases, `use super::*`, snapshot-only stores, or direct
+database access from GPUI views.
 
 Choose the crate that owns the behavior:
 
@@ -28,18 +27,21 @@ GPUI update callback.
 
 ## Local checks
 
-Run focused checks while working, then the full checks before review:
+Run focused checks while working, then the full checks before review. These are
+the same checks CI gates on:
 
 ```bash
 cargo check -p <crate-name>
 cargo test -p <crate-name>
-cargo check --workspace
-cargo test --workspace
+cargo test --workspace --no-fail-fast
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets
-bash scripts/check-architecture-boundaries.sh
-bash scripts/check-icon-references.sh
+python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
 ```
+
+`cargo test --workspace` builds every target, so a separate `cargo check
+--workspace` before it is redundant. `--no-fail-fast` matters: without it the
+first failing crate hides every crate after it.
 
 Use `cargo run -p nyaterm-app --bin nyaterm` for a local graphical smoke test.
 The full workspace and application checks may need platform-native GPUI, PTY,
@@ -66,8 +68,6 @@ by revision in the root `Cargo.toml`. Change one by committing to its fork
 branch and bumping that revision, and identify the upstream project/version or
 commit, the reason for the modification, and the validation performed. `temp/vendor/`
 holds untracked read-only copies for reading only; nothing there is compiled.
-Update `docs/architecture/gpui-migration-status.md` when a migration boundary,
-ownership rule, or debt count changes.
 
 ## Compatibility
 

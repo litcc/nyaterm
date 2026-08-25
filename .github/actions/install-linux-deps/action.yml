@@ -14,4 +14,6 @@ runs:
       shell: bash
       env:
         EXTRA_PACKAGES: ${{ inputs.extra_packages }}
-      run: ${{ github.action_path }}/../../../scripts/ci/install-linux-deps.sh
+      # Invoked through `bash` rather than executed directly so the action does not
+      # depend on the script's exec bit surviving checkout.
+      run: bash "${{ github.action_path }}/../../../scripts/ci/install-linux-deps.sh"

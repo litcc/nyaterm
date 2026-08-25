@@ -1,4 +1,4 @@
-name: Native Package
+name: Release
 
 on:
   workflow_dispatch:
@@ -20,23 +20,34 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-package-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
 
 jobs:
   package:
     name: Package ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - label: macos-arm64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
+          # Intel macOS runners exist until the macOS 15 image retires in Fall 2027.
           - label: macos-x64
             os: macos-15-intel
             target: x86_64-apple-darwin
+          # The Linux legs stay on 22.04 deliberately: it sets the glibc 2.35 floor
+          # for released binaries. Moving to 24.04 raises that to 2.39 and drops
+          # Ubuntu 22.04 and Debian 12 users. Image deprecation begins 2026-09-17
+          # and it is fully unsupported from 2027-04-17 — decide before then rather
+          # than letting it lapse.
           - label: linux-x64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -44,31 +55,30 @@ jobs:
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
           - label: windows-x64
-            os: windows-latest
+            os: windows-2025
             target: x86_64-pc-windows-msvc
           - label: windows-arm64
-            os: windows-latest
+            os: windows-2025
             target: aarch64-pc-windows-msvc
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          key: native-package-${{ matrix.target }}
-          cache-on-failure: true
+          cache-key: release-${{ matrix.target }}
+          cache-on-failure: 'true'
+          save-cache: always
 
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
@@ -79,48 +89,14 @@ jobs:
       - name: Install AppImage tooling
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          case '${{ matrix.target }}' in
-            x86_64-unknown-linux-gnu)
-              appimage_arch='x86_64'
-              appimage_sha256='b90f4a8b18967545fda78a445b27680a1642f1ef9488ced28b65398f2be7add2'
-              ;;
-            aarch64-unknown-linux-gnu)
-              appimage_arch='aarch64'
-              appimage_sha256='a48972e5ae91c944c5a7c80214e7e0a42dd6aa3ae979d8756203512a74ff574d'
-              ;;
-            *) echo 'Unsupported AppImage target' >&2; exit 1 ;;
-          esac
-          curl --fail --location --retry 3 \
-            --output appimagetool \
-            "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${appimage_arch}.AppImage"
-          echo "${appimage_sha256}  appimagetool" | sha256sum --check --strict
-          chmod +x appimagetool
-          sudo mv appimagetool /usr/local/bin/appimagetool
+        env:
+          TARGET: ${{ matrix.target }}
+        run: bash scripts/ci/install-appimagetool.sh "${TARGET}"
 
       - name: Install NSIS
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          NSIS_VERSION: '3.12'
-          NSIS_ARCHIVE_SHA256: '56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f'
-        run: |
-          $archiveName = "nsis-$env:NSIS_VERSION.zip"
-          $archivePath = Join-Path $env:RUNNER_TEMP $archiveName
-          $downloadUrl = "https://downloads.sourceforge.net/project/nsis/NSIS%203/$env:NSIS_VERSION/$archiveName"
-          curl.exe --fail --location --retry 3 --retry-all-errors --output $archivePath $downloadUrl
-          $actualHash = (Get-FileHash -Algorithm SHA256 $archivePath).Hash.ToLowerInvariant()
-          if ($actualHash -ne $env:NSIS_ARCHIVE_SHA256) {
-            throw "NSIS archive checksum mismatch: $actualHash"
-          }
-          $extractRoot = Join-Path $env:RUNNER_TEMP "nsis-$env:NSIS_VERSION-portable"
-          Expand-Archive -Path $archivePath -DestinationPath $extractRoot -Force
-          $nsisBin = Join-Path $extractRoot "nsis-$env:NSIS_VERSION"
-          if (-not (Test-Path (Join-Path $nsisBin 'makensis.exe'))) {
-            throw 'makensis.exe is missing from the verified NSIS archive'
-          }
-          $nsisBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        run: ./scripts/ci/install-nsis.ps1
 
       - name: Resolve package version
         id: version
@@ -142,13 +118,19 @@ jobs:
         env:
           NYATERM_VERSION: ${{ steps.version.outputs.value }}
           APPIMAGE_EXTRACT_AND_RUN: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: python scripts/release/package_native.py ${{ matrix.target }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: python scripts/release/package_native.py "${TARGET}"
 
       - name: Verify native package
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: >-
           python scripts/release/verify_native_package.py
-          --target ${{ matrix.target }}
-          --version ${{ steps.version.outputs.value }}
+          --target "${TARGET}"
+          --version "${VERSION}"
           --dist dist
 
       - name: Upload package artifact
@@ -161,11 +143,22 @@ jobs:
   release:
     name: Publish release assets
     needs: package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.upload_release)
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Download package artifacts
         uses: actions/download-artifact@v4
         with:
@@ -198,19 +191,19 @@ jobs:
             echo "prerelease=${prerelease}"
           } >> "${GITHUB_OUTPUT}"
 
+      # Compare the downloaded set against the names the packaging script itself
+      # derives, so adding a target does not mean remembering to bump a literal.
       - name: Validate release assets
         shell: bash
-        run: |
-          set -euo pipefail
-          test "$(find dist-release -maxdepth 1 -type f | wc -l)" -eq 14
-          find dist-release -maxdepth 1 -type f -printf '%f\n' | sort
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: python3 scripts/ci/check_release_assets.py --dist dist-release --version "${VERSION}"
 
       - name: Create or update GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
-          VERSION: ${{ steps.release.outputs.version }}
           PRERELEASE: ${{ steps.release.outputs.prerelease }}
         run: |
           set -euo pipefail
