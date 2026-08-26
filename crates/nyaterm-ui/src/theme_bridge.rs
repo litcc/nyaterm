@@ -187,7 +187,7 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
     // the assignments above only touch the component theme. Without this the bar
     // keeps whatever projection the last `Theme::change` built - which happens
     // only on a light/dark flip, from the built-in palette rather than ours.
-    Theme::sync_scrollbar_theme(cx);
+    Theme::sync_base(cx);
 }
 
 #[cfg(test)]

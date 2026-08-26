@@ -3086,7 +3086,6 @@ dependencies = [
  "gpui_macros",
  "gpui_shared_string",
  "gpui_util",
- "hdrhistogram",
  "heapless",
  "http_client",
  "image",
@@ -3136,7 +3135,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.5.2"
-source = "git+https://github.com/nyakang/gpui-component?rev=d44fcb466cdac2833ce7e39bad63a33b5bb302b9#d44fcb466cdac2833ce7e39bad63a33b5bb302b9"
+source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3168,7 +3167,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.2"
-source = "git+https://github.com/nyakang/gpui-component?rev=d44fcb466cdac2833ce7e39bad63a33b5bb302b9#d44fcb466cdac2833ce7e39bad63a33b5bb302b9"
+source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3213,7 +3212,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/nyakang/gpui-component?rev=d44fcb466cdac2833ce7e39bad63a33b5bb302b9#d44fcb466cdac2833ce7e39bad63a33b5bb302b9"
+source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3227,7 +3226,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/nyakang/gpui-component?rev=d44fcb466cdac2833ce7e39bad63a33b5bb302b9#d44fcb466cdac2833ce7e39bad63a33b5bb302b9"
+source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3578,20 +3577,6 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
-
-[[package]]
-name = "hdrhistogram"
-version = "7.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d1053f4708f0af3cf9fc5bffc7e68a914a3c45becb231c80068c9c3f78bea"
-dependencies = [
- "base64 0.22.1",
- "byteorder",
- "crossbeam-channel",
- "flate2",
- "nom 8.0.0",
- "num-traits",
-]
 
 [[package]]
 name = "heapless"

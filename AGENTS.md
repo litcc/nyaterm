@@ -171,7 +171,7 @@ discoverable without pinning it open. Two further consequences:
   width.
 
 Anything that writes `Theme::scrollbar_mode` or the `scrollbar*` colors directly
-must call `Theme::sync_scrollbar_theme(cx)` afterwards. `Scrollbar` reads the
+must call `Theme::sync_base(cx)` afterwards. `Scrollbar` reads the
 `gpui_base::Theme` projection, which those assignments do not touch.
 
 The terminal scrollback scrollbar is hand-rolled as a reserved flex column with
