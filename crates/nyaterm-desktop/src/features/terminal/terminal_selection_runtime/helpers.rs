@@ -39,11 +39,14 @@ pub(in crate::features) fn terminal_bounds_tracker(
                 return;
             };
             let scale_factor = window.scale_factor();
-            let unchanged = bounds_entity
+            if bounds_entity
                 .read(cx)
-                .terminal_surface_bounds_for_session(session_id.as_deref())
-                .is_some_and(|previous| previous == bounds);
-            if unchanged && bounds_entity.read(cx).terminal.layout.scale_factor == scale_factor {
+                .terminal_surface_bounds_tracking_is_current(
+                    session_id.as_deref(),
+                    bounds,
+                    scale_factor,
+                )
+            {
                 return;
             }
             // Defer mutation so we never re-enter the entity while layout/prepaint is running.

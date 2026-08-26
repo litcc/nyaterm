@@ -1301,6 +1301,63 @@ impl NyaTermApp {
         }
     }
 
+    /// Bounds recorded for exactly this pane, with no fallback to the active
+    /// pane's bounds. The bounds tracker must use this: every tab paints the
+    /// same rect, so falling back to a sibling's bounds makes a brand-new
+    /// session look already-measured and it never leaves the default grid.
+    pub(in crate::features) fn recorded_terminal_surface_bounds_for_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> Option<gpui::Bounds<gpui::Pixels>> {
+        match session_id.filter(|id| !id.is_empty()) {
+            Some(session_id) => self
+                .terminal
+                .layout
+                .session_surface_bounds
+                .get(session_id)
+                .copied(),
+            None => self.terminal.layout.surface_bounds,
+        }
+    }
+
+    /// True when the recorded bounds, scale factor, and the pane's live grid all
+    /// already agree with what `bounds` implies, so re-recording would be a
+    /// no-op. Checking the grid too keeps this self-healing when the surface is
+    /// painted before the session's view exists.
+    pub(in crate::features) fn terminal_surface_bounds_tracking_is_current(
+        &self,
+        session_id: Option<&str>,
+        bounds: gpui::Bounds<gpui::Pixels>,
+        scale_factor: f32,
+    ) -> bool {
+        if self.terminal.layout.scale_factor != scale_factor {
+            return false;
+        }
+        if self.recorded_terminal_surface_bounds_for_session(session_id) != Some(bounds) {
+            return false;
+        }
+        let TerminalResizeGeometry {
+            cols,
+            rows,
+            pixel_width,
+            pixel_height,
+        } = self.terminal_resize_geometry_for_bounds_for_session(bounds, session_id);
+        match session_id.filter(|id| !id.is_empty()) {
+            Some(session_id) => match self.terminal.view.views.get(session_id) {
+                Some(view) => {
+                    view.screen.cols() as u16 == cols
+                        && view.screen.rows() as u16 == rows
+                        && !view.backend_resize_changed(cols, rows, pixel_width, pixel_height)
+                }
+                None => true,
+            },
+            None => {
+                self.terminal.view.screen.cols() as u16 == cols
+                    && self.terminal.view.screen.rows() as u16 == rows
+            }
+        }
+    }
+
     pub(in crate::features) fn remember_terminal_scrollbar_track_bounds_for_session(
         &mut self,
         session_id: Option<&str>,
@@ -1597,11 +1654,14 @@ impl NyaTermApp {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use gpui::{Bounds, point, px, size};
+    use gpui::{AppContext as _, Bounds, TestAppContext, point, px, size};
     use nyaterm_core::{
-        TerminalResizeGeometry, TerminalViewportInsets,
-        terminal_resize_geometry_for_size_with_insets,
+        AppRuntime, RuntimeMode, TerminalResizeGeometry, TerminalViewportInsets,
+        terminal_resize_geometry_for_size_with_insets, uuid,
     };
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
 
     use super::{
         TERMINAL_SCROLL_POSITION_NOTIFY_DELAY, TERMINAL_SCROLLBAR_DRAG_NOTIFY_DELAY,
@@ -2033,5 +2093,100 @@ mod tests {
             ),
             Some(fallback)
         );
+    }
+
+    fn app_for_resize(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        // A uuid rather than a clock reading: these tests run in parallel and
+        // Windows' clock granularity lets a timestamp repeat, which would share
+        // one config dir and so one settings database.
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-terminal-resize-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    #[test]
+    fn a_second_tab_is_measured_even_though_it_paints_the_same_rect_as_the_first() {
+        let mut cx = TestAppContext::single();
+        let app = app_for_resize(&mut cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(700.)));
+
+        cx.update_entity(&app, |app, _| {
+            app.terminal
+                .seed_session_view("first".to_string(), String::new(), "UTF-8");
+            app.session.select_active_session("first");
+            let scale_factor = app.terminal.layout.scale_factor;
+
+            assert!(app.remember_terminal_surface_bounds_for_session(Some("first"), bounds));
+            let first = app.terminal.view.views.get("first").expect("first view");
+            let (cols, rows) = (first.screen.cols(), first.screen.rows());
+            assert!(
+                cols > 80 && rows > 24,
+                "expected {cols}x{rows} to fill 1200x700"
+            );
+
+            // Opening a second tab: same rect, and `first` already recorded it.
+            app.terminal
+                .seed_session_view("second".to_string(), String::new(), "UTF-8");
+            // The hit-test accessor deliberately falls back to the active pane's
+            // bounds, which is exactly why the tracker must not use it here.
+            assert_eq!(
+                app.terminal_surface_bounds_for_session(Some("second")),
+                Some(bounds)
+            );
+            assert!(!app.terminal_surface_bounds_tracking_is_current(
+                Some("second"),
+                bounds,
+                scale_factor
+            ));
+
+            assert!(app.remember_terminal_surface_bounds_for_session(Some("second"), bounds));
+            let second = app.terminal.view.views.get("second").expect("second view");
+            assert_eq!((second.screen.cols(), second.screen.rows()), (cols, rows));
+            assert!(app.terminal_surface_bounds_tracking_is_current(
+                Some("second"),
+                bounds,
+                scale_factor
+            ));
+        });
+    }
+
+    #[test]
+    fn a_view_created_after_its_bounds_were_recorded_still_gets_measured() {
+        let mut cx = TestAppContext::single();
+        let app = app_for_resize(&mut cx);
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(700.)));
+
+        cx.update_entity(&app, |app, _| {
+            let scale_factor = app.terminal.layout.scale_factor;
+            // The surface paints while the session is still connecting, so there
+            // is no view to resize yet.
+            assert!(!app.remember_terminal_surface_bounds_for_session(Some("pending"), bounds));
+            app.terminal
+                .seed_session_view("pending".to_string(), String::new(), "UTF-8");
+
+            assert!(!app.terminal_surface_bounds_tracking_is_current(
+                Some("pending"),
+                bounds,
+                scale_factor
+            ));
+            assert!(app.remember_terminal_surface_bounds_for_session(Some("pending"), bounds));
+            let view = app.terminal.view.views.get("pending").expect("view");
+            assert!(view.screen.cols() > 80 && view.screen.rows() > 24);
+        });
     }
 }
