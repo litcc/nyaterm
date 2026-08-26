@@ -1895,7 +1895,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid 0.9.6",
- "der_derive",
+ "der_derive 0.7.3",
  "flagset",
  "zeroize",
 ]
@@ -1907,6 +1907,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a69dedd701da44b0536442edf09c81a64b0ab97a7a4a5e3d1971f00027cbc63d"
 dependencies = [
  "const-oid 0.10.2",
+ "der_derive 0.8.0",
+ "flagset",
  "pem-rfc7468",
  "zeroize",
 ]
@@ -1929,6 +1931,17 @@ name = "der_derive"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8034092389675178f570469e6c3b0465d3d30b4505c294a6550db47f3c17ad18"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "der_derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59600e2c2d636fde9b65e99cc6445ac770c63d3628195ff39932b8d6d7409903"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2142,7 +2155,7 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
 dependencies = [
- "pkcs8",
+ "pkcs8 0.11.0",
  "signature",
 ]
 
@@ -2183,7 +2196,7 @@ dependencies = [
  "hkdf 0.13.0",
  "hybrid-array",
  "pem-rfc7468",
- "pkcs8",
+ "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "sec1",
  "subtle",
@@ -3714,6 +3727,7 @@ dependencies = [
  "http",
  "http-body",
  "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -4143,24 +4157,25 @@ checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
 [[package]]
 name = "ironrdp-async"
 version = "0.10.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "bytes",
  "ironrdp-connector",
  "ironrdp-core",
  "ironrdp-pdu",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
 name = "ironrdp-bulk"
 version = "0.1.1"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 
 [[package]]
 name = "ironrdp-cfg"
 version = "0.1.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-propertyset",
 ]
@@ -4168,11 +4183,10 @@ dependencies = [
 [[package]]
 name = "ironrdp-client"
 version = "0.1.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "anyhow",
  "futures-util",
- "ironrdp-bulk",
  "ironrdp-cfg",
  "ironrdp-cliprdr",
  "ironrdp-cliprdr-native",
@@ -4185,7 +4199,9 @@ dependencies = [
  "ironrdp-mstsgu",
  "ironrdp-pdu",
  "ironrdp-propertyset",
+ "ironrdp-rail",
  "ironrdp-rdcleanpath",
+ "ironrdp-rdpei",
  "ironrdp-session",
  "ironrdp-svc",
  "ironrdp-tls",
@@ -4195,13 +4211,13 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "url",
- "x509-cert",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
 name = "ironrdp-cliprdr"
 version = "0.7.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "bitflags 2.13.1",
  "ironrdp-core",
@@ -4213,7 +4229,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-cliprdr-native"
 version = "0.7.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-cliprdr",
  "ironrdp-core",
@@ -4224,7 +4240,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-connector"
 version = "0.10.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-core",
  "ironrdp-error",
@@ -4241,7 +4257,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-core"
 version = "0.2.1"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-error",
 ]
@@ -4249,7 +4265,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-displaycontrol"
 version = "0.8.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-core",
  "ironrdp-dvc",
@@ -4261,7 +4277,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-dvc"
 version = "0.8.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-core",
  "ironrdp-pdu",
@@ -4272,7 +4288,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-echo"
 version = "0.4.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-core",
  "ironrdp-dvc",
@@ -4283,12 +4299,12 @@ dependencies = [
 [[package]]
 name = "ironrdp-error"
 version = "0.2.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 
 [[package]]
 name = "ironrdp-graphics"
 version = "0.9.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "bit_field",
  "bitflags 2.13.1",
@@ -4296,15 +4312,16 @@ dependencies = [
  "byteorder",
  "ironrdp-core",
  "ironrdp-pdu",
- "num-derive",
+ "num-derive 0.5.1",
  "num-traits",
+ "wide",
  "yuv",
 ]
 
 [[package]]
 name = "ironrdp-mstsgu"
 version = "0.0.1"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.13.1",
@@ -4316,7 +4333,9 @@ dependencies = [
  "ironrdp-error",
  "ironrdp-tls",
  "log",
+ "sspi",
  "tokio",
+ "tokio-socks",
  "tokio-tungstenite",
  "tokio-util",
  "uuid",
@@ -4325,42 +4344,65 @@ dependencies = [
 [[package]]
 name = "ironrdp-pdu"
 version = "0.9.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "bit_field",
  "bitflags 2.13.1",
  "byteorder",
  "der-parser",
+ "hmac 0.12.1",
  "ironrdp-core",
  "ironrdp-error",
  "md-5 0.10.6",
  "num-bigint",
- "num-derive",
+ "num-derive 0.5.1",
  "num-integer",
  "num-traits",
  "pkcs1 0.7.5",
- "sha1 0.10.7",
+ "sha1 0.11.0",
  "tap",
- "x509-cert",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
 name = "ironrdp-propertyset"
 version = "0.1.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
+
+[[package]]
+name = "ironrdp-rail"
+version = "0.1.0"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
+dependencies = [
+ "ironrdp-core",
+ "ironrdp-svc",
+]
 
 [[package]]
 name = "ironrdp-rdcleanpath"
 version = "0.2.2"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
- "der 0.7.10",
+ "der 0.8.1",
+]
+
+[[package]]
+name = "ironrdp-rdpei"
+version = "0.1.0"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
+dependencies = [
+ "bitflags 2.13.1",
+ "ironrdp-core",
+ "ironrdp-dvc",
+ "ironrdp-pdu",
+ "ironrdp-svc",
+ "tracing",
 ]
 
 [[package]]
 name = "ironrdp-session"
 version = "0.11.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-bulk",
  "ironrdp-core",
@@ -4369,6 +4411,7 @@ dependencies = [
  "ironrdp-error",
  "ironrdp-graphics",
  "ironrdp-pdu",
+ "ironrdp-rdpei",
  "ironrdp-svc",
  "tracing",
 ]
@@ -4376,7 +4419,7 @@ dependencies = [
 [[package]]
 name = "ironrdp-svc"
 version = "0.8.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "bitflags 2.13.1",
  "ironrdp-core",
@@ -4386,17 +4429,18 @@ dependencies = [
 [[package]]
 name = "ironrdp-tls"
 version = "0.2.2"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
- "x509-cert",
+ "x509-cert 0.3.0",
 ]
 
 [[package]]
 name = "ironrdp-tokio"
 version = "0.10.0"
-source = "git+https://github.com/nyakang/IronRDP?rev=b00e2282efccf8beeecde8e5516a5048ed025184#b00e2282efccf8beeecde8e5516a5048ed025184"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
 dependencies = [
  "ironrdp-async",
  "ironrdp-connector",
@@ -5087,7 +5131,7 @@ dependencies = [
  "hybrid-array",
  "kem",
  "module-lattice",
- "pkcs8",
+ "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "sha3 0.11.0",
 ]
@@ -5380,6 +5424,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-derive"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4e98dc3b890f6c23a0f9d3d491a2823d0dea0fa656302a13dd225fa924112a8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5534,13 +5589,14 @@ dependencies = [
  "ironrdp-cliprdr",
  "ironrdp-core",
  "ironrdp-pdu",
+ "ironrdp-tls",
  "nyaterm-remote-desktop",
  "rustls",
  "sha2 0.11.0",
  "smallvec",
  "tokio",
  "uuid",
- "x509-cert",
+ "x509-cert 0.2.5",
 ]
 
 [[package]]
@@ -6502,6 +6558,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f"
 dependencies = [
  "der 0.7.10",
+ "pkcs8 0.10.2",
  "spki 0.7.3",
 ]
 
@@ -6530,6 +6587,16 @@ dependencies = [
  "scrypt",
  "sha2 0.11.0",
  "spki 0.8.0",
+]
+
+[[package]]
+name = "pkcs8"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f950b2377845cebe5cf8b5165cb3cc1a5e0fa5cfa3e1f7f55707d8fd82e0a7b7"
+dependencies = [
+ "der 0.7.10",
+ "spki 0.7.3",
 ]
 
 [[package]]
@@ -6678,6 +6745,15 @@ dependencies = [
  "shell-words",
  "winapi",
  "winreg 0.10.1",
+]
+
+[[package]]
+name = "portpicker"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be97d76faf1bfab666e1375477b23fde79eccf0276e9b63b92a39d676a889ba9"
+dependencies = [
+ "rand 0.8.7",
 ]
 
 [[package]]
@@ -7126,7 +7202,7 @@ dependencies = [
  "maybe-rayon",
  "new_debug_unreachable",
  "noop_proc_macro",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "paste",
  "profiling",
@@ -7328,7 +7404,9 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
@@ -7340,11 +7418,14 @@ dependencies = [
  "log",
  "percent-encoding",
  "pin-project-lite",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
+ "tokio-rustls",
  "tower",
  "tower-http",
  "tower-service",
@@ -7467,7 +7548,7 @@ dependencies = [
  "crypto-primes",
  "digest 0.11.3",
  "pkcs1 0.8.0-rc.4",
- "pkcs8",
+ "pkcs8 0.11.0",
  "rand_core 0.10.1",
  "sha2 0.11.0",
  "signature",
@@ -7522,7 +7603,7 @@ dependencies = [
  "pbkdf2 0.13.0",
  "pkcs1 0.8.0-rc.4",
  "pkcs5",
- "pkcs8",
+ "pkcs8 0.11.0",
  "polyval",
  "rand 0.10.2",
  "rand_core 0.10.1",
@@ -7860,6 +7941,15 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safe_arch"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "salsa20"
@@ -8643,7 +8733,7 @@ dependencies = [
  "hmac 0.13.0",
  "md-5 0.11.0",
  "md4",
- "num-derive",
+ "num-derive 0.4.2",
  "num-traits",
  "oid",
  "picky",
@@ -8652,10 +8742,13 @@ dependencies = [
  "picky-asn1-x509",
  "picky-krb",
  "pkcs1 0.8.0-rc.4",
+ "portpicker",
  "rand 0.10.2",
  "rand_core 0.10.1",
+ "reqwest",
  "rsa",
  "rustls",
+ "rustls-native-certs",
  "serde",
  "sha1 0.11.0",
  "sha2 0.11.0",
@@ -10418,6 +10511,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wide"
+version = "0.7.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
+]
+
+[[package]]
 name = "widestring"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11149,6 +11252,18 @@ dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
  "spki 0.7.3",
+ "tls_codec",
+]
+
+[[package]]
+name = "x509-cert"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "105ef4642d9cb137ef83d623d0e4bf08b8adf69e9918ca904a174adb6d3d038b"
+dependencies = [
+ "const-oid 0.10.2",
+ "der 0.8.1",
+ "spki 0.8.0",
  "tls_codec",
 ]
 

@@ -137,20 +137,23 @@ debug = "full"
 
 [patch.crates-io]
 alacritty_terminal = { git = "https://github.com/nyakang/alacritty", rev = "1b27ea0c584898af5c86b1dc2c4781a6412ec12b" }
-ironrdp-client = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
-ironrdp-connector = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
+ironrdp-client = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
+ironrdp-connector = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
 sspi = { git = "https://github.com/nyakang/sspi-rs", rev = "9d7d5358533784ab7742eaed411985b609a98c24" }
 # The published ironrdp-client and ironrdp-connector packages declare their
 # sibling crates as registry dependencies, but in the IronRDP repository those
 # are path dependencies, so patching the two above to git pulls the siblings
 # from git as well. Without these entries the graph holds both a registry and a
 # git copy of each and the SvcClientProcessor impls stop unifying. The versions
-# are identical on both sides.
-ironrdp-cliprdr = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
-ironrdp-core = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
-ironrdp-error = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
-ironrdp-pdu = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
-ironrdp-svc = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
+# are identical on both sides. `ironrdp-tls` is here for the same reason:
+# `nyaterm-rdp-helper` names its certificate-validation types directly, because
+# ironrdp-client does not re-export them.
+ironrdp-cliprdr = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
+ironrdp-core = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
+ironrdp-error = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
+ironrdp-pdu = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
+ironrdp-svc = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
+ironrdp-tls = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22310afbc26f6dfd27eb004e96e5c" }
 
 # gpui-component declares gpui, gpui_macros and gpui_platform against upstream
 # zed-industries/zed without pinning a revision, because the NyaTerm patch

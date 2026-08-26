@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::{Arc, Mutex, mpsc};
 
-use ironrdp_client::rdp::RdpInputEvent as IronInput;
+use ironrdp_client::rdp::RdpInputSender;
 use ironrdp_cliprdr::backend::{ClipboardMessage, CliprdrBackend};
 use ironrdp_cliprdr::pdu::{
     ClipboardFormat, ClipboardFormatId, ClipboardGeneralCapabilityFlags, FileContentsRequest,
@@ -11,7 +11,6 @@ use ironrdp_cliprdr::pdu::{
 use ironrdp_cliprdr::{Cliprdr, CliprdrClient};
 use ironrdp_core::impl_as_any;
 use nyaterm_remote_desktop::{MAX_CLIPBOARD_TEXT_BYTES, RdpControlMessage};
-use tokio::sync::mpsc as tokio_mpsc;
 
 use super::Outbound;
 
@@ -24,7 +23,7 @@ pub(super) struct ClipboardBridge {
 #[derive(Default)]
 struct ClipboardState {
     local_text: String,
-    input: Option<tokio_mpsc::UnboundedSender<IronInput>>,
+    input: Option<RdpInputSender>,
     generation: u64,
 }
 
@@ -46,7 +45,7 @@ impl ClipboardBridge {
         })
     }
 
-    pub(super) fn set_input_sender(&self, sender: tokio_mpsc::UnboundedSender<IronInput>) {
+    pub(super) fn set_input_sender(&self, sender: RdpInputSender) {
         self.state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -67,9 +66,9 @@ impl ClipboardBridge {
         };
         if let Some(sender) = sender {
             sender
-                .send(IronInput::Clipboard(ClipboardMessage::SendInitiateCopy(
-                    vec![ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT)],
-                )))
+                .send_clipboard(ClipboardMessage::SendInitiateCopy(vec![
+                    ClipboardFormat::new(ClipboardFormatId::CF_UNICODETEXT),
+                ]))
                 .map_err(|_| anyhow::anyhow!("IronRDP clipboard input channel closed"))?;
         }
         Ok(())
@@ -89,7 +88,7 @@ impl ClipboardBridge {
             .input
             .clone();
         if let Some(sender) = sender {
-            let _ = sender.send(IronInput::Clipboard(message));
+            let _ = sender.send_clipboard(message);
         }
     }
 

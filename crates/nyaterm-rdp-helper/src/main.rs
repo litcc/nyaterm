@@ -10,8 +10,10 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
-use ironrdp_client::config::{CertificateVerifier, ClipboardType, ConfigBuilder, Destination};
-use ironrdp_client::rdp::{RdpClient, RdpInputEvent as IronInput, RdpOutputEvent};
+use ironrdp_client::config::{ClipboardType, ConfigBuilder, Destination};
+use ironrdp_client::rdp::{
+    AutoReconnectDecision, RdpClient, RdpInputEvent as IronInput, RdpInputSender, RdpOutputEvent,
+};
 use ironrdp_pdu::input::MousePdu;
 use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
 use ironrdp_pdu::input::mouse::PointerFlags;
@@ -27,7 +29,7 @@ use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::sync::mpsc as tokio_mpsc;
 use uuid::Uuid;
-use x509_cert::der::Encode as _;
+use x509_cert::der::Decode as _;
 
 mod clipboard;
 
@@ -187,9 +189,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 };
                 for event in events {
                     if let Some(event) = convert_input(event, &mut input_state) {
-                        sender
-                            .send(IronInput::FastPath(event))
-                            .map_err(|_| anyhow::anyhow!("IronRDP input channel closed"))?;
+                        send_iron_input(sender, IronInput::FastPath(event))?;
                     }
                 }
             }
@@ -210,20 +210,19 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 };
                 let width = u16::try_from(width).unwrap_or(u16::MAX);
                 let height = u16::try_from(height).unwrap_or(u16::MAX);
-                sender
-                    .send(IronInput::Resize {
+                send_iron_input(
+                    sender,
+                    IronInput::Resize {
                         width,
                         height,
                         scale_factor: 100,
                         physical_size: None,
-                    })
-                    .map_err(|_| anyhow::anyhow!("IronRDP input channel closed"))?;
+                    },
+                )?;
             }
             RdpControlMessage::RequestFullFrame { session_id } => {
                 if let Some(sender) = iron_input.as_ref() {
-                    sender
-                        .send(IronInput::RequestFullFrame)
-                        .map_err(|_| anyhow::anyhow!("IronRDP input channel closed"))?;
+                    send_iron_input(sender, IronInput::RequestFullFrame)?;
                 } else {
                     send_error(
                         &output_tx,
@@ -280,7 +279,9 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                     },
                 )?;
                 if let Some(sender) = iron_input.take() {
-                    let _ = sender.send(IronInput::Close);
+                    // Bypasses the bounded input queue on purpose: a full queue must
+                    // not be able to stop a disconnect from being requested.
+                    sender.request_graceful_close();
                 }
                 if let Some(task) = client_task.take() {
                     let deadline = std::time::Instant::now() + Duration::from_millis(700);
@@ -309,7 +310,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
     }
 
     if let Some(sender) = iron_input {
-        let _ = sender.send(IronInput::Close);
+        sender.request_graceful_close();
     }
     drop(output_tx);
     let _ = reader.join();
@@ -380,60 +381,72 @@ fn build_config(
 ) -> anyhow::Result<(ironrdp_client::config::Config, Arc<ClipboardBridge>)> {
     let port = config.port;
     let certificate_output_tx = output_tx.clone();
-    let verifier: CertificateVerifier = Arc::new(move |host, certificate| {
-        let der = match certificate.to_der() {
-            Ok(der) => der,
-            Err(_) => return false,
-        };
-        let request_id = Uuid::new_v4().to_string();
-        let fingerprint = Sha256::digest(&der)
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<Vec<_>>()
-            .join(":");
-        let request = RdpCertificateRequest {
-            request_id: request_id.clone(),
-            host: host.to_string(),
-            port,
-            sha256_fingerprint: fingerprint,
-            subject: Some(certificate.tbs_certificate.subject.to_string()),
-            issuer: Some(certificate.tbs_certificate.issuer.to_string()),
-            valid_from: Some(certificate.tbs_certificate.validity.not_before.to_string()),
-            valid_to: Some(certificate.tbs_certificate.validity.not_after.to_string()),
-        };
-        if certificate_output_tx
-            .send(Outbound::Control(RdpControlMessage::CertificateRequest(
-                request,
-            )))
-            .is_err()
-        {
-            return false;
-        }
-        certificate_gate.waiting.store(true, Ordering::Release);
-        let deadline = std::time::Instant::now() + Duration::from_secs(120);
-        let mut slot = certificate_gate
-            .response
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let accepted = loop {
-            if let Some((response_id, response)) = slot.take()
-                && response_id == request_id
-            {
-                break !matches!(response, RdpCertificateResponse::Reject);
-            }
-            let now = std::time::Instant::now();
-            if now >= deadline {
-                break false;
-            }
-            let waited = certificate_gate.changed.wait_timeout(slot, deadline - now);
-            slot = match waited {
-                Ok((slot, _)) => slot,
-                Err(poisoned) => poisoned.into_inner().0,
+    let host = config.host.clone();
+    // IronRDP calls this only when the platform trust store rejects the chain, which
+    // for RDP is the common case (self-signed host certificates). A chain the store
+    // already trusts is accepted without a prompt.
+    let verifier: ironrdp_tls::CertificateValidationCallback =
+        Arc::new(move |der, endpoint, validation_error| {
+            let _ = endpoint;
+            let request_id = Uuid::new_v4().to_string();
+            let fingerprint = Sha256::digest(der)
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect::<Vec<_>>()
+                .join(":");
+            let parsed = x509_cert::Certificate::from_der(der).ok();
+            let request = RdpCertificateRequest {
+                request_id: request_id.clone(),
+                host: host.clone(),
+                port,
+                sha256_fingerprint: fingerprint,
+                subject: parsed
+                    .as_ref()
+                    .map(|cert| cert.tbs_certificate.subject.to_string()),
+                issuer: parsed
+                    .as_ref()
+                    .map(|cert| cert.tbs_certificate.issuer.to_string()),
+                valid_from: parsed
+                    .as_ref()
+                    .map(|cert| cert.tbs_certificate.validity.not_before.to_string()),
+                valid_to: parsed
+                    .as_ref()
+                    .map(|cert| cert.tbs_certificate.validity.not_after.to_string()),
             };
-        };
-        certificate_gate.waiting.store(false, Ordering::Release);
-        accepted
-    });
+            let _ = validation_error;
+            if certificate_output_tx
+                .send(Outbound::Control(RdpControlMessage::CertificateRequest(
+                    request,
+                )))
+                .is_err()
+            {
+                return false;
+            }
+            certificate_gate.waiting.store(true, Ordering::Release);
+            let deadline = std::time::Instant::now() + Duration::from_secs(120);
+            let mut slot = certificate_gate
+                .response
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let accepted = loop {
+                if let Some((response_id, response)) = slot.take()
+                    && response_id == request_id
+                {
+                    break !matches!(response, RdpCertificateResponse::Reject);
+                }
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    break false;
+                }
+                let waited = certificate_gate.changed.wait_timeout(slot, deadline - now);
+                slot = match waited {
+                    Ok((slot, _)) => slot,
+                    Err(poisoned) => poisoned.into_inner().0,
+                };
+            };
+            certificate_gate.waiting.store(false, Ordering::Release);
+            accepted
+        });
     let destination = Destination::new(format!("{}:{}", config.host, config.port))?;
     let platform = if cfg!(target_os = "windows") {
         MajorPlatformType::WINDOWS
@@ -469,10 +482,11 @@ fn build_config(
         // `none` authentication must not submit a password or enter CredSSP.
         .with_credssp(use_credssp)
         .with_tls(!use_credssp)
-        .with_audio_playback(false)
         .with_codecs(Vec::new())
         .with_pointer_software_rendering(false)
-        .with_certificate_verifier(verifier)
+        .with_dirty_region_updates(true)
+        .with_certificate_validation(ironrdp_tls::CertificateValidation::Strict)
+        .with_certificate_validation_callback(verifier)
         // Keep IronRDP's native clipboard backend disabled on every platform. When text
         // redirection is enabled, the custom static channel below is the sole CLIPRDR backend.
         .with_clipboard(ClipboardType::Disable);
@@ -487,7 +501,7 @@ async fn forward_output(
     session_id: String,
     mut receiver: tokio_mpsc::Receiver<RdpOutputEvent>,
     output_tx: mpsc::Sender<Outbound>,
-    input_tx: tokio_mpsc::UnboundedSender<IronInput>,
+    input_tx: RdpInputSender,
     certificate_gate: Arc<CertificateGate>,
     connection_timeout: Duration,
 ) {
@@ -530,7 +544,9 @@ async fn forward_output(
                         ),
                         fatal: true,
                     }));
-                    let _ = input_tx.send(IronInput::Close);
+                    // The negotiation stalled, so nothing is draining the bounded input
+                    // queue; cancel outright rather than queueing a shutdown request.
+                    input_tx.request_close();
                     return;
                 }
             }
@@ -592,7 +608,11 @@ async fn forward_output(
                     })
                     .map_err(|_| ())
             }
-            RdpOutputEvent::ResizeNotSupported => output_tx
+            // The session could not resize in place and IronRDP is about to reconnect
+            // with the new size. Report the capability so the UI stops offering dynamic
+            // resize; the reconnect surfaces through the ordinary state events. The
+            // reason is not carried over the IPC protocol, which has no field for it.
+            RdpOutputEvent::DisplayResizeFallback(_reason) => output_tx
                 .send(Outbound::Control(RdpControlMessage::Capability {
                     session_id: session_id.clone(),
                     capability: RdpCapability::DynamicResizeUnavailable,
@@ -654,12 +674,39 @@ async fn forward_output(
                     fatal: true,
                 }))
                 .map_err(|_| ()),
+            // Auto-reconnect is not enabled for this client (no maximum attempts is
+            // configured), so this should not arrive. The decision channel still has to
+            // be answered, or the session waits on it.
+            RdpOutputEvent::AutoReconnecting { response, .. } => {
+                let _ = response.send(AutoReconnectDecision::Stop);
+                Ok(())
+            }
+            // Everything else IronRDP reports is either informational or for a feature
+            // NyaTerm does not drive: connection/logon milestones (the helper derives
+            // its own state from DesktopReset and Terminated), monitor layout, RAIL and
+            // RemoteApp, and the server-side redraw requests, whose effect arrives as
+            // ordinary region updates.
+            _ => Ok(()),
         };
         if result.is_err() {
             break;
         }
         if terminal {
             break;
+        }
+    }
+}
+
+/// Queues ordinary input on IronRDP's bounded input queue.
+///
+/// A full queue means the session is not draining input fast enough, which is not a
+/// disconnect, so the event is dropped rather than failing the session. A closed
+/// queue is fatal.
+fn send_iron_input(sender: &RdpInputSender, event: IronInput) -> anyhow::Result<()> {
+    match sender.try_send(event) {
+        Ok(()) | Err(tokio_mpsc::error::TrySendError::Full(_)) => Ok(()),
+        Err(tokio_mpsc::error::TrySendError::Closed(_)) => {
+            Err(anyhow::anyhow!("IronRDP input channel closed"))
         }
     }
 }
@@ -865,7 +912,7 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
-    use ironrdp_client::rdp::{RdpInputEvent as IronInput, RdpOutputEvent};
+    use ironrdp_client::rdp::{RdpInputSender, RdpOutputEvent};
     use nyaterm_remote_desktop::{RdpControlMessage, RdpErrorKind};
     use tokio::sync::mpsc as tokio_mpsc;
 
@@ -912,7 +959,7 @@ mod tests {
     #[tokio::test]
     async fn stalled_security_negotiation_reports_a_fatal_timeout() {
         let (rdp_output_tx, rdp_output_rx) = tokio_mpsc::channel::<RdpOutputEvent>(1);
-        let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+        let (input_tx, mut input_rx) = RdpInputSender::channel(1);
         let (output_tx, output_rx) = mpsc::channel();
 
         forward_output(
@@ -932,7 +979,11 @@ mod tests {
         };
         assert_eq!(error.kind, RdpErrorKind::Timeout);
         assert!(fatal);
-        assert!(matches!(input_rx.recv().await, Some(IronInput::Close)));
+        // The cancellation goes out through IronRDP's close signal rather than the
+        // bounded input queue, precisely because nothing is draining that queue while
+        // negotiation is stalled. `RdpInputSender::channel` does not hand back the close
+        // receiver, so what is checked here is that no ordinary input was queued either.
+        assert!(input_rx.try_recv().is_err());
         drop(rdp_output_tx);
     }
 
