@@ -275,6 +275,13 @@ impl NyaDialogWindowExt for Window {
     }
 
     fn has_active_nya_dialog(&mut self, cx: &mut App) -> bool {
+        // `gpui-component` reads its `Root` with an `expect`, so asking a window
+        // that was not built with `nya_root` panics rather than answering. A
+        // window with no component root has no dialog, which is the answer every
+        // caller wants.
+        if self.root::<crate::root::NyaRoot>().flatten().is_none() {
+            return false;
+        }
         self.has_active_dialog(cx)
     }
 
