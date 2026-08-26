@@ -318,7 +318,11 @@ pub struct ZmodemTransfer {
     cancel_count: usize,
     file_count: u32,
     progress_throttle: ProgressThrottle,
+    /// Scratch buffer for file bytes handed to a `zmodem2::Sender`.
     send_buf: Vec<u8>,
+    /// Scratch buffer for received file bytes staged out of a `zmodem2::Receiver`
+    /// poll before they are written to disk.
+    file_buf: Vec<u8>,
 }
 
 enum TransferState {
@@ -409,6 +413,7 @@ impl ZmodemTransfer {
             file_count: 0,
             progress_throttle: ProgressThrottle::new(),
             send_buf: Vec::new(),
+            file_buf: Vec::new(),
         }
     }
 
@@ -459,7 +464,7 @@ impl ZmodemTransfer {
             current_file: None,
         };
 
-        let mut actions = self.drain_outgoing();
+        let mut actions = self.flush_outgoing();
         // Process the buffered bytes that arrived before the user accepted.
         actions.extend(self.feed_incoming(&buffered));
         actions
@@ -490,15 +495,15 @@ impl ZmodemTransfer {
         };
 
         let mut actions = Vec::new();
-        // 1. Drain the Sender's initial outgoing bytes (ZRQINIT).
-        actions.extend(self.drain_outgoing());
+        // 1. Push out the Sender's initial bytes (ZRQINIT).
+        actions.extend(self.flush_outgoing());
         // 2. Feed the buffered remote ZRINIT so the Sender knows the
         //    receiver's capabilities.
         actions.extend(self.feed_incoming(&buffered));
-        // 3. Start the first file (prepares ZFILE frame).
+        // 3. Start the first file (queues the ZFILE frame).
         actions.extend(self.start_next_send_file());
-        // 4. Drain the ZFILE frame.
-        actions.extend(self.drain_outgoing());
+        // 4. Push out that ZFILE frame.
+        actions.extend(self.flush_outgoing());
         actions
     }
 
@@ -532,31 +537,33 @@ impl ZmodemTransfer {
 
     fn feed_receiver(&mut self, data: &[u8]) -> Vec<ZmodemAction> {
         let mut actions = Vec::new();
-
-        let TransferState::Receiving {
-            receiver,
-            save_dir,
-            current_file,
-        } = &mut self.state
-        else {
-            return actions;
-        };
-
         let mut offset = 0;
-        while offset < data.len() {
-            match receiver.feed_incoming(&data[offset..]) {
-                Ok(consumed) => {
-                    if consumed == 0 {
-                        break;
-                    }
-                    offset += consumed;
-                }
+
+        loop {
+            if !self.pump_receiver(&mut actions) {
+                return actions;
+            }
+
+            if offset >= data.len() {
+                break;
+            }
+
+            let TransferState::Receiving { receiver, .. } = &mut self.state else {
+                break;
+            };
+
+            match receiver.submit_wire(&data[offset..]) {
+                // Nothing more can be consumed until further input arrives.
+                Ok(0) => break,
+                Ok(consumed) => offset += consumed,
                 Err(e) => {
                     zmodem_log!("ZMODEM receive error: {e}");
                     if matches!(
                         e,
                         zmodem2::Error::UnexpectedCrc16 | zmodem2::Error::UnexpectedCrc32
                     ) {
+                        // The state machine has already queued a NAK; resynchronise
+                        // on the next byte.
                         offset += 1;
                         continue;
                     }
@@ -567,102 +574,82 @@ impl ZmodemTransfer {
                     return actions;
                 }
             }
+        }
 
-            // Drain outgoing protocol bytes first.
-            let out = receiver.drain_outgoing();
-            if !out.is_empty() {
-                let out = out.to_vec();
-                let n = out.len();
-                actions.push(ZmodemAction::SendToRemote(out));
-                receiver.advance_outgoing(n);
-            }
+        actions
+    }
 
-            // Poll events — handle FileStart to create the output file.
-            while let Some(event) = receiver.poll_event() {
-                match event {
-                    zmodem2::ReceiverEvent::FileStart => {
-                        let name_raw = receiver.file_name();
-                        let name = String::from_utf8_lossy(name_raw).to_string();
-                        let name = sanitize_filename(&name);
-                        let size = u64::from(receiver.file_size());
+    /// Drains everything the receiver has queued — wire responses, file data and
+    /// events — until it reports [`zmodem2::Action::Idle`].
+    ///
+    /// `poll` borrows the state machine for as long as the action it returns is
+    /// alive, so each action is copied out before it is acted on. Returns `false`
+    /// once the transfer has reached a terminal state, in which case the closing
+    /// event has already been pushed.
+    fn pump_receiver(&mut self, actions: &mut Vec<ZmodemAction>) -> bool {
+        loop {
+            let TransferState::Receiving {
+                receiver,
+                save_dir,
+                current_file,
+            } = &mut self.state
+            else {
+                return false;
+            };
 
-                        let file_path = save_dir.join(&name);
-                        zmodem_log!(
-                            file = %file_path.display(),
-                            size,
-                            "ZMODEM receiving file"
-                        );
-                        match std::fs::File::create(&file_path) {
-                            Ok(file) => {
-                                self.progress_throttle.reset();
-                                *current_file = Some(ReceiveFile {
-                                    name: name.clone(),
-                                    size,
-                                    file,
-                                    written: 0,
-                                });
-                                if self.progress_throttle.should_emit(0, true) {
-                                    actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
-                                        file_name: name,
-                                        bytes_transferred: 0,
-                                        total_size: size,
-                                        direction: ZmodemDirection::Download,
-                                    }));
-                                }
-                            }
-                            Err(e) => {
-                                zmodem_log!("Failed to create file {}: {e}", file_path.display());
-                                self.state = TransferState::Done;
-                                actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
-                                actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
-                                    reason: format!("Failed to create file: {e}"),
-                                }));
-                                return actions;
-                            }
-                        }
-                    }
-                    zmodem2::ReceiverEvent::FileComplete => {
-                        if let Some(rf) = current_file {
-                            if self.progress_throttle.should_emit(rf.written, true) {
-                                actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
-                                    file_name: rf.name.clone(),
-                                    bytes_transferred: rf.written,
-                                    total_size: rf.size,
-                                    direction: ZmodemDirection::Download,
-                                }));
-                            }
-                            let _ = rf.file.flush();
-                        }
-                        self.file_count += 1;
-                        *current_file = None;
-                    }
-                    zmodem2::ReceiverEvent::SessionComplete => {
-                        self.state = TransferState::Done;
-                        actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Complete {
-                            direction: ZmodemDirection::Download,
-                            file_count: self.file_count,
-                        }));
-                        return actions;
+            let step = match receiver.poll() {
+                zmodem2::Action::WriteWire(bytes) => ReceiverStep::WriteWire(bytes.to_vec()),
+                zmodem2::Action::WriteFile(bytes) => {
+                    self.file_buf.clear();
+                    self.file_buf.extend_from_slice(bytes);
+                    ReceiverStep::WriteFile
+                }
+                zmodem2::Action::Event(zmodem2::Event::FileStarted(info)) => {
+                    ReceiverStep::FileStarted {
+                        name: sanitize_filename(&String::from_utf8_lossy(info.name)),
+                        size: info.size.map_or(0, |size| u64::from(size.get())),
                     }
                 }
-            }
+                zmodem2::Action::Event(zmodem2::Event::FileCompleted) => {
+                    ReceiverStep::FileCompleted
+                }
+                zmodem2::Action::Event(zmodem2::Event::SessionCompleted) => {
+                    ReceiverStep::SessionCompleted
+                }
+                zmodem2::Action::Event(zmodem2::Event::Aborted) => ReceiverStep::Aborted,
+                // `Idle`, the sender-only `ReadFile`, and anything a later zmodem2
+                // adds to these non-exhaustive enums: no work for this side.
+                _ => return true,
+            };
 
-            // Drain file data and write to the output file.
-            let file_data = receiver.drain_file();
-            if !file_data.is_empty() {
-                let len = file_data.len();
-
-                if let Some(rf) = current_file {
-                    if let Err(e) = rf.file.write_all(file_data) {
+            match step {
+                ReceiverStep::WriteWire(bytes) => {
+                    let len = bytes.len();
+                    actions.push(ZmodemAction::SendToRemote(bytes));
+                    receiver.wire_written(len);
+                }
+                ReceiverStep::WriteFile => {
+                    let Some(rf) = current_file.as_mut() else {
+                        // File data before any file header: the remote is not
+                        // following the protocol.
+                        self.state = TransferState::Done;
+                        actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                        actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                            reason: "ZMODEM file data arrived before any file header".to_string(),
+                        }));
+                        return false;
+                    };
+                    if let Err(e) = rf.file.write_all(&self.file_buf) {
                         zmodem_log!("Failed to write file data: {e}");
                         self.state = TransferState::Done;
                         actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
                         actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
                             reason: format!("File write error: {e}"),
                         }));
-                        return actions;
+                        return false;
                     }
-                    rf.written += len as u64;
+                    let written = self.file_buf.len();
+                    rf.written += written as u64;
                     if self.progress_throttle.should_emit(rf.written, false) {
                         actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
                             file_name: rf.name.clone(),
@@ -671,39 +658,107 @@ impl ZmodemTransfer {
                             direction: ZmodemDirection::Download,
                         }));
                     }
+                    if let Err(_e) = receiver.file_written(written) {
+                        zmodem_log!("file_written error: {e}");
+                    }
                 }
 
-                if let Err(_e) = receiver.advance_file(len) {
-                    zmodem_log!("advance_file error: {e}");
+                ReceiverStep::FileStarted { name, size } => {
+                    let file_path = save_dir.join(&name);
+                    zmodem_log!(
+                        file = %file_path.display(),
+                        size,
+                        "ZMODEM receiving file"
+                    );
+                    match std::fs::File::create(&file_path) {
+                        Ok(file) => {
+                            self.progress_throttle.reset();
+                            *current_file = Some(ReceiveFile {
+                                name: name.clone(),
+                                size,
+                                file,
+                                written: 0,
+                            });
+                            if self.progress_throttle.should_emit(0, true) {
+                                actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
+                                    file_name: name,
+                                    bytes_transferred: 0,
+                                    total_size: size,
+                                    direction: ZmodemDirection::Download,
+                                }));
+                            }
+                        }
+                        Err(e) => {
+                            zmodem_log!("Failed to create file {}: {e}", file_path.display());
+                            self.state = TransferState::Done;
+                            actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                            actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                                reason: format!("Failed to create file: {e}"),
+                            }));
+                            return false;
+                        }
+                    }
+                }
+
+                ReceiverStep::FileCompleted => {
+                    if let Some(rf) = current_file.as_mut() {
+                        if self.progress_throttle.should_emit(rf.written, true) {
+                            actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
+                                file_name: rf.name.clone(),
+                                bytes_transferred: rf.written,
+                                total_size: rf.size,
+                                direction: ZmodemDirection::Download,
+                            }));
+                        }
+                        let _ = rf.file.flush();
+                    }
+                    self.file_count += 1;
+                    *current_file = None;
+                }
+                ReceiverStep::SessionCompleted => {
+                    // The state machine queues its closing ZFIN before it pushes
+                    // the event, and `poll` reports events first, so flush what is
+                    // still queued: the remote is waiting for that ZFIN.
+                    flush_receiver_wire(receiver, actions);
+                    self.state = TransferState::Done;
+                    actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Complete {
+                        direction: ZmodemDirection::Download,
+                        file_count: self.file_count,
+                    }));
+                    return false;
+                }
+                ReceiverStep::Aborted => {
+                    flush_receiver_wire(receiver, actions);
+                    self.state = TransferState::Done;
+                    actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                        reason: "Remote aborted the ZMODEM session".to_string(),
+                    }));
+                    return false;
                 }
             }
         }
-
-        actions
     }
 
     fn feed_sender(&mut self, data: &[u8]) -> Vec<ZmodemAction> {
         let mut actions = Vec::new();
-
-        let TransferState::Sending {
-            sender,
-            files,
-            file_index,
-            current_file,
-        } = &mut self.state
-        else {
-            return actions;
-        };
-
         let mut offset = 0;
-        while offset < data.len() {
-            match sender.feed_incoming(&data[offset..]) {
-                Ok(consumed) => {
-                    if consumed == 0 {
-                        break;
-                    }
-                    offset += consumed;
-                }
+
+        loop {
+            if !self.pump_sender(&mut actions) {
+                return actions;
+            }
+
+            if offset >= data.len() {
+                break;
+            }
+
+            let TransferState::Sending { sender, .. } = &mut self.state else {
+                break;
+            };
+
+            match sender.submit_wire(&data[offset..]) {
+                Ok(0) => break,
+                Ok(consumed) => offset += consumed,
                 Err(e) => {
                     zmodem_log!("ZMODEM send error: {e}");
                     if matches!(
@@ -722,56 +777,122 @@ impl ZmodemTransfer {
             }
         }
 
-        // Drain any outgoing protocol responses before fulfilling file requests.
-        drain_sender_outgoing(sender, &mut actions);
+        actions
+    }
 
-        // Fulfill file data requests from the sender state machine.
-        // Drain outgoing after each feed_file() to prevent buffer overflow
-        // in the no_std fixed-capacity internal buffer.
-        while let Some(req) = sender.poll_file() {
-            if let Some(sf) = current_file {
-                let requested_offset = u64::from(req.offset);
-                if sf.position != requested_offset {
-                    if let Err(_e) = sf.file.seek(SeekFrom::Start(requested_offset)) {
-                        zmodem_log!("File seek error: {e}");
-                        break;
-                    }
-                    sf.position = requested_offset;
+    /// The sending counterpart of [`Self::pump_receiver`]: wire output, file read
+    /// requests, and events, until the sender goes idle.
+    fn pump_sender(&mut self, actions: &mut Vec<ZmodemAction>) -> bool {
+        loop {
+            let TransferState::Sending {
+                sender,
+                files,
+                file_index,
+                current_file,
+            } = &mut self.state
+            else {
+                return false;
+            };
+
+            let step = match sender.poll() {
+                zmodem2::Action::WriteWire(bytes) => SenderStep::WriteWire(bytes.to_vec()),
+                zmodem2::Action::ReadFile { offset, max_len } => SenderStep::ReadFile {
+                    offset: u64::from(offset.get()),
+                    max_len,
+                },
+                zmodem2::Action::Event(zmodem2::Event::FileCompleted) => SenderStep::FileCompleted,
+                zmodem2::Action::Event(zmodem2::Event::SessionCompleted) => {
+                    SenderStep::SessionCompleted
                 }
-                if self.send_buf.len() < req.len {
-                    self.send_buf.resize(req.len, 0);
+                zmodem2::Action::Event(zmodem2::Event::Aborted) => SenderStep::Aborted,
+                _ => return true,
+            };
+
+            match step {
+                SenderStep::WriteWire(bytes) => {
+                    let len = bytes.len();
+                    actions.push(ZmodemAction::SendToRemote(bytes));
+                    sender.wire_written(len);
                 }
-                match sf.file.read(&mut self.send_buf[..req.len]) {
-                    Ok(n) => {
-                        if let Err(_e) = sender.feed_file(&self.send_buf[..n]) {
-                            zmodem_log!("feed_file error: {e}");
-                            break;
-                        }
-                        sf.sent = sf.sent.max(requested_offset + n as u64);
-                        sf.position += n as u64;
-                        if self.progress_throttle.should_emit(sf.sent, false) {
-                            actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
-                                file_name: sf.name.clone(),
-                                bytes_transferred: sf.sent,
-                                total_size: sf.size,
-                                direction: ZmodemDirection::Upload,
+
+                SenderStep::ReadFile { offset, max_len } => {
+                    let Some(sf) = current_file.as_mut() else {
+                        // Nothing to answer with. Stopping here rather than
+                        // ignoring the request keeps the pump from spinning on a
+                        // request it can never satisfy.
+                        self.state = TransferState::Done;
+                        actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                        actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                            reason: "ZMODEM sender requested data with no file open".to_string(),
+                        }));
+                        return false;
+                    };
+
+                    if sf.position != offset {
+                        if let Err(e) = sf.file.seek(SeekFrom::Start(offset)) {
+                            zmodem_log!("File seek error: {e}");
+                            self.state = TransferState::Done;
+                            actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                            actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                                reason: format!("File seek error: {e}"),
                             }));
+                            return false;
                         }
-                        drain_sender_outgoing(sender, &mut actions);
+                        sf.position = offset;
                     }
-                    Err(_e) => {
-                        zmodem_log!("File read error");
-                        break;
+
+                    if self.send_buf.len() < max_len {
+                        self.send_buf.resize(max_len, 0);
+                    }
+                    let read = match sf.file.read(&mut self.send_buf[..max_len]) {
+                        Ok(0) => {
+                            // The advertised size promised more than the file
+                            // holds, and an empty chunk is not a legal answer.
+                            self.state = TransferState::Done;
+                            actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                            actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                                reason: "File ended before the advertised size".to_string(),
+                            }));
+                            return false;
+                        }
+                        Ok(read) => read,
+                        Err(e) => {
+                            zmodem_log!("File read error: {e}");
+                            self.state = TransferState::Done;
+                            actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                            actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                                reason: format!("File read error: {e}"),
+                            }));
+                            return false;
+                        }
+                    };
+
+                    sf.sent = sf.sent.max(offset + read as u64);
+                    sf.position += read as u64;
+                    let sent = sf.sent;
+                    let file_name = sf.name.clone();
+                    let total_size = sf.size;
+                    if self.progress_throttle.should_emit(sent, false) {
+                        actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
+                            file_name,
+                            bytes_transferred: sent,
+                            total_size,
+                            direction: ZmodemDirection::Upload,
+                        }));
+                    }
+                    if let Err(e) = sender.submit_file(&self.send_buf[..read]) {
+                        zmodem_log!("submit_file error: {e}");
+                        self.state = TransferState::Done;
+                        actions.push(ZmodemAction::SendToRemote(cancel_sequence()));
+                        actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                            reason: format!("ZMODEM send error: {e}"),
+                        }));
+                        return false;
                     }
                 }
-            }
-        }
 
-        // Poll events.
-        while let Some(event) = sender.poll_event() {
-            match event {
-                zmodem2::SenderEvent::FileComplete => {
-                    if let Some(sf) = current_file
+                SenderStep::FileCompleted => {
+                    if let Some(sf) = current_file.as_ref()
                         && self.progress_throttle.should_emit(sf.sent, true)
                     {
                         actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
@@ -792,7 +913,7 @@ impl ZmodemTransfer {
                             *file_index,
                             current_file,
                         ));
-                        if let Some(sf) = current_file
+                        if let Some(sf) = current_file.as_ref()
                             && self.progress_throttle.should_emit(0, true)
                         {
                             actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Progress {
@@ -802,25 +923,30 @@ impl ZmodemTransfer {
                                 direction: ZmodemDirection::Upload,
                             }));
                         }
-                    } else if let Err(_e) = sender.finish_session() {
-                        zmodem_log!("finish_session error: {e}");
+                    } else if let Err(_e) = sender.finish() {
+                        zmodem_log!("finish error: {e}");
                     }
                 }
-                zmodem2::SenderEvent::SessionComplete => {
+
+                SenderStep::SessionCompleted => {
+                    flush_sender_wire(sender, actions);
                     self.state = TransferState::Done;
                     actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Complete {
                         direction: ZmodemDirection::Upload,
                         file_count: self.file_count,
                     }));
-                    return actions;
+                    return false;
+                }
+                SenderStep::Aborted => {
+                    flush_sender_wire(sender, actions);
+                    self.state = TransferState::Done;
+                    actions.push(ZmodemAction::EmitEvent(ZmodemEvent::Failed {
+                        reason: "Remote aborted the ZMODEM session".to_string(),
+                    }));
+                    return false;
                 }
             }
         }
-
-        // Final drain.
-        drain_sender_outgoing(sender, &mut actions);
-
-        actions
     }
 
     fn start_next_send_file(&mut self) -> Vec<ZmodemAction> {
@@ -885,10 +1011,12 @@ impl ZmodemTransfer {
         };
 
         let size = metadata.len();
-        // zmodem2 uses u32 for file size
+        // zmodem2 carries the file size as a u32.
         let size_u32 = u32::try_from(size).unwrap_or(u32::MAX);
+        let info =
+            zmodem2::FileInfo::new(file_name.as_bytes(), Some(zmodem2::Position::new(size_u32)));
 
-        if let Err(e) = sender.start_file(file_name.as_bytes(), size_u32) {
+        if let Err(e) = sender.start_file(info) {
             return vec![ZmodemAction::EmitEvent(ZmodemEvent::Failed {
                 reason: format!("start_file error: {e}"),
             })];
@@ -905,41 +1033,69 @@ impl ZmodemTransfer {
         vec![]
     }
 
-    fn drain_outgoing(&mut self) -> Vec<ZmodemAction> {
+    /// Pushes out whatever the active state machine has already queued, without
+    /// feeding it any new input.
+    fn flush_outgoing(&mut self) -> Vec<ZmodemAction> {
         let mut actions = Vec::new();
-        match &mut self.state {
-            TransferState::Receiving { receiver, .. } => {
-                let out = receiver.drain_outgoing();
-                if !out.is_empty() {
-                    let out = out.to_vec();
-                    let n = out.len();
-                    actions.push(ZmodemAction::SendToRemote(out));
-                    receiver.advance_outgoing(n);
-                }
-            }
-            TransferState::Sending { sender, .. } => {
-                let out = sender.drain_outgoing();
-                if !out.is_empty() {
-                    let out = out.to_vec();
-                    let n = out.len();
-                    actions.push(ZmodemAction::SendToRemote(out));
-                    sender.advance_outgoing(n);
-                }
-            }
-            _ => {}
+        if matches!(self.state, TransferState::Receiving { .. }) {
+            self.pump_receiver(&mut actions);
+        } else if matches!(self.state, TransferState::Sending { .. }) {
+            self.pump_sender(&mut actions);
         }
         actions
     }
 }
 
-/// Drain the Sender's outgoing buffer into actions, advancing the cursor.
-fn drain_sender_outgoing(sender: &mut zmodem2::Sender, actions: &mut Vec<ZmodemAction>) {
-    let out = sender.drain_outgoing();
-    if !out.is_empty() {
-        let out = out.to_vec();
-        let n = out.len();
-        actions.push(ZmodemAction::SendToRemote(out));
-        sender.advance_outgoing(n);
+/// One unit of work taken out of a [`zmodem2::Receiver`] poll, with the payload
+/// copied out: `poll` borrows the state machine for as long as the action it
+/// returns is alive, and every handler needs to call back into it.
+enum ReceiverStep {
+    WriteWire(Vec<u8>),
+    /// File bytes staged in `ZmodemTransfer::file_buf`.
+    WriteFile,
+    FileStarted {
+        name: String,
+        size: u64,
+    },
+    FileCompleted,
+    SessionCompleted,
+    Aborted,
+}
+
+/// The sending counterpart of [`ReceiverStep`].
+enum SenderStep {
+    WriteWire(Vec<u8>),
+    ReadFile { offset: u64, max_len: usize },
+    FileCompleted,
+    SessionCompleted,
+    Aborted,
+}
+
+/// Pushes out the wire bytes a receiver has already queued, stopping at anything
+/// else. Needed on the terminal events, which `poll` reports before the closing
+/// frame queued alongside them.
+fn flush_receiver_wire(receiver: &mut zmodem2::Receiver, actions: &mut Vec<ZmodemAction>) {
+    loop {
+        let payload = match receiver.poll() {
+            zmodem2::Action::WriteWire(bytes) => bytes.to_vec(),
+            _ => return,
+        };
+        let len = payload.len();
+        actions.push(ZmodemAction::SendToRemote(payload));
+        receiver.wire_written(len);
+    }
+}
+
+/// The sending counterpart of [`flush_receiver_wire`].
+fn flush_sender_wire(sender: &mut zmodem2::Sender, actions: &mut Vec<ZmodemAction>) {
+    loop {
+        let payload = match sender.poll() {
+            zmodem2::Action::WriteWire(bytes) => bytes.to_vec(),
+            _ => return,
+        };
+        let len = payload.len();
+        actions.push(ZmodemAction::SendToRemote(payload));
+        sender.wire_written(len);
     }
 }
 
@@ -1177,5 +1333,103 @@ mod tests {
         let start = Instant::now();
         assert!(throttle.should_emit_at(128, false, start));
         assert!(throttle.should_emit_at(129, true, start + Duration::from_millis(1)));
+    }
+
+    /// Wires an uploading `ZmodemTransfer` to a downloading one and shuttles the
+    /// protocol bytes between them. This is the only test that drives the
+    /// `zmodem2` poll/submit pump, so it is what covers `pump_sender` and
+    /// `pump_receiver` rather than the header detection above.
+    #[test]
+    fn loopback_transfer_reproduces_the_file_on_the_receiving_side() {
+        let root = std::env::temp_dir().join(format!("nyaterm-zmodem-{}", uuid::Uuid::new_v4()));
+        let src_dir = root.join("src");
+        let dst_dir = root.join("dst");
+        std::fs::create_dir_all(&src_dir).expect("create source dir");
+        std::fs::create_dir_all(&dst_dir).expect("create destination dir");
+
+        // Larger than one subpacket and not a multiple of it, so the transfer has
+        // to span frames and end on a partial one.
+        let payload: Vec<u8> = (0..40_003u32).map(|i| (i % 251) as u8).collect();
+        let src_file = src_dir.join("payload.bin");
+        std::fs::write(&src_file, &payload).expect("write source file");
+
+        let mut upload = ZmodemTransfer::new(ZmodemDirection::Upload, &[]);
+        let mut download = ZmodemTransfer::new(ZmodemDirection::Download, &[]);
+
+        // The receiving side speaks first with its ZRINIT, exactly as a remote
+        // `rz` would.
+        let mut to_upload = collect_wire(download.accept_download(dst_dir.clone()));
+        let mut to_download = collect_wire(upload.accept_upload(vec![src_file]));
+
+        let mut upload_complete = None;
+        let mut download_complete = None;
+        let mut failures = Vec::new();
+
+        for _ in 0..10_000 {
+            if to_upload.is_empty() && to_download.is_empty() {
+                break;
+            }
+
+            let inbound_upload = std::mem::take(&mut to_upload);
+            let inbound_download = std::mem::take(&mut to_download);
+
+            for action in upload.feed_incoming(&inbound_upload) {
+                match action {
+                    ZmodemAction::SendToRemote(bytes) => to_download.extend_from_slice(&bytes),
+                    ZmodemAction::EmitEvent(ZmodemEvent::Complete { file_count, .. }) => {
+                        upload_complete = Some(file_count);
+                    }
+                    ZmodemAction::EmitEvent(ZmodemEvent::Failed { reason }) => {
+                        failures.push(format!("upload: {reason}"));
+                    }
+                    ZmodemAction::EmitEvent(_) => {}
+                }
+            }
+
+            for action in download.feed_incoming(&inbound_download) {
+                match action {
+                    ZmodemAction::SendToRemote(bytes) => to_upload.extend_from_slice(&bytes),
+                    ZmodemAction::EmitEvent(ZmodemEvent::Complete { file_count, .. }) => {
+                        download_complete = Some(file_count);
+                    }
+                    ZmodemAction::EmitEvent(ZmodemEvent::Failed { reason }) => {
+                        failures.push(format!("download: {reason}"));
+                    }
+                    ZmodemAction::EmitEvent(_) => {}
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "transfer reported failures: {failures:?}"
+        );
+        assert_eq!(
+            upload_complete,
+            Some(1),
+            "sender did not finish its session"
+        );
+        assert_eq!(
+            download_complete,
+            Some(1),
+            "receiver did not finish its session"
+        );
+        assert!(upload.is_done() && download.is_done());
+
+        let received = std::fs::read(dst_dir.join("payload.bin")).expect("read received file");
+        assert_eq!(received.len(), payload.len());
+        assert_eq!(received, payload);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn collect_wire(actions: Vec<ZmodemAction>) -> Vec<u8> {
+        let mut wire = Vec::new();
+        for action in actions {
+            if let ZmodemAction::SendToRemote(bytes) = action {
+                wire.extend_from_slice(&bytes);
+            }
+        }
+        wire
     }
 }

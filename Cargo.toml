@@ -103,7 +103,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 vnc = { package = "vnc-rs", git = "https://github.com/nyakang/vnc-rs", rev = "d855f22e301835cdf63a7aa1520877e3153ec66a" }
 vte = "0.14"
 zeroize = "1"
-zmodem2 = { git = "https://github.com/nyakang/zmodem2", rev = "11f2ebdeb3916bc07e72e00709b5d6e21e56e154" }
+zmodem2 = { git = "https://github.com/nyakang/zmodem2", rev = "b2f669a78ad0e1108115f1c4d9558e2663943a48" }
 zed_reqwest = { package = "zed-reqwest", version = "0.12.15-zed", default-features = false, features = [
     "blocking",
     "json",
