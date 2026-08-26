@@ -1,6 +1,5 @@
 use rust_i18n::t;
 
-use std::collections::HashSet;
 use std::time::Duration;
 
 use gpui::{Context, Window};
@@ -235,26 +234,14 @@ impl NyaTermApp {
 
         // After close_session_batch, local metadata is the source of truth for
         // remaining tabs (includes disconnected). Avoid transport map lock.
-        let live_ids = self
-            .session
-            .session_ids()
-            .map(ToOwned::to_owned)
-            .collect::<HashSet<_>>();
         let active_is_live = active_before
             .as_deref()
-            .is_some_and(|session_id| live_ids.contains(session_id));
+            .is_some_and(|session_id| self.session.has_session(session_id));
 
         if !active_is_live {
             self.ai.reset_agent_runtime();
             self.sync_session_event_bridge_policy();
-            if let Some(next_session_id) = self
-                .session
-                .session_order()
-                .iter()
-                .find(|session_id| live_ids.contains(*session_id))
-                .cloned()
-                .or_else(|| live_ids.iter().next().cloned())
-            {
+            if let Some(next_session_id) = self.session.next_live_session() {
                 self.activate_session_id(&next_session_id, cx);
             } else {
                 self.session.clear_active_session();

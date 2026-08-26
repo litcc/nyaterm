@@ -32,6 +32,10 @@ use super::zmodem_runtime::ZmodemSessionState;
 
 const COMMAND_HISTORY_LIMIT: usize = 128;
 const DEFAULT_DUPLICATE_STARTUP_DELAY_MS: u64 = 500;
+/// Safety net for the activation stack. Entries are deduplicated and pruned when
+/// their session leaves the catalog, so the stack normally stays at or below the
+/// live session count; this only bounds ids activated before registration.
+const ACTIVE_HISTORY_LIMIT: usize = 64;
 
 pub(in crate::features) struct SessionFeatureState {
     manager: Arc<SessionManager>,
@@ -85,6 +89,10 @@ struct SessionEventQueueState {
 #[derive(Default)]
 struct ActiveSessionState {
     id: Option<String>,
+    /// Previously activated sessions, least recent first, never containing `id`.
+    /// Closing the active tab hands over to the last live entry so focus returns
+    /// to where the user came from instead of the leftmost tab.
+    history: Vec<String>,
 }
 
 pub(in crate::features) struct SessionFeatureFocus {
@@ -922,7 +930,20 @@ impl SessionFeatureState {
         session_id: impl Into<String>,
     ) -> Option<String> {
         let session_id = session_id.into();
-        self.active.id.replace(session_id)
+        let previous = self.active.id.replace(session_id.clone());
+        // Keep the stack free of the session that just became active, then record
+        // the one it replaced as the newest fallback.
+        self.active.history.retain(|id| *id != session_id);
+        if let Some(previous) = previous.as_deref()
+            && previous != session_id
+        {
+            self.active.history.push(previous.to_string());
+            if self.active.history.len() > ACTIVE_HISTORY_LIMIT {
+                let overflow = self.active.history.len() - ACTIVE_HISTORY_LIMIT;
+                self.active.history.drain(..overflow);
+            }
+        }
+        previous
     }
 
     pub(in crate::features) fn select_active_session_if_none(
@@ -1291,20 +1312,29 @@ impl SessionFeatureState {
             .count()
     }
 
+    /// Who takes over when `session_id` closes: the most recently active surviving
+    /// session first, then tab order, then any survivor at all.
     pub(in crate::features) fn next_session_after(&self, session_id: &str) -> Option<String> {
+        self.next_live_session_excluding(Some(session_id))
+    }
+
+    /// Same handover policy as [`Self::next_session_after`] when the closed session
+    /// is already gone from the catalog and there is nothing left to skip.
+    pub(in crate::features) fn next_live_session(&self) -> Option<String> {
+        self.next_live_session_excluding(None)
+    }
+
+    fn next_live_session_excluding(&self, skip: Option<&str>) -> Option<String> {
         let known_ids = self.session_ids().collect::<HashSet<_>>();
-        self.order
+        self.active
+            .history
             .iter()
-            .find(|candidate| {
-                candidate.as_str() != session_id && known_ids.contains(candidate.as_str())
-            })
-            .cloned()
-            .or_else(|| {
-                known_ids
-                    .into_iter()
-                    .find(|candidate| *candidate != session_id)
-                    .map(ToOwned::to_owned)
-            })
+            .rev()
+            .chain(self.order.iter())
+            .map(String::as_str)
+            .chain(known_ids.iter().copied())
+            .find(|candidate| Some(*candidate) != skip && known_ids.contains(*candidate))
+            .map(ToOwned::to_owned)
     }
 
     pub(in crate::features) fn mark_session_disconnected(
@@ -1474,6 +1504,7 @@ impl SessionFeatureState {
         self.remove_trzsz_session_runtime(session_id);
         self.remove_remote_file_service(session_id);
         self.order.retain(|id| id != session_id);
+        self.active.history.retain(|id| id != session_id);
         self.start_tab_placements.remove(session_id);
         let multiplex_key = self
             .metadata

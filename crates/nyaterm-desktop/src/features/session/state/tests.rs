@@ -889,6 +889,68 @@ fn removing_session_catalog_clears_all_session_scoped_entries() {
 }
 
 #[test]
+fn closing_the_active_session_hands_over_to_the_most_recent_visit() {
+    let cx = TestAppContext::single();
+    let mut sessions = session_state(&cx);
+
+    sessions.register_session_metadata("session-a", session_metadata("first", None));
+    sessions.register_session_metadata("session-b", session_metadata("second", None));
+    sessions.register_session_metadata("session-c", session_metadata("third", None));
+    assert_eq!(
+        sessions.session_order(),
+        ["session-a", "session-b", "session-c"]
+    );
+
+    sessions.select_active_session("session-a");
+    sessions.select_active_session("session-b");
+    sessions.select_active_session("session-c");
+
+    // Tab order alone would jump to the leftmost tab; the user came from B.
+    sessions.remove_session_catalog("session-c");
+    assert!(sessions.active_id().is_none());
+    assert_eq!(
+        sessions.next_session_after("session-c").as_deref(),
+        Some("session-b")
+    );
+    assert_eq!(sessions.next_live_session().as_deref(), Some("session-b"));
+
+    // Re-activating a session moves it off the stack instead of duplicating it, so
+    // A -> B -> A hands back to B rather than to A itself.
+    sessions.select_active_session("session-b");
+    sessions.select_active_session("session-a");
+    sessions.select_active_session("session-b");
+    sessions.remove_session_catalog("session-b");
+    assert_eq!(
+        sessions.next_session_after("session-b").as_deref(),
+        Some("session-a")
+    );
+
+    sessions.remove_session_catalog("session-a");
+    assert!(sessions.next_session_after("session-a").is_none());
+    assert!(sessions.next_live_session().is_none());
+}
+
+#[test]
+fn session_handover_falls_back_to_tab_order_without_activation_history() {
+    let cx = TestAppContext::single();
+    let mut sessions = session_state(&cx);
+
+    sessions.register_session_metadata("session-a", session_metadata("first", None));
+    sessions.register_session_metadata("session-b", session_metadata("second", None));
+
+    assert_eq!(
+        sessions.next_session_after("session-a").as_deref(),
+        Some("session-b")
+    );
+
+    // A visit to a session that is closed later leaves no stale handover target.
+    sessions.select_active_session("session-b");
+    sessions.select_active_session("session-a");
+    sessions.remove_session_catalog("session-b");
+    assert_eq!(sessions.next_session_after("session-a"), None);
+}
+
+#[test]
 fn tab_lock_and_drag_state_have_single_owner() {
     let cx = TestAppContext::single();
     let mut sessions = session_state(&cx);
