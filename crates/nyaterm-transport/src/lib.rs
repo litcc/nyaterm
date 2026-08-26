@@ -2715,8 +2715,21 @@ impl client::Handler for SshClientHandler {
 
     async fn check_server_key(
         &mut self,
-        server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
+        // A host certificate replaces the host-key check rather than adding to it,
+        // and known hosts records plain host keys only, so there is nothing to
+        // compare a certificate against. Reject instead of falling back to the key
+        // inside it: that key is not what the user was asked to trust. Unreachable
+        // in practice, because the client never offers certificate host-key
+        // algorithms (`Preferred::host_key_certificates` is left empty).
+        let russh::keys::PublicKeyOrCertificate::PublicKey {
+            key: server_public_key,
+            ..
+        } = server_public_key
+        else {
+            return Ok(false);
+        };
         let Some(verifier) = &self.verifier else {
             return Ok(false);
         };
