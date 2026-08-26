@@ -115,6 +115,22 @@ pub(in crate::features) fn focus_child_window_shell_if_idle(
     }
 }
 
+/// How a child window's own title strip should be drawn.
+///
+/// Not derivable from the `Window` at render time: GPUI exposes the size, the
+/// resize flags and the maximised state, but not whether the platform chose to
+/// present this window as an attached sheet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::features) enum ChildWindowChrome {
+    /// A real title bar sits behind the header, so leave room for whatever
+    /// controls the platform draws there and supply the ones it does not.
+    Window,
+    /// An AppKit sheet. It has no title bar, so there are no traffic lights to
+    /// leave a gutter for and no title bar to drag it by; a sheet is not movable
+    /// and is dismissed by its own action buttons.
+    Sheet,
+}
+
 /// How a child window is presented. One per feature, built at its open site.
 pub(in crate::features) struct ChildWindowSpec {
     pub title: String,
@@ -202,6 +218,19 @@ impl ChildWindowSpec {
     pub(in crate::features) fn min_size(mut self, width: f32, height: f32) -> Self {
         self.min_size = Some(size(px(width), px(height)));
         self
+    }
+
+    /// Which chrome the platform will leave for this window to draw.
+    ///
+    /// macOS presents `WindowKind::Dialog` through `beginSheet:`, and a sheet has
+    /// no title bar: the style mask still carries `NSClosableWindowMask`, but
+    /// AppKit never draws the buttons, so a gutter reserved for them stays empty.
+    pub(in crate::features) fn chrome(&self) -> ChildWindowChrome {
+        if cfg!(target_os = "macos") && matches!(self.kind, WindowKind::Dialog) {
+            ChildWindowChrome::Sheet
+        } else {
+            ChildWindowChrome::Window
+        }
     }
 }
 
@@ -315,8 +344,8 @@ mod tests {
     use gpui::{Bounds, point, px, size};
 
     use super::{
-        ChildWindowCloseHandler, ChildWindowSpec, WindowKind, child_window_placement,
-        modal_scrim_is_drawn,
+        ChildWindowChrome, ChildWindowCloseHandler, ChildWindowSpec, WindowKind,
+        child_window_placement, modal_scrim_is_drawn,
     };
 
     fn display() -> Bounds<gpui::Pixels> {
@@ -420,6 +449,26 @@ mod tests {
         assert!(!prompt.resizable);
     }
 
+    /// A sheet has no title bar, so it must not reserve the traffic-light gutter
+    /// or claim a drag region -- AppKit draws neither, and the gutter would just be
+    /// an empty indent to the left of the title.
+    #[test]
+    fn only_a_window_with_a_title_bar_reserves_room_for_platform_controls() {
+        let scoped_edit = ChildWindowSpec::modal_editor("Edit".to_string(), 520., 620.);
+        let document = ChildWindowSpec::document("File".to_string(), 980., 720.);
+        let prompt = ChildWindowSpec::topmost_prompt("Modified".to_string(), 440., 240.);
+
+        // A `Dialog` is only a sheet on macOS; everywhere else it keeps a real
+        // title bar and, on Windows, the controls we draw into it ourselves.
+        if cfg!(target_os = "macos") {
+            assert_eq!(scoped_edit.chrome(), ChildWindowChrome::Sheet);
+        } else {
+            assert_eq!(scoped_edit.chrome(), ChildWindowChrome::Window);
+        }
+        assert_eq!(document.chrome(), ChildWindowChrome::Window);
+        assert_eq!(prompt.chrome(), ChildWindowChrome::Window);
+    }
+
     /// macOS turns a `Dialog` into a sheet under the owner's title bar, which is
     /// not what Settings should look like on that platform.
     #[test]
@@ -427,10 +476,7 @@ mod tests {
         let settings = ChildWindowSpec::settings("Settings".to_string(), 800., 560.);
         if cfg!(target_os = "macos") {
             assert!(matches!(settings.kind, WindowKind::Normal));
-            assert!(
-                modal_scrim_is_drawn() == false,
-                "the sheet dims its own parent"
-            );
+            assert!(!modal_scrim_is_drawn(), "the sheet dims its own parent");
         } else {
             assert!(matches!(settings.kind, WindowKind::Dialog));
             assert!(

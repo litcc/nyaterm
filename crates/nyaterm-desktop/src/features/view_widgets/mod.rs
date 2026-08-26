@@ -10,9 +10,9 @@ mod dialogs;
 
 mod child_window;
 pub(in crate::features) use child_window::{
-    ChildWindowCloseHandler, ChildWindowSpec, child_window_options, child_window_root,
-    focus_child_window_shell_if_idle, init_key_bindings as init_child_window_key_bindings,
-    modal_scrim_is_drawn,
+    ChildWindowChrome, ChildWindowCloseHandler, ChildWindowSpec, child_window_options,
+    child_window_root, focus_child_window_shell_if_idle,
+    init_key_bindings as init_child_window_key_bindings, modal_scrim_is_drawn,
 };
 
 mod inspector_widgets;

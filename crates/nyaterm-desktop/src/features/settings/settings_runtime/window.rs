@@ -12,8 +12,8 @@ use crate::features::pages::settings::panel::{SettingsPanel, SettingsSurface};
 use crate::features::{
     NyaTermApp,
     view_widgets::{
-        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
-        child_window_root, focus_child_window_shell_if_idle,
+        ChildWindowChrome, ChildWindowCloseHandler, ChildWindowSpec, child_window_header,
+        child_window_options, child_window_root, focus_child_window_shell_if_idle,
     },
 };
 
@@ -21,11 +21,12 @@ pub(in crate::features) struct SettingsWindow {
     app: Entity<NyaTermApp>,
     settings_panel: Entity<SettingsPanel>,
     shell_focus: FocusHandle,
+    chrome: ChildWindowChrome,
     _app_subscription: Subscription,
 }
 
 impl SettingsWindow {
-    fn new(app: Entity<NyaTermApp>, cx: &mut Context<Self>) -> Self {
+    fn new(app: Entity<NyaTermApp>, chrome: ChildWindowChrome, cx: &mut Context<Self>) -> Self {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
         let settings_panel = cx.new(|cx| {
             SettingsPanel::new_for_surface(app.downgrade(), SettingsSurface::NativeWindow, cx)
@@ -37,6 +38,7 @@ impl SettingsWindow {
             app,
             settings_panel,
             shell_focus: cx.focus_handle(),
+            chrome,
             _app_subscription: app_subscription,
         }
     }
@@ -93,6 +95,7 @@ impl Render for SettingsWindow {
                 palette,
                 title,
                 Some("icons/settings.svg"),
+                self.chrome,
                 window,
                 move |_, window, cx| header_close(window, cx),
             ))
@@ -205,12 +208,13 @@ fn open_settings_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut App) {
 
     let spec = ChildWindowSpec::settings(t!("settings.title").to_string(), 800., 560.)
         .min_size(640., 480.);
+    let chrome = spec.chrome();
     let parent = app.read(cx).shell.main_window();
     let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
     let view_app = app.clone();
     let result: anyhow::Result<NyaWindowHandle> = cx.open_window(options, move |window, cx| {
-        let view = cx.new(|cx| SettingsWindow::new(view_app, cx));
+        let view = cx.new(|cx| SettingsWindow::new(view_app, chrome, cx));
         let close_panel = view.read(cx).settings_panel.clone();
         window.on_window_should_close(cx, move |window, cx| {
             let panel = close_panel.clone();

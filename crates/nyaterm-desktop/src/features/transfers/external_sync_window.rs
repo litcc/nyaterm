@@ -11,8 +11,8 @@ use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 use crate::features::{
     NyaTermApp,
     view_widgets::{
-        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
-        child_window_root, focus_child_window_shell_if_idle,
+        ChildWindowChrome, ChildWindowCloseHandler, ChildWindowSpec, child_window_header,
+        child_window_options, child_window_root, focus_child_window_shell_if_idle,
     },
 };
 
@@ -20,16 +20,23 @@ pub(super) struct TransferExternalSyncWindow {
     app: Entity<NyaTermApp>,
     prompt_id: String,
     shell_focus: FocusHandle,
+    chrome: ChildWindowChrome,
     _app_subscription: Subscription,
 }
 
 impl TransferExternalSyncWindow {
-    fn new(app: Entity<NyaTermApp>, prompt_id: String, cx: &mut Context<Self>) -> Self {
+    fn new(
+        app: Entity<NyaTermApp>,
+        prompt_id: String,
+        chrome: ChildWindowChrome,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             app,
             prompt_id,
             shell_focus: cx.focus_handle(),
+            chrome,
             _app_subscription: app_subscription,
         }
     }
@@ -88,6 +95,7 @@ impl Render for TransferExternalSyncWindow {
                 palette,
                 title,
                 Some("icons/sync.svg"),
+                self.chrome,
                 window,
                 move |_, window, cx| header_close(window, cx),
             ))
@@ -162,6 +170,7 @@ fn open_transfer_external_sync_window_now_from_app(
     // prompt they cannot see is a prompt that never gets answered. The pre-GPUI
     // implementation set `alwaysOnTop` for exactly these windows and nothing else.
     let spec = ChildWindowSpec::topmost_prompt(title, 440., 240.);
+    let chrome = spec.chrome();
     let parent = app.read(cx).shell.main_window();
     let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
@@ -177,7 +186,8 @@ fn open_transfer_external_sync_window_now_from_app(
         });
         let prompt_focus = view_app.read(cx).transfer.external_sync_focus().clone();
         window.focus(&prompt_focus, cx);
-        let view = cx.new(|cx| TransferExternalSyncWindow::new(view_app, view_prompt_id, cx));
+        let view =
+            cx.new(|cx| TransferExternalSyncWindow::new(view_app, view_prompt_id, chrome, cx));
         cx.new(|cx| nya_root(view, window, cx))
     });
 

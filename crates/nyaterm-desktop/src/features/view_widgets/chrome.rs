@@ -3,6 +3,7 @@ use gpui::{
     TitlebarOptions, Window, WindowControlArea, deferred, div, prelude::*, px, rgb, rgba, svg,
 };
 
+use super::child_window::ChildWindowChrome;
 use crate::theme::ThemePalette;
 use nyaterm_ui::{NyaButton, NyaButtonVariant};
 
@@ -141,6 +142,7 @@ pub(in crate::features) fn child_window_header(
     palette: ThemePalette,
     title: impl Into<SharedString>,
     icon_path: Option<&'static str>,
+    chrome: ChildWindowChrome,
     window: &Window,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
@@ -148,6 +150,9 @@ pub(in crate::features) fn child_window_header(
     let is_maximized = window.is_maximized();
     let minimizable = window.is_minimizable();
     let maximizable = window.is_resizable();
+    // A sheet has no title bar: nothing to leave a traffic-light gutter for, and
+    // nothing to drag it by.
+    let has_title_bar = chrome == ChildWindowChrome::Window;
     div()
         .h(px(40.))
         .flex_none()
@@ -165,8 +170,13 @@ pub(in crate::features) fn child_window_header(
                 .items_center()
                 .gap_2()
                 .px_3()
-                .when(cfg!(target_os = "macos"), |this| this.pl(px(70.)))
-                .window_control_area(WindowControlArea::Drag)
+                .when(cfg!(target_os = "macos") && has_title_bar, |this| {
+                    // Room for the traffic lights AppKit draws over the content.
+                    this.pl(px(70.))
+                })
+                .when(has_title_bar, |this| {
+                    this.window_control_area(WindowControlArea::Drag)
+                })
                 .when_some(icon_path, |this, icon_path| {
                     this.child(
                         svg()

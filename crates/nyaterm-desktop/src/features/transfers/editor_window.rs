@@ -14,8 +14,8 @@ use super::remote_text_editor::RemoteTextEditor;
 use crate::features::{
     NyaTermApp,
     view_widgets::{
-        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
-        child_window_root, focus_child_window_shell_if_idle,
+        ChildWindowChrome, ChildWindowCloseHandler, ChildWindowSpec, child_window_header,
+        child_window_options, child_window_root, focus_child_window_shell_if_idle,
     },
 };
 
@@ -24,17 +24,19 @@ pub(super) struct RemoteFileEditorWindow {
     editors: HashMap<String, Entity<RemoteTextEditor>>,
     active_editor_id: Option<String>,
     shell_focus: FocusHandle,
+    chrome: ChildWindowChrome,
     _app_subscription: Subscription,
 }
 
 impl RemoteFileEditorWindow {
-    fn new(app: Entity<NyaTermApp>, cx: &mut Context<Self>) -> Self {
+    fn new(app: Entity<NyaTermApp>, chrome: ChildWindowChrome, cx: &mut Context<Self>) -> Self {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             app,
             editors: HashMap::new(),
             active_editor_id: None,
             shell_focus: cx.focus_handle(),
+            chrome,
             _app_subscription: app_subscription,
         }
     }
@@ -131,6 +133,7 @@ impl Render for RemoteFileEditorWindow {
                 palette,
                 title,
                 Some("icons/files.svg"),
+                self.chrome,
                 window,
                 move |_, window, cx| header_close(window, cx),
             ))
@@ -184,6 +187,7 @@ fn open_remote_file_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut
 
     let title = t!("fileEditor.title").to_string();
     let spec = ChildWindowSpec::document(title, 980., 720.).min_size(640., 480.);
+    let chrome = spec.chrome();
     let parent = app.read(cx).shell.main_window();
     let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
@@ -199,7 +203,7 @@ fn open_remote_file_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut
                 should_close
             })
         });
-        let view = cx.new(|cx| RemoteFileEditorWindow::new(view_app, cx));
+        let view = cx.new(|cx| RemoteFileEditorWindow::new(view_app, chrome, cx));
         cx.new(|cx| nya_root(view, window, cx))
     });
 

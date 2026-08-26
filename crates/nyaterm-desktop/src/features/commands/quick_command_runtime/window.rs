@@ -13,23 +13,25 @@ use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 use crate::features::{
     NyaTermApp,
     view_widgets::{
-        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
-        child_window_root, focus_child_window_shell_if_idle,
+        ChildWindowChrome, ChildWindowCloseHandler, ChildWindowSpec, child_window_header,
+        child_window_options, child_window_root, focus_child_window_shell_if_idle,
     },
 };
 
 pub(in crate::features::commands) struct QuickCommandWindow {
     app: Entity<NyaTermApp>,
     shell_focus: FocusHandle,
+    chrome: ChildWindowChrome,
     _app_subscription: Subscription,
 }
 
 impl QuickCommandWindow {
-    fn new(app: Entity<NyaTermApp>, cx: &mut Context<Self>) -> Self {
+    fn new(app: Entity<NyaTermApp>, chrome: ChildWindowChrome, cx: &mut Context<Self>) -> Self {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             app,
             shell_focus: cx.focus_handle(),
+            chrome,
             _app_subscription: app_subscription,
         }
     }
@@ -77,6 +79,7 @@ impl Render for QuickCommandWindow {
                 palette,
                 title,
                 None,
+                self.chrome,
                 window,
                 move |_, window, cx| header_close(window, cx),
             ))
@@ -163,6 +166,7 @@ fn open_quick_command_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut App)
 
     let title = app.read(cx).quick_command_editor_title().to_string();
     let spec = ChildWindowSpec::modal_editor(title, 540., 688.).min_size(420., 560.);
+    let chrome = spec.chrome();
     let parent = app.read(cx).shell.main_window();
     let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
@@ -179,7 +183,7 @@ fn open_quick_command_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut App)
         });
         let editor_focus = view_app.read(cx).commands.quick_editor_focus().clone();
         window.focus(&editor_focus, cx);
-        let view = cx.new(|cx| QuickCommandWindow::new(view_app, cx));
+        let view = cx.new(|cx| QuickCommandWindow::new(view_app, chrome, cx));
         cx.new(|cx| nya_root(view, window, cx))
     });
 
