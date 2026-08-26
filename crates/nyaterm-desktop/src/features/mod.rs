@@ -31,6 +31,7 @@ mod view_widgets;
 
 pub(crate) fn init(cx: &mut gpui::App) {
     terminal::init_key_bindings(cx);
+    view_widgets::init_child_window_key_bindings(cx);
 }
 
 pub use app_state::NyaTermApp;

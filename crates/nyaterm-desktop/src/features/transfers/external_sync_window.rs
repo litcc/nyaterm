@@ -1,18 +1,25 @@
 use rust_i18n::t;
 
+use std::rc::Rc;
+
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
-    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, Subscription, Window, div,
+    prelude::*, px, rgb,
 };
-use nyaterm_ui::{NyaWindowHandle, nya_root};
+use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 
 use crate::features::{
-    NyaTermApp, view_widgets::child_window_header, view_widgets::child_window_titlebar,
+    NyaTermApp,
+    view_widgets::{
+        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
+        child_window_root, focus_child_window_shell_if_idle,
+    },
 };
 
 pub(super) struct TransferExternalSyncWindow {
     app: Entity<NyaTermApp>,
     prompt_id: String,
+    shell_focus: FocusHandle,
     _app_subscription: Subscription,
 }
 
@@ -22,6 +29,7 @@ impl TransferExternalSyncWindow {
         Self {
             app,
             prompt_id,
+            shell_focus: cx.focus_handle(),
             _app_subscription: app_subscription,
         }
     }
@@ -60,12 +68,18 @@ impl Render for TransferExternalSyncWindow {
         });
         let close_app = self.app.clone();
         let close_prompt_id = self.prompt_id.clone();
+        let on_close: ChildWindowCloseHandler =
+            Rc::new(move |window: &mut Window, cx: &mut App| {
+                let prompt_id = close_prompt_id.clone();
+                close_app.update(cx, |app, cx| {
+                    app.ignore_external_editor_sync_prompt(&prompt_id, cx);
+                });
+                window.remove_window();
+            });
+        let header_close = on_close.clone();
+        focus_child_window_shell_if_idle(&self.shell_focus, window, cx);
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
+        child_window_root(&self.shell_focus, true, on_close)
             .bg(rgb(palette.bg))
             .text_color(rgb(palette.text))
             .font(font)
@@ -74,14 +88,8 @@ impl Render for TransferExternalSyncWindow {
                 palette,
                 title,
                 Some("icons/sync.svg"),
-                false,
-                window.is_maximized(),
-                move |_, window, cx| {
-                    close_app.update(cx, |app, cx| {
-                        app.ignore_external_editor_sync_prompt(&close_prompt_id, cx);
-                    });
-                    window.remove_window();
-                },
+                window,
+                move |_, window, cx| header_close(window, cx),
             ))
             .child(div().flex_1().min_h_0().overflow_hidden().child(content))
             .into_any_element()
@@ -89,52 +97,19 @@ impl Render for TransferExternalSyncWindow {
 }
 
 impl NyaTermApp {
-    pub(in crate::features) fn activate_transfer_external_sync_window(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some((prompt_id, handle)) = self.transfer.first_external_sync_window() else {
-            return false;
-        };
-        let app = cx.entity();
-        cx.defer(move |cx| {
-            if handle
-                .update(cx, |_, window, _| window.activate_window())
-                .is_err()
-            {
-                app.update(cx, |app, cx| {
-                    app.transfer.clear_external_sync_window_tracking(&prompt_id);
-                    cx.notify();
-                });
-            }
-        });
-        true
-    }
-
     pub(in crate::features) fn open_transfer_external_sync_window(
         &mut self,
         prompt_id: String,
         cx: &mut Context<Self>,
     ) -> bool {
         if let Some(handle) = self.transfer.external_sync_window(&prompt_id) {
-            let app = cx.entity();
-            cx.defer(move |cx| {
-                if handle
-                    .update(cx, |_, window, _| window.activate_window())
-                    .is_err()
-                {
-                    app.update(cx, |app, cx| {
-                        app.transfer.clear_external_sync_window_tracking(&prompt_id);
-                        cx.notify();
-                    });
-                }
-            });
-            return true;
-        }
-        if self
-            .transfer
-            .external_sync_window_open_is_pending(&prompt_id)
-        {
+            let slot_prompt_id = prompt_id.clone();
+            activate_child_window(
+                &cx.entity(),
+                handle,
+                move |app: &mut NyaTermApp| app.transfer.external_sync_window_slot(&slot_prompt_id),
+                cx,
+            );
             return true;
         }
         if !self.transfer.begin_external_sync_window_open(&prompt_id) {
@@ -183,33 +158,28 @@ fn open_transfer_external_sync_window_now_from_app(
     }
 
     let title = t!("fileExplorer.fileModified").to_string();
-    let bounds = Bounds::centered(None, size(px(440.), px(240.)), cx);
+    // Always on top: this fires while the user is in an external editor, and a
+    // prompt they cannot see is a prompt that never gets answered. The pre-GPUI
+    // implementation set `alwaysOnTop` for exactly these windows and nothing else.
+    let spec = ChildWindowSpec::topmost_prompt(title, 440., 240.);
+    let parent = app.read(cx).shell.main_window();
+    let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
     let close_prompt_id = prompt_id.clone();
     let view_app = app.clone();
     let view_prompt_id = prompt_id.clone();
-    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(
-        WindowOptions {
-            titlebar: child_window_titlebar(title),
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            kind: WindowKind::Floating,
-            is_resizable: false,
-            is_minimizable: false,
-            ..Default::default()
-        },
-        move |window, cx| {
-            window.on_window_should_close(cx, move |_, cx| {
-                close_app.update(cx, |app, cx| {
-                    app.ignore_external_editor_sync_prompt(&close_prompt_id, cx);
-                });
-                true
+    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(options, move |window, cx| {
+        window.on_window_should_close(cx, move |_, cx| {
+            close_app.update(cx, |app, cx| {
+                app.ignore_external_editor_sync_prompt(&close_prompt_id, cx);
             });
-            let prompt_focus = view_app.read(cx).transfer.external_sync_focus().clone();
-            window.focus(&prompt_focus, cx);
-            let view = cx.new(|cx| TransferExternalSyncWindow::new(view_app, view_prompt_id, cx));
-            cx.new(|cx| nya_root(view, window, cx))
-        },
-    );
+            true
+        });
+        let prompt_focus = view_app.read(cx).transfer.external_sync_focus().clone();
+        window.focus(&prompt_focus, cx);
+        let view = cx.new(|cx| TransferExternalSyncWindow::new(view_app, view_prompt_id, cx));
+        cx.new(|cx| nya_root(view, window, cx))
+    });
 
     app.update(cx, |app, cx| match result {
         Ok(handle) => {

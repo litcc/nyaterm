@@ -10,7 +10,7 @@ use gpui::{
 use super::NyaTermApp;
 use super::terminal::{FULL_SHELL_PAINT_COUNT, terminal_surface_paint_count};
 use super::view_widgets::{
-    full_window_input_layer, full_window_overlay_layer, passive_overlay_layer,
+    full_window_input_layer, full_window_overlay_layer, modal_scrim_is_drawn, passive_overlay_layer,
 };
 use crate::features::perf::{GpuiPerfContext, record_gpui_perf_sample};
 use crate::features::runtime_jobs::ActivitySide;
@@ -179,19 +179,11 @@ impl NyaTermApp {
                 }),
             )
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.modal_child_window_open() {
-                    this.activate_modal_child_window(cx);
-                    cx.stop_propagation();
-                    return;
-                }
                 if this.handle_global_shortcut(event, window, cx) {
                     cx.stop_propagation();
                 }
             }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                if this.modal_child_window_open() {
-                    return;
-                }
                 this.reconcile_root_pointer_interactions(event, cx);
                 if event.dragging() {
                     this.update_transfer_browser_column_resize(event, cx);
@@ -213,9 +205,6 @@ impl NyaTermApp {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                    if this.modal_child_window_open() {
-                        return;
-                    }
                     this.finish_transfer_browser_column_resize(cx);
                     this.finish_panel_resize(cx);
                     this.finish_transfer_height_resize(cx);
@@ -231,10 +220,6 @@ impl NyaTermApp {
             .on_mouse_up(
                 MouseButton::Navigate(NavigationDirection::Back),
                 cx.listener(|this, _event: &MouseUpEvent, window, cx| {
-                    if this.modal_child_window_open() {
-                        this.activate_modal_child_window(cx);
-                        return;
-                    }
                     if this.current_left_panel() == Some(NavItem::Transfers) {
                         cx.stop_propagation();
                         this.open_transfer_browser_history(1, window, cx);
@@ -244,10 +229,6 @@ impl NyaTermApp {
             .on_mouse_up(
                 MouseButton::Navigate(NavigationDirection::Forward),
                 cx.listener(|this, _event: &MouseUpEvent, window, cx| {
-                    if this.modal_child_window_open() {
-                        this.activate_modal_child_window(cx);
-                        return;
-                    }
                     if this.current_left_panel() == Some(NavItem::Transfers) {
                         cx.stop_propagation();
                         this.open_transfer_browser_history(-1, window, cx);
@@ -257,9 +238,6 @@ impl NyaTermApp {
             .on_mouse_up(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                    if this.modal_child_window_open() {
-                        return;
-                    }
                     if this.finish_terminal_mouse_report(event, cx) {
                         cx.stop_propagation();
                     }
@@ -268,9 +246,6 @@ impl NyaTermApp {
             .on_mouse_up(
                 MouseButton::Middle,
                 cx.listener(|this, event: &MouseUpEvent, _, cx| {
-                    if this.modal_child_window_open() {
-                        return;
-                    }
                     if this.finish_terminal_mouse_report(event, cx) {
                         cx.stop_propagation();
                     }
@@ -694,20 +669,22 @@ impl NyaTermApp {
                     self.activity_bar_context_menu_overlay(cx),
                 ))
             })
+            // Below the lock screen on purpose: both layers share
+            // `APP_OVERLAY_PRIORITY`, so insertion order decides, and a layer
+            // painted above the lock screen would swallow the pointer input the
+            // lock screen needs.
+            .when(
+                modal_scrim_is_drawn() && self.modal_child_window_is_open_or_pending(),
+                |this| this.child(passive_overlay_layer(self.modal_owner_scrim())),
+            )
             .when(overlay.locked, |this| {
                 this.child(full_window_overlay_layer(
                     "lock-screen-input-layer",
                     self.lock_screen_overlay(window, cx),
                 ))
             })
-            .when(self.modal_child_window_open(), |this| {
-                this.child(full_window_overlay_layer(
-                    "modal-owner-input-layer",
-                    self.modal_owner_backdrop(cx),
-                ))
-            })
             // Background SSH operations can request credentials while another
-            // modal is open, so authentication must be the topmost overlay.
+            // overlay is open, so authentication must be the topmost overlay.
             .when(ssh_auth_prompt_open, |this| {
                 this.child(
                     deferred(full_window_overlay_layer(
@@ -740,50 +717,34 @@ impl NyaTermApp {
         self.clear_session_tab_drag(cx);
     }
 
-    fn modal_child_window_open(&self) -> bool {
-        self.shell.settings_window().is_some()
-            || self.shell.settings_window_open_pending()
+    /// Whether the main window should be held back for a modal child window.
+    ///
+    /// The three windows below hold one shared draft slot each, so the main
+    /// window must not be edited underneath them. Deliberately absent: the remote
+    /// file editor, which is an independent document window, and the
+    /// external-editor prompt, which is a topmost `PopUp` that must not block the
+    /// workspace it is reporting on.
+    ///
+    /// The pending state counts: a child window is opened from a deferred
+    /// callback, and without it the main window would be live for the frames in
+    /// between.
+    fn modal_child_window_is_open_or_pending(&self) -> bool {
+        self.shell.settings_window_is_open_or_pending()
+            || self.connection_state.editor_window_is_open_or_pending()
             || self.commands.quick_editor_window_is_open_or_pending()
-            || self.connection_state.editor_modal_window_open_or_pending()
-            || self.transfer.external_sync_has_window()
-            || self.transfer.external_sync_has_pending_window()
     }
 
-    fn activate_modal_child_window(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.shell.settings_window().is_some() {
-            self.activate_settings_window(cx)
-        } else if self.shell.settings_window_open_pending() {
-            true
-        } else if self.commands.quick_editor_window_is_open() {
-            self.activate_quick_command_window(cx)
-        } else if self.commands.quick_editor_window_is_pending() {
-            true
-        } else if self.connection_state.editor_has_window() {
-            self.activate_connection_editor_window(cx)
-        } else if self.connection_state.editor_window_open_pending() {
-            true
-        } else if self.transfer.external_sync_has_window() {
-            self.activate_transfer_external_sync_window(cx)
-        } else {
-            self.transfer.external_sync_has_pending_window()
-        }
-    }
-
-    fn modal_owner_backdrop(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Dims the main window while a modal child window owns a draft.
+    ///
+    /// Deliberately inert: the child window is a `WindowKind::Dialog`, so the
+    /// platform has already stopped input from reaching this window, and a scrim
+    /// that handled clicks would be claiming a job it never gets asked to do.
+    fn modal_owner_scrim(&self) -> impl IntoElement {
         div()
-            .id("modal-owner-backdrop")
+            .id("modal-owner-scrim")
             .absolute()
             .inset_0()
             .bg(rgba(0x00000066))
-            .cursor_pointer()
-            .on_mouse_move(|_, _, cx| cx.stop_propagation())
-            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_up(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-            .on_mouse_up(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, _, cx| {
-                cx.stop_propagation();
-                this.activate_modal_child_window(cx);
-            }))
     }
 
     fn ssh_auth_prompt_overlay(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -957,6 +918,64 @@ mod tests {
         assert!(columns * rows <= 8192);
         assert!(columns as f32 * tile.0 >= 3840.);
         assert!(rows as f32 * tile.1 >= 2160.);
+    }
+
+    /// A bare app entity, enough for the pure state predicates.
+    ///
+    /// The temp directory is keyed by pid *and* a uuid: a clock-derived name lets
+    /// two parallel fixtures share one settings database on Windows.
+    fn modal_predicate_app(cx: &mut TestAppContext) -> gpui::Entity<super::NyaTermApp> {
+        let root = std::env::temp_dir().join(format!(
+            "nyaterm-modal-predicate-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| super::NyaTermApp::new(runtime, stores, cx))
+    }
+
+    /// The three windows that hold a draft shared with the main window each hold
+    /// it back, and each does so from the moment the open is requested -- a child
+    /// window is opened from a deferred callback, so the pending state is the only
+    /// thing covering the frames in between.
+    #[gpui::test]
+    fn every_draft_owning_child_window_holds_the_main_window_back(cx: &mut TestAppContext) {
+        let app = modal_predicate_app(cx);
+
+        cx.update_entity(&app, |app, _| {
+            assert!(
+                !app.modal_child_window_is_open_or_pending(),
+                "nothing is open yet"
+            );
+
+            assert!(app.shell.begin_settings_window_open());
+            assert!(app.modal_child_window_is_open_or_pending());
+            app.shell.cancel_settings_window_open();
+            assert!(!app.modal_child_window_is_open_or_pending());
+
+            assert!(app.connection_state.begin_editor_window_open());
+            assert!(app.modal_child_window_is_open_or_pending());
+            app.connection_state.clear_editor_window_pending();
+            assert!(!app.modal_child_window_is_open_or_pending());
+
+            app.commands
+                .open_quick_editor(crate::models::QuickCommandEditorState::blank());
+            assert!(app.commands.request_quick_editor_window());
+            assert!(app.modal_child_window_is_open_or_pending());
+            app.commands.cancel_quick_editor_window_request();
+            assert!(!app.modal_child_window_is_open_or_pending());
+        });
     }
 
     fn root_render_benchmark_dir() -> PathBuf {

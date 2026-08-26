@@ -131,15 +131,23 @@ pub(in crate::features) fn window_control_button(
         .on_click(on_click)
 }
 
+/// The 40px bar every child window draws in place of a native title bar.
+///
+/// Which controls appear is read off the window itself rather than passed in, so
+/// a window cannot end up offering a button the platform will ignore -- or, worse,
+/// omitting one it needs: a resizable window with no restore button can still be
+/// maximised with `Win`+`Up` and then has no way back.
 pub(in crate::features) fn child_window_header(
     palette: ThemePalette,
     title: impl Into<SharedString>,
     icon_path: Option<&'static str>,
-    window_controls: bool,
-    is_maximized: bool,
+    window: &Window,
     on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let title = title.into();
+    let is_maximized = window.is_maximized();
+    let minimizable = window.is_minimizable();
+    let maximizable = window.is_resizable();
     div()
         .h(px(40.))
         .flex_none()
@@ -184,7 +192,7 @@ pub(in crate::features) fn child_window_header(
                 .flex_none()
                 .flex()
                 .items_center()
-                .when(!cfg!(target_os = "macos") && window_controls, |this| {
+                .when(!cfg!(target_os = "macos") && minimizable, |this| {
                     this.child(window_control_button(
                         palette,
                         "child-window-min",
@@ -192,7 +200,9 @@ pub(in crate::features) fn child_window_header(
                         WindowControlArea::Min,
                         |_, window, _| window.minimize_window(),
                     ))
-                    .child(window_control_button(
+                })
+                .when(!cfg!(target_os = "macos") && maximizable, |this| {
+                    this.child(window_control_button(
                         palette,
                         "child-window-max",
                         if is_maximized {

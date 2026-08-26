@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use nyaterm_ui::NyaWindowHandle;
+use nyaterm_ui::ChildWindowSlot;
 
 use super::super::connection_runtime::ConnectionEditorToggle;
 use crate::models::{
@@ -14,14 +14,12 @@ pub(super) fn clear_connection_editor_runtime_state(
     draft: &mut Option<ConnectionEditorState>,
     icon_picker_open: &mut bool,
     group_select_open: &mut bool,
-    window: &mut Option<NyaWindowHandle>,
-    window_open_pending: &mut bool,
+    window: &mut ChildWindowSlot,
 ) {
     *icon_picker_open = false;
     *group_select_open = false;
     *draft = None;
-    *window = None;
-    *window_open_pending = false;
+    window.clear();
 }
 
 pub(super) fn select_saved_connection_after_editor_save(
@@ -48,13 +46,6 @@ pub(super) fn connection_editor_inline_panel_draft(
         return None;
     }
     draft.clone()
-}
-
-pub(super) fn connection_editor_window_open_or_pending(
-    has_window: bool,
-    window_open_pending: bool,
-) -> bool {
-    has_window || window_open_pending
 }
 
 pub(super) fn set_connection_editor_icon(

@@ -2,21 +2,28 @@ use rust_i18n::t;
 
 use std::collections::{HashMap, HashSet};
 
+use std::rc::Rc;
+
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+    App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, Subscription, Window, div,
+    prelude::*, px, rgb,
 };
-use nyaterm_ui::{NyaWindowHandle, nya_root};
+use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 
 use super::remote_text_editor::RemoteTextEditor;
 use crate::features::{
-    NyaTermApp, view_widgets::child_window_header, view_widgets::child_window_titlebar,
+    NyaTermApp,
+    view_widgets::{
+        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
+        child_window_root, focus_child_window_shell_if_idle,
+    },
 };
 
 pub(super) struct RemoteFileEditorWindow {
     app: Entity<NyaTermApp>,
     editors: HashMap<String, Entity<RemoteTextEditor>>,
     active_editor_id: Option<String>,
+    shell_focus: FocusHandle,
     _app_subscription: Subscription,
 }
 
@@ -27,6 +34,7 @@ impl RemoteFileEditorWindow {
             app,
             editors: HashMap::new(),
             active_editor_id: None,
+            shell_focus: cx.focus_handle(),
             _app_subscription: app_subscription,
         }
     }
@@ -101,12 +109,20 @@ impl Render for RemoteFileEditorWindow {
             app.transfer_editor_window_view(editor, cursor_position, cx)
         });
         let close_app = self.app.clone();
+        let on_close: ChildWindowCloseHandler =
+            Rc::new(move |window: &mut Window, cx: &mut App| {
+                let should_close = close_app.update(cx, |app, cx| {
+                    app.close_transfer_editor(cx);
+                    !app.transfer.editor_has_workspace()
+                });
+                if should_close {
+                    window.remove_window();
+                }
+            });
+        let header_close = on_close.clone();
+        focus_child_window_shell_if_idle(&self.shell_focus, window, cx);
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
+        child_window_root(&self.shell_focus, false, on_close)
             .bg(rgb(palette.bg))
             .text_color(rgb(palette.text))
             .font(font)
@@ -115,17 +131,8 @@ impl Render for RemoteFileEditorWindow {
                 palette,
                 title,
                 Some("icons/files.svg"),
-                true,
-                window.is_maximized(),
-                move |_, window, cx| {
-                    let should_close = close_app.update(cx, |app, cx| {
-                        app.close_transfer_editor(cx);
-                        !app.transfer.editor_has_workspace()
-                    });
-                    if should_close {
-                        window.remove_window();
-                    }
-                },
+                window,
+                move |_, window, cx| header_close(window, cx),
             ))
             .child(div().flex_1().min_h_0().overflow_hidden().child(content))
             .into_any_element()
@@ -135,22 +142,12 @@ impl Render for RemoteFileEditorWindow {
 impl NyaTermApp {
     pub(in crate::features) fn open_remote_file_editor_window(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.transfer.editor_window() {
-            let app = cx.entity();
-            cx.defer(move |cx| {
-                if handle
-                    .update(cx, |_, window, _| window.activate_window())
-                    .is_err()
-                {
-                    app.update(cx, |app, cx| {
-                        if app.transfer.clear_editor_window_if(handle) {
-                            cx.notify();
-                        }
-                    });
-                }
-            });
-            return;
-        }
-        if self.transfer.editor_window_open_is_pending() {
+            activate_child_window(
+                &cx.entity(),
+                handle,
+                |app: &mut NyaTermApp| Some(app.transfer.editor_window_slot()),
+                cx,
+            );
             return;
         }
         if !self.transfer.begin_editor_window_open() {
@@ -186,31 +183,25 @@ fn open_remote_file_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut
     }
 
     let title = t!("fileEditor.title").to_string();
-    let bounds = Bounds::centered(None, size(px(980.), px(720.)), cx);
+    let spec = ChildWindowSpec::document(title, 980., 720.).min_size(640., 480.);
+    let parent = app.read(cx).shell.main_window();
+    let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
     let view_app = app.clone();
-    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(
-        WindowOptions {
-            titlebar: child_window_titlebar(title),
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(640.), px(480.))),
-            ..Default::default()
-        },
-        move |window, cx| {
-            window.on_window_should_close(cx, move |_, cx| {
-                close_app.update(cx, |app, cx| {
-                    app.close_transfer_editor(cx);
-                    let should_close = !app.transfer.editor_has_workspace();
-                    if should_close {
-                        app.transfer.clear_editor_window_tracking();
-                    }
-                    should_close
-                })
-            });
-            let view = cx.new(|cx| RemoteFileEditorWindow::new(view_app, cx));
-            cx.new(|cx| nya_root(view, window, cx))
-        },
-    );
+    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(options, move |window, cx| {
+        window.on_window_should_close(cx, move |_, cx| {
+            close_app.update(cx, |app, cx| {
+                app.close_transfer_editor(cx);
+                let should_close = !app.transfer.editor_has_workspace();
+                if should_close {
+                    app.transfer.clear_editor_window_tracking();
+                }
+                should_close
+            })
+        });
+        let view = cx.new(|cx| RemoteFileEditorWindow::new(view_app, cx));
+        cx.new(|cx| nya_root(view, window, cx))
+    });
 
     app.update(cx, |app, cx| match result {
         Ok(handle) => {

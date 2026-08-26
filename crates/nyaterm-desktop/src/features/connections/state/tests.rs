@@ -6,10 +6,9 @@ use super::{
     clear_connection_list_runtime_state, clear_network_proxy_editor, clear_network_tunnel_editor,
     clear_selected_connection_ids, commit_connection_editor_new_group,
     connection_drop_position_for_target, connection_editor_inline_panel_draft,
-    connection_editor_window_open_or_pending, cycle_connection_sort_mode,
-    insert_connection_editor_description_newline, move_connection_editor_ssh_algorithm,
-    remove_connection_list_references, remove_group_list_references,
-    remove_network_group_references, remove_network_item_references,
+    cycle_connection_sort_mode, insert_connection_editor_description_newline,
+    move_connection_editor_ssh_algorithm, remove_connection_list_references,
+    remove_group_list_references, remove_network_group_references, remove_network_item_references,
     retain_loaded_connection_references, retain_loaded_group_list_references,
     saved_connections_in_group_tree_for_list_state, select_connection_ids,
     select_saved_connection_after_editor_save, selected_connections_for_list_state,
@@ -46,6 +45,7 @@ use nyaterm_core::{
     RecordingMode, RecordingRotationPolicy, RuntimeMode, SavedConnection, SshAgentEndpoint,
     SshAgentForwardingPolicy, SshProfile, SshTerminalType, uuid,
 };
+use nyaterm_ui::ChildWindowSlot;
 use std::path::PathBuf;
 
 #[test]
@@ -587,22 +587,20 @@ fn clear_connection_editor_runtime_state_clears_secret_draft_and_icon_picker() {
     let mut draft = Some(connection_editor_state_with_secret_draft());
     let mut icon_picker_open = true;
     let mut group_select_open = true;
-    let mut window = None;
-    let mut window_open_pending = true;
+    let mut window = ChildWindowSlot::default();
+    assert!(window.begin_open());
 
     clear_connection_editor_runtime_state(
         &mut draft,
         &mut icon_picker_open,
         &mut group_select_open,
         &mut window,
-        &mut window_open_pending,
     );
 
     assert_eq!(draft, None);
     assert!(!icon_picker_open);
     assert!(!group_select_open);
-    assert_eq!(window, None);
-    assert!(!window_open_pending);
+    assert!(!window.is_open_or_pending());
 }
 
 #[test]
@@ -610,8 +608,8 @@ fn finish_connection_editor_save_state_clears_editor_and_selects_saved_connectio
     let mut draft = Some(connection_editor_state_with_secret_draft());
     let mut icon_picker_open = true;
     let mut group_select_open = true;
-    let mut window = None;
-    let mut window_open_pending = true;
+    let mut window = ChildWindowSlot::default();
+    assert!(window.begin_open());
     let mut selected_ids = HashSet::from(["old".to_string()]);
     let mut last_selected_id = Some("old".to_string());
     let mut expanded_group_ids = HashSet::from(["existing-group".to_string()]);
@@ -621,7 +619,6 @@ fn finish_connection_editor_save_state_clears_editor_and_selects_saved_connectio
         &mut icon_picker_open,
         &mut group_select_open,
         &mut window,
-        &mut window_open_pending,
     );
     select_saved_connection_after_editor_save(
         &mut selected_ids,
@@ -634,8 +631,7 @@ fn finish_connection_editor_save_state_clears_editor_and_selects_saved_connectio
     assert_eq!(draft, None);
     assert!(!icon_picker_open);
     assert!(!group_select_open);
-    assert_eq!(window, None);
-    assert!(!window_open_pending);
+    assert!(!window.is_open_or_pending());
     assert_eq!(selected_ids, HashSet::from(["conn-b".to_string()]));
     assert_eq!(last_selected_id.as_deref(), Some("conn-b"));
     assert!(expanded_group_ids.contains("existing-group"));
@@ -655,9 +651,6 @@ fn connection_editor_inline_panel_draft_requires_draft_without_window() {
     assert!(connection_editor_inline_panel_draft(&draft, true, false).is_none());
     assert!(connection_editor_inline_panel_draft(&draft, false, true).is_none());
     assert!(connection_editor_inline_panel_draft(&None, false, false).is_none());
-    assert!(connection_editor_window_open_or_pending(true, false));
-    assert!(connection_editor_window_open_or_pending(false, true));
-    assert!(!connection_editor_window_open_or_pending(false, false));
 }
 
 fn connection_editor_owner(cx: &TestAppContext) -> ConnectionEditorFeatureState {
@@ -670,8 +663,7 @@ fn connection_editor_owner(cx: &TestAppContext) -> ConnectionEditorFeatureState 
         number_field_subscriptions: Vec::new(),
         forwarding_endpoint_fields: HashMap::new(),
         forwarding_endpoint_field_subscriptions: Vec::new(),
-        window: None,
-        window_open_pending: false,
+        window: ChildWindowSlot::default(),
         focus,
         icon_picker_open: false,
         group_select_open: false,

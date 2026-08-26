@@ -392,7 +392,7 @@ impl NyaTermApp {
     pub(in crate::features) fn activity_entry_selected(&self, entry: ActivityBarEntry) -> bool {
         match entry {
             ActivityBarEntry::Panel(NavItem::Settings) => {
-                self.shell.navigation.settings.window.is_some()
+                self.shell.navigation.settings.window.is_open()
                     || self.shell.navigation.main_mode == MainMode::Page
             }
             ActivityBarEntry::Panel(item) => self.panel_entry_selected(item),

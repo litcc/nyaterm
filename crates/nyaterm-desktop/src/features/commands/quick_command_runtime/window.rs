@@ -2,18 +2,25 @@ use rust_i18n::t;
 
 use std::borrow::Cow;
 
+use std::rc::Rc;
+
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
-    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, Subscription, Window, div,
+    prelude::*, px, rgb,
 };
-use nyaterm_ui::{NyaWindowHandle, nya_root};
+use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 
 use crate::features::{
-    NyaTermApp, view_widgets::child_window_header, view_widgets::child_window_titlebar,
+    NyaTermApp,
+    view_widgets::{
+        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
+        child_window_root, focus_child_window_shell_if_idle,
+    },
 };
 
 pub(in crate::features::commands) struct QuickCommandWindow {
     app: Entity<NyaTermApp>,
+    shell_focus: FocusHandle,
     _app_subscription: Subscription,
 }
 
@@ -22,6 +29,7 @@ impl QuickCommandWindow {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             app,
+            shell_focus: cx.focus_handle(),
             _app_subscription: app_subscription,
         }
     }
@@ -52,12 +60,15 @@ impl Render for QuickCommandWindow {
             app.quick_command_editor_window_view(viewport_width, cx)
         });
         let close_app = self.app.clone();
+        let on_close: ChildWindowCloseHandler =
+            Rc::new(move |window: &mut Window, cx: &mut App| {
+                close_app.update(cx, |app, cx| app.close_quick_command_editor(cx));
+                window.remove_window();
+            });
+        let header_close = on_close.clone();
+        focus_child_window_shell_if_idle(&self.shell_focus, window, cx);
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
+        child_window_root(&self.shell_focus, true, on_close)
             .bg(rgb(palette.bg))
             .text_color(rgb(palette.text))
             .font(font)
@@ -66,12 +77,8 @@ impl Render for QuickCommandWindow {
                 palette,
                 title,
                 None,
-                false,
-                window.is_maximized(),
-                move |_, window, cx| {
-                    close_app.update(cx, |app, cx| app.close_quick_command_editor(cx));
-                    window.remove_window();
-                },
+                window,
+                move |_, window, cx| header_close(window, cx),
             ))
             .child(div().flex_1().min_h_0().overflow_hidden().child(content))
             .into_any_element()
@@ -91,6 +98,10 @@ impl NyaTermApp {
         }
     }
 
+    /// Raise the editor window if one is already open.
+    ///
+    /// There is a single quick-command draft, so a second open request has to
+    /// land on the window that already owns it rather than start a rival draft.
     pub(in crate::features) fn activate_quick_command_window(
         &mut self,
         cx: &mut Context<Self>,
@@ -98,19 +109,12 @@ impl NyaTermApp {
         let Some(handle) = self.commands.quick_editor_window() else {
             return false;
         };
-        let app = cx.entity();
-        cx.defer(move |cx| {
-            if handle
-                .update(cx, |_, window, _| window.activate_window())
-                .is_err()
-            {
-                app.update(cx, |app, cx| {
-                    if app.commands.clear_quick_editor_window_if(handle) {
-                        cx.notify();
-                    }
-                });
-            }
-        });
+        activate_child_window(
+            &cx.entity(),
+            handle,
+            |app: &mut NyaTermApp| Some(app.commands.quick_editor_window_slot()),
+            cx,
+        );
         true
     }
 
@@ -158,34 +162,26 @@ fn open_quick_command_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut App)
     }
 
     let title = app.read(cx).quick_command_editor_title().to_string();
-    let bounds = Bounds::centered(None, size(px(540.), px(688.)), cx);
+    let spec = ChildWindowSpec::modal_editor(title, 540., 688.).min_size(420., 560.);
+    let parent = app.read(cx).shell.main_window();
+    let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
     let view_app = app.clone();
-    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(
-        WindowOptions {
-            titlebar: child_window_titlebar(title),
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(420.), px(560.))),
-            kind: WindowKind::Floating,
-            is_minimizable: false,
-            ..Default::default()
-        },
-        move |window, cx| {
-            window.on_window_should_close(cx, move |_, cx| {
-                close_app.update(cx, |app, cx| {
-                    app.commands.close_quick_editor();
-                    app.shell
-                        .set_status("quick command editor closed".to_string());
-                    cx.notify();
-                });
-                true
+    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(options, move |window, cx| {
+        window.on_window_should_close(cx, move |_, cx| {
+            close_app.update(cx, |app, cx| {
+                app.commands.close_quick_editor();
+                app.shell
+                    .set_status("quick command editor closed".to_string());
+                cx.notify();
             });
-            let editor_focus = view_app.read(cx).commands.quick_editor_focus().clone();
-            window.focus(&editor_focus, cx);
-            let view = cx.new(|cx| QuickCommandWindow::new(view_app, cx));
-            cx.new(|cx| nya_root(view, window, cx))
-        },
-    );
+            true
+        });
+        let editor_focus = view_app.read(cx).commands.quick_editor_focus().clone();
+        window.focus(&editor_focus, cx);
+        let view = cx.new(|cx| QuickCommandWindow::new(view_app, cx));
+        cx.new(|cx| nya_root(view, window, cx))
+    });
 
     app.update(cx, |app, cx| match result {
         Ok(handle) => {

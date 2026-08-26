@@ -2,19 +2,26 @@ use rust_i18n::t;
 
 use std::borrow::Cow;
 
+use std::rc::Rc;
+
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
-    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, Subscription, Window, div,
+    prelude::*, px, rgb,
 };
-use nyaterm_ui::{NyaWindowHandle, nya_root};
+use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 
 use crate::features::{
-    NyaTermApp, view_widgets::child_window_header, view_widgets::child_window_titlebar,
+    NyaTermApp,
+    view_widgets::{
+        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
+        child_window_root, focus_child_window_shell_if_idle,
+    },
 };
 use crate::models::ConnectionEditorField;
 
 pub(in crate::features::connections) struct ConnectionEditorWindow {
     app: Entity<NyaTermApp>,
+    shell_focus: FocusHandle,
     _app_subscription: Subscription,
     /// Focus is per-window, so the field the main window focused means nothing
     /// here; this window has to claim it on its own first frame.
@@ -26,6 +33,7 @@ impl ConnectionEditorWindow {
         let app_subscription = cx.observe(&app, |_, _, cx| cx.notify());
         Self {
             app,
+            shell_focus: cx.focus_handle(),
             _app_subscription: app_subscription,
             focused_initial_field: false,
         }
@@ -70,12 +78,15 @@ impl Render for ConnectionEditorWindow {
             .app
             .update(cx, |app, cx| app.connection_editor_window_view(editor, cx));
         let close_app = self.app.clone();
+        let on_close: ChildWindowCloseHandler =
+            Rc::new(move |window: &mut Window, cx: &mut App| {
+                close_app.update(cx, |app, cx| app.close_connection_editor(cx));
+                window.remove_window();
+            });
+        let header_close = on_close.clone();
+        focus_child_window_shell_if_idle(&self.shell_focus, window, cx);
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
+        child_window_root(&self.shell_focus, true, on_close)
             .bg(rgb(palette.bg))
             .text_color(rgb(palette.text))
             .font(font)
@@ -84,12 +95,8 @@ impl Render for ConnectionEditorWindow {
                 palette,
                 title,
                 None,
-                false,
-                window.is_maximized(),
-                move |_, window, cx| {
-                    close_app.update(cx, |app, cx| app.close_connection_editor(cx));
-                    window.remove_window();
-                },
+                window,
+                move |_, window, cx| header_close(window, cx),
             ))
             .child(div().flex_1().min_h_0().overflow_hidden().child(content))
             .into_any_element()
@@ -105,6 +112,11 @@ impl NyaTermApp {
         }
     }
 
+    /// Raise the editor window if one is already open.
+    ///
+    /// This is what stops a second "new connection" from starting a competing
+    /// draft: there is one draft slot, so the second request has to land on the
+    /// window that already owns it.
     pub(in crate::features) fn activate_connection_editor_window(
         &mut self,
         cx: &mut Context<Self>,
@@ -112,19 +124,12 @@ impl NyaTermApp {
         let Some(handle) = self.connection_state.editor_window_handle() else {
             return false;
         };
-        let app = cx.entity();
-        cx.defer(move |cx| {
-            if handle
-                .update(cx, |_, window, _| window.activate_window())
-                .is_err()
-            {
-                app.update(cx, |app, cx| {
-                    if app.connection_state.clear_editor_window_if_current(handle) {
-                        cx.notify();
-                    }
-                });
-            }
-        });
+        activate_child_window(
+            &cx.entity(),
+            handle,
+            |app: &mut NyaTermApp| Some(app.connection_state.editor_window_slot()),
+            cx,
+        );
         true
     }
 
@@ -135,11 +140,9 @@ impl NyaTermApp {
         if self.activate_connection_editor_window(cx) {
             return true;
         }
-        if self.connection_state.editor_window_open_pending() {
+        if !self.connection_state.begin_editor_window_open() {
             return true;
         }
-
-        self.connection_state.mark_editor_window_pending();
         cx.notify();
         let app = cx.entity();
         cx.defer(move |cx| {
@@ -170,34 +173,26 @@ fn open_connection_editor_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut 
     }
 
     let title = app.read(cx).connection_editor_title().to_string();
-    let bounds = Bounds::centered(None, size(px(520.), px(620.)), cx);
+    let spec = ChildWindowSpec::modal_editor(title, 520., 620.).min_size(420., 480.);
+    let parent = app.read(cx).shell.main_window();
+    let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
     let view_app = app.clone();
-    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(
-        WindowOptions {
-            titlebar: child_window_titlebar(title),
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(420.), px(480.))),
-            kind: WindowKind::Floating,
-            is_minimizable: false,
-            ..Default::default()
-        },
-        move |window, cx| {
-            window.on_window_should_close(cx, move |_, cx| {
-                close_app.update(cx, |app, cx| {
-                    app.connection_state.close_editor();
-                    app.shell
-                        .set_status(t!("dialog.connectionEditorClosed").to_string());
-                    cx.notify();
-                });
-                true
+    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(options, move |window, cx| {
+        window.on_window_should_close(cx, move |_, cx| {
+            close_app.update(cx, |app, cx| {
+                app.connection_state.close_editor();
+                app.shell
+                    .set_status(t!("dialog.connectionEditorClosed").to_string());
+                cx.notify();
             });
-            let editor_focus = view_app.read(cx).connection_state.editor_focus_handle();
-            window.focus(&editor_focus, cx);
-            let view = cx.new(|cx| ConnectionEditorWindow::new(view_app, cx));
-            cx.new(|cx| nya_root(view, window, cx))
-        },
-    );
+            true
+        });
+        let editor_focus = view_app.read(cx).connection_state.editor_focus_handle();
+        window.focus(&editor_focus, cx);
+        let view = cx.new(|cx| ConnectionEditorWindow::new(view_app, cx));
+        cx.new(|cx| nya_root(view, window, cx))
+    });
 
     app.update(cx, |app, cx| match result {
         Ok(handle) => {

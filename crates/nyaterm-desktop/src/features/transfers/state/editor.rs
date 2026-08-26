@@ -2,7 +2,7 @@
 
 use gpui::FocusHandle;
 use nyaterm_transport::{SftpRemoteTextFile, SftpWriteTextResult};
-use nyaterm_ui::NyaWindowHandle;
+use nyaterm_ui::{ChildWindowSlot, NyaWindowHandle};
 
 use crate::models::{TransferEditorState, TransferEditorWorkspaceState};
 
@@ -31,9 +31,7 @@ impl TransferFeatureState {
     }
 
     pub(in crate::features) fn editor_inline_overlay_is_open(&self) -> bool {
-        self.editor.workspace.is_some()
-            && self.editor.window.is_none()
-            && !self.editor.window_open_pending
+        self.editor.workspace.is_some() && !self.editor.window.is_open_or_pending()
     }
 
     pub(in crate::features) fn active_editor_tab(&self) -> Option<&TransferEditorState> {
@@ -117,7 +115,7 @@ impl TransferFeatureState {
         workspace.remove_tab(tab_id);
         if workspace.tabs.is_empty() {
             self.editor.workspace = None;
-            self.editor.window_open_pending = false;
+            self.editor.window.cancel_open();
         }
         TransferEditorCloseOutcome::Closed
     }
@@ -140,7 +138,7 @@ impl TransferFeatureState {
         }
         self.editor.workspace = None;
         self.editor.tabs_menu_open = false;
-        self.editor.window_open_pending = false;
+        self.editor.window.cancel_open();
         TransferEditorCloseOutcome::Closed
     }
 
@@ -153,13 +151,13 @@ impl TransferFeatureState {
             Self::clear_editor_close_state(workspace);
             if workspace.tabs.is_empty() {
                 self.editor.workspace = None;
-                self.editor.window_open_pending = false;
+                self.editor.window.cancel_open();
             }
             TransferEditorDiscardOutcome::TabDiscarded
         } else {
             self.editor.workspace = None;
             self.editor.tabs_menu_open = false;
-            self.editor.window_open_pending = false;
+            self.editor.window.cancel_open();
             TransferEditorDiscardOutcome::WorkspaceDiscarded
         }
     }
@@ -402,7 +400,7 @@ impl TransferFeatureState {
         if close_workspace {
             self.editor.workspace = None;
             self.editor.tabs_menu_open = false;
-            self.editor.window_open_pending = false;
+            self.editor.window.cancel_open();
             Some(TransferEditorSaveOutcome::SavedAndClosed)
         } else {
             Some(outcome)
@@ -453,7 +451,7 @@ impl TransferFeatureState {
         if workspace.tabs.is_empty() {
             self.editor.workspace = None;
             self.editor.tabs_menu_open = false;
-            self.editor.window_open_pending = false;
+            self.editor.window.cancel_open();
         } else if removed > 0 {
             Self::clear_editor_close_state(workspace);
         }
@@ -499,34 +497,35 @@ impl TransferFeatureState {
     }
 
     pub(in crate::features::transfers) fn editor_window(&self) -> Option<NyaWindowHandle> {
-        self.editor.window
+        self.editor.window.handle()
     }
 
     pub(in crate::features) fn editor_window_is_open(&self) -> bool {
-        self.editor.window.is_some()
+        self.editor.window.is_open()
     }
 
     pub(in crate::features) fn editor_window_open_is_pending(&self) -> bool {
-        self.editor.window_open_pending
+        self.editor.window.is_pending()
     }
 
+    pub(in crate::features::transfers) fn editor_window_slot(&mut self) -> &mut ChildWindowSlot {
+        &mut self.editor.window
+    }
+
+    /// Claim the right to open the editor window; also refuses when there is no
+    /// workspace to show, so the caller can fall back to the inline overlay.
     pub(in crate::features) fn begin_editor_window_open(&mut self) -> bool {
-        if self.editor.workspace.is_none()
-            || self.editor.window.is_some()
-            || self.editor.window_open_pending
-        {
+        if self.editor.workspace.is_none() {
             return false;
         }
-        self.editor.window_open_pending = true;
-        true
+        self.editor.window.begin_open()
     }
 
     pub(in crate::features::transfers) fn finish_editor_window_open(
         &mut self,
         handle: NyaWindowHandle,
     ) {
-        self.editor.window = Some(handle);
-        self.editor.window_open_pending = false;
+        self.editor.window.finish_open(handle);
     }
 
     pub(in crate::features::transfers) fn finish_editor_window_activation(
@@ -534,29 +533,16 @@ impl TransferFeatureState {
         handle: NyaWindowHandle,
         activated: bool,
     ) -> bool {
-        self.editor.window_open_pending = false;
-        if !activated && self.editor.window.is_some_and(|current| current == handle) {
-            self.editor.window = None;
-            return true;
+        self.editor.window.cancel_open();
+        if activated {
+            return false;
         }
-        false
-    }
-
-    pub(in crate::features::transfers) fn clear_editor_window_if(
-        &mut self,
-        handle: NyaWindowHandle,
-    ) -> bool {
-        if self.editor.window.is_some_and(|current| current == handle) {
-            self.editor.window = None;
-            true
-        } else {
-            false
-        }
+        self.editor.window.clear_if(handle)
     }
 
     pub(in crate::features) fn clear_editor_window_tracking(&mut self) -> bool {
-        let changed = self.editor.window.take().is_some() || self.editor.window_open_pending;
-        self.editor.window_open_pending = false;
+        let changed = self.editor.window.is_open_or_pending();
+        self.editor.window.clear();
         changed
     }
 
@@ -573,8 +559,7 @@ impl TransferEditorFeatureState {
             workspace: None,
             tabs_menu_open: false,
             focus,
-            window: None,
-            window_open_pending: false,
+            window: ChildWindowSlot::default(),
         }
     }
 }

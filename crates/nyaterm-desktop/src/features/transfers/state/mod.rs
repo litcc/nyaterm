@@ -21,7 +21,7 @@ use std::time::Instant;
 
 use gpui::{FocusHandle, Pixels, ScrollHandle, UniformListScrollHandle};
 use nyaterm_transport::{SftpDuplicatePolicy, SftpFileEntry, SftpFileProperties};
-use nyaterm_ui::NyaWindowHandle;
+use nyaterm_ui::{ChildWindowSlot, NyaWindowHandle};
 
 use crate::models::{
     TransferBrowserColumnResizeState, TransferBrowserColumnWidths, TransferBrowserContextTarget,
@@ -194,8 +194,7 @@ struct TransferEditorFeatureState {
     workspace: Option<TransferEditorWorkspaceState>,
     tabs_menu_open: bool,
     focus: FocusHandle,
-    window: Option<NyaWindowHandle>,
-    window_open_pending: bool,
+    window: ChildWindowSlot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -231,8 +230,9 @@ pub(in crate::features) enum TransferEditorCloseAfterSave {
 /// Handing a remote file to an external editor and syncing it back.
 struct TransferExternalSyncState {
     prompts: HashMap<String, TransferExternalSyncPromptState>,
-    windows: HashMap<String, NyaWindowHandle>,
-    window_open_pending: HashSet<String>,
+    /// One slot per prompt id: several files can be modified at once, so
+    /// several prompt windows can be open at once.
+    windows: HashMap<String, ChildWindowSlot>,
     always_uploads: HashSet<String>,
     focus: FocusHandle,
 }
@@ -829,7 +829,6 @@ impl TransferFeatureState {
             .find(|(prompt_id, prompt)| {
                 prompt.session_id.as_deref() == Some(session_id)
                     && !self.external_sync.windows.contains_key(*prompt_id)
-                    && !self.external_sync.window_open_pending.contains(*prompt_id)
             })
             .map(|(prompt_id, prompt)| (prompt_id.clone(), prompt.clone()))
     }
@@ -845,7 +844,6 @@ impl TransferFeatureState {
     ) -> Option<TransferExternalSyncPromptState> {
         let prompt = self.external_sync.prompts.remove(prompt_id)?;
         self.external_sync.windows.remove(prompt_id);
-        self.external_sync.window_open_pending.remove(prompt_id);
         if let Some(watch_key) = always_watch_key {
             self.external_sync.always_uploads.insert(watch_key);
         }
@@ -855,7 +853,6 @@ impl TransferFeatureState {
     pub(in crate::features) fn dismiss_external_sync_prompt(&mut self, prompt_id: &str) -> bool {
         let removed = self.external_sync.prompts.remove(prompt_id).is_some();
         self.external_sync.windows.remove(prompt_id);
-        self.external_sync.window_open_pending.remove(prompt_id);
         removed
     }
 
@@ -871,55 +868,47 @@ impl TransferFeatureState {
         self.external_sync
             .windows
             .retain(|prompt_id, _| prompts.contains_key(prompt_id));
-        self.external_sync
-            .window_open_pending
-            .retain(|prompt_id| prompts.contains_key(prompt_id));
         before.saturating_sub(self.external_sync.prompts.len())
     }
 
-    pub(in crate::features) fn external_sync_has_window(&self) -> bool {
-        !self.external_sync.windows.is_empty()
-    }
-
-    pub(in crate::features) fn external_sync_has_pending_window(&self) -> bool {
-        !self.external_sync.window_open_pending.is_empty()
-    }
-
-    pub(in crate::features::transfers) fn first_external_sync_window(
-        &self,
-    ) -> Option<(String, NyaWindowHandle)> {
-        self.external_sync
-            .windows
-            .iter()
-            .next()
-            .map(|(prompt_id, handle)| (prompt_id.clone(), *handle))
+    /// The window slot for one prompt, if that prompt still exists.
+    ///
+    /// Deliberately does not insert: a deferred callback can arrive after the
+    /// prompt was answered or its session closed, and creating an entry for a
+    /// dead prompt id would leave the map growing entries nothing ever reads.
+    pub(in crate::features::transfers) fn external_sync_window_slot(
+        &mut self,
+        prompt_id: &str,
+    ) -> Option<&mut ChildWindowSlot> {
+        self.external_sync.windows.get_mut(prompt_id)
     }
 
     pub(in crate::features::transfers) fn external_sync_window(
         &self,
         prompt_id: &str,
     ) -> Option<NyaWindowHandle> {
-        self.external_sync.windows.get(prompt_id).copied()
+        self.external_sync.windows.get(prompt_id)?.handle()
     }
 
     pub(in crate::features) fn external_sync_window_open_is_pending(
         &self,
         prompt_id: &str,
     ) -> bool {
-        self.external_sync.window_open_pending.contains(prompt_id)
+        self.external_sync
+            .windows
+            .get(prompt_id)
+            .is_some_and(ChildWindowSlot::is_pending)
     }
 
     pub(in crate::features) fn begin_external_sync_window_open(&mut self, prompt_id: &str) -> bool {
-        if !self.external_sync.prompts.contains_key(prompt_id)
-            || self.external_sync.windows.contains_key(prompt_id)
-            || self.external_sync.window_open_pending.contains(prompt_id)
-        {
+        if !self.external_sync.prompts.contains_key(prompt_id) {
             return false;
         }
         self.external_sync
-            .window_open_pending
-            .insert(prompt_id.to_string());
-        true
+            .windows
+            .entry(prompt_id.to_string())
+            .or_default()
+            .begin_open()
     }
 
     pub(in crate::features::transfers) fn finish_external_sync_window_open(
@@ -927,17 +916,21 @@ impl TransferFeatureState {
         prompt_id: String,
         handle: NyaWindowHandle,
     ) {
-        self.external_sync.windows.insert(prompt_id.clone(), handle);
-        self.external_sync.window_open_pending.remove(&prompt_id);
+        self.external_sync
+            .windows
+            .entry(prompt_id)
+            .or_default()
+            .finish_open(handle);
     }
 
     pub(in crate::features) fn clear_external_sync_window_tracking(
         &mut self,
         prompt_id: &str,
     ) -> bool {
-        let removed_window = self.external_sync.windows.remove(prompt_id).is_some();
-        let removed_pending = self.external_sync.window_open_pending.remove(prompt_id);
-        removed_window || removed_pending
+        self.external_sync
+            .windows
+            .remove(prompt_id)
+            .is_some_and(|slot| slot.is_open_or_pending())
     }
 
     pub(in crate::features) fn remote_path(&self) -> &str {
@@ -1123,7 +1116,6 @@ impl TransferExternalSyncState {
         Self {
             prompts: HashMap::new(),
             windows: HashMap::new(),
-            window_open_pending: HashSet::new(),
             always_uploads: HashSet::new(),
             focus,
         }

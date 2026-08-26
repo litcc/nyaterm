@@ -1,19 +1,26 @@
 use rust_i18n::t;
 
+use std::rc::Rc;
+
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, IntoElement, Render, Subscription, Window,
-    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    App, AppContext, Context, Entity, FocusHandle, IntoElement, Render, Subscription, Window, div,
+    prelude::*, px, rgb,
 };
-use nyaterm_ui::{NyaWindowHandle, nya_root};
+use nyaterm_ui::{NyaWindowHandle, activate_child_window, nya_root};
 
 use crate::features::pages::settings::panel::{SettingsPanel, SettingsSurface};
 use crate::features::{
-    NyaTermApp, view_widgets::child_window_header, view_widgets::child_window_titlebar,
+    NyaTermApp,
+    view_widgets::{
+        ChildWindowCloseHandler, ChildWindowSpec, child_window_header, child_window_options,
+        child_window_root, focus_child_window_shell_if_idle,
+    },
 };
 
 pub(in crate::features) struct SettingsWindow {
     app: Entity<NyaTermApp>,
     settings_panel: Entity<SettingsPanel>,
+    shell_focus: FocusHandle,
     _app_subscription: Subscription,
 }
 
@@ -29,6 +36,7 @@ impl SettingsWindow {
         Self {
             app,
             settings_panel,
+            shell_focus: cx.focus_handle(),
             _app_subscription: app_subscription,
         }
     }
@@ -61,12 +69,22 @@ impl Render for SettingsWindow {
             .cached(crate::features::layout::cached_panel_style());
         let close_app = self.app.clone();
         let close_panel = self.settings_panel.clone();
+        let on_close: ChildWindowCloseHandler =
+            Rc::new(move |window: &mut Window, cx: &mut App| {
+                let panel = close_panel.clone();
+                let may_close = close_app.update(cx, |app, cx| {
+                    app.request_settings_window_close(&panel, window, cx)
+                });
+                if may_close {
+                    window.remove_window();
+                }
+            });
+        let header_close = on_close.clone();
+        focus_child_window_shell_if_idle(&self.shell_focus, window, cx);
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
+        // Settings deliberately does not close on `escape`: the draft can hold a
+        // long edit and closing discards it.
+        child_window_root(&self.shell_focus, false, on_close)
             .bg(rgb(palette.bg))
             .text_color(rgb(palette.text))
             .font(font)
@@ -75,15 +93,8 @@ impl Render for SettingsWindow {
                 palette,
                 title,
                 Some("icons/settings.svg"),
-                false,
-                window.is_maximized(),
-                move |_, window, cx| {
-                    close_app.update(cx, |app, cx| {
-                        app.clear_native_settings_panel(&close_panel, cx);
-                        app.cancel_settings(cx);
-                    });
-                    window.remove_window();
-                },
+                window,
+                move |_, window, cx| header_close(window, cx),
             ))
             .child(div().flex_1().min_h_0().overflow_hidden().child(content))
             .into_any_element()
@@ -91,23 +102,68 @@ impl Render for SettingsWindow {
 }
 
 impl NyaTermApp {
+    /// Close the settings window, asking first when the draft has unsaved edits.
+    ///
+    /// Returns whether the window may close now. Closing settings *discards*:
+    /// `cancel_settings` restores every field from the snapshot taken when the
+    /// window opened, so an unconfirmed close silently throws the edits away.
+    /// The remote text editor already vetoes its own close this way.
+    fn request_settings_window_close(
+        &mut self,
+        panel: &Entity<SettingsPanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.settings_draft_dirty() {
+            self.discard_settings_draft_and_window(panel, cx);
+            return true;
+        }
+        let panel = panel.clone();
+        self.open_confirm_dialog(
+            (
+                t!("settings.discardChangesTitle").to_string(),
+                t!("settings.discardChangesDesc").to_string(),
+                t!("settings.discardChanges").to_string(),
+                true,
+                move |app: &mut NyaTermApp, window: &mut Window, cx: &mut Context<NyaTermApp>| {
+                    app.discard_settings_draft_and_window(&panel, cx);
+                    window.remove_window();
+                    true
+                },
+            ),
+            window,
+            cx,
+        );
+        false
+    }
+
+    /// `cancel_settings` already clears the window slot through
+    /// `finish_settings_navigation`, which is also what restores the panel
+    /// collapse state the embedded page had before settings opened.
+    fn discard_settings_draft_and_window(
+        &mut self,
+        panel: &Entity<SettingsPanel>,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_native_settings_panel(panel, cx);
+        self.cancel_settings(cx);
+    }
+
+    /// Raise the settings window if one is already open.
+    ///
+    /// Returning `true` is what keeps a second "open settings" from starting a
+    /// competing draft: there is one draft, so the request has to land on the
+    /// window already holding it.
     pub(in crate::features) fn activate_settings_window(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(handle) = self.shell.settings_window() else {
             return false;
         };
-        let app = cx.entity();
-        cx.defer(move |cx| {
-            if handle
-                .update(cx, |_, window, _| window.activate_window())
-                .is_err()
-            {
-                app.update(cx, |app, cx| {
-                    if app.shell.clear_settings_window_if(handle) {
-                        cx.notify();
-                    }
-                });
-            }
-        });
+        activate_child_window(
+            &cx.entity(),
+            handle,
+            |app: &mut NyaTermApp| Some(app.shell.settings_window_slot()),
+            cx,
+        );
         true
     }
 
@@ -147,31 +203,23 @@ fn open_settings_window_now_from_app(app: Entity<NyaTermApp>, cx: &mut App) {
         return;
     }
 
-    let title = t!("settings.title").to_string();
-    let bounds = Bounds::centered(None, size(px(800.), px(560.)), cx);
+    let spec = ChildWindowSpec::settings(t!("settings.title").to_string(), 800., 560.)
+        .min_size(640., 480.);
+    let parent = app.read(cx).shell.main_window();
+    let options = child_window_options(&spec, parent, cx);
     let close_app = app.clone();
     let view_app = app.clone();
-    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(
-        WindowOptions {
-            titlebar: child_window_titlebar(title),
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
-            window_min_size: Some(size(px(640.), px(480.))),
-            kind: WindowKind::Floating,
-            is_minimizable: false,
-            ..Default::default()
-        },
-        move |window, cx| {
-            window.on_window_should_close(cx, move |_, cx| {
-                close_app.update(cx, |app, cx| {
-                    app.cancel_settings(cx);
-                    app.shell.clear_settings_window();
-                });
-                true
-            });
-            let view = cx.new(|cx| SettingsWindow::new(view_app, cx));
-            cx.new(|cx| nya_root(view, window, cx))
-        },
-    );
+    let result: anyhow::Result<NyaWindowHandle> = cx.open_window(options, move |window, cx| {
+        let view = cx.new(|cx| SettingsWindow::new(view_app, cx));
+        let close_panel = view.read(cx).settings_panel.clone();
+        window.on_window_should_close(cx, move |window, cx| {
+            let panel = close_panel.clone();
+            close_app.update(cx, |app, cx| {
+                app.request_settings_window_close(&panel, window, cx)
+            })
+        });
+        cx.new(|cx| nya_root(view, window, cx))
+    });
 
     app.update(cx, |app, cx| match result {
         Ok(handle) => {

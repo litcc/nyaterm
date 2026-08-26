@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui::{Entity, Pixels, RenderImage, ScrollHandle, SharedString};
-use nyaterm_ui::{NyaAppMenuBar, NyaWindowHandle};
+use nyaterm_ui::{ChildWindowSlot, NyaAppMenuBar, NyaWindowHandle};
 
 use super::super::app_state::SettingsDraftSnapshot;
 use super::runtime_state::ShellRuntimeState;
@@ -35,6 +35,13 @@ pub(in crate::features) struct ShellFeatureState {
     pub(super) workspace: ShellWorkspaceState,
     pub(super) diagnostics: ShellDiagnosticState,
     resize_handle_hover: ResizeHandleHoverState,
+    /// The window `NyaTermApp` itself renders in.
+    ///
+    /// GPUI discards the handle `cx.open_window` returns at startup, and
+    /// `cx.active_window()` is whatever the platform focused, which is the wrong
+    /// answer when a child window opens from a background event. Child windows
+    /// need this one to pick the display and the placement to open on.
+    main_window: Option<NyaWindowHandle>,
 }
 
 #[derive(Default)]
@@ -116,8 +123,7 @@ pub(super) struct ShellSettingsNavigationState {
     pub(super) active_tab: SettingsTab,
     pub(super) expanded_groups: HashSet<String>,
     pub(super) draft_snapshot: Option<SettingsDraftSnapshot>,
-    pub(super) window: Option<NyaWindowHandle>,
-    pub(super) window_open_pending: bool,
+    pub(super) window: ChildWindowSlot,
     pub(super) previous_left_collapsed: Option<bool>,
     pub(super) previous_right_collapsed: Option<bool>,
 }
@@ -191,8 +197,7 @@ impl ShellFeatureState {
                     active_tab: SettingsTab::General,
                     expanded_groups: HashSet::from(["workspace".to_string()]),
                     draft_snapshot: None,
-                    window: None,
-                    window_open_pending: false,
+                    window: ChildWindowSlot::default(),
                     previous_left_collapsed: None,
                     previous_right_collapsed: None,
                 },
@@ -238,6 +243,7 @@ impl ShellFeatureState {
             },
             diagnostics: ShellDiagnosticState::default(),
             resize_handle_hover: ResizeHandleHoverState::default(),
+            main_window: None,
         }
     }
 
@@ -414,51 +420,41 @@ impl ShellFeatureState {
     }
 
     pub(in crate::features) fn settings_window(&self) -> Option<NyaWindowHandle> {
-        self.navigation.settings.window
+        self.navigation.settings.window.handle()
     }
 
     pub(in crate::features) fn settings_window_open_pending(&self) -> bool {
-        self.navigation.settings.window_open_pending
+        self.navigation.settings.window.is_pending()
+    }
+
+    pub(in crate::features) fn settings_window_is_open_or_pending(&self) -> bool {
+        self.navigation.settings.window.is_open_or_pending()
+    }
+
+    pub(in crate::features) fn settings_window_slot(&mut self) -> &mut ChildWindowSlot {
+        &mut self.navigation.settings.window
     }
 
     pub(in crate::features) fn begin_settings_window_open(&mut self) -> bool {
-        if self.navigation.settings.window.is_some() || self.navigation.settings.window_open_pending
-        {
-            return false;
-        }
-        self.navigation.settings.window_open_pending = true;
-        true
+        self.navigation.settings.window.begin_open()
     }
 
     pub(in crate::features) fn complete_settings_window_open(&mut self, handle: NyaWindowHandle) {
-        self.navigation.settings.window = Some(handle);
-        self.navigation.settings.window_open_pending = false;
+        self.navigation.settings.window.finish_open(handle);
         self.navigation.settings.previous_left_collapsed = None;
         self.navigation.settings.previous_right_collapsed = None;
     }
 
     pub(in crate::features) fn clear_settings_window(&mut self) {
-        self.navigation.settings.window = None;
-        self.navigation.settings.window_open_pending = false;
-    }
-
-    pub(in crate::features) fn clear_settings_window_if(
-        &mut self,
-        handle: NyaWindowHandle,
-    ) -> bool {
-        if self.navigation.settings.window != Some(handle) {
-            return false;
-        }
-        self.navigation.settings.window = None;
-        true
+        self.navigation.settings.window.clear();
     }
 
     pub(in crate::features) fn cancel_settings_window_open(&mut self) {
-        self.navigation.settings.window_open_pending = false;
+        self.navigation.settings.window.cancel_open();
     }
 
     pub(in crate::features) fn fail_settings_window_open(&mut self) {
-        self.clear_settings_window();
+        self.navigation.settings.window.fail_open();
         self.show_page(NavItem::Settings);
         self.panels.left_collapsed = true;
         self.panels.right_collapsed = true;
@@ -489,10 +485,24 @@ impl ShellFeatureState {
         }
     }
 
+    /// The window `NyaTermApp` renders in, once the first frame has run.
+    pub(in crate::features) fn main_window(&self) -> Option<NyaWindowHandle> {
+        self.main_window
+    }
+
+    /// Record the main window on the first frame that can see it.
+    ///
+    /// Only ever set once: `NyaTermApp` renders in exactly one window, and a
+    /// child window's root is a different view type so it cannot land here.
+    pub(in crate::features) fn remember_main_window(&mut self, handle: NyaWindowHandle) {
+        if self.main_window.is_none() {
+            self.main_window = Some(handle);
+        }
+    }
+
     pub(in crate::features) fn active_left_panel(&self) -> Option<NavItem> {
         self.panels.active_left
     }
-
     pub(in crate::features) fn active_right_panel(&self) -> Option<NavItem> {
         self.panels.active_right
     }

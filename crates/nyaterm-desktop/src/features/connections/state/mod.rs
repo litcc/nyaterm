@@ -9,7 +9,7 @@ use gpui::{
     App, AppContext as _, Bounds, Context, Entity, FocusHandle, Pixels, SharedString, Subscription,
 };
 use nyaterm_core::{AppSettingsSummary, ConnectionType, Group, SavedConnection};
-use nyaterm_ui::NyaWindowHandle;
+use nyaterm_ui::{ChildWindowSlot, NyaWindowHandle};
 
 use super::catalog::ConnectionCatalogState;
 use super::connection_runtime::ConnectionEditorToggle;
@@ -40,15 +40,14 @@ use self::editor_logic::{
     ConnectionEditorPlaceholder, add_connection_editor_agent_endpoint,
     advance_connection_editor_focus, apply_connection_editor_shell_path,
     apply_connection_editor_working_dir, clear_connection_editor_runtime_state,
-    commit_connection_editor_new_group, connection_editor_inline_panel_draft,
-    connection_editor_window_open_or_pending, editor_field_seeds, forwarding_endpoint_field_seeds,
-    insert_connection_editor_description_newline, move_connection_editor_agent_endpoint,
-    move_connection_editor_ssh_algorithm, remove_connection_editor_agent_endpoint,
-    select_connection_editor_agent_endpoint, select_saved_connection_after_editor_save,
-    set_connection_editor_advanced_tab, set_connection_editor_agent_endpoint_type,
-    set_connection_editor_error, set_connection_editor_field_text,
-    set_connection_editor_forwarding_endpoint_field, set_connection_editor_icon,
-    set_connection_editor_icon_auto_detect, set_connection_editor_kind,
+    commit_connection_editor_new_group, connection_editor_inline_panel_draft, editor_field_seeds,
+    forwarding_endpoint_field_seeds, insert_connection_editor_description_newline,
+    move_connection_editor_agent_endpoint, move_connection_editor_ssh_algorithm,
+    remove_connection_editor_agent_endpoint, select_connection_editor_agent_endpoint,
+    select_saved_connection_after_editor_save, set_connection_editor_advanced_tab,
+    set_connection_editor_agent_endpoint_type, set_connection_editor_error,
+    set_connection_editor_field_text, set_connection_editor_forwarding_endpoint_field,
+    set_connection_editor_icon, set_connection_editor_icon_auto_detect, set_connection_editor_kind,
     set_connection_editor_password_source, set_connection_editor_rdp_tab,
     set_connection_editor_select_value, set_connection_editor_ssh_algorithm_enabled,
     set_connection_editor_ssh_algorithm_tab, set_connection_editor_telnet_tab,
@@ -197,8 +196,7 @@ struct ConnectionEditorFeatureState {
     number_field_subscriptions: Vec<Subscription>,
     forwarding_endpoint_fields: HashMap<(usize, ConnectionEditorField), Entity<NyaInputState>>,
     forwarding_endpoint_field_subscriptions: Vec<Subscription>,
-    window: Option<NyaWindowHandle>,
-    window_open_pending: bool,
+    window: ChildWindowSlot,
     focus: FocusHandle,
     icon_picker_open: bool,
     group_select_open: bool,
@@ -286,8 +284,7 @@ impl ConnectionFeatureState {
                 number_field_subscriptions: Vec::new(),
                 forwarding_endpoint_fields: HashMap::new(),
                 forwarding_endpoint_field_subscriptions: Vec::new(),
-                window: None,
-                window_open_pending: false,
+                window: ChildWindowSlot::default(),
                 focus: focus.editor,
                 icon_picker_open: false,
                 group_select_open: false,
@@ -900,7 +897,7 @@ impl ConnectionFeatureState {
         self.editor.focus_handle()
     }
 
-    pub(in crate::features::connections) fn editor_window_handle(&self) -> Option<NyaWindowHandle> {
+    pub(in crate::features) fn editor_window_handle(&self) -> Option<NyaWindowHandle> {
         self.editor.window_handle()
     }
 
@@ -912,8 +909,12 @@ impl ConnectionFeatureState {
         self.editor.window_open_pending()
     }
 
-    pub fn editor_modal_window_open_or_pending(&self) -> bool {
-        self.editor.modal_window_open_or_pending()
+    pub(in crate::features) fn editor_window_is_open_or_pending(&self) -> bool {
+        self.editor.window_is_open_or_pending()
+    }
+
+    pub(in crate::features) fn editor_window_slot(&mut self) -> &mut ChildWindowSlot {
+        self.editor.window_slot()
     }
 
     pub fn close_editor_icon_picker(&mut self) {
@@ -1063,15 +1064,9 @@ impl ConnectionFeatureState {
         self.editor.close();
     }
 
-    pub(in crate::features::connections) fn clear_editor_window_if_current(
-        &mut self,
-        window: NyaWindowHandle,
-    ) -> bool {
-        self.editor.clear_window_if_current(window)
-    }
-
-    pub fn mark_editor_window_pending(&mut self) {
-        self.editor.mark_window_pending();
+    /// Claim the right to open the editor window; false when one already exists.
+    pub fn begin_editor_window_open(&mut self) -> bool {
+        self.editor.begin_window_open()
     }
 
     pub fn clear_editor_window_pending(&mut self) {
@@ -1347,7 +1342,6 @@ impl ConnectionFeatureState {
             &mut self.editor.icon_picker_open,
             &mut self.editor.group_select_open,
             &mut self.editor.window,
-            &mut self.editor.window_open_pending,
         );
         self.editor.group_select_trigger_bounds = None;
         let expanded_before = self.list.expanded_group_ids.clone();
@@ -1671,7 +1665,7 @@ impl ConnectionEditorFeatureState {
         connection_editor_inline_panel_draft(
             &self.draft,
             self.has_window(),
-            self.window_open_pending,
+            self.window_open_pending(),
         )
     }
 
@@ -1686,19 +1680,23 @@ impl ConnectionEditorFeatureState {
     }
 
     pub fn window_handle(&self) -> Option<NyaWindowHandle> {
-        self.window
+        self.window.handle()
     }
 
     pub fn has_window(&self) -> bool {
-        self.window.is_some()
+        self.window.is_open()
     }
 
     pub fn window_open_pending(&self) -> bool {
-        self.window_open_pending
+        self.window.is_pending()
     }
 
-    pub fn modal_window_open_or_pending(&self) -> bool {
-        connection_editor_window_open_or_pending(self.has_window(), self.window_open_pending)
+    pub fn window_slot(&mut self) -> &mut ChildWindowSlot {
+        &mut self.window
+    }
+
+    pub fn window_is_open_or_pending(&self) -> bool {
+        self.window.is_open_or_pending()
     }
 
     pub fn close_icon_picker(&mut self) {
@@ -1897,35 +1895,25 @@ impl ConnectionEditorFeatureState {
             &mut self.icon_picker_open,
             &mut self.group_select_open,
             &mut self.window,
-            &mut self.window_open_pending,
         );
         self.group_select_trigger_bounds = None;
     }
 
-    pub fn clear_window_if_current(&mut self, window: NyaWindowHandle) -> bool {
-        if self.window.is_some_and(|current| current == window) {
-            self.window = None;
-            return true;
-        }
-        false
-    }
-
-    pub fn mark_window_pending(&mut self) {
-        self.window_open_pending = true;
+    /// Claim the right to open the editor window; false when one already exists.
+    pub fn begin_window_open(&mut self) -> bool {
+        self.window.begin_open()
     }
 
     pub fn clear_window_pending(&mut self) {
-        self.window_open_pending = false;
+        self.window.cancel_open();
     }
 
     pub fn attach_window(&mut self, window: NyaWindowHandle) {
-        self.window = Some(window);
-        self.window_open_pending = false;
+        self.window.finish_open(window);
     }
 
     pub fn clear_window(&mut self) {
-        self.window = None;
-        self.window_open_pending = false;
+        self.window.clear();
     }
 }
 

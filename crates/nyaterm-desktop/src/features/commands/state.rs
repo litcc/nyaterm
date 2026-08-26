@@ -9,7 +9,7 @@ use nyaterm_core::{
     QuickCommandRelativePosition, QuickCommandsConfig, quick_command_category_move_neighbor,
 };
 use nyaterm_store::StoreBlockingClient;
-use nyaterm_ui::NyaWindowHandle;
+use nyaterm_ui::{ChildWindowSlot, NyaWindowHandle};
 
 use crate::features::{
     runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
@@ -352,8 +352,7 @@ impl CommandFeatureState {
         self.quick.editor.draft = None;
         self.quick.editor.category_search_draft.clear();
         self.quick.editor.new_category_draft.clear();
-        self.quick.editor.window = None;
-        self.quick.editor.window_open_pending = false;
+        self.quick.editor.window.clear();
         self.quick.editor.category_picker_open = false;
         self.quick.editor.icon_picker_open = false;
     }
@@ -554,60 +553,49 @@ impl CommandFeatureState {
         }
     }
 
-    pub(in crate::features::commands) fn quick_editor_window(&self) -> Option<NyaWindowHandle> {
-        self.quick.editor.window
-    }
-
-    pub(in crate::features) fn quick_editor_window_is_open(&self) -> bool {
-        self.quick.editor.window.is_some()
+    pub(in crate::features) fn quick_editor_window(&self) -> Option<NyaWindowHandle> {
+        self.quick.editor.window.handle()
     }
 
     pub(in crate::features) fn quick_editor_window_is_pending(&self) -> bool {
-        self.quick.editor.window_open_pending
-    }
-
-    pub(in crate::features) fn quick_editor_is_inline(&self) -> bool {
-        self.quick.editor.draft.is_some()
-            && self.quick.editor.window.is_none()
-            && !self.quick.editor.window_open_pending
+        self.quick.editor.window.is_pending()
     }
 
     pub(in crate::features) fn quick_editor_window_is_open_or_pending(&self) -> bool {
-        self.quick.editor.window.is_some() || self.quick.editor.window_open_pending
+        self.quick.editor.window.is_open_or_pending()
     }
 
+    pub(in crate::features) fn quick_editor_is_inline(&self) -> bool {
+        self.quick.editor.draft.is_some() && !self.quick.editor.window.is_open_or_pending()
+    }
+
+    pub(in crate::features) fn quick_editor_window_slot(&mut self) -> &mut ChildWindowSlot {
+        &mut self.quick.editor.window
+    }
+
+    /// Claim the right to open the editor window.
+    ///
+    /// Also refuses when there is no draft to show, so the caller can fall back
+    /// to focusing the inline editor.
     pub(in crate::features) fn request_quick_editor_window(&mut self) -> bool {
-        if self.quick.editor.draft.is_none()
-            || self.quick.editor.window.is_some()
-            || self.quick.editor.window_open_pending
-        {
+        if self.quick.editor.draft.is_none() {
             return false;
         }
-        self.quick.editor.window_open_pending = true;
-        true
+        self.quick.editor.window.begin_open()
     }
 
     pub(in crate::features::commands) fn finish_quick_editor_window_open(
         &mut self,
         window: Option<NyaWindowHandle>,
     ) {
-        self.quick.editor.window = window;
-        self.quick.editor.window_open_pending = false;
-    }
-
-    pub(in crate::features::commands) fn clear_quick_editor_window_if(
-        &mut self,
-        expected: NyaWindowHandle,
-    ) -> bool {
-        if self.quick.editor.window == Some(expected) {
-            self.quick.editor.window = None;
-            return true;
+        match window {
+            Some(window) => self.quick.editor.window.finish_open(window),
+            None => self.quick.editor.window.fail_open(),
         }
-        false
     }
 
     pub(in crate::features) fn cancel_quick_editor_window_request(&mut self) {
-        self.quick.editor.window_open_pending = false;
+        self.quick.editor.window.cancel_open();
     }
 
     pub(in crate::features) fn quick_details(&self) -> Option<&QuickCommandDetailsState> {
@@ -893,8 +881,7 @@ pub(in crate::features) struct QuickCommandDropTarget {
 struct QuickCommandEditorFeatureState {
     draft: Option<QuickCommandEditorState>,
     focus: FocusHandle,
-    window: Option<NyaWindowHandle>,
-    window_open_pending: bool,
+    window: ChildWindowSlot,
     category_picker_open: bool,
     icon_picker_open: bool,
     category_search_draft: String,
@@ -941,8 +928,7 @@ impl QuickCommandFeatureState {
             editor: QuickCommandEditorFeatureState {
                 draft: None,
                 focus: focus.editor,
-                window: None,
-                window_open_pending: false,
+                window: ChildWindowSlot::default(),
                 category_picker_open: false,
                 icon_picker_open: false,
                 category_search_draft: String::new(),
@@ -1232,9 +1218,12 @@ mod tests {
         state.open_quick_editor(QuickCommandEditorState::blank());
         assert!(state.request_quick_editor_window());
         assert!(state.quick_editor_window_is_pending());
+        // A second request must not start a second window.
+        assert!(!state.request_quick_editor_window());
         state.close_quick_editor();
         assert!(state.quick_editor().is_none());
-        assert!(!state.quick_editor_window_is_open_or_pending());
+        assert!(state.quick_editor_window().is_none());
+        assert!(!state.quick_editor_window_is_pending());
     }
 
     #[test]

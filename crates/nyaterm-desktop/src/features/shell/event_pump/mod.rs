@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use futures::{FutureExt as _, StreamExt as _};
 use gpui::{Context, Window};
+use nyaterm_ui::NyaRoot;
 
 use crate::features::shell::event_pump::helpers::{
     PENDING_SESSION_STILL_CONNECTING_AFTER, PendingSessionAuthWait, RUNTIME_DATA_PLANE_DRAIN_SLOW,
@@ -275,6 +276,13 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let before_metrics = self.terminal.cell_metrics();
+        // Child windows open relative to this window, and GPUI throws away the
+        // handle `cx.open_window` returned at startup, so capture it from the
+        // first frame that has a `Window` to ask. Set-once, so this is one
+        // `is_none` check per frame afterwards.
+        if let Some(handle) = window.window_handle().downcast::<NyaRoot>() {
+            self.shell.remember_main_window(handle);
+        }
         let vs = window.viewport_size();
         let viewport_changed = self
             .shell
