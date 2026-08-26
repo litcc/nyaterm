@@ -38,7 +38,7 @@ repository = "https://github.com/nyakang/nyaterm"
 
 [workspace.dependencies]
 aes-gcm = "0.11"
-alacritty_terminal = "0.26.0"
+alacritty_terminal = "0.26.1-dev"
 anyhow = "1"
 async-http-proxy = { version = "1.2.5", features = ["runtime-tokio", "basic-auth"] }
 base64 = "0.22"
@@ -136,7 +136,7 @@ inherits = "dev"
 debug = "full"
 
 [patch.crates-io]
-alacritty_terminal = { git = "https://github.com/nyakang/alacritty", rev = "e7561331aa6e84df5dff9e1feb9433406fa0a4f9" }
+alacritty_terminal = { git = "https://github.com/nyakang/alacritty", rev = "1b27ea0c584898af5c86b1dc2c4781a6412ec12b" }
 ironrdp-client = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
 ironrdp-connector = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
 sspi = { git = "https://github.com/nyakang/sspi-rs", rev = "9d7d5358533784ab7742eaed411985b609a98c24" }
