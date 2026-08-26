@@ -1063,15 +1063,30 @@ fn bash_inline_shell_integration_preserves_disabled_history() {
     }
 }
 
-#[test]
-fn generated_bash_shell_integration_scripts_pass_syntax_check() {
-    if std::process::Command::new("bash")
+/// A real GNU bash we can hand a script to, or `None` when the platform only has a
+/// stand-in. On Windows `bash` on `PATH` is often `System32\bash.exe`, the WSL
+/// launcher: it starts fine (so spawning succeeds) but without an installed
+/// distribution it fails with its message on stdout, which used to surface as an
+/// empty "bash syntax error:".
+fn gnu_bash_for_syntax_check() -> Option<std::process::Command> {
+    let probe = std::process::Command::new("bash")
         .arg("--version")
         .output()
-        .is_err()
-    {
-        return;
+        .ok()?;
+    if !probe.status.success() {
+        return None;
     }
+    if !String::from_utf8_lossy(&probe.stdout).contains("GNU bash") {
+        return None;
+    }
+    Some(std::process::Command::new("bash"))
+}
+
+#[test]
+fn generated_bash_shell_integration_scripts_pass_syntax_check() {
+    let Some(_) = gnu_bash_for_syntax_check() else {
+        return;
+    };
     let ready = super::build_ssh_ready_marker("syntax-check");
     let scripts = [
         super::persistent_script(super::ShellKind::Bash)
@@ -1097,25 +1112,34 @@ fn generated_bash_shell_integration_scripts_pass_syntax_check() {
         .expect("bash activation script"),
     ];
     for (index, script) in scripts.into_iter().enumerate() {
-        // Check a file rather than `bash -n -c <script>`: on Windows `bash` is Git
-        // Bash, which rebuilds argv from the raw Windows command line and mangles a
-        // multi-KiB argument containing newlines and quotes. Write bytes so no
-        // newline translation is applied either.
-        let path = std::env::temp_dir().join(format!(
-            "nyaterm-bash-syntax-{}-{index}.sh",
-            std::process::id()
-        ));
-        std::fs::write(&path, script.as_bytes()).expect("write bash syntax fixture");
-        let output = std::process::Command::new("bash")
+        // Pipe the script into `bash -n` on stdin rather than passing it as a path or
+        // as `-c <script>`: on Windows `bash` is either Git Bash, which rebuilds argv
+        // from the raw command line and mangles a multi-KiB argument containing
+        // newlines and quotes, or the WSL launcher, which cannot open a Windows path.
+        // Stdin needs neither argv quoting nor path translation.
+        let mut child = gnu_bash_for_syntax_check()
+            .expect("gnu bash")
             .arg("-n")
-            .arg(&path)
-            .output()
-            .expect("run bash syntax check");
-        std::fs::remove_file(&path).ok();
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn bash syntax check");
+        child
+            .stdin
+            .take()
+            .expect("bash syntax check stdin")
+            .write_all(script.as_bytes())
+            .expect("write bash syntax check script");
+        let output = child
+            .wait_with_output()
+            .expect("wait for bash syntax check");
         assert!(
             output.status.success(),
-            "bash syntax error: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "script {index} failed bash syntax check ({}): {}{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout),
         );
     }
 }
