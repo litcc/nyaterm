@@ -78,7 +78,6 @@ in `nyaterm-core`; database execution and compatibility readers belong in
 
 The GPUI Entity stores each own state that `NyaTermApp` does not own:
 
-* `WindowRuntimeStore`: window runtime pump.
 * `StartupRestoreStore`: startup-restore queue.
 * `OverlayStore`: authoritative quick-switch overlay state.
 

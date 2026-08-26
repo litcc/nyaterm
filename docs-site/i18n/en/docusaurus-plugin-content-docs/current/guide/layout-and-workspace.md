@@ -128,9 +128,18 @@ These flows open dedicated child windows so they do not interrupt the active ses
 - Settings
 - New session / connection creation
 - Quick command editing
+- Remote file editing
 - Auto-upload prompts
 
-NyaTerm remembers child-window size, position, and modal relationships, and restores focus and window state when one reopens.
+Every child window opens centered on the main window, on whichever display the main window is on, gets its own taskbar entry, and can be minimized, maximized, and restored. Triggering the same action again raises the window that is already open instead of opening a second one.
+
+**Connection creation** and **quick command editing** each own an exclusive draft, so they are modal windows at the operating-system level: the main window is blocked by the system while one is open, and is restored and refocused when it closes. **Settings** is modal too on Windows and Linux; on macOS it is an independent window, because a modal child window becomes a sheet attached under the title bar there, and Apple's convention is that Settings gets a window of its own.
+
+**Remote file editing** is an independent document window and does not block the main window -- editing a remote file usually means going back to the terminal to read output or copy something, and locking the workspace would get in the way. The **auto-upload prompt** does not block it either, but it does stay on top: it appears after you have finished editing a file in an external editor, and a prompt you cannot see is a prompt that never gets answered.
+
+`Ctrl / Cmd + W` closes the current child window; connection creation, quick command editing, and the auto-upload prompt also respond to `Esc`. The settings window does not respond to `Esc`, and closing it with unsaved changes asks for confirmation first.
+
+Child-window position and size are not persisted yet, so each one re-centers when it opens.
 
 ## Tray and window state
 

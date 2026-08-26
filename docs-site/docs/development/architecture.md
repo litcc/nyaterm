@@ -57,7 +57,6 @@ nyaterm-app
 
 每份状态只有一个可写 owner。当前独立 Entity store 只拥有 `NyaTermApp` 不拥有的状态：
 
-- `WindowRuntimeStore`：窗口运行时 pump
 - `StartupRestoreStore`：启动恢复队列
 - `OverlayStore`：快速切换 overlay
 

@@ -57,7 +57,6 @@ The main responsibilities are:
 
 Each value has one writable owner. The remaining independent Entity stores own only state that `NyaTermApp` does not own:
 
-- `WindowRuntimeStore` for the window runtime pump
 - `StartupRestoreStore` for the startup restore queue
 - `OverlayStore` for the quick-switch overlay
 
