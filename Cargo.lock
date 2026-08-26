@@ -8717,8 +8717,8 @@ dependencies = [
 
 [[package]]
 name = "sspi"
-version = "0.21.0"
-source = "git+https://github.com/nyakang/sspi-rs?rev=9d7d5358533784ab7742eaed411985b609a98c24#9d7d5358533784ab7742eaed411985b609a98c24"
+version = "0.21.4"
+source = "git+https://github.com/nyakang/sspi-rs?rev=01e88b00b92e19e54791ce6a12b2d413ae375151#01e88b00b92e19e54791ce6a12b2d413ae375151"
 dependencies = [
  "async-dnssd",
  "async-recursion",
