@@ -139,7 +139,7 @@ debug = "full"
 alacritty_terminal = { git = "https://github.com/nyakang/alacritty", rev = "e7561331aa6e84df5dff9e1feb9433406fa0a4f9" }
 ironrdp-client = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
 ironrdp-connector = { git = "https://github.com/nyakang/IronRDP", rev = "b00e2282efccf8beeecde8e5516a5048ed025184" }
-sspi = { git = "https://github.com/nyakang/sspi-rs", rev = "26f0e057775dd5281de22c8f942fd2af48f48e8f" }
+sspi = { git = "https://github.com/nyakang/sspi-rs", rev = "9d7d5358533784ab7742eaed411985b609a98c24" }
 # The published ironrdp-client and ironrdp-connector packages declare their
 # sibling crates as registry dependencies, but in the IronRDP repository those
 # are path dependencies, so patching the two above to git pulls the siblings

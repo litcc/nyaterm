@@ -8691,7 +8691,7 @@ dependencies = [
 [[package]]
 name = "sspi"
 version = "0.21.0"
-source = "git+https://github.com/nyakang/sspi-rs?rev=26f0e057775dd5281de22c8f942fd2af48f48e8f#26f0e057775dd5281de22c8f942fd2af48f48e8f"
+source = "git+https://github.com/nyakang/sspi-rs?rev=9d7d5358533784ab7742eaed411985b609a98c24#9d7d5358533784ab7742eaed411985b609a98c24"
 dependencies = [
  "async-dnssd",
  "async-recursion",
@@ -8701,8 +8701,6 @@ dependencies = [
  "cfg-if",
  "crypto-bigint",
  "crypto-mac",
- "curve25519-dalek",
- "ed25519-dalek",
  "futures",
  "getrandom 0.3.4",
  "hmac 0.13.0",
@@ -8716,6 +8714,7 @@ dependencies = [
  "picky-asn1-der",
  "picky-asn1-x509",
  "picky-krb",
+ "pkcs1 0.8.0-rc.4",
  "rand 0.10.2",
  "rand_core 0.10.1",
  "rsa",
