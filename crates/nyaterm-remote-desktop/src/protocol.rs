@@ -4,7 +4,57 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
+
+/// Maximum UTF-8 payload accepted for a single committed-text event.
+///
+/// This intentionally leaves ample room below the control-packet envelope for
+/// JSON framing and other events in the same input batch.
+pub const MAX_COMMITTED_TEXT_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum CommittedTextError {
+    #[error("committed text exceeds the {MAX_COMMITTED_TEXT_BYTES}-byte limit")]
+    TooLong,
+    #[error("committed text contains NUL")]
+    ContainsNul,
+    #[error("committed text contains a control character that must be sent as a key event")]
+    ContainsControl,
+}
+
+/// Validate an entire committed-text payload before it is put on the wire.
+///
+/// Committed text is Unicode text produced by an IME or text service. Control
+/// characters are deliberately excluded: Enter, Tab, Escape, and similar input
+/// must retain their protocol-specific key semantics instead of being smuggled
+/// through a text event.
+pub fn validate_committed_text(text: &str) -> Result<(), CommittedTextError> {
+    if text.len() > MAX_COMMITTED_TEXT_BYTES {
+        return Err(CommittedTextError::TooLong);
+    }
+    if text.contains('\0') {
+        return Err(CommittedTextError::ContainsNul);
+    }
+    if text.chars().any(char::is_control) {
+        return Err(CommittedTextError::ContainsControl);
+    }
+    Ok(())
+}
+
+/// Static features implemented by an RDP helper for this IPC version.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RdpServerCapabilities {
+    pub committed_unicode_text: bool,
+    pub secure_attention: bool,
+}
+
+/// Static features implemented by a VNC helper for this IPC version.
+///
+/// Secure Attention is intentionally absent: VNC has no SAS wire operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VncServerCapabilities {
+    pub committed_unicode_keysyms: bool,
+}
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RdpSessionConfig {
@@ -439,8 +489,20 @@ impl Default for VncReconnectConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VncInputEvent {
-    Key { keysym: u32, pressed: bool },
-    Pointer { x: u32, y: u32, button_mask: u8 },
+    Key {
+        keysym: u32,
+        pressed: bool,
+    },
+    /// Unicode text committed by an IME or text service. The helper translates
+    /// each scalar to its VNC Unicode keysym without synthesizing SAS.
+    Text {
+        text: String,
+    },
+    Pointer {
+        x: u32,
+        y: u32,
+        button_mask: u8,
+    },
     ReleaseAllKeys,
 }
 
@@ -525,6 +587,7 @@ pub enum RdpControlMessage {
     },
     ServerHello {
         version: u32,
+        capabilities: RdpServerCapabilities,
     },
     Connect {
         session_id: String,
@@ -544,6 +607,13 @@ pub enum RdpControlMessage {
     Input {
         session_id: String,
         events: Vec<RdpInputEvent>,
+    },
+    /// Ask the RDP helper to invoke the remote Secure Attention sequence.
+    ///
+    /// This is deliberately not represented as synthetic Ctrl+Alt+Delete key
+    /// events: an RDP server treats SAS as a distinct protocol operation.
+    SecureAttention {
+        session_id: String,
     },
     Resize {
         session_id: String,
@@ -589,6 +659,7 @@ pub enum VncControlMessage {
     },
     ServerHello {
         version: u32,
+        capabilities: VncServerCapabilities,
     },
     Connect {
         session_id: String,
@@ -671,7 +742,8 @@ pub fn parse_vnc_scale_mode(value: &str) -> VncScaleMode {
 #[cfg(test)]
 mod tests {
     use super::{
-        RdpCertificatePolicy, RdpDisplayMode, parse_rdp_certificate_policy, parse_rdp_display_mode,
+        CommittedTextError, MAX_COMMITTED_TEXT_BYTES, RdpCertificatePolicy, RdpDisplayMode,
+        parse_rdp_certificate_policy, parse_rdp_display_mode, validate_committed_text,
     };
 
     #[test]
@@ -697,5 +769,28 @@ mod tests {
     #[test]
     fn legacy_native_display_mode_is_fixed() {
         assert_eq!(parse_rdp_display_mode("native"), RdpDisplayMode::Fixed);
+    }
+
+    #[test]
+    fn committed_text_accepts_unicode_at_the_byte_limit() {
+        let text = "界".repeat(MAX_COMMITTED_TEXT_BYTES / 3);
+        assert!(text.len() <= MAX_COMMITTED_TEXT_BYTES);
+        assert_eq!(validate_committed_text(&text), Ok(()));
+    }
+
+    #[test]
+    fn committed_text_rejects_oversize_nul_and_control_characters() {
+        assert_eq!(
+            validate_committed_text(&"a".repeat(MAX_COMMITTED_TEXT_BYTES + 1)),
+            Err(CommittedTextError::TooLong)
+        );
+        assert_eq!(
+            validate_committed_text("before\0after"),
+            Err(CommittedTextError::ContainsNul)
+        );
+        assert_eq!(
+            validate_committed_text("line\nfeed"),
+            Err(CommittedTextError::ContainsControl)
+        );
     }
 }

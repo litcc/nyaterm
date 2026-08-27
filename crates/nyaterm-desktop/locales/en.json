@@ -2577,12 +2577,17 @@
     "youdao": "Youdao"
   },
   "remoteDesktop": {
+    "certificateChangedTitle": "Remote Desktop certificate changed",
+    "certificateChangedWarning": "The server certificate no longer matches the remembered certificate. Reject unless you independently verified this change.",
     "certificateTitle": "Confirm Remote Desktop certificate",
     "close": "Close",
     "connecting": "Negotiating secure Remote Desktop session...",
     "connectionFailed": "Remote Desktop connection failed",
     "disconnected": "Remote Desktop session is disconnected",
+    "presentedFingerprint": "Presented fingerprint",
+    "previousFingerprint": "Previously trusted fingerprint",
     "reject": "Reject",
+    "replaceCertificate": "Replace Trusted Certificate",
     "retry": "Retry",
     "trustAndRemember": "Trust And Remember",
     "trustOnce": "Trust Once",

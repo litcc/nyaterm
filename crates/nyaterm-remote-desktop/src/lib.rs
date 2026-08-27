@@ -8,7 +8,10 @@ mod protocol;
 mod session;
 mod vnc;
 
-pub use certificate::{CertificateDecision, evaluate_certificate};
+pub use certificate::{
+    CertificateDecision, CertificateEvaluation, CertificateMatchState, CertificatePromptReason,
+    evaluate_certificate, evaluate_certificate_match,
+};
 pub use clipboard::{ClipboardOrigin, ClipboardTracker, MAX_CLIPBOARD_TEXT_BYTES};
 pub use frame::{DirtyRect, Framebuffer, FramebufferError, merge_dirty_rects};
 pub use input::{KeyMapper, RemoteKey, viewport_to_remote};
@@ -19,16 +22,17 @@ pub use ipc::{
     write_packet_into,
 };
 pub use protocol::{
-    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH,
-    MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, PixelFormat, QueueWaker, RdpCapability,
-    RdpCertificatePolicy, RdpCertificateRequest, RdpCertificateResponse, RdpClipboardConfig,
-    RdpClipboardMode, RdpControlMessage, RdpCursorEvent, RdpDisplayConfig, RdpDisplayMode,
-    RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpReconnectConfig,
-    RdpRuntimeEvent, RdpSessionConfig, RdpSessionDrain, RdpSessionState, VncClipboardConfig,
-    VncControlMessage, VncDisplayConfig, VncError, VncErrorKind, VncInputEvent, VncReconnectConfig,
-    VncRuntimeEvent, VncScaleMode, VncSecurityConfig, VncSecurityMode, VncSessionConfig,
+    CommittedTextError, MAX_COMMITTED_TEXT_BYTES, MAX_VNC_CLIPBOARD_TEXT_BYTES,
+    MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION,
+    PixelFormat, QueueWaker, RdpCapability, RdpCertificatePolicy, RdpCertificateRequest,
+    RdpCertificateResponse, RdpClipboardConfig, RdpClipboardMode, RdpControlMessage,
+    RdpCursorEvent, RdpDisplayConfig, RdpDisplayMode, RdpError, RdpErrorKind, RdpFrameEvent,
+    RdpInputEvent, RdpPointerButton, RdpReconnectConfig, RdpRuntimeEvent, RdpServerCapabilities,
+    RdpSessionConfig, RdpSessionDrain, RdpSessionState, VncClipboardConfig, VncControlMessage,
+    VncDisplayConfig, VncError, VncErrorKind, VncInputEvent, VncReconnectConfig, VncRuntimeEvent,
+    VncScaleMode, VncSecurityConfig, VncSecurityMode, VncServerCapabilities, VncSessionConfig,
     VncSessionDrain, VncSessionState, parse_rdp_certificate_policy, parse_rdp_clipboard_mode,
-    parse_rdp_display_mode, parse_vnc_scale_mode, parse_vnc_security_mode,
+    parse_rdp_display_mode, parse_vnc_scale_mode, parse_vnc_security_mode, validate_committed_text,
 };
 pub use session::{RdpSessionManager, resolve_helper_path};
 pub use vnc::{VncSessionManager, validate_vnc_config};

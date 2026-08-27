@@ -443,8 +443,8 @@ mod tests {
         encode_frame_packet, encode_vnc_control, read_packet, write_packet, write_packet_into,
     };
     use crate::{
-        PROTOCOL_VERSION, PixelFormat, RdpControlMessage, RdpFrameEvent, VncControlMessage,
-        VncInputEvent, VncSessionState,
+        PROTOCOL_VERSION, PixelFormat, RdpControlMessage, RdpFrameEvent, RdpServerCapabilities,
+        VncControlMessage, VncInputEvent, VncServerCapabilities, VncSessionState,
     };
     use std::io::{Cursor, Write};
 
@@ -506,6 +506,38 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_rdp_static_capabilities_and_secure_attention() {
+        let hello = encode_control(&RdpControlMessage::ServerHello {
+            version: PROTOCOL_VERSION,
+            capabilities: RdpServerCapabilities {
+                committed_unicode_text: true,
+                secure_attention: true,
+            },
+        })
+        .unwrap();
+        assert!(matches!(
+            decode_control(&hello).unwrap(),
+            RdpControlMessage::ServerHello {
+                capabilities: RdpServerCapabilities {
+                    committed_unicode_text: true,
+                    secure_attention: true,
+                },
+                ..
+            }
+        ));
+
+        let sas = encode_control(&RdpControlMessage::SecureAttention {
+            session_id: "rdp".to_string(),
+        })
+        .unwrap();
+        assert!(matches!(
+            decode_control(&sas).unwrap(),
+            RdpControlMessage::SecureAttention { ref session_id } if session_id == "rdp"
+        ));
+        assert!(decode_vnc_control(&sas).is_err());
+    }
+
+    #[test]
     fn rejects_unknown_packet_type_and_oversize_payload() {
         assert!(read_packet(&mut Cursor::new(vec![99, 0, 0, 0, 0])).is_err());
         let length = (super::CONTROL_PAYLOAD_LIMIT as u32 + 1).to_le_bytes();
@@ -520,6 +552,12 @@ mod tests {
             VncControlMessage::ClientHello {
                 version: PROTOCOL_VERSION,
             },
+            VncControlMessage::ServerHello {
+                version: PROTOCOL_VERSION,
+                capabilities: VncServerCapabilities {
+                    committed_unicode_keysyms: true,
+                },
+            },
             VncControlMessage::DesktopReset {
                 session_id: "vnc".to_string(),
                 epoch: 4,
@@ -533,10 +571,15 @@ mod tests {
             },
             VncControlMessage::Input {
                 session_id: "vnc".to_string(),
-                events: vec![VncInputEvent::Key {
-                    keysym: 0xFF0D,
-                    pressed: true,
-                }],
+                events: vec![
+                    VncInputEvent::Key {
+                        keysym: 0xFF0D,
+                        pressed: true,
+                    },
+                    VncInputEvent::Text {
+                        text: "你好".to_string(),
+                    },
+                ],
             },
             VncControlMessage::RequestFullFrame {
                 session_id: "vnc".to_string(),
@@ -558,6 +601,15 @@ mod tests {
         assert_eq!(decoded.len(), messages.len());
         assert!(matches!(
             decoded[1],
+            VncControlMessage::ServerHello {
+                capabilities: VncServerCapabilities {
+                    committed_unicode_keysyms: true
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            decoded[2],
             VncControlMessage::DesktopReset {
                 epoch: 4,
                 width: 1024,
@@ -566,7 +618,7 @@ mod tests {
             }
         ));
         assert!(matches!(
-            &decoded[2],
+            &decoded[3],
             VncControlMessage::State {
                 state: VncSessionState::Reconnecting,
                 ..
@@ -609,6 +661,9 @@ mod tests {
     fn only_write_packet_flushes() {
         let packet = encode_vnc_control(&VncControlMessage::ServerHello {
             version: PROTOCOL_VERSION,
+            capabilities: VncServerCapabilities {
+                committed_unicode_keysyms: true,
+            },
         })
         .unwrap();
 

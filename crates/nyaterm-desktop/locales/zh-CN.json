@@ -2577,12 +2577,17 @@
     "youdao": "有道翻译"
   },
   "remoteDesktop": {
+    "certificateChangedTitle": "远程桌面证书已变更",
+    "certificateChangedWarning": "服务器证书与已记住的证书不再匹配。除非已通过独立渠道验证此次变更，否则请拒绝连接。",
     "certificateTitle": "确认远程桌面证书",
     "close": "关闭",
     "connecting": "正在协商安全远程桌面会话…",
     "connectionFailed": "远程桌面连接失败",
     "disconnected": "远程桌面会话已断开",
+    "presentedFingerprint": "当前证书指纹",
+    "previousFingerprint": "此前信任的证书指纹",
     "reject": "拒绝",
+    "replaceCertificate": "替换受信任证书",
     "retry": "重试",
     "trustAndRemember": "信任并记住",
     "trustOnce": "仅本次信任",

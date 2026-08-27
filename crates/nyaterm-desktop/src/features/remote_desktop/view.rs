@@ -3,18 +3,20 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use gpui::{
-    Bounds, Context, FontWeight, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    SharedString, Size, canvas, div, prelude::*, px, rgb,
+    Bounds, Context, ElementInputHandler, FontWeight, IntoElement, KeyDownEvent, KeyUpEvent,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
+    ScrollWheelEvent, SharedString, Size, canvas, div, prelude::*, px, rgb,
 };
 use nyaterm_remote_desktop::{
-    RdpCertificateResponse, RdpPointerButton, RdpSessionState, VncScaleMode,
+    CertificatePromptReason, RdpCertificateResponse, RdpPointerButton, RdpSessionState,
+    VncScaleMode,
 };
 
 use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
-use super::runtime::format_rdp_error;
+use super::runtime::{format_rdp_error, secure_attention_available};
+use super::state::RdpCertificatePrompt;
 
 impl NyaTermApp {
     pub(in crate::features) fn remote_desktop_view(
@@ -31,6 +33,14 @@ impl NyaTermApp {
                 )
                 .into_any_element();
         };
+        let is_rdp = self.session.metadata(&session_id).is_some_and(|metadata| {
+            matches!(
+                metadata.launch_config,
+                crate::models::SessionLaunchConfig::Rdp(_)
+            )
+        });
+        let secure_attention_is_available =
+            secure_attention_available(is_rdp, &session.state, session.server_capabilities);
         if let Some(request) = session.certificate_request.clone() {
             return self
                 .rdp_certificate_view(session_id, request, cx)
@@ -159,9 +169,23 @@ impl NyaTermApp {
         let cursor = session.cursor.clone();
         let cursor_texture = session.cursor_texture;
         let app = cx.entity();
+        let input_entity = app.clone();
+        let surface_focus = self.remote_desktop.focus().clone();
+        let input_focus = surface_focus.clone();
+        let input_is_active = self.session.active_id() == Some(session_id.as_str());
         let viewport_session_id = session_id.clone();
         let canvas = canvas(
             move |bounds, window, cx| {
+                if input_is_active {
+                    let visible_bounds = window.content_mask().bounds.intersect(&bounds);
+                    if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.) {
+                        window.handle_input(
+                            &input_focus,
+                            ElementInputHandler::new(visible_bounds, input_entity.clone()),
+                            cx,
+                        );
+                    }
+                }
                 let app = app.clone();
                 let session_id = viewport_session_id.clone();
                 window.defer(cx, move |_, cx| {
@@ -207,7 +231,8 @@ impl NyaTermApp {
         let scroll_id = session_id.clone();
         let key_down_id = session_id.clone();
         let key_up_id = session_id.clone();
-        let focus = self.remote_desktop.focus().clone();
+        let secure_attention_id = session_id.clone();
+        let focus = surface_focus;
         div()
             .id(format!("rdp-surface-{session_id}"))
             .size_full()
@@ -221,6 +246,9 @@ impl NyaTermApp {
                     &event.keystroke.key,
                     event.keystroke.key_char.as_deref(),
                     event.is_held,
+                    event.keystroke.modifiers.control,
+                    event.keystroke.modifiers.alt,
+                    event.keystroke.modifiers.platform,
                 ) {
                     cx.stop_propagation();
                     this.mark_user_activity();
@@ -254,6 +282,7 @@ impl NyaTermApp {
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(this.remote_desktop.focus(), cx);
+                    this.activate_workspace_pane(right_down_id.clone(), cx);
                     let _ = this.send_rdp_pointer(
                         &right_down_id,
                         event.position,
@@ -267,6 +296,7 @@ impl NyaTermApp {
                 MouseButton::Middle,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(this.remote_desktop.focus(), cx);
+                    this.activate_workspace_pane(middle_down_id.clone(), cx);
                     let _ = this.send_rdp_pointer(
                         &middle_down_id,
                         event.position,
@@ -328,19 +358,79 @@ impl NyaTermApp {
                 }
             }))
             .child(canvas)
+            .when(secure_attention_is_available, |surface| {
+                surface.child(
+                    div()
+                        .absolute()
+                        .top(px(8.))
+                        .right(px(8.))
+                        .child(small_button(
+                            palette,
+                            format!("rdp-secure-attention-{session_id}"),
+                            "Secure Attention (Ctrl+Alt+Delete)",
+                            cx.listener(move |this, _, _, cx| {
+                                if this.send_rdp_secure_attention(&secure_attention_id) {
+                                    this.mark_user_activity();
+                                }
+                                cx.notify();
+                            }),
+                        )),
+                )
+            })
             .into_any_element()
     }
 
     fn rdp_certificate_view(
         &mut self,
         session_id: String,
-        request: nyaterm_remote_desktop::RdpCertificateRequest,
+        prompt: RdpCertificatePrompt,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let reject_id = session_id.clone();
         let once_id = session_id.clone();
         let remember_id = session_id.clone();
+        let changed = matches!(prompt.reason, CertificatePromptReason::Changed { .. });
+        let title = if changed {
+            t!("remoteDesktop.certificateChangedTitle")
+        } else {
+            t!("remoteDesktop.certificateTitle")
+        };
+        let remember_label = if changed {
+            t!("remoteDesktop.replaceCertificate")
+        } else {
+            t!("remoteDesktop.trustAndRemember")
+        };
+        let risk_detail = match &prompt.reason {
+            CertificatePromptReason::FirstUse => String::new(),
+            CertificatePromptReason::Changed {
+                previous_fingerprint,
+                presented_fingerprint,
+            } => format!(
+                "{}\n{}: {}\n{}: {}",
+                t!("remoteDesktop.certificateChangedWarning"),
+                t!("remoteDesktop.previousFingerprint"),
+                previous_fingerprint,
+                t!("remoteDesktop.presentedFingerprint"),
+                presented_fingerprint,
+            ),
+        };
+        let request = prompt.request;
+        let certificate_detail = format!(
+            "{}:{}\nSHA-256 {}\nSubject: {}\nIssuer: {}\nValid: {} to {}",
+            request.host,
+            request.port,
+            request.sha256_fingerprint,
+            request.subject.as_deref().unwrap_or("unknown"),
+            request.issuer.as_deref().unwrap_or("unknown"),
+            request.valid_from.as_deref().unwrap_or("unknown"),
+            request.valid_to.as_deref().unwrap_or("unknown")
+        );
+        let detail = if risk_detail.is_empty() {
+            certificate_detail
+        } else {
+            format!("{risk_detail}\n\n{certificate_detail}")
+        };
         div()
             .size_full()
             .flex()
@@ -355,23 +445,14 @@ impl NyaTermApp {
                     .text_size(px(15.))
                     .font_weight(FontWeight(600.))
                     .text_color(rgb(palette.warning))
-                    .child(t!("remoteDesktop.certificateTitle")),
+                    .child(title),
             )
             .child(
                 div()
                     .max_w(px(620.))
                     .text_size(px(12.))
                     .text_color(rgb(palette.text_dimmed))
-                    .child(format!(
-                        "{}:{}\nSHA-256 {}\nSubject: {}\nIssuer: {}\nValid: {} to {}",
-                        request.host,
-                        request.port,
-                        request.sha256_fingerprint,
-                        request.subject.as_deref().unwrap_or("unknown"),
-                        request.issuer.as_deref().unwrap_or("unknown"),
-                        request.valid_from.as_deref().unwrap_or("unknown"),
-                        request.valid_to.as_deref().unwrap_or("unknown")
-                    )),
+                    .child(detail),
             )
             .child(
                 div()
@@ -390,23 +471,25 @@ impl NyaTermApp {
                             cx.notify();
                         }),
                     ))
-                    .child(small_button(
-                        palette,
-                        format!("rdp-cert-once-{session_id}"),
-                        t!("remoteDesktop.trustOnce"),
-                        cx.listener(move |this, _, _, cx| {
-                            this.resolve_rdp_certificate(
-                                &once_id,
-                                RdpCertificateResponse::TrustOnce,
-                                cx,
-                            );
-                            cx.notify();
-                        }),
-                    ))
+                    .when(!changed, |this| {
+                        this.child(small_button(
+                            palette,
+                            format!("rdp-cert-once-{session_id}"),
+                            t!("remoteDesktop.trustOnce"),
+                            cx.listener(move |this, _, _, cx| {
+                                this.resolve_rdp_certificate(
+                                    &once_id,
+                                    RdpCertificateResponse::TrustOnce,
+                                    cx,
+                                );
+                                cx.notify();
+                            }),
+                        ))
+                    })
                     .child(small_button(
                         palette,
                         format!("rdp-cert-remember-{session_id}"),
-                        t!("remoteDesktop.trustAndRemember"),
+                        remember_label,
                         cx.listener(move |this, _, _, cx| {
                             this.resolve_rdp_certificate(
                                 &remember_id,

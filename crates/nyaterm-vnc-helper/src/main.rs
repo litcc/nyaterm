@@ -22,9 +22,10 @@ use std::time::{Duration, Instant};
 
 use nyaterm_remote_desktop::{
     MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH,
-    PROTOCOL_VERSION, Packet, PixelFormat, RdpFrameEvent, VncControlMessage, VncError,
-    VncErrorKind, VncInputEvent, VncSecurityMode, VncSessionConfig, VncSessionState,
-    decode_vnc_control, encode_frame_packet, encode_vnc_control, read_packet, write_packet_into,
+    MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, Packet, PixelFormat, RdpFrameEvent, VncControlMessage,
+    VncError, VncErrorKind, VncInputEvent, VncSecurityMode, VncServerCapabilities,
+    VncSessionConfig, VncSessionState, decode_vnc_control, encode_frame_packet, encode_vnc_control,
+    read_packet, validate_committed_text, write_packet_into,
 };
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
@@ -48,10 +49,48 @@ enum Outbound {
 }
 
 enum WorkerCommand {
-    Input(VncInputEvent),
+    Input(ValidatedVncInputBatch),
     Clipboard(String),
     FullRefresh,
     Close,
+}
+
+struct ValidatedVncInputBatch(Vec<VncInputEvent>);
+
+impl ValidatedVncInputBatch {
+    fn try_new(events: Vec<VncInputEvent>) -> Result<Self, VncError> {
+        if events.len() > MAX_VNC_INPUT_BATCH {
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                format!("VNC input batch exceeds {MAX_VNC_INPUT_BATCH} events"),
+            ));
+        }
+        for event in &events {
+            if let VncInputEvent::Text { text } = event {
+                validate_committed_text(text).map_err(|error| {
+                    VncError::new(
+                        VncErrorKind::Protocol,
+                        format!("invalid VNC committed text: {error}"),
+                    )
+                })?;
+            }
+        }
+        Ok(Self(events))
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ServerWriteKind {
+    Input,
+    Clipboard,
+}
+
+fn server_write_allowed(view_only: bool, clipboard_enabled: bool, kind: ServerWriteKind) -> bool {
+    !view_only
+        && match kind {
+            ServerWriteKind::Input => true,
+            ServerWriteKind::Clipboard => clipboard_enabled,
+        }
 }
 
 /// A live session: the worker thread plus the channels that steer it.
@@ -76,16 +115,69 @@ fn main() {
     }
 }
 
+fn validate_control_phase(message: &VncControlMessage, hello_complete: bool) -> io::Result<()> {
+    if !hello_complete {
+        if matches!(message, VncControlMessage::ClientHello { .. }) {
+            return Ok(());
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "VNC IPC expected ClientHello before any other message",
+        ));
+    }
+
+    match message {
+        VncControlMessage::ClientHello { .. } => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "VNC IPC ClientHello may only be sent once",
+        )),
+        VncControlMessage::ServerHello { .. }
+        | VncControlMessage::DesktopReset { .. }
+        | VncControlMessage::State { .. }
+        | VncControlMessage::Error { .. } => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "VNC IPC helper-only message received from application",
+        )),
+        VncControlMessage::Connect { .. }
+        | VncControlMessage::Input { .. }
+        | VncControlMessage::Clipboard { .. }
+        | VncControlMessage::RequestFullFrame { .. }
+        | VncControlMessage::Disconnect { .. } => Ok(()),
+    }
+}
+
+fn validate_active_session_id(active_session_id: Option<&str>, received: &str) -> io::Result<()> {
+    if let Some(active) = active_session_id
+        && active != received
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "VNC IPC session id mismatch: active session is '{active}', received '{received}'"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn run() -> io::Result<()> {
     let (output_tx, output_rx) = mpsc::channel();
     let writer = spawn_stdout_writer(output_rx)?;
     let mut stdin = io::stdin().lock();
     let mut session: Option<Session> = None;
+    let mut hello_complete = false;
 
     while let Some(packet) = read_packet(&mut stdin)? {
         let message = decode_vnc_control(&packet)?;
+        validate_control_phase(&message, hello_complete)?;
         match message {
             VncControlMessage::ClientHello { version } => {
+                if hello_complete {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "VNC IPC ClientHello may only be sent once",
+                    ));
+                }
                 if version != PROTOCOL_VERSION {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -98,10 +190,20 @@ fn run() -> io::Result<()> {
                     &output_tx,
                     VncControlMessage::ServerHello {
                         version: PROTOCOL_VERSION,
+                        capabilities: VncServerCapabilities {
+                            committed_unicode_keysyms: true,
+                        },
                     },
                 )?;
+                hello_complete = true;
             }
             VncControlMessage::Connect { session_id, config } => {
+                if !hello_complete {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "VNC IPC Connect received before ClientHello",
+                    ));
+                }
                 if session.is_some() {
                     send_error(
                         &output_tx,
@@ -115,28 +217,54 @@ fn run() -> io::Result<()> {
                 session = Some(spawn_session(session_id, config, output_tx.clone()));
             }
             VncControlMessage::Input { session_id, events } => {
-                let Some(active) = session.as_ref().filter(|s| s.session_id == session_id) else {
+                if !hello_complete {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "VNC IPC Input received before ClientHello",
+                    ));
+                }
+                validate_active_session_id(
+                    session.as_ref().map(|active| active.session_id.as_str()),
+                    &session_id,
+                )?;
+                let batch = ValidatedVncInputBatch::try_new(events)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                let Some(active) = session.as_ref() else {
                     continue;
                 };
-                for event in events {
-                    // A closed channel means the worker already exited; it has
-                    // reported why, so dropping late input is correct here.
-                    if active.sender.send(WorkerCommand::Input(event)).is_err() {
-                        break;
-                    }
-                }
+                // A closed channel means the worker already exited; it has
+                // reported why, so dropping late input is correct here.
+                let _ = active.sender.send(WorkerCommand::Input(batch));
             }
             VncControlMessage::Clipboard { session_id, text } => {
-                if let Some(active) = session.as_ref().filter(|s| s.session_id == session_id) {
+                if !hello_complete {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "VNC IPC Clipboard received before ClientHello",
+                    ));
+                }
+                validate_active_session_id(
+                    session.as_ref().map(|active| active.session_id.as_str()),
+                    &session_id,
+                )?;
+                if let Some(active) = session.as_ref() {
                     let _ = active.sender.send(WorkerCommand::Clipboard(text));
                 }
             }
             VncControlMessage::RequestFullFrame { session_id } => {
-                if let Some(active) = session.as_ref().filter(|s| s.session_id == session_id) {
+                validate_active_session_id(
+                    session.as_ref().map(|active| active.session_id.as_str()),
+                    &session_id,
+                )?;
+                if let Some(active) = session.as_ref() {
                     let _ = active.sender.send(WorkerCommand::FullRefresh);
                 }
             }
             VncControlMessage::Disconnect { session_id } => {
+                validate_active_session_id(
+                    session.as_ref().map(|active| active.session_id.as_str()),
+                    &session_id,
+                )?;
                 send_control(
                     &output_tx,
                     VncControlMessage::State {
@@ -162,7 +290,12 @@ fn run() -> io::Result<()> {
             VncControlMessage::ServerHello { .. }
             | VncControlMessage::DesktopReset { .. }
             | VncControlMessage::State { .. }
-            | VncControlMessage::Error { .. } => {}
+            | VncControlMessage::Error { .. } => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "VNC IPC helper-only message received from application",
+                ));
+            }
         }
     }
 
@@ -483,11 +616,23 @@ async fn run_generation(
                 match command {
                     // view_only and clipboard.enabled are enforced here, not only
                     // in the application: this process is the authority.
-                    Some(WorkerCommand::Input(event)) if !config.view_only => {
-                        send_vnc_input(&client, event, &mut pressed_keys).await?;
+                    Some(WorkerCommand::Input(batch))
+                        if server_write_allowed(
+                            config.view_only,
+                            config.clipboard.enabled,
+                            ServerWriteKind::Input,
+                        ) =>
+                    {
+                        send_vnc_input_batch(&client, batch, &mut pressed_keys).await?;
                     }
                     Some(WorkerCommand::Input(_)) => {}
-                    Some(WorkerCommand::Clipboard(text)) if !config.view_only && config.clipboard.enabled => {
+                    Some(WorkerCommand::Clipboard(text))
+                        if server_write_allowed(
+                            config.view_only,
+                            config.clipboard.enabled,
+                            ServerWriteKind::Clipboard,
+                        ) =>
+                    {
                         client.input(X11Event::CopyText(text)).await.map_err(classify_vnc_error)?;
                     }
                     Some(WorkerCommand::Clipboard(_)) => {}
@@ -570,6 +715,33 @@ fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), V
     Ok(())
 }
 
+fn unicode_scalar_to_keysym(scalar: char) -> u32 {
+    let scalar = u32::from(scalar);
+    if scalar <= 0xff {
+        scalar
+    } else {
+        0x0100_0000 | scalar
+    }
+}
+
+fn committed_text_key_events(text: &str) -> impl Iterator<Item = (u32, bool)> + '_ {
+    text.chars().flat_map(|scalar| {
+        let keysym = unicode_scalar_to_keysym(scalar);
+        [(keysym, true), (keysym, false)]
+    })
+}
+
+async fn send_vnc_input_batch(
+    client: &VncClient,
+    batch: ValidatedVncInputBatch,
+    pressed_keys: &mut Vec<u32>,
+) -> Result<(), VncError> {
+    for event in batch.0 {
+        send_vnc_input(client, event, pressed_keys).await?;
+    }
+    Ok(())
+}
+
 async fn send_vnc_input(
     client: &VncClient,
     event: VncInputEvent,
@@ -591,6 +763,20 @@ async fn send_vnc_input(
                 }))
                 .await
                 .map_err(classify_vnc_error)?;
+        }
+        VncInputEvent::Text { text } => {
+            // The complete batch was validated before it crossed the worker
+            // channel, so no VNC wire event can precede committed-text validation.
+            // Committed text is always key input and never falls back to clipboard.
+            for (keysym, pressed) in committed_text_key_events(&text) {
+                client
+                    .input(X11Event::KeyEvent(ClientKeyEvent {
+                        keycode: keysym,
+                        down: pressed,
+                    }))
+                    .await
+                    .map_err(classify_vnc_error)?;
+            }
         }
         VncInputEvent::Pointer { x, y, button_mask } => {
             client
@@ -773,14 +959,28 @@ mod tests {
     use std::sync::mpsc;
 
     use nyaterm_remote_desktop::{
-        MAX_VNC_CLIPBOARD_TEXT_BYTES, VncControlMessage, VncErrorKind, VncSecurityMode,
+        MAX_COMMITTED_TEXT_BYTES, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH,
+        VncControlMessage, VncErrorKind, VncInputEvent, VncSecurityMode,
     };
     use vnc::VncSecurityPolicy;
 
     use super::{
-        Outbound, classify_vnc_error, is_latin1_within_limit, reconnect_delay, report_panic,
-        security_policy, validate_framebuffer_dimensions,
+        Outbound, ServerWriteKind, ValidatedVncInputBatch, classify_vnc_error,
+        committed_text_key_events, is_latin1_within_limit, reconnect_delay, report_panic,
+        security_policy, server_write_allowed, unicode_scalar_to_keysym,
+        validate_active_session_id, validate_framebuffer_dimensions,
     };
+
+    #[test]
+    fn active_session_id_rejects_foreign_messages() {
+        validate_active_session_id(None, "before-connect")
+            .expect("pre-connect handling keeps its existing semantics");
+        validate_active_session_id(Some("session-a"), "session-a").expect("matching session id");
+        let error = validate_active_session_id(Some("session-a"), "session-b")
+            .expect_err("foreign session id must fail closed");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("session id mismatch"));
+    }
 
     #[test]
     fn panic_payloads_are_reported_as_a_fatal_single_line_error() {
@@ -859,6 +1059,74 @@ mod tests {
         assert!(!is_latin1_within_limit("hello \u{0100}"));
         assert!(!is_latin1_within_limit(
             &"a".repeat(MAX_VNC_CLIPBOARD_TEXT_BYTES + 1)
+        ));
+    }
+
+    #[test]
+    fn unicode_scalars_convert_to_standard_x11_keysyms() {
+        assert_eq!(unicode_scalar_to_keysym('A'), 0x41);
+        assert_eq!(unicode_scalar_to_keysym('é'), 0xe9);
+        assert_eq!(unicode_scalar_to_keysym('Ā'), 0x0100_0100);
+        assert_eq!(unicode_scalar_to_keysym('文'), 0x0100_6587);
+        assert_eq!(unicode_scalar_to_keysym('\u{10ffff}'), 0x0110_ffff);
+    }
+
+    #[test]
+    fn committed_text_expands_only_to_ordered_key_down_up_pairs() {
+        assert_eq!(
+            committed_text_key_events("A文").collect::<Vec<_>>(),
+            vec![
+                (0x41, true),
+                (0x41, false),
+                (0x0100_6587, true),
+                (0x0100_6587, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn input_batch_is_fully_validated_before_worker_dispatch() {
+        let valid_prefix_then_invalid_text = vec![
+            VncInputEvent::Key {
+                keysym: 0x41,
+                pressed: true,
+            },
+            VncInputEvent::Text {
+                text: "valid 文本".to_string(),
+            },
+            VncInputEvent::Text {
+                text: "invalid\u{001b}".to_string(),
+            },
+        ];
+        assert!(ValidatedVncInputBatch::try_new(valid_prefix_then_invalid_text).is_err());
+
+        let oversized_text = VncInputEvent::Text {
+            text: "a".repeat(MAX_COMMITTED_TEXT_BYTES + 1),
+        };
+        assert!(ValidatedVncInputBatch::try_new(vec![oversized_text]).is_err());
+
+        let oversized_batch = vec![VncInputEvent::ReleaseAllKeys; MAX_VNC_INPUT_BATCH + 1];
+        assert!(ValidatedVncInputBatch::try_new(oversized_batch).is_err());
+    }
+
+    #[test]
+    fn view_only_is_the_authoritative_input_and_clipboard_gate() {
+        assert!(!server_write_allowed(true, true, ServerWriteKind::Input));
+        assert!(!server_write_allowed(
+            true,
+            true,
+            ServerWriteKind::Clipboard
+        ));
+        assert!(server_write_allowed(false, false, ServerWriteKind::Input));
+        assert!(!server_write_allowed(
+            false,
+            false,
+            ServerWriteKind::Clipboard
+        ));
+        assert!(server_write_allowed(
+            false,
+            true,
+            ServerWriteKind::Clipboard
         ));
     }
 

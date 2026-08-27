@@ -10,8 +10,9 @@ use crate::helper_process;
 use crate::{
     MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, PacketType, QueueWaker,
     RdpFrameEvent, VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent,
-    VncSecurityMode, VncSessionConfig, VncSessionDrain, VncSessionState, decode_frame_packet,
-    decode_vnc_control, encode_vnc_control, read_packet, write_packet,
+    VncSecurityMode, VncServerCapabilities, VncSessionConfig, VncSessionDrain, VncSessionState,
+    decode_frame_packet, decode_vnc_control, encode_vnc_control, read_packet,
+    validate_committed_text, write_packet,
 };
 
 const FRAME_QUEUE_LIMIT: usize = 64;
@@ -112,6 +113,7 @@ impl EventQueue {
 
 struct SessionRecord {
     state: Arc<Mutex<VncSessionState>>,
+    capabilities: Arc<Mutex<Option<VncServerCapabilities>>>,
     queue: Arc<Mutex<EventQueue>>,
     writer: Arc<Mutex<ChildStdin>>,
     child: Option<Child>,
@@ -190,15 +192,18 @@ impl VncSessionManager {
             ..EventQueue::default()
         }));
         let state = Arc::new(Mutex::new(VncSessionState::Connecting));
+        let capabilities = Arc::new(Mutex::new(None));
         let reader = spawn_reader(
             session_id.clone(),
             stdout,
             writer.clone(),
             queue.clone(),
             state.clone(),
+            capabilities.clone(),
         );
         let mut record = SessionRecord {
             state,
+            capabilities,
             queue,
             writer,
             child: Some(child),
@@ -251,12 +256,30 @@ impl VncSessionManager {
         Ok(session_id)
     }
 
+    /// Return the static helper capabilities confirmed by `ServerHello`.
+    ///
+    /// VNC has no Secure Attention capability or operation by design.
+    pub fn server_capabilities(&self, session_id: &str) -> Option<VncServerCapabilities> {
+        let sessions = self.sessions.lock().ok()?;
+        *sessions.get(session_id)?.capabilities.lock().ok()?
+    }
+
     pub fn send_input(&self, session_id: &str, events: Vec<VncInputEvent>) -> Result<(), VncError> {
         if events.len() > MAX_VNC_INPUT_BATCH {
             return Err(VncError::new(
                 VncErrorKind::Protocol,
                 format!("VNC input batch exceeds {MAX_VNC_INPUT_BATCH} events"),
             ));
+        }
+        let needs_committed_text = validate_vnc_input(&events)?;
+        if needs_committed_text {
+            let capabilities = self.confirmed_capabilities(session_id)?;
+            if !capabilities.committed_unicode_keysyms {
+                return Err(VncError::new(
+                    VncErrorKind::Protocol,
+                    "VNC helper did not advertise committed Unicode keysym input",
+                ));
+            }
         }
         self.send(
             session_id,
@@ -378,6 +401,28 @@ impl VncSessionManager {
         }
     }
 
+    fn confirmed_capabilities(&self, session_id: &str) -> Result<VncServerCapabilities, VncError> {
+        let sessions = self.sessions.lock().map_err(|_| registry_poisoned())?;
+        let record = sessions.get(session_id).ok_or_else(|| {
+            VncError::new(
+                VncErrorKind::Protocol,
+                format!("VNC session '{session_id}' is not running"),
+            )
+        })?;
+        record
+            .capabilities
+            .lock()
+            .map_err(|_| VncError::new(VncErrorKind::Internal, "VNC capability lock is poisoned"))?
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                VncError::new(
+                    VncErrorKind::Protocol,
+                    "VNC helper capabilities have not been confirmed",
+                )
+            })
+    }
+
     fn send(&self, session_id: &str, message: VncControlMessage) -> Result<(), VncError> {
         let sessions = self.sessions.lock().map_err(|_| registry_poisoned())?;
         let record = sessions.get(session_id).ok_or_else(|| {
@@ -395,6 +440,22 @@ impl Drop for VncSessionManager {
         // Without this, every helper process outlives the application.
         self.shutdown();
     }
+}
+
+fn validate_vnc_input(events: &[VncInputEvent]) -> Result<bool, VncError> {
+    let mut has_committed_text = false;
+    for event in events {
+        if let VncInputEvent::Text { text } = event {
+            validate_committed_text(text).map_err(|error| {
+                VncError::new(
+                    VncErrorKind::Protocol,
+                    format!("invalid VNC committed text: {error}"),
+                )
+            })?;
+            has_committed_text = true;
+        }
+    }
+    Ok(has_committed_text)
 }
 
 pub fn validate_vnc_config(config: &VncSessionConfig) -> Result<(), VncError> {
@@ -450,10 +511,12 @@ fn spawn_reader(
     writer: Arc<Mutex<ChildStdin>>,
     queue: Arc<Mutex<EventQueue>>,
     state: Arc<Mutex<VncSessionState>>,
+    capabilities: Arc<Mutex<Option<VncServerCapabilities>>>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name(format!("nyaterm-vnc-reader-{session_id}"))
         .spawn(move || {
+            let mut hello_received = false;
             loop {
                 let packet = match read_packet(&mut stdout) {
                     Ok(Some(packet)) => packet,
@@ -472,9 +535,22 @@ fn spawn_reader(
                 let result: Result<(), VncError> = match packet.packet_type {
                     PacketType::Control => decode_vnc_control(&packet)
                         .map_err(|error| VncError::new(VncErrorKind::Protocol, error.to_string()))
-                        .and_then(|message| handle_control(&session_id, message, &queue, &state)),
-                    PacketType::Frame => decode_frame_packet(&packet)
-                        .map_err(|error| VncError::new(VncErrorKind::Protocol, error.to_string()))
+                        .and_then(|message| {
+                            handle_control(
+                                &session_id,
+                                message,
+                                &queue,
+                                &state,
+                                &capabilities,
+                                &mut hello_received,
+                            )
+                        }),
+                    PacketType::Frame => require_server_hello(hello_received, "frame packet")
+                        .and_then(|()| {
+                            decode_frame_packet(&packet).map_err(|error| {
+                                VncError::new(VncErrorKind::Protocol, error.to_string())
+                            })
+                        })
                         .map(|(frame_session, frame)| {
                             if frame_session != session_id {
                                 return;
@@ -495,7 +571,16 @@ fn spawn_reader(
                             }
                         }),
                     // The VNC path never advertises cursor encodings.
-                    PacketType::Cursor => Ok(()),
+                    PacketType::Cursor => {
+                        if hello_received {
+                            Err(VncError::new(
+                                VncErrorKind::Protocol,
+                                "VNC helper sent an unsupported cursor packet",
+                            ))
+                        } else {
+                            require_server_hello(false, "cursor packet")
+                        }
+                    }
                 };
                 if let Err(error) = result {
                     push_reader_error(&session_id, &queue, &state, error.kind, error.message);
@@ -525,20 +610,73 @@ fn spawn_reader(
         .expect("failed to spawn the VNC helper reader")
 }
 
+fn require_server_hello(received: bool, packet_kind: &str) -> Result<(), VncError> {
+    if received {
+        Ok(())
+    } else {
+        Err(VncError::new(
+            VncErrorKind::Protocol,
+            format!("VNC helper sent {packet_kind} before ServerHello"),
+        ))
+    }
+}
+
 fn handle_control(
     session_id: &str,
     message: VncControlMessage,
     queue: &Arc<Mutex<EventQueue>>,
     state: &Arc<Mutex<VncSessionState>>,
+    capabilities: &Arc<Mutex<Option<VncServerCapabilities>>>,
+    hello_received: &mut bool,
 ) -> Result<(), VncError> {
-    match message {
-        VncControlMessage::ServerHello { version } if version != PROTOCOL_VERSION => {
+    if !*hello_received {
+        let VncControlMessage::ServerHello {
+            version,
+            capabilities: confirmed,
+        } = message
+        else {
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                "VNC helper's first control message must be ServerHello",
+            ));
+        };
+        if version != PROTOCOL_VERSION {
             return Err(VncError::new(
                 VncErrorKind::Protocol,
                 format!("VNC helper protocol version {version} does not match {PROTOCOL_VERSION}"),
             ));
         }
-        VncControlMessage::ServerHello { .. } => {}
+        let mut slot = capabilities.lock().map_err(|_| {
+            VncError::new(VncErrorKind::Internal, "VNC capability lock is poisoned")
+        })?;
+        if slot.is_some() {
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                "VNC helper capabilities were already confirmed",
+            ));
+        }
+        *slot = Some(confirmed);
+        *hello_received = true;
+        return Ok(());
+    }
+
+    match message {
+        VncControlMessage::ServerHello { .. } => {
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                "VNC helper sent duplicate ServerHello",
+            ));
+        }
+        VncControlMessage::ClientHello { .. }
+        | VncControlMessage::Connect { .. }
+        | VncControlMessage::Input { .. }
+        | VncControlMessage::RequestFullFrame { .. }
+        | VncControlMessage::Disconnect { .. } => {
+            return Err(VncError::new(
+                VncErrorKind::Protocol,
+                "VNC helper sent an application-only control message",
+            ));
+        }
         VncControlMessage::DesktopReset {
             session_id: event_session,
             epoch,
@@ -635,15 +773,123 @@ fn is_latin1_within_limit(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
-    use super::{EventQueue, FRAME_QUEUE_LIMIT, is_latin1_within_limit, validate_vnc_config};
-    use crate::{
-        Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PixelFormat, RdpFrameEvent, VncClipboardConfig,
-        VncDisplayConfig, VncErrorKind, VncReconnectConfig, VncRuntimeEvent, VncSecurityConfig,
-        VncSecurityMode, VncSessionConfig,
+    use super::{
+        EventQueue, FRAME_QUEUE_LIMIT, handle_control, is_latin1_within_limit,
+        require_server_hello, validate_vnc_config, validate_vnc_input,
     };
+    use crate::{
+        Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PROTOCOL_VERSION, PixelFormat, RdpFrameEvent,
+        VncClipboardConfig, VncControlMessage, VncDisplayConfig, VncErrorKind, VncInputEvent,
+        VncReconnectConfig, VncRuntimeEvent, VncSecurityConfig, VncSecurityMode,
+        VncServerCapabilities, VncSessionConfig, VncSessionState,
+    };
+
+    #[test]
+    fn server_hello_must_be_first_and_records_capabilities_only_once() {
+        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let state = Arc::new(Mutex::new(VncSessionState::Connecting));
+        let capabilities = Arc::new(Mutex::new(None));
+        let advertised = VncServerCapabilities {
+            committed_unicode_keysyms: true,
+        };
+        let mut hello_received = false;
+
+        let error = handle_control(
+            "s",
+            VncControlMessage::Error {
+                session_id: "s".to_string(),
+                error: crate::VncError::new(VncErrorKind::Protocol, "before hello"),
+                fatal: true,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &mut hello_received,
+        )
+        .expect_err("error before ServerHello must fail");
+        assert_eq!(error.kind, VncErrorKind::Protocol);
+        assert!(!hello_received);
+        assert_eq!(*capabilities.lock().unwrap(), None);
+
+        let error = handle_control(
+            "s",
+            VncControlMessage::ServerHello {
+                version: PROTOCOL_VERSION - 1,
+                capabilities: advertised,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &mut hello_received,
+        )
+        .expect_err("a mismatched version must fail");
+        assert_eq!(error.kind, VncErrorKind::Protocol);
+        assert!(!hello_received);
+        assert_eq!(*capabilities.lock().unwrap(), None);
+
+        handle_control(
+            "s",
+            VncControlMessage::ServerHello {
+                version: PROTOCOL_VERSION,
+                capabilities: advertised,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &mut hello_received,
+        )
+        .expect("matching hello");
+        assert!(hello_received);
+        assert_eq!(*capabilities.lock().unwrap(), Some(advertised));
+
+        let error = handle_control(
+            "s",
+            VncControlMessage::ServerHello {
+                version: PROTOCOL_VERSION,
+                capabilities: VncServerCapabilities::default(),
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &mut hello_received,
+        )
+        .expect_err("duplicate ServerHello must fail");
+        assert_eq!(error.kind, VncErrorKind::Protocol);
+        assert_eq!(*capabilities.lock().unwrap(), Some(advertised));
+
+        let error = handle_control(
+            "s",
+            VncControlMessage::ClientHello {
+                version: PROTOCOL_VERSION,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &mut hello_received,
+        )
+        .expect_err("application-only messages from the helper must fail");
+        assert_eq!(error.kind, VncErrorKind::Protocol);
+        assert!(require_server_hello(false, "frame packet").is_err());
+        assert!(require_server_hello(false, "cursor packet").is_err());
+        assert!(require_server_hello(true, "frame packet").is_ok());
+    }
+
+    #[test]
+    fn vnc_committed_text_batch_is_fully_validated() {
+        let events = vec![
+            VncInputEvent::Text {
+                text: "Unicode 文本".to_string(),
+            },
+            VncInputEvent::Text {
+                text: "invalid\u{001b}".to_string(),
+            },
+        ];
+        assert!(validate_vnc_input(&events).is_err());
+        assert!(!validate_vnc_input(&[VncInputEvent::ReleaseAllKeys]).unwrap());
+    }
 
     #[test]
     fn every_producer_path_wakes_the_consumer() {

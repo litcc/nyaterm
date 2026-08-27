@@ -4,9 +4,10 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use nyaterm_remote_desktop::{
-    PROTOCOL_VERSION, VncClipboardConfig, VncControlMessage, VncDisplayConfig, VncErrorKind,
-    VncReconnectConfig, VncSecurityConfig, VncSessionConfig, VncSessionState, decode_vnc_control,
-    encode_vnc_control, read_packet, write_packet,
+    PROTOCOL_VERSION, PixelFormat, RdpFrameEvent, VncClipboardConfig, VncControlMessage,
+    VncDisplayConfig, VncError, VncErrorKind, VncInputEvent, VncReconnectConfig, VncSecurityConfig,
+    VncServerCapabilities, VncSessionConfig, VncSessionState, decode_vnc_control,
+    encode_frame_packet, encode_vnc_control, read_packet, write_packet,
 };
 
 fn helper_command() -> Command {
@@ -28,6 +29,75 @@ fn send(stdin: &mut impl Write, message: &VncControlMessage) {
 
 fn recv(stdout: &mut impl std::io::Read) -> VncControlMessage {
     decode_vnc_control(&read_packet(stdout).unwrap().unwrap()).unwrap()
+}
+
+fn client_hello() -> VncControlMessage {
+    VncControlMessage::ClientHello {
+        version: PROTOCOL_VERSION,
+    }
+}
+
+fn assert_server_hello(message: VncControlMessage) {
+    assert!(matches!(
+        message,
+        VncControlMessage::ServerHello {
+            version: PROTOCOL_VERSION,
+            capabilities: VncServerCapabilities {
+                committed_unicode_keysyms: true,
+            },
+        }
+    ));
+}
+
+fn handshake(stdin: &mut impl Write, stdout: &mut impl std::io::Read) {
+    send(stdin, &client_hello());
+    assert_server_hello(recv(stdout));
+}
+
+fn assert_helper_rejects(messages: Vec<VncControlMessage>) {
+    let mut child = helper_command()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for message in messages {
+        send(&mut stdin, &message);
+    }
+    drop(stdin);
+    assert!(!child.wait().unwrap().success());
+}
+
+fn assert_helper_rejects_frame(after_hello: bool) {
+    let mut child = helper_command()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    if after_hello {
+        send(&mut stdin, &client_hello());
+    }
+    let frame = RdpFrameEvent::Bitmap {
+        epoch: 1,
+        full: true,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        stride: 4,
+        format: PixelFormat::Rgba8,
+        pixels: vec![0; 4],
+    };
+    write_packet(
+        &mut stdin,
+        &encode_frame_packet("test-session", &frame).unwrap(),
+    )
+    .unwrap();
+    drop(stdin);
+    assert!(!child.wait().unwrap().success());
 }
 
 /// A port with nothing listening on it: bind, read the port, then release it.
@@ -55,24 +125,100 @@ fn config(port: u16) -> VncSessionConfig {
     }
 }
 
+fn non_client_hello_messages() -> Vec<VncControlMessage> {
+    vec![
+        VncControlMessage::ServerHello {
+            version: PROTOCOL_VERSION,
+            capabilities: VncServerCapabilities::default(),
+        },
+        VncControlMessage::Connect {
+            session_id: "test-session".to_string(),
+            config: config(closed_port()),
+        },
+        VncControlMessage::DesktopReset {
+            session_id: "test-session".to_string(),
+            epoch: 1,
+            width: 800,
+            height: 600,
+        },
+        VncControlMessage::State {
+            session_id: "test-session".to_string(),
+            state: VncSessionState::Connecting,
+            message: None,
+        },
+        VncControlMessage::Input {
+            session_id: "test-session".to_string(),
+            events: vec![VncInputEvent::ReleaseAllKeys],
+        },
+        VncControlMessage::Clipboard {
+            session_id: "test-session".to_string(),
+            text: "clipboard".to_string(),
+        },
+        VncControlMessage::Error {
+            session_id: "test-session".to_string(),
+            error: VncError::new(VncErrorKind::Protocol, "wrong direction"),
+            fatal: true,
+        },
+        VncControlMessage::RequestFullFrame {
+            session_id: "test-session".to_string(),
+        },
+        VncControlMessage::Disconnect {
+            session_id: "test-session".to_string(),
+        },
+    ]
+}
+
+fn helper_only_messages() -> Vec<VncControlMessage> {
+    vec![
+        VncControlMessage::ServerHello {
+            version: PROTOCOL_VERSION,
+            capabilities: VncServerCapabilities::default(),
+        },
+        VncControlMessage::DesktopReset {
+            session_id: "test-session".to_string(),
+            epoch: 1,
+            width: 800,
+            height: 600,
+        },
+        VncControlMessage::State {
+            session_id: "test-session".to_string(),
+            state: VncSessionState::Connecting,
+            message: None,
+        },
+        VncControlMessage::Error {
+            session_id: "test-session".to_string(),
+            error: VncError::new(VncErrorKind::Protocol, "wrong direction"),
+            fatal: true,
+        },
+    ]
+}
+
+fn foreign_session_messages() -> Vec<VncControlMessage> {
+    vec![
+        VncControlMessage::Input {
+            session_id: "foreign-session".to_string(),
+            events: vec![VncInputEvent::ReleaseAllKeys],
+        },
+        VncControlMessage::Clipboard {
+            session_id: "foreign-session".to_string(),
+            text: "clipboard".to_string(),
+        },
+        VncControlMessage::RequestFullFrame {
+            session_id: "foreign-session".to_string(),
+        },
+        VncControlMessage::Disconnect {
+            session_id: "foreign-session".to_string(),
+        },
+    ]
+}
+
 #[test]
 fn helper_handshake_disconnects_and_reaps_cleanly() {
     let mut child = spawn_helper();
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
 
-    send(
-        &mut stdin,
-        &VncControlMessage::ClientHello {
-            version: PROTOCOL_VERSION,
-        },
-    );
-    assert!(matches!(
-        recv(&mut stdout),
-        VncControlMessage::ServerHello {
-            version: PROTOCOL_VERSION
-        }
-    ));
+    handshake(&mut stdin, &mut stdout);
 
     send(
         &mut stdin,
@@ -99,21 +245,72 @@ fn helper_handshake_disconnects_and_reaps_cleanly() {
 }
 
 #[test]
+fn pipelined_client_hello_and_connect_still_emit_server_hello_first() {
+    let mut child = spawn_helper();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+
+    send(&mut stdin, &client_hello());
+    send(
+        &mut stdin,
+        &VncControlMessage::Connect {
+            session_id: "pipelined".to_string(),
+            config: config(closed_port()),
+        },
+    );
+
+    assert_server_hello(recv(&mut stdout));
+    send(
+        &mut stdin,
+        &VncControlMessage::Disconnect {
+            session_id: "pipelined".to_string(),
+        },
+    );
+    drop(stdin);
+    let _ = child.wait().unwrap();
+}
+
+#[test]
+fn every_non_client_hello_message_and_frame_fail_before_hello() {
+    for message in non_client_hello_messages() {
+        assert_helper_rejects(vec![message]);
+    }
+    assert_helper_rejects_frame(false);
+}
+
+#[test]
+fn repeated_hello_wrong_version_and_helper_only_messages_fail_closed() {
+    assert_helper_rejects(vec![VncControlMessage::ClientHello {
+        version: PROTOCOL_VERSION + 1,
+    }]);
+    assert_helper_rejects(vec![client_hello(), client_hello()]);
+    for message in helper_only_messages() {
+        assert_helper_rejects(vec![client_hello(), message]);
+    }
+    assert_helper_rejects_frame(true);
+}
+
+#[test]
+fn every_session_scoped_message_with_a_foreign_id_fails_closed() {
+    for message in foreign_session_messages() {
+        assert_helper_rejects(vec![
+            client_hello(),
+            VncControlMessage::Connect {
+                session_id: "active-session".to_string(),
+                config: config(closed_port()),
+            },
+            message,
+        ]);
+    }
+}
+
+#[test]
 fn unreachable_server_reports_a_fatal_transport_error_and_still_disconnects() {
     let mut child = spawn_helper();
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
 
-    send(
-        &mut stdin,
-        &VncControlMessage::ClientHello {
-            version: PROTOCOL_VERSION,
-        },
-    );
-    assert!(matches!(
-        recv(&mut stdout),
-        VncControlMessage::ServerHello { .. }
-    ));
+    handshake(&mut stdin, &mut stdout);
 
     send(
         &mut stdin,
@@ -172,6 +369,7 @@ fn a_second_connect_is_rejected_without_replacing_the_session() {
     let mut stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
 
+    handshake(&mut stdin, &mut stdout);
     let port = closed_port();
     send(
         &mut stdin,

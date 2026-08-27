@@ -3,13 +3,16 @@ use std::time::{Duration, Instant};
 use futures::StreamExt as _;
 use gpui::{Bounds, ClipboardItem, Context, DevicePixels, Point, Size, Window, point, size};
 use nyaterm_remote_desktop::{
-    CertificateDecision, ClipboardOrigin, DirtyRect, Framebuffer, RdpCapability,
-    RdpCertificatePolicy, RdpCertificateRequest, RdpCertificateResponse, RdpClipboardMode,
-    RdpDisplayMode, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent,
-    RdpSessionConfig, RdpSessionState, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent,
-    VncSessionConfig, VncSessionState,
+    CertificateDecision, CertificateMatchState, CertificatePromptReason, ClipboardOrigin,
+    DirtyRect, Framebuffer, RdpCapability, RdpCertificatePolicy, RdpCertificateRequest,
+    RdpCertificateResponse, RdpClipboardMode, RdpDisplayMode, RdpError, RdpErrorKind,
+    RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities, RdpSessionConfig,
+    RdpSessionState, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent, VncServerCapabilities,
+    VncSessionConfig, VncSessionState, evaluate_certificate_match,
 };
-use nyaterm_store::{KnownHostCheck, RdpCertificateMetadata, StoreDomain, store_request};
+use nyaterm_store::{RdpCertificateMetadata, RdpKnownHostCheck, StoreDomain, store_request};
+
+use super::state::RdpCertificatePrompt;
 
 use crate::features::NyaTermApp;
 
@@ -57,7 +60,7 @@ impl NyaTermApp {
                     None,
                 );
                 if let Some(session_id) = this.session.active_id_owned() {
-                    this.release_rdp_keys(&session_id);
+                    this.release_remote_keys(&session_id);
                 }
             },
         );
@@ -343,12 +346,13 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
     ) -> Result<(), RdpError> {
+        self.remote_desktop.input.clear_session(session_id);
         if self.session.active_id() == Some(session_id) {
             super::keyboard_capture::set_keyboard_capture(
                 self.remote_desktop.manager.clone(),
                 None,
             );
-            self.release_rdp_keys(session_id);
+            self.release_remote_keys(session_id);
         }
         if let Some(mut session) = self.remote_desktop.sessions.remove(session_id) {
             if let Some(texture) = session.texture.take() {
@@ -365,6 +369,10 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
     ) -> Result<(), VncError> {
+        self.remote_desktop.input.clear_session(session_id);
+        if self.session.active_id() == Some(session_id) {
+            self.release_remote_keys(session_id);
+        }
         if let Some(mut session) = self.remote_desktop.sessions.remove(session_id) {
             if let Some(texture) = session.texture.take() {
                 self.remote_desktop.pending_texture_removals.push(texture);
@@ -376,7 +384,22 @@ impl NyaTermApp {
         self.remote_desktop.vnc_manager.close(session_id)
     }
 
-    pub(in crate::features) fn release_rdp_keys(&mut self, session_id: &str) {
+    pub(in crate::features) fn release_remote_keys(&mut self, session_id: &str) {
+        self.remote_desktop.input.clear_session(session_id);
+        if self.session.metadata(session_id).is_some_and(|metadata| {
+            matches!(
+                metadata.launch_config,
+                crate::models::SessionLaunchConfig::Vnc(_)
+            )
+        }) {
+            if self.vnc_input_enabled(session_id) {
+                let _ = self
+                    .remote_desktop
+                    .vnc_manager
+                    .send_input(session_id, vec![VncInputEvent::ReleaseAllKeys]);
+            }
+            return;
+        }
         let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
             return;
         };
@@ -555,22 +578,33 @@ impl NyaTermApp {
     ) {
         match event {
             VncRuntimeEvent::State { state, message, .. } => {
+                let vnc_server_capabilities = vnc_capabilities_for_state(
+                    &state,
+                    self.remote_desktop
+                        .vnc_manager
+                        .server_capabilities(session_id),
+                );
+                let state = match state {
+                    VncSessionState::Connecting
+                    | VncSessionState::Authenticating
+                    | VncSessionState::Negotiating => RdpSessionState::Connecting,
+                    VncSessionState::Connected => RdpSessionState::Connected,
+                    VncSessionState::Reconnecting => RdpSessionState::Reconnecting,
+                    VncSessionState::Disconnecting => RdpSessionState::Disconnecting,
+                    VncSessionState::Disconnected => RdpSessionState::Disconnected,
+                    VncSessionState::Failed => RdpSessionState::Failed(RdpError::new(
+                        RdpErrorKind::Session,
+                        message
+                            .clone()
+                            .unwrap_or_else(|| "VNC session failed".to_string()),
+                    )),
+                };
+                if remote_state_clears_input(&state) {
+                    self.remote_desktop.input.clear_session(session_id);
+                }
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
-                    session.state = match state {
-                        VncSessionState::Connecting
-                        | VncSessionState::Authenticating
-                        | VncSessionState::Negotiating => RdpSessionState::Connecting,
-                        VncSessionState::Connected => RdpSessionState::Connected,
-                        VncSessionState::Reconnecting => RdpSessionState::Reconnecting,
-                        VncSessionState::Disconnecting => RdpSessionState::Disconnecting,
-                        VncSessionState::Disconnected => RdpSessionState::Disconnected,
-                        VncSessionState::Failed => RdpSessionState::Failed(RdpError::new(
-                            RdpErrorKind::Session,
-                            message
-                                .clone()
-                                .unwrap_or_else(|| "VNC session failed".to_string()),
-                        )),
-                    };
+                    session.vnc_server_capabilities = vnc_server_capabilities;
+                    session.state = state;
                 }
                 if let Some(message) = message {
                     self.shell.set_status(message);
@@ -594,7 +628,9 @@ impl NyaTermApp {
                 }
             }
             VncRuntimeEvent::Error { error, .. } => {
+                self.remote_desktop.input.clear_session(session_id);
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
+                    session.vnc_server_capabilities = None;
                     set_rdp_view_error(
                         session,
                         vnc_error_as_rdp_kind(error.kind),
@@ -645,32 +681,173 @@ impl NyaTermApp {
         );
     }
 
+    pub(in crate::features) fn focused_remote_desktop_session_id(
+        &self,
+        window: &Window,
+    ) -> Option<String> {
+        self.remote_desktop
+            .focus
+            .is_focused(window)
+            .then(|| self.session.active_id_owned())
+            .flatten()
+            .filter(|session_id| self.remote_desktop.is_session(session_id))
+    }
+
+    pub(in crate::features) fn remote_marked_text(&self, session_id: &str) -> String {
+        self.remote_desktop
+            .input
+            .marked_text(session_id)
+            .to_string()
+    }
+
+    pub(in crate::features) fn set_remote_marked_text(&mut self, session_id: &str, text: &str) {
+        self.remote_desktop.input.set_marked_text(session_id, text);
+    }
+
+    pub(in crate::features) fn clear_remote_marked_text(&mut self, session_id: &str) {
+        self.remote_desktop.input.clear_marked_text(session_id);
+    }
+
+    pub(in crate::features) fn send_remote_committed_text(
+        &mut self,
+        session_id: &str,
+        text: &str,
+    ) -> bool {
+        self.remote_desktop.input.clear_marked_text(session_id);
+        if text.is_empty() {
+            return true;
+        }
+        if !self
+            .remote_desktop
+            .sessions
+            .get(session_id)
+            .is_some_and(|session| matches!(session.state, RdpSessionState::Connected))
+        {
+            self.shell.set_status(
+                "Remote desktop text input is unavailable while disconnected".to_string(),
+            );
+            return false;
+        }
+        let is_vnc = self.session.metadata(session_id).is_some_and(|metadata| {
+            matches!(
+                metadata.launch_config,
+                crate::models::SessionLaunchConfig::Vnc(_)
+            )
+        });
+        let committed_text_supported =
+            self.remote_desktop
+                .sessions
+                .get(session_id)
+                .is_some_and(|session| {
+                    remote_committed_text_supported(
+                        is_vnc,
+                        session.server_capabilities,
+                        session.vnc_server_capabilities,
+                    )
+                });
+        if !committed_text_supported {
+            return false;
+        }
+        let result = if is_vnc {
+            if !self.vnc_input_enabled(session_id) {
+                self.shell
+                    .set_status("VNC view-only mode does not accept input".to_string());
+                return false;
+            }
+            self.remote_desktop
+                .vnc_manager
+                .send_input(
+                    session_id,
+                    vec![VncInputEvent::Text {
+                        text: text.to_string(),
+                    }],
+                )
+                .map_err(|error| error.to_string())
+        } else {
+            self.remote_desktop
+                .manager
+                .send_input(
+                    session_id,
+                    vec![RdpInputEvent::Unicode {
+                        text: text.to_string(),
+                    }],
+                )
+                .map_err(|error| format_rdp_error(&error))
+        };
+        match result {
+            Ok(()) => true,
+            Err(error) => {
+                self.shell.set_status(error);
+                false
+            }
+        }
+    }
+
     pub(in crate::features) fn send_rdp_key_down(
         &mut self,
         session_id: &str,
         key: &str,
         key_char: Option<&str>,
         repeat: bool,
+        control: bool,
+        alt: bool,
+        platform: bool,
     ) -> bool {
-        if self.session.metadata(session_id).is_some_and(|metadata| {
+        if !self
+            .remote_desktop
+            .sessions
+            .get(session_id)
+            .is_some_and(|session| matches!(session.state, RdpSessionState::Connected))
+        {
+            return false;
+        }
+        let is_vnc = self.session.metadata(session_id).is_some_and(|metadata| {
             matches!(
                 metadata.launch_config,
                 crate::models::SessionLaunchConfig::Vnc(_)
             )
-        }) {
+        });
+        let committed_text_supported =
+            self.remote_desktop
+                .sessions
+                .get(session_id)
+                .is_some_and(|session| {
+                    remote_committed_text_supported(
+                        is_vnc,
+                        session.server_capabilities,
+                        session.vnc_server_capabilities,
+                    )
+                });
+        let classified_for_text = remote_key_down_should_defer_to_text(
+            key_char,
+            committed_text_supported,
+            RemoteInputPlatform::current(),
+            RemoteKeyModifiers {
+                control,
+                alt,
+                platform,
+            },
+        );
+        let key_already_uses_text = self
+            .remote_desktop
+            .input
+            .is_key_up_suppressed(session_id, key);
+        if remote_key_down_uses_text_route(repeat, key_already_uses_text, classified_for_text) {
+            if is_vnc && !self.vnc_input_enabled(session_id) {
+                return false;
+            }
+            self.remote_desktop.input.suppress_key_up(session_id, key);
+            return true;
+        }
+        if is_vnc {
             return self.send_vnc_key(session_id, key, key_char, true);
         }
-        let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
-            return false;
-        };
-        let event = session.keys.key_down(key, repeat).or_else(|| {
-            key_char
-                .filter(|text| !text.is_empty())
-                .map(|text| RdpInputEvent::Unicode {
-                    text: text.to_string(),
-                })
-        });
-        let Some(event) = event else {
+        let Some(event) = self
+            .remote_desktop
+            .sessions
+            .get_mut(session_id)
+            .and_then(|session| session.keys.key_down(key, repeat))
+        else {
             return false;
         };
         self.remote_desktop
@@ -680,6 +857,13 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn send_rdp_key_up(&mut self, session_id: &str, key: &str) -> bool {
+        if self
+            .remote_desktop
+            .input
+            .take_suppressed_key_up(session_id, key)
+        {
+            return true;
+        }
         if self.session.metadata(session_id).is_some_and(|metadata| {
             matches!(
                 metadata.launch_config,
@@ -700,6 +884,42 @@ impl NyaTermApp {
             .manager
             .send_input(session_id, vec![event])
             .is_ok()
+    }
+
+    pub(in crate::features) fn rdp_secure_attention_available(&self, session_id: &str) -> bool {
+        let is_rdp = self.session.metadata(session_id).is_some_and(|metadata| {
+            matches!(
+                metadata.launch_config,
+                crate::models::SessionLaunchConfig::Rdp(_)
+            )
+        });
+        self.remote_desktop
+            .sessions
+            .get(session_id)
+            .is_some_and(|session| {
+                secure_attention_available(is_rdp, &session.state, session.server_capabilities)
+            })
+    }
+
+    pub(in crate::features) fn send_rdp_secure_attention(&mut self, session_id: &str) -> bool {
+        if !self.rdp_secure_attention_available(session_id) {
+            return false;
+        }
+        match self
+            .remote_desktop
+            .manager
+            .send_secure_attention(session_id)
+        {
+            Ok(()) => {
+                self.shell
+                    .set_status("RDP Secure Attention sent".to_string());
+                true
+            }
+            Err(error) => {
+                self.shell.set_status(format_rdp_error(&error));
+                false
+            }
+        }
     }
 
     pub(in crate::features) fn send_rdp_pointer(
@@ -885,7 +1105,7 @@ impl NyaTermApp {
         self.session.metadata(session_id).is_some_and(|metadata| {
             matches!(
                 &metadata.launch_config,
-                crate::models::SessionLaunchConfig::Vnc(config) if !config.view_only
+                crate::models::SessionLaunchConfig::Vnc(config) if vnc_input_allowed(config.view_only)
             )
         })
     }
@@ -953,6 +1173,12 @@ impl NyaTermApp {
     ) {
         match event {
             RdpRuntimeEvent::State { state, message, .. } => {
+                let server_capabilities = matches!(state, RdpSessionState::Connected)
+                    .then(|| self.remote_desktop.manager.server_capabilities(session_id))
+                    .flatten();
+                if remote_state_clears_input(&state) {
+                    self.remote_desktop.input.clear_session(session_id);
+                }
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
                     if should_disable_dynamic_resize_after_state(
                         &state,
@@ -965,6 +1191,7 @@ impl NyaTermApp {
                     if let RdpSessionState::Failed(error) = &state {
                         session.error = Some(error.clone());
                     }
+                    session.server_capabilities = server_capabilities;
                     session.state = state;
                 }
                 if let Some(message) = message {
@@ -1016,9 +1243,15 @@ impl NyaTermApp {
                 }
             }
             RdpRuntimeEvent::Error { error, fatal, .. } => {
+                if fatal {
+                    self.remote_desktop.input.clear_session(session_id);
+                }
                 let should_reconnect = fatal && self.schedule_rdp_reconnect(session_id, &error);
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
                     session.error = Some(error.clone());
+                    if fatal {
+                        session.server_capabilities = None;
+                    }
                     if fatal && !should_reconnect {
                         session.state = RdpSessionState::Failed(error.clone());
                     }
@@ -1232,7 +1465,7 @@ impl NyaTermApp {
                 session_id,
                 request,
                 policy,
-                KnownHostCheck::UnknownHost,
+                RdpKnownHostCheck::UnknownHost,
                 cx,
             );
             return;
@@ -1278,32 +1511,27 @@ impl NyaTermApp {
         session_id: &str,
         request: RdpCertificateRequest,
         policy: RdpCertificatePolicy,
-        check: KnownHostCheck,
+        check: RdpKnownHostCheck,
         cx: &mut Context<Self>,
     ) {
-        let decision = match policy {
-            RdpCertificatePolicy::Insecure => CertificateDecision::Accept,
-            RdpCertificatePolicy::TrustOnFirstUse => match check {
-                KnownHostCheck::Match => CertificateDecision::Accept,
-                KnownHostCheck::UnknownHost => CertificateDecision::AcceptAndRemember,
-                KnownHostCheck::HostSeen => CertificateDecision::Reject,
+        let match_state = match check {
+            RdpKnownHostCheck::Match => CertificateMatchState::Match,
+            RdpKnownHostCheck::UnknownHost => CertificateMatchState::FirstUse,
+            RdpKnownHostCheck::Changed {
+                remembered_fingerprint,
+            } => CertificateMatchState::Changed {
+                remembered_fingerprint,
             },
-            RdpCertificatePolicy::Strict | RdpCertificatePolicy::RejectChanged => {
-                if check == KnownHostCheck::Match {
-                    CertificateDecision::Accept
-                } else {
-                    CertificateDecision::Reject
-                }
-            }
-            RdpCertificatePolicy::Prompt => {
-                if check == KnownHostCheck::Match {
-                    CertificateDecision::Accept
-                } else {
-                    CertificateDecision::Prompt
-                }
-            }
         };
-        match decision {
+        let expected_previous_fingerprint = match &match_state {
+            CertificateMatchState::Changed {
+                remembered_fingerprint,
+            } => Some(remembered_fingerprint.clone()),
+            CertificateMatchState::FirstUse | CertificateMatchState::Match => None,
+        };
+        let evaluation =
+            evaluate_certificate_match(policy, match_state, &request.sha256_fingerprint);
+        match evaluation.decision {
             CertificateDecision::Accept => {
                 let _ = self
                     .remote_desktop
@@ -1311,7 +1539,11 @@ impl NyaTermApp {
                     .respond_certificate(&request.request_id, RdpCertificateResponse::TrustOnce);
             }
             CertificateDecision::AcceptAndRemember => {
-                self.persist_rdp_certificate_and_respond(request, cx);
+                self.persist_rdp_certificate_and_respond(
+                    request,
+                    expected_previous_fingerprint,
+                    cx,
+                );
             }
             CertificateDecision::Reject => {
                 let _ = self
@@ -1320,8 +1552,15 @@ impl NyaTermApp {
                     .respond_certificate(&request.request_id, RdpCertificateResponse::Reject);
             }
             CertificateDecision::Prompt => {
+                let Some(reason) = evaluation.prompt_reason else {
+                    let _ = self
+                        .remote_desktop
+                        .manager
+                        .respond_certificate(&request.request_id, RdpCertificateResponse::Reject);
+                    return;
+                };
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
-                    session.certificate_request = Some(request);
+                    session.certificate_request = Some(RdpCertificatePrompt { request, reason });
                 }
             }
         }
@@ -1333,22 +1572,40 @@ impl NyaTermApp {
         response: RdpCertificateResponse,
         cx: &mut Context<Self>,
     ) {
-        let request = self
+        let prompt = self
             .remote_desktop
             .sessions
             .get_mut(session_id)
             .and_then(|session| session.certificate_request.take());
-        let Some(request) = request else {
+        let Some(prompt) = prompt else {
             return;
         };
+        let expected_previous_fingerprint = match &prompt.reason {
+            CertificatePromptReason::FirstUse => None,
+            CertificatePromptReason::Changed {
+                previous_fingerprint,
+                ..
+            } => Some(previous_fingerprint.clone()),
+        };
         if response == RdpCertificateResponse::TrustAndRemember {
-            self.persist_rdp_certificate_and_respond(request, cx);
+            self.persist_rdp_certificate_and_respond(
+                prompt.request,
+                expected_previous_fingerprint,
+                cx,
+            );
             return;
         }
+        let response = if matches!(prompt.reason, CertificatePromptReason::Changed { .. })
+            && response == RdpCertificateResponse::TrustOnce
+        {
+            RdpCertificateResponse::Reject
+        } else {
+            response
+        };
         if let Err(error) = self
             .remote_desktop
             .manager
-            .respond_certificate(&request.request_id, response)
+            .respond_certificate(&prompt.request.request_id, response)
         {
             self.shell.set_status(format_rdp_error(&error));
         }
@@ -1357,6 +1614,7 @@ impl NyaTermApp {
     fn persist_rdp_certificate_and_respond(
         &mut self,
         request: RdpCertificateRequest,
+        expected_previous_fingerprint: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let request_id = request.request_id.clone();
@@ -1373,11 +1631,24 @@ impl NyaTermApp {
         let submitted = self.submit_store_request(
             0,
             store_request(StoreDomain::Security, move |store| {
-                store.upsert_rdp_known_host(&host, port, &fingerprint, metadata)
+                store.replace_rdp_known_host_if_matches(
+                    &host,
+                    port,
+                    expected_previous_fingerprint.as_deref(),
+                    &fingerprint,
+                    metadata,
+                )
             }),
             move |this, event, cx| {
                 let response = match event.outcome {
-                    Ok(()) => RdpCertificateResponse::TrustAndRemember,
+                    Ok(true) => RdpCertificateResponse::TrustAndRemember,
+                    Ok(false) => {
+                        this.shell.set_status(
+                            "RDP certificate changed again before confirmation; connection rejected"
+                                .to_string(),
+                        );
+                        RdpCertificateResponse::Reject
+                    }
                     Err(error) => {
                         this.shell.set_status(format!(
                             "RDP certificate could not be remembered: {error}"
@@ -1624,6 +1895,116 @@ fn set_button_mask(mask: &mut u8, bit: u8, pressed: bool) {
     }
 }
 
+fn vnc_input_allowed(view_only: bool) -> bool {
+    !view_only
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteInputPlatform {
+    MacOs,
+    Windows,
+    Linux,
+    Other,
+}
+
+impl RemoteInputPlatform {
+    fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else if cfg!(target_os = "windows") {
+            Self::Windows
+        } else if cfg!(target_os = "linux") {
+            Self::Linux
+        } else {
+            Self::Other
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct RemoteKeyModifiers {
+    control: bool,
+    alt: bool,
+    platform: bool,
+}
+
+fn remote_committed_text_supported(
+    is_vnc: bool,
+    rdp_capabilities: Option<RdpServerCapabilities>,
+    vnc_capabilities: Option<VncServerCapabilities>,
+) -> bool {
+    if is_vnc {
+        vnc_capabilities.is_some_and(|capabilities| capabilities.committed_unicode_keysyms)
+    } else {
+        rdp_capabilities.is_some_and(|capabilities| capabilities.committed_unicode_text)
+    }
+}
+
+fn remote_key_down_should_defer_to_text(
+    key_char: Option<&str>,
+    committed_text_supported: bool,
+    input_platform: RemoteInputPlatform,
+    modifiers: RemoteKeyModifiers,
+) -> bool {
+    if !committed_text_supported
+        || modifiers.platform
+        || !key_char.is_some_and(|text| {
+            !text.is_empty() && text.chars().all(|character| !character.is_control())
+        })
+    {
+        return false;
+    }
+
+    match input_platform {
+        RemoteInputPlatform::MacOs => !modifiers.control,
+        RemoteInputPlatform::Windows | RemoteInputPlatform::Linux => {
+            modifiers.control == modifiers.alt
+        }
+        RemoteInputPlatform::Other => !modifiers.control && !modifiers.alt,
+    }
+}
+
+fn remote_key_down_uses_text_route(
+    repeat: bool,
+    key_already_uses_text: bool,
+    classified_for_text: bool,
+) -> bool {
+    if repeat {
+        key_already_uses_text
+    } else {
+        classified_for_text
+    }
+}
+
+fn vnc_capabilities_for_state(
+    state: &VncSessionState,
+    capabilities: Option<VncServerCapabilities>,
+) -> Option<VncServerCapabilities> {
+    matches!(state, VncSessionState::Connected)
+        .then_some(capabilities)
+        .flatten()
+}
+
+fn remote_state_clears_input(state: &RdpSessionState) -> bool {
+    matches!(
+        state,
+        RdpSessionState::Reconnecting
+            | RdpSessionState::Disconnecting
+            | RdpSessionState::Disconnected
+            | RdpSessionState::Failed(_)
+    )
+}
+
+pub(super) fn secure_attention_available(
+    is_rdp: bool,
+    state: &RdpSessionState,
+    capabilities: Option<RdpServerCapabilities>,
+) -> bool {
+    is_rdp
+        && matches!(state, RdpSessionState::Connected)
+        && capabilities.is_some_and(|capabilities| capabilities.secure_attention)
+}
+
 fn vnc_keysym_for_key(key: &str, key_char: Option<&str>) -> Option<u32> {
     let key = key.to_ascii_lowercase();
     let keysym = match key.as_str() {
@@ -1774,13 +2155,20 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use nyaterm_core::ConnectionAuth;
-    use nyaterm_remote_desktop::{RdpError, RdpErrorKind};
+    use nyaterm_remote_desktop::{
+        RdpError, RdpErrorKind, RdpServerCapabilities, RdpSessionState, VncServerCapabilities,
+        VncSessionState,
+    };
 
     use super::{
-        MAINTENANCE_INTERVAL, POINTER_MOVE_INTERVAL, RESIZE_DEBOUNCE,
-        clear_rdp_reconnect_after_frame, inline_remote_desktop_password, rdp_error_is_retryable,
-        rdp_reconnect_delay, rdp_resize_is_material, remote_desktop_password_id,
-        remote_desktop_periodic_delay, should_disable_dynamic_resize_after_state,
+        MAINTENANCE_INTERVAL, POINTER_MOVE_INTERVAL, RESIZE_DEBOUNCE, RemoteInputPlatform,
+        RemoteKeyModifiers, clear_rdp_reconnect_after_frame, inline_remote_desktop_password,
+        rdp_error_is_retryable, rdp_reconnect_delay, rdp_resize_is_material,
+        remote_committed_text_supported, remote_desktop_password_id, remote_desktop_periodic_delay,
+        remote_key_down_should_defer_to_text, remote_key_down_uses_text_route,
+        remote_state_clears_input, secure_attention_available,
+        should_disable_dynamic_resize_after_state, vnc_capabilities_for_state, vnc_input_allowed,
+        vnc_keysym_for_key,
     };
     use crate::features::remote_desktop::state::RemoteDesktopSessionState;
 
@@ -1910,5 +2298,187 @@ mod tests {
             Some(now),
             now,
         ));
+    }
+
+    #[test]
+    fn committed_text_requires_the_confirmed_protocol_capability() {
+        let rdp_supported = RdpServerCapabilities {
+            committed_unicode_text: true,
+            secure_attention: false,
+        };
+        let vnc_supported = VncServerCapabilities {
+            committed_unicode_keysyms: true,
+        };
+
+        assert!(!remote_committed_text_supported(false, None, None));
+        assert!(!remote_committed_text_supported(
+            false,
+            Some(RdpServerCapabilities::default()),
+            None,
+        ));
+        assert!(remote_committed_text_supported(
+            false,
+            Some(rdp_supported),
+            None,
+        ));
+        assert!(!remote_committed_text_supported(true, None, None));
+        assert!(!remote_committed_text_supported(
+            true,
+            None,
+            Some(VncServerCapabilities::default()),
+        ));
+        assert!(remote_committed_text_supported(
+            true,
+            None,
+            Some(vnc_supported),
+        ));
+    }
+
+    #[test]
+    fn printable_keydown_uses_platform_text_service_policy() {
+        let plain = RemoteKeyModifiers::default();
+        let control = RemoteKeyModifiers {
+            control: true,
+            ..Default::default()
+        };
+        let alt = RemoteKeyModifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let alt_gr = RemoteKeyModifiers {
+            control: true,
+            alt: true,
+            ..Default::default()
+        };
+        let platform = RemoteKeyModifiers {
+            platform: true,
+            ..Default::default()
+        };
+        let defers = |input_platform, modifiers| {
+            remote_key_down_should_defer_to_text(Some("é"), true, input_platform, modifiers)
+        };
+
+        for input_platform in [
+            RemoteInputPlatform::MacOs,
+            RemoteInputPlatform::Windows,
+            RemoteInputPlatform::Linux,
+        ] {
+            assert!(defers(input_platform, plain));
+            assert!(!defers(input_platform, control));
+            assert!(!defers(input_platform, platform));
+        }
+        assert!(defers(RemoteInputPlatform::MacOs, alt));
+        assert!(!defers(RemoteInputPlatform::MacOs, alt_gr));
+        for input_platform in [RemoteInputPlatform::Windows, RemoteInputPlatform::Linux] {
+            assert!(defers(input_platform, alt_gr));
+            assert!(!defers(input_platform, alt));
+        }
+    }
+
+    #[test]
+    fn repeat_keydowns_keep_the_initial_route_when_modifiers_change() {
+        assert!(!remote_key_down_uses_text_route(true, false, true));
+        assert!(remote_key_down_uses_text_route(true, true, false));
+        assert!(remote_key_down_uses_text_route(false, false, true));
+        assert!(!remote_key_down_uses_text_route(false, true, false));
+    }
+
+    #[test]
+    fn unsupported_or_non_printable_keys_stay_on_the_physical_path() {
+        let plain = RemoteKeyModifiers::default();
+        assert!(!remote_key_down_should_defer_to_text(
+            Some("a"),
+            false,
+            RemoteInputPlatform::Windows,
+            plain,
+        ));
+        assert!(!remote_key_down_should_defer_to_text(
+            Some("\r"),
+            true,
+            RemoteInputPlatform::MacOs,
+            plain,
+        ));
+        assert!(!remote_key_down_should_defer_to_text(
+            None,
+            true,
+            RemoteInputPlatform::Linux,
+            plain,
+        ));
+    }
+
+    #[test]
+    fn vnc_capability_cache_only_survives_connected_state() {
+        let supported = Some(VncServerCapabilities {
+            committed_unicode_keysyms: true,
+        });
+
+        assert_eq!(
+            vnc_capabilities_for_state(&VncSessionState::Connected, supported),
+            supported,
+        );
+        assert_eq!(
+            vnc_capabilities_for_state(&VncSessionState::Reconnecting, supported),
+            None,
+        );
+        assert_eq!(
+            vnc_capabilities_for_state(&VncSessionState::Disconnected, supported),
+            None,
+        );
+    }
+
+    #[test]
+    fn physical_vnc_key_mapping_preserves_shortcut_and_navigation_keys() {
+        assert_eq!(vnc_keysym_for_key("c", Some("c")), Some(u32::from('c')));
+        assert_eq!(vnc_keysym_for_key("left", None), Some(0xff51));
+        assert_eq!(vnc_keysym_for_key("F12", None), Some(0xffc9));
+    }
+
+    #[test]
+    fn vnc_view_only_is_rejected_before_manager_dispatch() {
+        assert!(vnc_input_allowed(false));
+        assert!(!vnc_input_allowed(true));
+    }
+
+    #[test]
+    fn secure_attention_requires_rdp_connected_state_and_confirmed_capability() {
+        let supported = Some(RdpServerCapabilities {
+            committed_unicode_text: true,
+            secure_attention: true,
+        });
+        assert!(secure_attention_available(
+            true,
+            &RdpSessionState::Connected,
+            supported,
+        ));
+        assert!(!secure_attention_available(
+            false,
+            &RdpSessionState::Connected,
+            supported,
+        ));
+        assert!(!secure_attention_available(
+            true,
+            &RdpSessionState::Connecting,
+            supported,
+        ));
+        assert!(!secure_attention_available(
+            true,
+            &RdpSessionState::Connected,
+            None,
+        ));
+        assert!(!secure_attention_available(
+            true,
+            &RdpSessionState::Connected,
+            Some(RdpServerCapabilities::default()),
+        ));
+    }
+
+    #[test]
+    fn disconnecting_states_clear_local_composition_and_key_suppression() {
+        assert!(!remote_state_clears_input(&RdpSessionState::Connected));
+        assert!(remote_state_clears_input(&RdpSessionState::Reconnecting));
+        assert!(remote_state_clears_input(&RdpSessionState::Disconnected));
+        assert!(remote_state_clears_input(&RdpSessionState::Failed(
+            RdpError::new(RdpErrorKind::Session, "closed")
+        )));
     }
 }

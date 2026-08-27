@@ -21,9 +21,9 @@ use ironrdp_pdu::rdp::capability_sets::MajorPlatformType;
 use nyaterm_remote_desktop::{
     PROTOCOL_VERSION, Packet, PixelFormat, RdpCapability, RdpCertificateRequest,
     RdpCertificateResponse, RdpControlMessage, RdpCursorEvent, RdpError, RdpErrorKind,
-    RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpSessionConfig, RdpSessionState,
-    decode_control, encode_control, encode_cursor_packet, encode_frame_packet, read_packet,
-    write_packet_into,
+    RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpServerCapabilities, RdpSessionConfig,
+    RdpSessionState, decode_control, encode_control, encode_cursor_packet, encode_frame_packet,
+    read_packet, validate_committed_text, write_packet_into,
 };
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
@@ -50,11 +50,56 @@ struct CertificateGate {
     waiting: AtomicBool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct InputState {
     pressed_keys: HashSet<(u8, bool)>,
     pointer_x: u16,
     pointer_y: u16,
+}
+
+fn validate_control_phase(message: &RdpControlMessage, hello_received: bool) -> anyhow::Result<()> {
+    if !hello_received {
+        if matches!(message, RdpControlMessage::ClientHello { .. }) {
+            return Ok(());
+        }
+        anyhow::bail!("RDP IPC expected ClientHello before any other message");
+    }
+
+    match message {
+        RdpControlMessage::ClientHello { .. } => {
+            anyhow::bail!("duplicate RDP IPC ClientHello")
+        }
+        RdpControlMessage::ServerHello { .. }
+        | RdpControlMessage::DesktopReset { .. }
+        | RdpControlMessage::State { .. }
+        | RdpControlMessage::CertificateRequest(_)
+        | RdpControlMessage::Capability { .. }
+        | RdpControlMessage::Error { .. } => {
+            anyhow::bail!("RDP IPC helper-only message received from application")
+        }
+        RdpControlMessage::Connect { .. }
+        | RdpControlMessage::Input { .. }
+        | RdpControlMessage::SecureAttention { .. }
+        | RdpControlMessage::Resize { .. }
+        | RdpControlMessage::Clipboard { .. }
+        | RdpControlMessage::CertificateResponse { .. }
+        | RdpControlMessage::RequestFullFrame { .. }
+        | RdpControlMessage::Disconnect { .. } => Ok(()),
+    }
+}
+
+fn validate_active_session_id(
+    active_session_id: Option<&str>,
+    received: &str,
+) -> anyhow::Result<()> {
+    if let Some(active) = active_session_id
+        && active != received
+    {
+        anyhow::bail!(
+            "RDP IPC session id mismatch: active session is '{active}', received '{received}'"
+        );
+    }
+    Ok(())
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -87,7 +132,8 @@ fn install_crypto_provider() -> anyhow::Result<()> {
 async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
     let (output_tx, output_rx) = mpsc::channel();
     let writer = spawn_stdout_writer(output_rx)?;
-    let (control_tx, mut control_rx) = tokio_mpsc::unbounded_channel();
+    let (control_tx, mut control_rx) =
+        tokio_mpsc::unbounded_channel::<io::Result<RdpControlMessage>>();
     let reader = spawn_stdin_reader(control_tx)?;
     let certificate_gate = Arc::new(CertificateGate::default());
     let mut iron_input = None;
@@ -95,8 +141,12 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
     let mut output_task = None;
     let mut input_state = InputState::default();
     let mut clipboard_bridge = None;
+    let mut hello_received = false;
+    let mut active_session_id: Option<String> = None;
 
     while let Some(message) = control_rx.recv().await {
+        let message = message?;
+        validate_control_phase(&message, hello_received)?;
         match message {
             RdpControlMessage::ClientHello { version } => {
                 if version != PROTOCOL_VERSION {
@@ -106,8 +156,13 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                     &output_tx,
                     RdpControlMessage::ServerHello {
                         version: PROTOCOL_VERSION,
+                        capabilities: RdpServerCapabilities {
+                            committed_unicode_text: true,
+                            secure_attention: true,
+                        },
                     },
                 )?;
+                hello_received = true;
             }
             RdpControlMessage::Connect { session_id, config } => {
                 if let Some(error) = provider_error.as_deref() {
@@ -167,6 +222,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                             }
                         })?,
                 );
+                let connected_session_id = session_id.clone();
                 output_task = Some(tokio::spawn(forward_output(
                     session_id,
                     rdp_output_rx,
@@ -175,8 +231,10 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                     connection_gate,
                     CONNECTION_TIMEOUT,
                 )));
+                active_session_id = Some(connected_session_id);
             }
             RdpControlMessage::Input { session_id, events } => {
+                validate_active_session_id(active_session_id.as_deref(), &session_id)?;
                 let Some(sender) = iron_input.as_ref() else {
                     send_error(
                         &output_tx,
@@ -187,17 +245,35 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                     )?;
                     continue;
                 };
+                validate_input_events(&events)?;
                 for event in events {
-                    if let Some(event) = convert_input(event, &mut input_state) {
-                        send_iron_input(sender, IronInput::FastPath(event))?;
-                    }
+                    convert_and_send_input(sender, event, &mut input_state)?;
                 }
+            }
+            RdpControlMessage::SecureAttention { session_id } => {
+                validate_active_session_id(active_session_id.as_deref(), &session_id)?;
+                let Some(sender) = iron_input.as_ref() else {
+                    send_error(
+                        &output_tx,
+                        &session_id,
+                        RdpErrorKind::Protocol,
+                        "RDP session is not connected",
+                        false,
+                    )?;
+                    continue;
+                };
+                send_reliable_iron_input(
+                    sender,
+                    IronInput::FastPath(secure_attention_input(&input_state)),
+                )
+                .await?;
             }
             RdpControlMessage::Resize {
                 session_id,
                 width,
                 height,
             } => {
+                validate_active_session_id(active_session_id.as_deref(), &session_id)?;
                 let Some(sender) = iron_input.as_ref() else {
                     send_error(
                         &output_tx,
@@ -221,6 +297,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 )?;
             }
             RdpControlMessage::RequestFullFrame { session_id } => {
+                validate_active_session_id(active_session_id.as_deref(), &session_id)?;
                 if let Some(sender) = iron_input.as_ref() {
                     send_iron_input(sender, IronInput::RequestFullFrame)?;
                 } else {
@@ -249,6 +326,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 text,
                 generation: _,
             } => {
+                validate_active_session_id(active_session_id.as_deref(), &session_id)?;
                 let Some(bridge) = clipboard_bridge.as_ref() else {
                     send_error(
                         &output_tx,
@@ -270,6 +348,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 }
             }
             RdpControlMessage::Disconnect { session_id } => {
+                validate_active_session_id(active_session_id.as_deref(), &session_id)?;
                 send_control(
                     &output_tx,
                     RdpControlMessage::State {
@@ -305,7 +384,14 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 )?;
                 break;
             }
-            _ => {}
+            RdpControlMessage::ServerHello { .. }
+            | RdpControlMessage::DesktopReset { .. }
+            | RdpControlMessage::State { .. }
+            | RdpControlMessage::CertificateRequest(_)
+            | RdpControlMessage::Capability { .. }
+            | RdpControlMessage::Error { .. } => {
+                anyhow::bail!("RDP IPC helper-only message received from application");
+            }
         }
     }
 
@@ -357,17 +443,26 @@ fn write_outbound(writer: &mut impl io::Write, outbound: Outbound) -> io::Result
 }
 
 fn spawn_stdin_reader(
-    control_tx: tokio_mpsc::UnboundedSender<RdpControlMessage>,
+    control_tx: tokio_mpsc::UnboundedSender<io::Result<RdpControlMessage>>,
 ) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new()
         .name("nyaterm-rdp-stdin".to_string())
         .spawn(move || {
             let mut stdin = io::stdin().lock();
-            while let Ok(Some(message)) = read_packet(&mut stdin)
-                .and_then(|packet| packet.map(|packet| decode_control(&packet)).transpose())
-            {
-                if control_tx.send(message).is_err() {
-                    break;
+            loop {
+                match read_packet(&mut stdin)
+                    .and_then(|packet| packet.map(|packet| decode_control(&packet)).transpose())
+                {
+                    Ok(Some(message)) => {
+                        if control_tx.send(Ok(message)).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = control_tx.send(Err(error));
+                        break;
+                    }
                 }
             }
         })
@@ -700,15 +795,113 @@ async fn forward_output(
 /// Queues ordinary input on IronRDP's bounded input queue.
 ///
 /// A full queue means the session is not draining input fast enough, which is not a
-/// disconnect, so the event is dropped rather than failing the session. A closed
-/// queue is fatal.
-fn send_iron_input(sender: &RdpInputSender, event: IronInput) -> anyhow::Result<()> {
+/// disconnect, so the complete event is dropped rather than failing the session. A
+/// closed queue is fatal. The return value is true only when the event was queued.
+fn send_iron_input(sender: &RdpInputSender, event: IronInput) -> anyhow::Result<bool> {
     match sender.try_send(event) {
-        Ok(()) | Err(tokio_mpsc::error::TrySendError::Full(_)) => Ok(()),
+        Ok(()) => Ok(true),
+        Err(tokio_mpsc::error::TrySendError::Full(_)) => Ok(false),
         Err(tokio_mpsc::error::TrySendError::Closed(_)) => {
             Err(anyhow::anyhow!("IronRDP input channel closed"))
         }
     }
+}
+
+/// Reliably queues control input without blocking the helper's async runtime thread.
+///
+/// IronRDP exposes only non-blocking bounded-queue operations, so yield between
+/// capacity probes. A closed queue means the session can no longer receive the
+/// control input and is therefore fatal.
+async fn send_reliable_iron_input(
+    sender: &RdpInputSender,
+    mut event: IronInput,
+) -> anyhow::Result<()> {
+    loop {
+        match sender.try_send(event) {
+            Ok(()) => return Ok(()),
+            Err(tokio_mpsc::error::TrySendError::Full(returned)) => {
+                event = returned;
+                tokio::task::yield_now().await;
+            }
+            Err(tokio_mpsc::error::TrySendError::Closed(_)) => {
+                return Err(anyhow::anyhow!("IronRDP input channel closed"));
+            }
+        }
+    }
+}
+
+fn validate_input_events(events: &[RdpInputEvent]) -> anyhow::Result<()> {
+    for event in events {
+        if let RdpInputEvent::Unicode { text } = event {
+            validate_committed_text(text)
+                .map_err(|error| anyhow::anyhow!("invalid RDP committed text: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn convert_and_send_input(
+    sender: &RdpInputSender,
+    event: RdpInputEvent,
+    state: &mut InputState,
+) -> anyhow::Result<()> {
+    let mut staged = state.clone();
+    let Some(batch) = convert_input(event, &mut staged) else {
+        return Ok(());
+    };
+    if send_iron_input(sender, IronInput::FastPath(batch))? {
+        *state = staged;
+    }
+    Ok(())
+}
+
+fn secure_attention_input(state: &InputState) -> SmallVec<[FastPathInputEvent; 2]> {
+    const CTRL: u8 = 0x1d;
+    const ALT: u8 = 0x38;
+    const DELETE: u8 = 0x53;
+
+    let ctrl_held = state
+        .pressed_keys
+        .iter()
+        .any(|(scan_code, _)| *scan_code == CTRL);
+    let alt_held = state
+        .pressed_keys
+        .iter()
+        .any(|(scan_code, _)| *scan_code == ALT);
+    let mut events = SmallVec::new();
+    if !ctrl_held {
+        events.push(FastPathInputEvent::KeyboardEvent(
+            KeyboardFlags::empty(),
+            CTRL,
+        ));
+    }
+    if !alt_held {
+        events.push(FastPathInputEvent::KeyboardEvent(
+            KeyboardFlags::empty(),
+            ALT,
+        ));
+    }
+    events.push(FastPathInputEvent::KeyboardEvent(
+        KeyboardFlags::EXTENDED,
+        DELETE,
+    ));
+    events.push(FastPathInputEvent::KeyboardEvent(
+        KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE,
+        DELETE,
+    ));
+    if !alt_held {
+        events.push(FastPathInputEvent::KeyboardEvent(
+            KeyboardFlags::RELEASE,
+            ALT,
+        ));
+    }
+    if !ctrl_held {
+        events.push(FastPathInputEvent::KeyboardEvent(
+            KeyboardFlags::RELEASE,
+            CTRL,
+        ));
+    }
+    events
 }
 
 fn send_cursor(
@@ -912,14 +1105,27 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
-    use ironrdp_client::rdp::{RdpInputSender, RdpOutputEvent};
-    use nyaterm_remote_desktop::{RdpControlMessage, RdpErrorKind};
+    use ironrdp_client::rdp::{RdpInputEvent as IronInput, RdpInputSender, RdpOutputEvent};
+    use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
+    use nyaterm_remote_desktop::{RdpControlMessage, RdpErrorKind, RdpInputEvent};
     use tokio::sync::mpsc as tokio_mpsc;
 
     use super::{
-        CertificateGate, Outbound, classify_error, forward_output, install_crypto_provider,
-        report_ironrdp_panic,
+        CertificateGate, InputState, Outbound, classify_error, convert_and_send_input,
+        convert_input, forward_output, install_crypto_provider, report_ironrdp_panic,
+        secure_attention_input, send_iron_input, send_reliable_iron_input,
+        validate_active_session_id, validate_input_events,
     };
+
+    #[test]
+    fn active_session_id_rejects_foreign_messages() {
+        validate_active_session_id(None, "before-connect")
+            .expect("pre-connect handling keeps its existing semantics");
+        validate_active_session_id(Some("session-a"), "session-a").expect("matching session id");
+        let error = validate_active_session_id(Some("session-a"), "session-b")
+            .expect_err("foreign session id must fail closed");
+        assert!(error.to_string().contains("session id mismatch"));
+    }
 
     #[test]
     fn rustls_crypto_provider_installation_is_idempotent() {
@@ -1007,5 +1213,239 @@ mod tests {
             "IronRDP runtime panicked: connector assertion failed"
         );
         assert!(fatal);
+    }
+
+    #[test]
+    fn committed_text_is_validated_before_utf16_press_release_conversion() {
+        let events = [
+            RdpInputEvent::Unicode {
+                text: "valid".to_string(),
+            },
+            RdpInputEvent::Unicode {
+                text: "invalid\ntext".to_string(),
+            },
+        ];
+        assert!(validate_input_events(&events).is_err());
+
+        let mut state = InputState::default();
+        let converted = convert_input(
+            RdpInputEvent::Unicode {
+                text: "A😀".to_string(),
+            },
+            &mut state,
+        )
+        .expect("non-empty committed text");
+        let units = [0x0041, 0xd83d, 0xde00];
+        assert_eq!(converted.len(), units.len() * 2);
+        for (pair, expected_unit) in converted.chunks_exact(2).zip(units) {
+            let [
+                FastPathInputEvent::UnicodeKeyboardEvent(down_flags, down_unit),
+                FastPathInputEvent::UnicodeKeyboardEvent(up_flags, up_unit),
+            ] = pair
+            else {
+                panic!("expected Unicode press/release pair");
+            };
+            assert!(down_flags.is_empty());
+            assert_eq!(*down_unit, expected_unit);
+            assert_eq!(*up_flags, KeyboardFlags::RELEASE);
+            assert_eq!(*up_unit, expected_unit);
+        }
+        assert_eq!(state, InputState::default());
+    }
+
+    fn assert_keyboard_batch(batch: &[FastPathInputEvent], expected: &[(KeyboardFlags, u8)]) {
+        assert_eq!(batch.len(), expected.len());
+        for (event, (expected_flags, expected_code)) in batch.iter().zip(expected) {
+            let FastPathInputEvent::KeyboardEvent(flags, code) = event else {
+                panic!("Secure Attention must contain only keyboard events");
+            };
+            assert_eq!(*flags, *expected_flags);
+            assert_eq!(*code, *expected_code);
+        }
+    }
+
+    #[test]
+    fn secure_attention_is_one_ordered_fast_path_batch() {
+        let state = InputState::default();
+        let batch = secure_attention_input(&state);
+        assert_keyboard_batch(
+            &batch,
+            &[
+                (KeyboardFlags::empty(), 0x1d),
+                (KeyboardFlags::empty(), 0x38),
+                (KeyboardFlags::EXTENDED, 0x53),
+                (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53),
+                (KeyboardFlags::RELEASE, 0x38),
+                (KeyboardFlags::RELEASE, 0x1d),
+            ],
+        );
+        assert_eq!(state, InputState::default());
+    }
+
+    #[test]
+    fn secure_attention_reuses_held_ctrl_and_preserves_state() {
+        let mut state = InputState::default();
+        state.pressed_keys.insert((0x1d, true));
+        let original = state.clone();
+
+        let batch = secure_attention_input(&state);
+
+        assert_keyboard_batch(
+            &batch,
+            &[
+                (KeyboardFlags::empty(), 0x38),
+                (KeyboardFlags::EXTENDED, 0x53),
+                (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53),
+                (KeyboardFlags::RELEASE, 0x38),
+            ],
+        );
+        assert_eq!(state, original);
+    }
+
+    #[test]
+    fn secure_attention_reuses_held_alt_and_preserves_state() {
+        let mut state = InputState::default();
+        state.pressed_keys.insert((0x38, true));
+        let original = state.clone();
+
+        let batch = secure_attention_input(&state);
+
+        assert_keyboard_batch(
+            &batch,
+            &[
+                (KeyboardFlags::empty(), 0x1d),
+                (KeyboardFlags::EXTENDED, 0x53),
+                (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53),
+                (KeyboardFlags::RELEASE, 0x1d),
+            ],
+        );
+        assert_eq!(state, original);
+    }
+
+    #[test]
+    fn secure_attention_reuses_both_held_modifiers_and_preserves_state() {
+        let mut state = InputState::default();
+        state.pressed_keys.insert((0x1d, false));
+        state.pressed_keys.insert((0x38, true));
+        let original = state.clone();
+
+        let batch = secure_attention_input(&state);
+
+        assert_keyboard_batch(
+            &batch,
+            &[
+                (KeyboardFlags::EXTENDED, 0x53),
+                (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53),
+            ],
+        );
+        assert_eq!(state, original);
+    }
+
+    #[tokio::test]
+    async fn secure_attention_waits_for_full_queue_and_eventually_enqueues() {
+        let (sender, mut receiver) = RdpInputSender::channel(1);
+        assert!(send_iron_input(&sender, IronInput::RequestFullFrame).unwrap());
+        let batch = secure_attention_input(&InputState::default());
+        let enqueue_sender = sender.clone();
+        let enqueue = tokio::spawn(async move {
+            send_reliable_iron_input(&enqueue_sender, IronInput::FastPath(batch)).await
+        });
+
+        tokio::task::yield_now().await;
+        assert!(!enqueue.is_finished());
+        assert!(matches!(
+            receiver.recv().await.unwrap(),
+            IronInput::RequestFullFrame
+        ));
+        tokio::time::timeout(Duration::from_secs(1), enqueue)
+            .await
+            .expect("reliable enqueue timed out")
+            .expect("reliable enqueue task panicked")
+            .expect("reliable enqueue failed");
+
+        let IronInput::FastPath(batch) = receiver.recv().await.unwrap() else {
+            panic!("expected queued Secure Attention batch");
+        };
+        assert_keyboard_batch(
+            &batch,
+            &[
+                (KeyboardFlags::empty(), 0x1d),
+                (KeyboardFlags::empty(), 0x38),
+                (KeyboardFlags::EXTENDED, 0x53),
+                (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53),
+                (KeyboardFlags::RELEASE, 0x38),
+                (KeyboardFlags::RELEASE, 0x1d),
+            ],
+        );
+    }
+
+    #[tokio::test]
+    async fn secure_attention_reliable_enqueue_fails_when_queue_is_closed() {
+        let (sender, receiver) = RdpInputSender::channel(1);
+        drop(receiver);
+
+        let error = send_reliable_iron_input(
+            &sender,
+            IronInput::FastPath(secure_attention_input(&InputState::default())),
+        )
+        .await
+        .expect_err("closed queue must reject Secure Attention");
+
+        assert_eq!(error.to_string(), "IronRDP input channel closed");
+    }
+
+    #[test]
+    fn full_input_queue_does_not_commit_ordinary_pressed_state() {
+        let (sender, mut receiver) = RdpInputSender::channel(1);
+        assert!(send_iron_input(&sender, IronInput::RequestFullFrame).unwrap());
+
+        let mut state = InputState::default();
+        state.pressed_keys.insert((0x1d, false));
+        let original = state.clone();
+        convert_and_send_input(
+            &sender,
+            RdpInputEvent::KeyUp {
+                scan_code: 0x1d,
+                extended: false,
+                repeat: false,
+            },
+            &mut state,
+        )
+        .unwrap();
+        assert_eq!(state, original);
+
+        assert!(matches!(
+            receiver.try_recv().unwrap(),
+            IronInput::RequestFullFrame
+        ));
+        convert_and_send_input(
+            &sender,
+            RdpInputEvent::KeyUp {
+                scan_code: 0x1d,
+                extended: false,
+                repeat: false,
+            },
+            &mut state,
+        )
+        .unwrap();
+        assert!(state.pressed_keys.is_empty());
+
+        let (closed_sender, closed_receiver) = RdpInputSender::channel(1);
+        drop(closed_receiver);
+        state.pressed_keys.insert((0x38, false));
+        let original = state.clone();
+        assert!(
+            convert_and_send_input(
+                &closed_sender,
+                RdpInputEvent::KeyUp {
+                    scan_code: 0x38,
+                    extended: false,
+                    repeat: false,
+                },
+                &mut state,
+            )
+            .is_err()
+        );
+        assert_eq!(state, original);
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -6,14 +6,16 @@ use crate::models::event_wake::{ANY_INTEREST, EventWake};
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{Bounds, DynamicTexture, FocusHandle, Pixels, Subscription};
 use nyaterm_remote_desktop::{
-    ClipboardTracker, Framebuffer, KeyMapper, RdpCapability, RdpCertificateRequest, RdpCursorEvent,
-    RdpError, RdpSessionManager, RdpSessionState, VncSessionManager,
+    CertificatePromptReason, ClipboardTracker, Framebuffer, KeyMapper, RdpCapability,
+    RdpCertificateRequest, RdpCursorEvent, RdpError, RdpServerCapabilities, RdpSessionManager,
+    RdpSessionState, VncServerCapabilities, VncSessionManager,
 };
 
 pub(in crate::features) struct RemoteDesktopFeatureState {
     pub(super) manager: Arc<RdpSessionManager>,
     pub(super) vnc_manager: Arc<VncSessionManager>,
     pub(super) sessions: HashMap<String, RemoteDesktopSessionState>,
+    pub(super) input: RemoteDesktopInputState,
     pub(super) focus: FocusHandle,
     pub(super) last_clipboard_poll: Option<Instant>,
     pub(super) metrics_enabled: bool,
@@ -31,15 +33,92 @@ pub(in crate::features) struct RemoteDesktopFeatureState {
     periodic_clock_armed: bool,
 }
 
+#[derive(Clone)]
+pub(super) struct RdpCertificatePrompt {
+    pub(super) request: RdpCertificateRequest,
+    pub(super) reason: CertificatePromptReason,
+}
+
+#[derive(Default)]
+pub(super) struct RemoteDesktopInputState {
+    session_id: Option<String>,
+    marked_text: String,
+    suppressed_key_ups: HashSet<String>,
+}
+
+impl RemoteDesktopInputState {
+    fn prepare_session(&mut self, session_id: &str) {
+        if self.session_id.as_deref() == Some(session_id) {
+            return;
+        }
+        self.marked_text.clear();
+        self.suppressed_key_ups.clear();
+        self.session_id = Some(session_id.to_string());
+    }
+
+    pub(super) fn marked_text(&self, session_id: &str) -> &str {
+        if self.session_id.as_deref() == Some(session_id) {
+            &self.marked_text
+        } else {
+            ""
+        }
+    }
+
+    pub(super) fn set_marked_text(&mut self, session_id: &str, text: &str) {
+        self.prepare_session(session_id);
+        self.marked_text.clear();
+        self.marked_text.push_str(text);
+    }
+
+    pub(super) fn clear_marked_text(&mut self, session_id: &str) {
+        if self.session_id.as_deref() == Some(session_id) {
+            self.marked_text.clear();
+        }
+    }
+
+    pub(super) fn suppress_key_up(&mut self, session_id: &str, key: &str) {
+        self.prepare_session(session_id);
+        self.suppressed_key_ups.insert(normalize_key(key));
+    }
+
+    pub(super) fn is_key_up_suppressed(&self, session_id: &str, key: &str) -> bool {
+        self.session_id.as_deref() == Some(session_id)
+            && self.suppressed_key_ups.contains(&normalize_key(key))
+    }
+
+    pub(super) fn take_suppressed_key_up(&mut self, session_id: &str, key: &str) -> bool {
+        self.session_id.as_deref() == Some(session_id)
+            && self.suppressed_key_ups.remove(&normalize_key(key))
+    }
+
+    pub(super) fn clear_session(&mut self, session_id: &str) {
+        if self.session_id.as_deref() == Some(session_id) {
+            self.clear();
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.session_id = None;
+        self.marked_text.clear();
+        self.suppressed_key_ups.clear();
+    }
+}
+
+fn normalize_key(key: &str) -> String {
+    key.to_ascii_lowercase()
+}
+
 pub(super) struct RemoteDesktopSessionState {
     pub(super) state: RdpSessionState,
     pub(super) framebuffer: Option<Framebuffer>,
     pub(super) texture: Option<DynamicTexture>,
     pub(super) cursor: Option<RdpCursorEvent>,
     pub(super) cursor_texture: Option<DynamicTexture>,
-    pub(super) certificate_request: Option<RdpCertificateRequest>,
+    pub(super) certificate_request: Option<RdpCertificatePrompt>,
     pub(super) error: Option<RdpError>,
     pub(super) capability: Option<RdpCapability>,
+    pub(super) server_capabilities: Option<RdpServerCapabilities>,
+    pub(super) vnc_server_capabilities: Option<VncServerCapabilities>,
     pub(super) clipboard: ClipboardTracker,
     pub(super) keys: KeyMapper,
     pub(super) last_pointer: Option<(u32, u32)>,
@@ -66,6 +145,8 @@ impl Default for RemoteDesktopSessionState {
             certificate_request: None,
             error: None,
             capability: None,
+            server_capabilities: None,
+            vnc_server_capabilities: None,
             clipboard: ClipboardTracker::default(),
             keys: KeyMapper::default(),
             last_pointer: None,
@@ -103,6 +184,7 @@ impl RemoteDesktopFeatureState {
             manager,
             vnc_manager,
             sessions: HashMap::new(),
+            input: RemoteDesktopInputState::default(),
             focus,
             last_clipboard_poll: None,
             metrics_enabled: std::env::var("NYATERM_RDP_METRICS").as_deref() == Ok("1"),
@@ -166,5 +248,37 @@ impl RemoteDesktopFeatureState {
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.state = RdpSessionState::Disconnected;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RemoteDesktopInputState;
+
+    #[test]
+    fn marked_text_and_suppressed_key_ups_are_owned_by_one_session() {
+        let mut input = RemoteDesktopInputState::default();
+        input.set_marked_text("first", "拼");
+        input.suppress_key_up("first", "A");
+
+        assert_eq!(input.marked_text("first"), "拼");
+        assert_eq!(input.marked_text("second"), "");
+        assert!(input.take_suppressed_key_up("first", "a"));
+        assert!(!input.take_suppressed_key_up("first", "a"));
+    }
+
+    #[test]
+    fn switching_or_clearing_a_session_discards_local_input_state() {
+        let mut input = RemoteDesktopInputState::default();
+        input.set_marked_text("first", "preedit");
+        input.suppress_key_up("first", "x");
+
+        input.set_marked_text("second", "next");
+        assert_eq!(input.marked_text("first"), "");
+        assert!(!input.take_suppressed_key_up("first", "x"));
+        assert_eq!(input.marked_text("second"), "next");
+
+        input.clear_session("second");
+        assert_eq!(input.marked_text("second"), "");
     }
 }

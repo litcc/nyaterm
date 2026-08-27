@@ -9,9 +9,9 @@ use uuid::Uuid;
 use crate::helper_process;
 use crate::{
     PROTOCOL_VERSION, PacketType, QueueWaker, RdpCertificateResponse, RdpControlMessage, RdpError,
-    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpSessionConfig, RdpSessionDrain,
-    RdpSessionState, decode_control, decode_cursor_packet, decode_frame_packet, encode_control,
-    read_packet, write_packet,
+    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities,
+    RdpSessionConfig, RdpSessionDrain, RdpSessionState, decode_control, decode_cursor_packet,
+    decode_frame_packet, encode_control, read_packet, validate_committed_text, write_packet,
 };
 
 const MIN_WIDTH: u32 = 200;
@@ -131,6 +131,7 @@ impl EventQueue {
 
 struct SessionRecord {
     state: Arc<Mutex<RdpSessionState>>,
+    capabilities: Arc<Mutex<Option<RdpServerCapabilities>>>,
     queue: Arc<Mutex<EventQueue>>,
     writer: Arc<Mutex<ChildStdin>>,
     child: Option<Child>,
@@ -207,16 +208,19 @@ impl RdpSessionManager {
             ..EventQueue::default()
         }));
         let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
+        let capabilities = Arc::new(Mutex::new(None));
         let reader = spawn_reader(
             session_id.clone(),
             stdout,
             writer.clone(),
             queue.clone(),
             state.clone(),
+            capabilities.clone(),
             self.pending_certificates.clone(),
         );
         let mut record = SessionRecord {
             state,
+            capabilities,
             queue,
             writer,
             child: Some(child),
@@ -307,12 +311,46 @@ impl RdpSessionManager {
         drain.control
     }
 
+    /// Return the static helper capabilities confirmed by `ServerHello`.
+    ///
+    /// `None` means that no valid hello has been received; capability-dependent
+    /// operations fail closed in that state.
+    pub fn server_capabilities(&self, session_id: &str) -> Option<RdpServerCapabilities> {
+        let sessions = self.sessions.lock().ok()?;
+        *sessions.get(session_id)?.capabilities.lock().ok()?
+    }
+
     pub fn send_input(&self, session_id: &str, events: Vec<RdpInputEvent>) -> Result<(), RdpError> {
+        let needs_committed_text = validate_rdp_input(&events)?;
+        if needs_committed_text {
+            let capabilities = self.confirmed_capabilities(session_id)?;
+            if !capabilities.committed_unicode_text {
+                return Err(RdpError::new(
+                    RdpErrorKind::Unsupported,
+                    "RDP helper did not advertise committed Unicode text input",
+                ));
+            }
+        }
         self.send(
             session_id,
             RdpControlMessage::Input {
                 session_id: session_id.to_string(),
                 events,
+            },
+        )
+    }
+
+    pub fn send_secure_attention(&self, session_id: &str) -> Result<(), RdpError> {
+        if !self.confirmed_capabilities(session_id)?.secure_attention {
+            return Err(RdpError::new(
+                RdpErrorKind::Unsupported,
+                "RDP helper did not advertise Secure Attention",
+            ));
+        }
+        self.send(
+            session_id,
+            RdpControlMessage::SecureAttention {
+                session_id: session_id.to_string(),
             },
         )
     }
@@ -440,6 +478,30 @@ impl RdpSessionManager {
         }
     }
 
+    fn confirmed_capabilities(&self, session_id: &str) -> Result<RdpServerCapabilities, RdpError> {
+        let sessions = self.sessions.lock().map_err(|_| {
+            RdpError::new(RdpErrorKind::Ipc, "RDP session registry lock is poisoned")
+        })?;
+        let record = sessions.get(session_id).ok_or_else(|| {
+            RdpError::new(
+                RdpErrorKind::Protocol,
+                format!("RDP session '{session_id}' was not found"),
+            )
+        })?;
+        record
+            .capabilities
+            .lock()
+            .map_err(|_| RdpError::new(RdpErrorKind::Ipc, "RDP capability lock is poisoned"))?
+            .as_ref()
+            .copied()
+            .ok_or_else(|| {
+                RdpError::new(
+                    RdpErrorKind::Protocol,
+                    "RDP helper capabilities have not been confirmed",
+                )
+            })
+    }
+
     fn send(&self, session_id: &str, message: RdpControlMessage) -> Result<(), RdpError> {
         let sessions = self.sessions.lock().map_err(|_| {
             RdpError::new(RdpErrorKind::Ipc, "RDP session registry lock is poisoned")
@@ -481,11 +543,13 @@ fn spawn_reader(
     writer: Arc<Mutex<ChildStdin>>,
     queue: Arc<Mutex<EventQueue>>,
     state: Arc<Mutex<RdpSessionState>>,
+    capabilities: Arc<Mutex<Option<RdpServerCapabilities>>>,
     pending_certificates: Arc<Mutex<HashMap<String, String>>>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name(format!("nyaterm-rdp-reader-{session_id}"))
         .spawn(move || {
+            let mut hello_received = false;
             loop {
                 let packet = match read_packet(&mut stdout) {
                     Ok(Some(packet)) => packet,
@@ -510,11 +574,17 @@ fn spawn_reader(
                                 message,
                                 &queue,
                                 &state,
+                                &capabilities,
                                 &pending_certificates,
+                                &mut hello_received,
                             )
                         }),
-                    PacketType::Frame => decode_frame_packet(&packet)
-                        .map_err(|error| RdpError::new(RdpErrorKind::Protocol, error.to_string()))
+                    PacketType::Frame => require_server_hello(hello_received, "frame packet")
+                        .and_then(|()| {
+                            decode_frame_packet(&packet).map_err(|error| {
+                                RdpError::new(RdpErrorKind::Protocol, error.to_string())
+                            })
+                        })
                         .map(|(frame_session, frame)| {
                             if frame_session != session_id {
                                 return;
@@ -532,8 +602,12 @@ fn spawn_reader(
                                 );
                             }
                         }),
-                    PacketType::Cursor => decode_cursor_packet(&packet)
-                        .map_err(|error| RdpError::new(RdpErrorKind::Protocol, error.to_string()))
+                    PacketType::Cursor => require_server_hello(hello_received, "cursor packet")
+                        .and_then(|()| {
+                            decode_cursor_packet(&packet).map_err(|error| {
+                                RdpError::new(RdpErrorKind::Protocol, error.to_string())
+                            })
+                        })
                         .map(|(cursor_session, cursor)| {
                             if cursor_session == session_id {
                                 queue
@@ -573,21 +647,77 @@ fn spawn_reader(
         .expect("failed to spawn RDP helper reader")
 }
 
+fn require_server_hello(received: bool, packet_kind: &str) -> Result<(), RdpError> {
+    if received {
+        Ok(())
+    } else {
+        Err(RdpError::new(
+            RdpErrorKind::Protocol,
+            format!("RDP helper sent {packet_kind} before ServerHello"),
+        ))
+    }
+}
+
 fn handle_control(
     session_id: &str,
     message: RdpControlMessage,
     queue: &Arc<Mutex<EventQueue>>,
     state: &Arc<Mutex<RdpSessionState>>,
+    capabilities: &Arc<Mutex<Option<RdpServerCapabilities>>>,
     pending: &Arc<Mutex<HashMap<String, String>>>,
+    hello_received: &mut bool,
 ) -> Result<(), RdpError> {
-    match message {
-        RdpControlMessage::ServerHello { version } if version != PROTOCOL_VERSION => {
+    if !*hello_received {
+        let RdpControlMessage::ServerHello {
+            version,
+            capabilities: confirmed,
+        } = message
+        else {
+            return Err(RdpError::new(
+                RdpErrorKind::Protocol,
+                "RDP helper's first control message must be ServerHello",
+            ));
+        };
+        if version != PROTOCOL_VERSION {
             return Err(RdpError::new(
                 RdpErrorKind::Protocol,
                 format!("RDP helper protocol version {version} does not match {PROTOCOL_VERSION}"),
             ));
         }
-        RdpControlMessage::ServerHello { .. } => {}
+        let mut slot = capabilities
+            .lock()
+            .map_err(|_| RdpError::new(RdpErrorKind::Ipc, "RDP capability lock is poisoned"))?;
+        if slot.is_some() {
+            return Err(RdpError::new(
+                RdpErrorKind::Protocol,
+                "RDP helper capabilities were already confirmed",
+            ));
+        }
+        *slot = Some(confirmed);
+        *hello_received = true;
+        return Ok(());
+    }
+
+    match message {
+        RdpControlMessage::ServerHello { .. } => {
+            return Err(RdpError::new(
+                RdpErrorKind::Protocol,
+                "RDP helper sent duplicate ServerHello",
+            ));
+        }
+        RdpControlMessage::ClientHello { .. }
+        | RdpControlMessage::Connect { .. }
+        | RdpControlMessage::Input { .. }
+        | RdpControlMessage::SecureAttention { .. }
+        | RdpControlMessage::Resize { .. }
+        | RdpControlMessage::CertificateResponse { .. }
+        | RdpControlMessage::RequestFullFrame { .. }
+        | RdpControlMessage::Disconnect { .. } => {
+            return Err(RdpError::new(
+                RdpErrorKind::Protocol,
+                "RDP helper sent an application-only control message",
+            ));
+        }
         RdpControlMessage::DesktopReset {
             session_id: event_session,
             epoch,
@@ -700,6 +830,22 @@ fn cleanup_child(record: &mut SessionRecord) {
     helper_process::cleanup_child(&mut record.child, &mut record.reader);
 }
 
+fn validate_rdp_input(events: &[RdpInputEvent]) -> Result<bool, RdpError> {
+    let mut has_committed_text = false;
+    for event in events {
+        if let RdpInputEvent::Unicode { text } = event {
+            validate_committed_text(text).map_err(|error| {
+                RdpError::new(
+                    RdpErrorKind::Protocol,
+                    format!("invalid RDP committed text: {error}"),
+                )
+            })?;
+            has_committed_text = true;
+        }
+    }
+    Ok(has_committed_text)
+}
+
 fn validate_config(config: &RdpSessionConfig) -> Result<(), RdpError> {
     if config.host.trim().is_empty() {
         return Err(RdpError::new(
@@ -729,11 +875,169 @@ fn validate_size(width: u32, height: u32) -> Result<(), RdpError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
 
-    use super::{EventQueue, FRAME_QUEUE_LIMIT};
-    use crate::{PixelFormat, RdpFrameEvent, RdpRuntimeEvent};
+    use super::{
+        EventQueue, FRAME_QUEUE_LIMIT, handle_control, require_server_hello, validate_rdp_input,
+    };
+    use crate::{
+        PROTOCOL_VERSION, PixelFormat, RdpCapability, RdpControlMessage, RdpFrameEvent,
+        RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities, RdpSessionState,
+    };
+
+    #[test]
+    fn server_hello_must_be_first_and_records_capabilities_only_once() {
+        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
+        let capabilities = Arc::new(Mutex::new(None));
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let advertised = RdpServerCapabilities {
+            committed_unicode_text: true,
+            secure_attention: true,
+        };
+        let mut hello_received = false;
+
+        let error = handle_control(
+            "s",
+            RdpControlMessage::State {
+                session_id: "s".to_string(),
+                state: RdpSessionState::Connecting,
+                message: None,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &pending,
+            &mut hello_received,
+        )
+        .expect_err("state before ServerHello must fail");
+        assert_eq!(error.kind, crate::RdpErrorKind::Protocol);
+        assert!(!hello_received);
+        assert_eq!(*capabilities.lock().unwrap(), None);
+
+        let error = handle_control(
+            "s",
+            RdpControlMessage::ServerHello {
+                version: PROTOCOL_VERSION - 1,
+                capabilities: advertised,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &pending,
+            &mut hello_received,
+        )
+        .expect_err("a mismatched version must fail");
+        assert_eq!(error.kind, crate::RdpErrorKind::Protocol);
+        assert!(!hello_received);
+        assert_eq!(*capabilities.lock().unwrap(), None);
+
+        handle_control(
+            "s",
+            RdpControlMessage::ServerHello {
+                version: PROTOCOL_VERSION,
+                capabilities: advertised,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &pending,
+            &mut hello_received,
+        )
+        .expect("matching hello");
+        assert!(hello_received);
+        assert_eq!(*capabilities.lock().unwrap(), Some(advertised));
+
+        let error = handle_control(
+            "s",
+            RdpControlMessage::ServerHello {
+                version: PROTOCOL_VERSION,
+                capabilities: RdpServerCapabilities::default(),
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &pending,
+            &mut hello_received,
+        )
+        .expect_err("duplicate ServerHello must fail");
+        assert_eq!(error.kind, crate::RdpErrorKind::Protocol);
+        assert_eq!(*capabilities.lock().unwrap(), Some(advertised));
+
+        let error = handle_control(
+            "s",
+            RdpControlMessage::ClientHello {
+                version: PROTOCOL_VERSION,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &pending,
+            &mut hello_received,
+        )
+        .expect_err("application-only messages from the helper must fail");
+        assert_eq!(error.kind, crate::RdpErrorKind::Protocol);
+        assert!(require_server_hello(false, "frame packet").is_err());
+        assert!(require_server_hello(false, "cursor packet").is_err());
+        assert!(require_server_hello(true, "frame packet").is_ok());
+    }
+
+    #[test]
+    fn rdp_committed_text_batch_is_fully_validated() {
+        let events = vec![
+            RdpInputEvent::Unicode {
+                text: "valid text".to_string(),
+            },
+            RdpInputEvent::Unicode {
+                text: "invalid\ntext".to_string(),
+            },
+        ];
+        assert!(validate_rdp_input(&events).is_err());
+        assert!(!validate_rdp_input(&[RdpInputEvent::ReleaseAllKeys]).unwrap());
+    }
+
+    #[test]
+    fn dynamic_resize_unavailable_remains_a_runtime_capability_event() {
+        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let state = Arc::new(Mutex::new(RdpSessionState::Connected));
+        let capabilities = Arc::new(Mutex::new(Some(RdpServerCapabilities {
+            committed_unicode_text: true,
+            secure_attention: true,
+        })));
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        let mut hello_received = true;
+
+        handle_control(
+            "s",
+            RdpControlMessage::Capability {
+                session_id: "s".to_string(),
+                capability: RdpCapability::DynamicResizeUnavailable,
+            },
+            &queue,
+            &state,
+            &capabilities,
+            &pending,
+            &mut hello_received,
+        )
+        .expect("runtime capability event");
+
+        assert_eq!(
+            *capabilities.lock().unwrap(),
+            Some(RdpServerCapabilities {
+                committed_unicode_text: true,
+                secure_attention: true,
+            })
+        );
+        assert!(matches!(
+            queue.lock().unwrap().control.front(),
+            Some(RdpRuntimeEvent::Capability {
+                capability: RdpCapability::DynamicResizeUnavailable,
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn every_producer_path_wakes_the_consumer() {

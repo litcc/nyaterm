@@ -16,6 +16,16 @@ impl NyaTermApp {
             cx.notify();
             return;
         };
+        if let Some(session_id) = self
+            .session
+            .active_id_owned()
+            .filter(|session_id| self.remote_desktop.is_session(session_id))
+        {
+            let _ = self.send_remote_committed_text(&session_id, &text);
+            self.mark_user_activity();
+            cx.notify();
+            return;
+        }
         self.paste_terminal_text(text, window, cx);
     }
 
