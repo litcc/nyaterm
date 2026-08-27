@@ -30,7 +30,9 @@ NyaTerm 没有独立的 Web 后端。原生应用的领域逻辑、协议运行�
 - `Exited`
 - `Error`
 
-事件队列会合并和限制高吞吐输出。桌面层批量 drain 事件，而不是让后台线程直接修改 GPUI state。新增会话事件时使用有类型的 enum variant，并同时测试正常顺序、队列上限和关闭路径。
+事件队列按原始事件顺序限制高吞吐输出：单个大 `Output` 会拆成有界 chunk，8/4 MiB 高低水位通过 producer wait 提供正常运行期的无损背压，不合并相邻 raw output。桌面层批量 drain 事件，而不是让后台线程直接修改 GPUI state。新增会话事件时使用有类型的 enum variant，并同时测试正常顺序、队列上限和关闭路径。
+
+关闭单个 session 时，manager 必须先取消该 session 并唤醒 queue waiter，再关闭 transport 和 join reader；取消会清除该 session 的已排队事件并拒绝后续事件，但不能影响其他 session。manager 整体析构必须先全局关闭 queue、唤醒 producer 和 blocking consumer，再关闭并 join 全部 session。全局关闭后的空 blocking drain 立即返回；这些 shutdown 丢弃边界不改变正常过载的无损与 8/4 MiB 滞回契约。
 
 SSH、SFTP、隧道、远程进程和 Docker 等操作也应保持异步或运行在专用 worker 上。不要让 transport 依赖窗口、对话框或桌面 feature 类型。
 

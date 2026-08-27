@@ -42,6 +42,52 @@ pub(crate) enum TerminalPerformanceOverlay {
     Recovered,
 }
 
+/// Pure presentation state for deciding terminal data-plane and paint work.
+///
+/// A visible split pane is not background merely because another session owns
+/// keyboard focus. `VisibleInactive` therefore keeps live snapshots and surface
+/// notifications while reserving active-only decorations for `VisibleActive`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalPresentation {
+    VisibleActive,
+    VisibleInactive,
+    Background,
+}
+
+impl TerminalPresentation {
+    pub(crate) fn resolve(is_active: bool, is_visible: bool) -> Self {
+        match (is_active, is_visible) {
+            (true, true) => Self::VisibleActive,
+            (false, true) => Self::VisibleInactive,
+            (_, false) => Self::Background,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TerminalWorkPolicy {
+    pub(crate) parse_output: bool,
+    pub(crate) live_snapshot: bool,
+    pub(crate) surface_notify: bool,
+    pub(crate) active_decorations: bool,
+}
+
+impl TerminalWorkPolicy {
+    pub(crate) const fn for_presentation(presentation: TerminalPresentation) -> Self {
+        let visible = matches!(
+            presentation,
+            TerminalPresentation::VisibleActive | TerminalPresentation::VisibleInactive
+        );
+        Self {
+            // Every state must advance the authoritative parser and protocol state.
+            parse_output: true,
+            live_snapshot: visible,
+            surface_notify: visible,
+            active_decorations: matches!(presentation, TerminalPresentation::VisibleActive),
+        }
+    }
+}
+
 pub(crate) const TERMINAL_OUTPUT_VISIBLE_BACKLOG_CAP: usize = 1_000_000;
 pub(crate) const TERMINAL_OUTPUT_VISIBLE_BURST_OVERLOAD: usize = 256 * 1024;
 /// UI-only text mirror cap. The authoritative terminal screen/scrollback lives
@@ -227,17 +273,18 @@ pub(crate) struct EffectiveTerminalPaintPolicy {
 
 impl EffectiveTerminalPaintPolicy {
     pub(crate) fn resolve(
-        is_active: bool,
+        presentation: TerminalPresentation,
         render_degraded: bool,
         runtime_output_pressure: bool,
         output_burst_bytes: usize,
         performance_mode: TerminalPerformanceMode,
         action_links_enabled: bool,
     ) -> Self {
-        let enhanced_decorations = !render_degraded;
+        let work_policy = TerminalWorkPolicy::for_presentation(presentation);
+        let enhanced_decorations = work_policy.active_decorations && !render_degraded;
         let expensive_interactions = terminal_expensive_interactions_enabled(
             action_links_enabled,
-            is_active,
+            work_policy.active_decorations,
             render_degraded,
             runtime_output_pressure,
             output_burst_bytes,
@@ -682,6 +729,11 @@ impl TerminalViewState {
             last_backend_resize: None,
             target_line: None,
         }
+    }
+
+    pub(crate) fn complete_snapshot_request(&mut self, offset: usize) {
+        self.pending_snapshot_offsets.remove(&offset);
+        self.priority_pending_snapshot_offsets.remove(&offset);
     }
 
     pub(crate) fn from_output(output: String) -> Self {
@@ -1219,11 +1271,12 @@ impl KeywordHighlightEditorField {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct TerminalFramePipeline {
     command_tx: TerminalFrameCommandSender,
     event_queue: TerminalFrameEventQueue,
     event_wake_rx: Arc<Mutex<Option<UnboundedReceiver<()>>>>,
+    handle_count: Arc<AtomicUsize>,
 }
 
 pub(crate) struct TerminalFrameOutputSubmission {
@@ -1269,6 +1322,7 @@ impl TerminalFramePipeline {
             command_tx,
             event_queue,
             event_wake_rx: Arc::new(Mutex::new(Some(event_wake_rx))),
+            handle_count: Arc::new(AtomicUsize::new(1)),
         }
     }
 
@@ -1457,6 +1511,22 @@ impl TerminalFramePipeline {
             .send(TerminalFrameCommand::SetSnapshotPriority { session_ids });
     }
 
+    /// Wait until the worker has processed every command ordered before this fence.
+    ///
+    /// This is intentionally test-only: production consumers synchronize through
+    /// event wakes, while tests need deterministic completion without sleeps.
+    #[cfg(test)]
+    pub(crate) fn flush_for_test(&self) {
+        let (complete_tx, complete_rx) = std::sync::mpsc::sync_channel(0);
+        assert!(
+            self.command_tx
+                .send(TerminalFrameCommand::Fence { complete_tx })
+        );
+        complete_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("terminal frame worker did not reach test fence before watchdog timeout");
+    }
+
     pub(crate) fn drain_events_into(
         &self,
         events: &mut VecDeque<TerminalFrameEvent>,
@@ -1478,10 +1548,31 @@ impl TerminalFramePipeline {
     }
 }
 
+impl Clone for TerminalFramePipeline {
+    fn clone(&self) -> Self {
+        self.handle_count.fetch_add(1, Ordering::Relaxed);
+        Self {
+            command_tx: self.command_tx.clone(),
+            event_queue: self.event_queue.clone(),
+            event_wake_rx: self.event_wake_rx.clone(),
+            handle_count: self.handle_count.clone(),
+        }
+    }
+}
+
+impl Drop for TerminalFramePipeline {
+    fn drop(&mut self) {
+        if self.handle_count.fetch_sub(1, Ordering::AcqRel) == 1 {
+            self.event_queue.close();
+        }
+    }
+}
+
 impl Default for TerminalFramePipeline {
     fn default() -> Self {
-        let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
-        let recording_writer = super::RecordingWritePipeline::spawn(recording_manager).writer();
+        let recording_writer =
+            super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES)
+                .writer();
         Self::spawn(recording_writer)
     }
 }
@@ -1531,6 +1622,10 @@ enum TerminalFrameCommand {
     SetSnapshotPriority {
         session_ids: Vec<String>,
     },
+    #[cfg(test)]
+    Fence {
+        complete_tx: std::sync::mpsc::SyncSender<()>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1548,11 +1643,25 @@ pub(crate) enum TerminalFrameEvent {
 
 #[derive(Clone, Debug)]
 struct TerminalFrameEventQueue {
-    inner: Arc<Mutex<VecDeque<TerminalFrameEvent>>>,
+    shared: Arc<TerminalFrameEventQueueShared>,
     cap: usize,
     wake_tx: Option<UnboundedSender<()>>,
     wake_interests: Arc<AtomicU8>,
     wake_count: Arc<AtomicU64>,
+}
+
+#[derive(Debug)]
+struct TerminalFrameEventQueueShared {
+    inner: Mutex<TerminalFrameEventQueueInner>,
+    space_available: Condvar,
+    #[cfg(test)]
+    blocked_notifier: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+}
+
+#[derive(Debug)]
+struct TerminalFrameEventQueueInner {
+    events: VecDeque<TerminalFrameEvent>,
+    closed: bool,
 }
 
 const TERMINAL_FRAME_EVENT_WAKE_OUTPUT: u8 = 1 << 0;
@@ -1564,30 +1673,40 @@ const TERMINAL_FRAME_EVENT_WAKE_ALL: u8 = TERMINAL_FRAME_EVENT_WAKE_OUTPUT
     | TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT
     | TERMINAL_FRAME_EVENT_WAKE_SEARCH;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalFrameEventQueuePushOutcome {
+    Enqueued,
+    Closed,
+    Poisoned,
+}
+
 impl TerminalFrameEventQueue {
     #[cfg(test)]
     fn new(cap: usize) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(VecDeque::with_capacity(cap.min(1024)))),
-            cap,
-            wake_tx: None,
-            wake_interests: Arc::new(AtomicU8::new(0)),
-            wake_count: Arc::new(AtomicU64::new(0)),
-        }
+        Self::build(cap, None)
     }
 
     fn new_with_wake(cap: usize) -> (Self, UnboundedReceiver<()>) {
         let (wake_tx, wake_rx) = unbounded();
-        (
-            Self {
-                inner: Arc::new(Mutex::new(VecDeque::with_capacity(cap.min(1024)))),
-                cap,
-                wake_tx: Some(wake_tx),
-                wake_interests: Arc::new(AtomicU8::new(0)),
-                wake_count: Arc::new(AtomicU64::new(0)),
-            },
-            wake_rx,
-        )
+        (Self::build(cap, Some(wake_tx)), wake_rx)
+    }
+
+    fn build(cap: usize, wake_tx: Option<UnboundedSender<()>>) -> Self {
+        Self {
+            shared: Arc::new(TerminalFrameEventQueueShared {
+                inner: Mutex::new(TerminalFrameEventQueueInner {
+                    events: VecDeque::with_capacity(cap.min(1024)),
+                    closed: false,
+                }),
+                space_available: Condvar::new(),
+                #[cfg(test)]
+                blocked_notifier: Mutex::new(None),
+            }),
+            cap,
+            wake_tx,
+            wake_interests: Arc::new(AtomicU8::new(0)),
+            wake_count: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     fn arm_wake(&self, interest: u8) {
@@ -1596,21 +1715,40 @@ impl TerminalFrameEventQueue {
         }
     }
 
-    fn push(&self, mut event: TerminalFrameEvent) {
+    fn push(&self, mut event: TerminalFrameEvent) -> TerminalFrameEventQueuePushOutcome {
         let wake_interest = terminal_frame_event_wake_interest(&event);
-        let Ok(mut queue) = self.inner.lock() else {
-            return;
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return TerminalFrameEventQueuePushOutcome::Poisoned;
         };
-        compact_terminal_frame_event_queue(&mut queue, &mut event);
-        while queue.len() >= self.cap.max(1) {
-            let drop_index = queue
+        loop {
+            if inner.closed {
+                return TerminalFrameEventQueuePushOutcome::Closed;
+            }
+            compact_terminal_frame_event_queue(&mut inner.events, &mut event);
+            if inner.events.len() < self.cap.max(1) {
+                inner.events.push_back(event);
+                break;
+            }
+            if let Some(drop_index) = inner
+                .events
                 .iter()
                 .position(terminal_frame_event_can_drop_under_pressure)
-                .unwrap_or(0);
-            queue.remove(drop_index);
+            {
+                inner.events.remove(drop_index);
+                continue;
+            }
+            #[cfg(test)]
+            if let Ok(mut notifier) = self.shared.blocked_notifier.lock()
+                && let Some(notifier) = notifier.take()
+            {
+                let _ = notifier.send(());
+            }
+            inner = match self.shared.space_available.wait(inner) {
+                Ok(inner) => inner,
+                Err(_) => return TerminalFrameEventQueuePushOutcome::Poisoned,
+            };
         }
-        queue.push_back(event);
-        drop(queue);
+        drop(inner);
         if wake_interest != 0
             && self
                 .wake_interests
@@ -1622,33 +1760,73 @@ impl TerminalFrameEventQueue {
         {
             self.wake_count.fetch_add(1, Ordering::Relaxed);
         }
+        TerminalFrameEventQueuePushOutcome::Enqueued
+    }
+
+    #[cfg(test)]
+    fn notify_when_next_push_blocks(&self) -> std::sync::mpsc::Receiver<()> {
+        let (notify_tx, notify_rx) = std::sync::mpsc::channel();
+        *self
+            .shared
+            .blocked_notifier
+            .lock()
+            .expect("terminal frame event queue blocked notifier poisoned") = Some(notify_tx);
+        notify_rx
     }
 
     #[cfg(test)]
     fn try_recv(&self) -> Option<TerminalFrameEvent> {
-        self.inner.lock().ok()?.pop_front()
+        let event = self.shared.inner.lock().ok()?.events.pop_front();
+        if event.is_some() {
+            self.shared.space_available.notify_one();
+        }
+        event
     }
 
     fn drain_into(&self, events: &mut VecDeque<TerminalFrameEvent>, limit: usize) -> usize {
         if limit == 0 {
             return 0;
         }
-        let Ok(mut queue) = self.inner.lock() else {
+        let Ok(mut inner) = self.shared.inner.lock() else {
             return 0;
         };
         let mut drained = 0usize;
         while drained < limit {
-            let Some(event) = queue.pop_front() else {
+            let Some(event) = inner.events.pop_front() else {
                 break;
             };
             events.push_back(event);
             drained += 1;
         }
+        drop(inner);
+        if drained > 0 {
+            self.shared.space_available.notify_all();
+        }
         drained
     }
 
+    fn close(&self) {
+        if let Ok(mut inner) = self.shared.inner.lock() {
+            inner.closed = true;
+        }
+        self.shared.space_available.notify_all();
+    }
+
+    #[cfg(test)]
+    fn is_closed(&self) -> bool {
+        self.shared
+            .inner
+            .lock()
+            .map(|inner| inner.closed)
+            .unwrap_or(true)
+    }
+
     fn len(&self) -> usize {
-        self.inner.lock().map(|queue| queue.len()).unwrap_or(0)
+        self.shared
+            .inner
+            .lock()
+            .map(|inner| inner.events.len())
+            .unwrap_or(0)
     }
 
     fn wake_count(&self) -> u64 {
@@ -1661,6 +1839,18 @@ fn terminal_frame_event_wake_interest(event: &TerminalFrameEvent) -> u8 {
         TerminalFrameEvent::Output(_) => TERMINAL_FRAME_EVENT_WAKE_OUTPUT,
         TerminalFrameEvent::Snapshot(_) => TERMINAL_FRAME_EVENT_WAKE_SNAPSHOT,
         TerminalFrameEvent::Search(_) => TERMINAL_FRAME_EVENT_WAKE_SEARCH,
+    }
+}
+
+fn push_terminal_frame_worker_event(
+    event_queue: &TerminalFrameEventQueue,
+    event: TerminalFrameEvent,
+) {
+    if event_queue.push(event) == TerminalFrameEventQueuePushOutcome::Poisoned {
+        tracing::error!(
+            diagnostic = "terminal_frame_event_queue_poisoned",
+            "terminal frame event queue lock was poisoned"
+        );
     }
 }
 
@@ -2512,19 +2702,33 @@ fn push_terminal_frame_command(
             priority: true,
             purpose,
         } => {
-            commands.retain(|queued| {
-                !matches!(
-                    queued,
-                    TerminalFrameCommand::RequestSnapshot {
+            let segment_start = commands
+                .iter()
+                .rposition(terminal_frame_command_is_fence)
+                .map_or(0, |index| index + 1);
+            let mut index = segment_start;
+            while index < commands.len() {
+                let stale = matches!(
+                    commands.get(index),
+                    Some(TerminalFrameCommand::RequestSnapshot {
                         session_id: queued_session_id,
                         priority: true,
                         ..
-                    } if queued_session_id == &session_id
-                )
-            });
+                    }) if queued_session_id == &session_id
+                );
+                if stale {
+                    commands.remove(index);
+                } else {
+                    index += 1;
+                }
+            }
             let insert_at = commands
                 .iter()
-                .position(terminal_frame_command_priority_snapshot_insert_before)
+                .enumerate()
+                .skip(segment_start)
+                .find_map(|(index, command)| {
+                    terminal_frame_command_priority_snapshot_insert_before(command).then_some(index)
+                })
                 .unwrap_or(commands.len());
             commands.insert(
                 insert_at,
@@ -2567,6 +2771,14 @@ fn compact_stale_terminal_frame_commands(commands: &mut VecDeque<TerminalFrameCo
     let mut compacted = VecDeque::with_capacity(commands.len());
 
     for command in commands.drain(..).rev() {
+        if terminal_frame_command_is_fence(&command) {
+            seen_snapshots.clear();
+            seen_priority_snapshots.clear();
+            seen_searches.clear();
+            kept_snapshot_priority = false;
+            compacted.push_front(command);
+            continue;
+        }
         let keep = match &command {
             TerminalFrameCommand::RequestSnapshot {
                 session_id,
@@ -2597,6 +2809,14 @@ fn compact_stale_terminal_frame_commands(commands: &mut VecDeque<TerminalFrameCo
     }
 
     *commands = compacted;
+}
+
+fn terminal_frame_command_is_fence(_command: &TerminalFrameCommand) -> bool {
+    #[cfg(test)]
+    if matches!(_command, TerminalFrameCommand::Fence { .. }) {
+        return true;
+    }
+    false
 }
 
 fn terminal_frame_command_can_drop_under_pressure(command: &TerminalFrameCommand) -> bool {
@@ -2635,6 +2855,19 @@ fn terminal_frame_command_output_bytes(command: &TerminalFrameCommand) -> usize 
     }
 }
 
+fn terminal_frame_live_snapshot_enabled(is_visible: bool) -> bool {
+    let presentation = if is_visible {
+        // The worker only needs visibility; active and inactive visible sessions
+        // intentionally share live snapshot policy.
+        TerminalPresentation::VisibleInactive
+    } else {
+        TerminalPresentation::Background
+    };
+    let policy = TerminalWorkPolicy::for_presentation(presentation);
+    debug_assert!(policy.parse_output);
+    policy.live_snapshot
+}
+
 fn run_terminal_frame_processor(
     command_rx: TerminalFrameCommandReceiver,
     event_queue: TerminalFrameEventQueue,
@@ -2661,7 +2894,7 @@ fn run_terminal_frame_processor(
                 &mut selected_occurrence_search_jobs,
                 &sessions,
             ) {
-                event_queue.push(TerminalFrameEvent::Search(event));
+                push_terminal_frame_worker_event(&event_queue, TerminalFrameEvent::Search(event));
             }
             continue;
         };
@@ -2671,7 +2904,9 @@ fn run_terminal_frame_processor(
                 encoding,
                 scrollback_limit,
             } => {
-                let include = !priority_initialized || snapshot_priority.contains(&session_id);
+                let include = terminal_frame_live_snapshot_enabled(
+                    !priority_initialized || snapshot_priority.contains(&session_id),
+                );
                 let session = sessions
                     .entry(session_id)
                     .or_insert_with(|| TerminalFrameSession::new(&encoding, scrollback_limit));
@@ -2689,9 +2924,14 @@ fn run_terminal_frame_processor(
                     &session_id,
                     "selected occurrence search was cancelled by session reset",
                 ) {
-                    event_queue.push(TerminalFrameEvent::Search(stale));
+                    push_terminal_frame_worker_event(
+                        &event_queue,
+                        TerminalFrameEvent::Search(stale),
+                    );
                 }
-                let include = !priority_initialized || snapshot_priority.contains(&session_id);
+                let include = terminal_frame_live_snapshot_enabled(
+                    !priority_initialized || snapshot_priority.contains(&session_id),
+                );
                 let session = sessions
                     .entry(session_id.clone())
                     .or_insert_with(|| TerminalFrameSession::new(&encoding, scrollback_limit));
@@ -2704,7 +2944,10 @@ fn run_terminal_frame_processor(
                     &session_id,
                     "selected occurrence session was removed",
                 ) {
-                    event_queue.push(TerminalFrameEvent::Search(stale));
+                    push_terminal_frame_worker_event(
+                        &event_queue,
+                        TerminalFrameEvent::Search(stale),
+                    );
                 }
                 sessions.remove(&session_id);
                 snapshot_priority.remove(&session_id);
@@ -2719,13 +2962,19 @@ fn run_terminal_frame_processor(
                     &session_id,
                     "selected occurrence search was cancelled by terminal resize",
                 ) {
-                    event_queue.push(TerminalFrameEvent::Search(stale));
+                    push_terminal_frame_worker_event(
+                        &event_queue,
+                        TerminalFrameEvent::Search(stale),
+                    );
                 }
                 if let Some(session) = sessions.get_mut(&session_id) {
                     let started_at = Instant::now();
                     session.resize(cols, rows);
                     let event = session.resized_live_snapshot_event(session_id, started_at);
-                    event_queue.push(TerminalFrameEvent::Snapshot(event));
+                    push_terminal_frame_worker_event(
+                        &event_queue,
+                        TerminalFrameEvent::Snapshot(event),
+                    );
                 }
             }
             TerminalFrameCommand::Output {
@@ -2739,8 +2988,18 @@ fn run_terminal_frame_processor(
                     &session_id,
                     "selected occurrence search was cancelled by terminal output",
                 ) {
-                    event_queue.push(TerminalFrameEvent::Search(stale));
+                    push_terminal_frame_worker_event(
+                        &event_queue,
+                        TerminalFrameEvent::Search(stale),
+                    );
                 }
+                let include_live_snapshot = terminal_frame_live_snapshot_enabled(
+                    !priority_initialized || snapshot_priority.contains(&session_id),
+                );
+                sessions
+                    .entry(session_id.clone())
+                    .or_insert_with(|| TerminalFrameSession::new(&encoding, scrollback_limit))
+                    .include_live_snapshot = include_live_snapshot;
                 process_terminal_frame_output_burst(
                     &command_rx,
                     &mut pending_commands,
@@ -2750,7 +3009,12 @@ fn run_terminal_frame_processor(
                     data,
                     encoding,
                     scrollback_limit,
-                    |event| event_queue.push(TerminalFrameEvent::Output(event)),
+                    |event| {
+                        push_terminal_frame_worker_event(
+                            &event_queue,
+                            TerminalFrameEvent::Output(event),
+                        );
+                    },
                 );
             }
             TerminalFrameCommand::RequestSnapshot {
@@ -2769,7 +3033,10 @@ fn run_terminal_frame_processor(
                         action_link_matchers,
                         priority,
                     );
-                    event_queue.push(TerminalFrameEvent::Snapshot(event));
+                    push_terminal_frame_worker_event(
+                        &event_queue,
+                        TerminalFrameEvent::Snapshot(event),
+                    );
                 }
             }
             TerminalFrameCommand::RequestSearch {
@@ -2784,11 +3051,17 @@ fn run_terminal_frame_processor(
                             &mut selected_occurrence_search_jobs,
                             job,
                         ) {
-                            event_queue.push(TerminalFrameEvent::Search(stale));
+                            push_terminal_frame_worker_event(
+                                &event_queue,
+                                TerminalFrameEvent::Search(stale),
+                            );
                         }
                     } else {
                         let event = session.search_event(session_id, purpose, key);
-                        event_queue.push(TerminalFrameEvent::Search(event));
+                        push_terminal_frame_worker_event(
+                            &event_queue,
+                            TerminalFrameEvent::Search(event),
+                        );
                     }
                 }
             }
@@ -2797,8 +3070,14 @@ fn run_terminal_frame_processor(
                 snapshot_priority.clear();
                 snapshot_priority.extend(session_ids);
                 for (session_id, session) in sessions.iter_mut() {
-                    session.include_live_snapshot = snapshot_priority.contains(session_id);
+                    session.include_live_snapshot = terminal_frame_live_snapshot_enabled(
+                        snapshot_priority.contains(session_id),
+                    );
                 }
+            }
+            #[cfg(test)]
+            TerminalFrameCommand::Fence { complete_tx } => {
+                let _ = complete_tx.send(());
             }
         }
     }

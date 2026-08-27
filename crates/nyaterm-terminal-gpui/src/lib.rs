@@ -73,8 +73,8 @@ fn resolve_cell_bg(
 }
 
 pub use element::{
-    NyaTerminalElement, NyaTerminalLayoutCache, TerminalBufferMatch, TerminalGridSelection,
-    TerminalLineDecorations, TerminalSearchFlags,
+    NyaTerminalElement, NyaTerminalLayoutCache, NyaTerminalLayoutCacheStats, TerminalBufferMatch,
+    TerminalGridSelection, TerminalLineDecorations, TerminalSearchFlags,
 };
 pub use input::{
     TerminalKeyMode, initial_terminal_screen, terminal_key_bytes, terminal_key_bytes_with_mode,

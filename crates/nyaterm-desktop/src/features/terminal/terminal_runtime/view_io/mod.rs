@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::models::{
     EffectiveTerminalPaintPolicy, TerminalFrameActionLinks, TerminalPerformanceMode,
-    TerminalProtocolState, TerminalSearchMode, TerminalSelection, TerminalViewState,
-    terminal_action_link_matcher_key, terminal_snapshot_matches_grid_geometry,
+    TerminalPresentation, TerminalProtocolState, TerminalSearchMode, TerminalSelection,
+    TerminalViewState, TerminalWorkPolicy, terminal_action_link_matcher_key,
+    terminal_snapshot_matches_grid_geometry,
 };
 use gpui::{AppContext, ClipboardItem, Context, Entity, Window};
 #[cfg(test)]
@@ -889,6 +890,9 @@ impl NyaTermApp {
         self.ensure_paint_theme_caches();
         let surface = self.ensure_terminal_surface(session_id, cx);
         let is_active = self.session.active_id() == Some(session_id);
+        let is_visible = self.terminal_session_has_visible_surface(session_id);
+        let presentation = TerminalPresentation::resolve(is_active, is_visible);
+        let work_policy = TerminalWorkPolicy::for_presentation(presentation);
         let is_disconnected = self.session.is_disconnected(session_id);
         let render_output_pressure = self.runtime_output_pressure_active();
         let view = self.terminal.view.views.get(session_id);
@@ -1111,7 +1115,7 @@ impl NyaTermApp {
 
         let search_mapping_started_at = Instant::now();
         let paint_policy = EffectiveTerminalPaintPolicy::resolve(
-            is_active,
+            presentation,
             render_degraded,
             render_output_pressure,
             burst,
@@ -1145,7 +1149,7 @@ impl NyaTermApp {
         let mut active_search_ranges_by_line: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
         let mut selected_occurrence_ranges_by_line: HashMap<usize, Vec<(usize, usize)>> =
             HashMap::new();
-        let selected_occurrence_matches = if is_active {
+        let selected_occurrence_matches = if work_policy.active_decorations {
             self.terminal_selected_occurrence_matches_for_session(session_id)
                 .unwrap_or_default()
         } else {
@@ -1153,7 +1157,7 @@ impl NyaTermApp {
         };
         // Selected occurrences are explicit user feedback. Keep them visible
         // while optional decorations are degraded under output pressure.
-        if is_active {
+        if work_policy.active_decorations {
             let (abs_start, abs_end) =
                 crate::features::terminal::terminal_surface::terminal_snapshot_absolute_range(
                     &snapshot,

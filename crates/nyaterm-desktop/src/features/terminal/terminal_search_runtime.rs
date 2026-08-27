@@ -446,6 +446,34 @@ impl NyaTermApp {
         event: RecordingWriteEvent,
     ) -> bool {
         match event {
+            RecordingWriteEvent::Status(status) => {
+                let state = status.state;
+                let last_error = status.last_error.clone();
+                self.recording.apply_status(status);
+                match state {
+                    nyaterm_transport::RecordingStatusState::Degraded => {
+                        self.shell.set_status(format!(
+                            "recording degraded: {}",
+                            last_error
+                                .unwrap_or_else(|| "some recording data was lost".to_string())
+                        ));
+                    }
+                    nyaterm_transport::RecordingStatusState::Failed => {
+                        self.shell.set_status(format!(
+                            "recording failed: {}",
+                            last_error.unwrap_or_else(|| "writer failed".to_string())
+                        ));
+                    }
+                    nyaterm_transport::RecordingStatusState::Starting
+                    | nyaterm_transport::RecordingStatusState::Recording
+                    | nyaterm_transport::RecordingStatusState::Stopping => {}
+                }
+                true
+            }
+            RecordingWriteEvent::StatusRemoved { session_id } => {
+                self.recording.remove_status(&session_id);
+                true
+            }
             RecordingWriteEvent::HistorySearch(event) => {
                 // A reply for a query the user has already moved on from.
                 if self.terminal.search.history_pending_key.as_ref() != Some(&event.key) {

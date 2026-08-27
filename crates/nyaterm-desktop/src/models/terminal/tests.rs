@@ -17,20 +17,21 @@ use super::{
     TERMINAL_PERFORMANCE_RECOVERY_NOTICE, TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM,
     TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT, TERMINAL_UI_OUTPUT_TAIL_CAP,
     TerminalFrameActionLinks, TerminalFrameCommand, TerminalFrameEvent, TerminalFrameEventQueue,
-    TerminalFrameOutputBatch, TerminalFrameOutputEvent, TerminalFrameOutputSubmission,
-    TerminalFrameParts, TerminalFrameSearchEvent, TerminalFrameSearchKey,
-    TerminalFrameSearchPurpose, TerminalFrameSearchResult, TerminalFrameSession,
-    TerminalFrameSnapshotEvent, TerminalFrameSnapshotPurpose, TerminalPerformanceMode,
-    TerminalPerformanceOverlay, TerminalProtocolState, TerminalRenderCache, TerminalViewState,
-    append_terminal_ui_output_tail, coalesce_terminal_frame_output_command,
+    TerminalFrameEventQueuePushOutcome, TerminalFrameOutputBatch, TerminalFrameOutputEvent,
+    TerminalFrameOutputSubmission, TerminalFrameParts, TerminalFramePipeline,
+    TerminalFrameSearchEvent, TerminalFrameSearchKey, TerminalFrameSearchPurpose,
+    TerminalFrameSearchResult, TerminalFrameSession, TerminalFrameSnapshotEvent,
+    TerminalFrameSnapshotPurpose, TerminalPerformanceMode, TerminalPerformanceOverlay,
+    TerminalPresentation, TerminalProtocolState, TerminalRenderCache, TerminalViewState,
+    TerminalWorkPolicy, append_terminal_ui_output_tail, coalesce_terminal_frame_output_command,
     compact_stale_terminal_frame_commands, next_terminal_frame_command,
     prepare_terminal_frame_action_links, prepare_terminal_frame_action_links_reusing,
     process_next_selected_occurrence_search_chunk, process_terminal_frame_output_burst,
     protect_terminal_output_burst, replace_selected_occurrence_search_job,
     terminal_expensive_interactions_enabled, terminal_frame_command_channel,
     terminal_frame_output_commands, terminal_frame_scroll_window_extra_rows,
-    terminal_frame_search_result_is_current, terminal_snapshot_matches_grid_geometry,
-    try_next_terminal_frame_command,
+    terminal_frame_search_result_is_current, terminal_frame_snapshot_with_scroll_window,
+    terminal_snapshot_matches_grid_geometry, try_next_terminal_frame_command,
 };
 
 fn selected_occurrence_test_key(
@@ -92,6 +93,51 @@ fn terminal_frame_empty_output_submission_produces_no_command() {
         scrollback_limit: 1000,
     });
     assert!(command.is_none());
+}
+
+#[test]
+fn terminal_presentation_work_policy_is_total_and_distinguishes_visible_inactive() {
+    let cases = [
+        (
+            TerminalPresentation::VisibleActive,
+            TerminalWorkPolicy {
+                parse_output: true,
+                live_snapshot: true,
+                surface_notify: true,
+                active_decorations: true,
+            },
+        ),
+        (
+            TerminalPresentation::VisibleInactive,
+            TerminalWorkPolicy {
+                parse_output: true,
+                live_snapshot: true,
+                surface_notify: true,
+                active_decorations: false,
+            },
+        ),
+        (
+            TerminalPresentation::Background,
+            TerminalWorkPolicy {
+                parse_output: true,
+                live_snapshot: false,
+                surface_notify: false,
+                active_decorations: false,
+            },
+        ),
+    ];
+
+    for (presentation, expected) in cases {
+        assert_eq!(TerminalWorkPolicy::for_presentation(presentation), expected);
+    }
+    assert_eq!(
+        TerminalPresentation::resolve(false, true),
+        TerminalPresentation::VisibleInactive
+    );
+    assert_eq!(
+        TerminalPresentation::resolve(true, false),
+        TerminalPresentation::Background
+    );
 }
 
 #[test]
@@ -853,6 +899,90 @@ fn terminal_frame_output_includes_snapshot_when_high_priority() {
 }
 
 #[test]
+fn terminal_frame_pipeline_background_chunks_are_deterministic_after_priority_snapshot() {
+    const SESSION_ID: &str = "background-stress";
+    const CHUNK_COUNT: usize = 96;
+    const CHUNK_PAYLOAD_BYTES: usize = 1024;
+
+    let pipeline = TerminalFramePipeline::default();
+    pipeline.set_snapshot_priority(Vec::new());
+    pipeline.flush_for_test();
+
+    let chunks = (0..CHUNK_COUNT)
+        .map(|index| {
+            format!("chunk-{index:03}:{}\r\n", "x".repeat(CHUNK_PAYLOAD_BYTES)).into_bytes()
+        })
+        .collect::<Vec<_>>();
+    assert!(chunks.iter().all(|chunk| chunk.len() < 1024 * 1024));
+    let submitted_bytes = chunks.iter().map(Vec::len).sum::<usize>();
+    let mut reference = TerminalScreen::default();
+    reference.set_scrollback_limit(1000);
+    for chunk in &chunks {
+        reference.advance(chunk);
+        pipeline.submit_output(SESSION_ID, chunk.clone(), "UTF-8", 1000);
+    }
+
+    pipeline.flush_for_test();
+    let mut background_events = VecDeque::new();
+    pipeline.drain_events_into(&mut background_events, usize::MAX);
+    let mut accepted_bytes = 0usize;
+    let mut background_revision = 0u64;
+    let mut output_events = 0usize;
+    while let Some(event) = background_events.pop_front() {
+        let TerminalFrameEvent::Output(frame) = event else {
+            panic!("background output phase should only emit output events");
+        };
+        output_events += 1;
+        accepted_bytes = accepted_bytes.saturating_add(frame.accepted_bytes);
+        background_revision = background_revision.max(frame.revision);
+        assert_eq!(frame.session_id, SESSION_ID);
+        assert!(frame.snapshot.is_none());
+        assert_eq!(frame.snapshot_stats.reused_rows, 0);
+        assert_eq!(frame.snapshot_stats.rebuilt_rows, 0);
+        assert_eq!(frame.snapshot_stats.inspected_rows, 0);
+        assert_eq!(frame.skipped_output_bytes, 0);
+    }
+    assert!(output_events > 0);
+    assert_eq!(accepted_bytes, submitted_bytes);
+
+    pipeline.set_snapshot_priority(vec![SESSION_ID.to_string()]);
+    pipeline.request_priority_snapshot(SESSION_ID, 0, false, ActionLinksMatcherSettings::default());
+    pipeline.flush_for_test();
+
+    let mut visible_events = VecDeque::new();
+    pipeline.drain_events_into(&mut visible_events, usize::MAX);
+    let snapshot_event = visible_events
+        .into_iter()
+        .find_map(|event| match event {
+            TerminalFrameEvent::Snapshot(event) => Some(event),
+            TerminalFrameEvent::Output(_) | TerminalFrameEvent::Search(_) => None,
+        })
+        .expect("visible priority request should emit a snapshot");
+    let expected = terminal_frame_snapshot_with_scroll_window(&reference, 0, true);
+    assert_eq!(snapshot_event.revision, background_revision);
+    assert_eq!(snapshot_event.snapshot.cols, expected.cols);
+    assert_eq!(
+        snapshot_event.snapshot.viewport_rows,
+        expected.viewport_rows
+    );
+    assert_eq!(snapshot_event.snapshot.cursor.row, expected.cursor.row);
+    assert_eq!(snapshot_event.snapshot.cursor.col, expected.cursor.col);
+    assert_eq!(
+        snapshot_event
+            .snapshot
+            .rows()
+            .iter()
+            .map(|row| row.signature)
+            .collect::<Vec<_>>(),
+        expected
+            .rows()
+            .iter()
+            .map(|row| row.signature)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn terminal_frame_output_reports_single_line_snapshot_reuse() {
     let mut session = TerminalFrameSession::new("UTF-8", 1000);
     session.include_live_snapshot = true;
@@ -1081,9 +1211,11 @@ fn terminal_ui_output_tail_is_bounded_and_utf8_safe() {
 #[test]
 fn terminal_frame_visible_text_event_keeps_only_tail_for_ui() {
     let mut session = TerminalFrameSession::new("UTF-8", 1000);
-    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
-    let recording_pipeline =
-        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+    let mut recording_pipeline =
+        super::super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES);
+    let mut recording_events = recording_pipeline
+        .take_event_receiver()
+        .expect("recording events should be available");
     let input = format!(
         "{}tail",
         "x".repeat(TERMINAL_FRAME_VISIBLE_TEXT_TAIL_CAP + 1024)
@@ -1103,20 +1235,28 @@ fn terminal_frame_visible_text_event_keeps_only_tail_for_ui() {
         event.recording_text_bytes,
         TERMINAL_FRAME_VISIBLE_TEXT_TAIL_CAP + 1028
     );
+    recording_pipeline.request_history_search(super::super::RecordingHistorySearchKey {
+        session_id: "s1".to_string(),
+        query: "tail".to_string(),
+        case_sensitive: false,
+        regex: false,
+        whole_word: false,
+        limit: Some(10),
+        context_before: Some(0),
+        context_after: Some(0),
+        max_lines: None,
+    });
     recording_pipeline.writer().flush();
-    let recorded = recording_manager
-        .search_history(nyaterm_transport::TerminalHistorySearchRequest {
-            session_id: "s1".to_string(),
-            query: "tail".to_string(),
-            case_sensitive: false,
-            regex: false,
-            whole_word: false,
-            limit: Some(10),
-            context_before: Some(0),
-            context_after: Some(0),
-            max_lines: None,
-        })
-        .expect("recording history search should succeed");
+    let recorded = loop {
+        let event = recording_events
+            .try_recv()
+            .expect("recording search result should be available");
+        if let super::super::RecordingWriteEvent::HistorySearch(event) = event {
+            break event
+                .result
+                .expect("recording history search should succeed");
+        }
+    };
     assert_eq!(recorded.total, 1);
 }
 
@@ -1389,6 +1529,164 @@ fn terminal_frame_event_queue_preserves_output_effects() {
         Some(TerminalFrameEvent::Output(frame)) if frame.revision == 2
     ));
     assert!(queue.try_recv().is_none());
+}
+
+#[test]
+fn terminal_frame_event_queue_waits_for_room_without_reordering_critical_events() {
+    let queue = TerminalFrameEventQueue::new(2);
+    for (revision, reply) in [(1, b"reply-1".as_slice()), (2, b"reply-2".as_slice())] {
+        let mut frame = output_frame_with_sizes(reply.len(), 0);
+        frame.revision = revision;
+        frame.effects.pty_write.push(reply.to_vec());
+        assert_eq!(
+            queue.push(TerminalFrameEvent::Output(frame)),
+            TerminalFrameEventQueuePushOutcome::Enqueued
+        );
+    }
+
+    let blocked_rx = queue.notify_when_next_push_blocks();
+    let producer_queue = queue.clone();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let producer = std::thread::spawn(move || {
+        let mut frame = output_frame_with_sizes(7, 0);
+        frame.revision = 3;
+        frame.effects.pty_write.push(b"reply-3".to_vec());
+        let outcome = producer_queue.push(TerminalFrameEvent::Output(frame));
+        let _ = result_tx.send(outcome);
+    });
+    blocked_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("critical producer did not block on the full queue");
+
+    let mut drained = VecDeque::new();
+    assert_eq!(queue.drain_into(&mut drained, 1), 1);
+    assert!(matches!(
+        drained.pop_front(),
+        Some(TerminalFrameEvent::Output(frame)) if frame.revision == 1
+    ));
+    assert_eq!(
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("critical producer did not wake after drain"),
+        TerminalFrameEventQueuePushOutcome::Enqueued
+    );
+    producer.join().expect("critical producer panicked");
+
+    for (revision, reply) in [(2, b"reply-2".as_slice()), (3, b"reply-3".as_slice())] {
+        let Some(TerminalFrameEvent::Output(frame)) = queue.try_recv() else {
+            panic!("critical output should remain queued");
+        };
+        assert_eq!(frame.revision, revision);
+        assert_eq!(frame.effects.pty_write, vec![reply.to_vec()]);
+    }
+    assert!(queue.try_recv().is_none());
+}
+
+#[test]
+fn terminal_frame_event_queue_close_releases_waiting_push_without_enqueuing() {
+    let queue = TerminalFrameEventQueue::new(1);
+    let mut queued = output_frame_with_sizes(1, 0);
+    queued.revision = 1;
+    queued.effects.bell = true;
+    assert_eq!(
+        queue.push(TerminalFrameEvent::Output(queued)),
+        TerminalFrameEventQueuePushOutcome::Enqueued
+    );
+
+    let blocked_rx = queue.notify_when_next_push_blocks();
+    let producer_queue = queue.clone();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let producer = std::thread::spawn(move || {
+        let mut rejected = output_frame_with_sizes(1, 0);
+        rejected.revision = 2;
+        rejected.effects.bell = true;
+        let outcome = producer_queue.push(TerminalFrameEvent::Output(rejected));
+        let _ = result_tx.send(outcome);
+    });
+    blocked_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("critical producer did not block on the full queue");
+
+    queue.close();
+    assert_eq!(
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("close did not wake the critical producer"),
+        TerminalFrameEventQueuePushOutcome::Closed
+    );
+    producer.join().expect("critical producer panicked");
+    assert_eq!(queue.len(), 1);
+    assert!(matches!(
+        queue.try_recv(),
+        Some(TerminalFrameEvent::Output(frame)) if frame.revision == 1
+    ));
+    assert!(queue.try_recv().is_none());
+}
+
+#[test]
+fn terminal_frame_event_queue_delivers_snapshot_reply_after_critical_pressure() {
+    let queue = TerminalFrameEventQueue::new(1);
+    let mut critical = output_frame_with_sizes(1, 0);
+    critical.effects.bell = true;
+    assert_eq!(
+        queue.push(TerminalFrameEvent::Output(critical)),
+        TerminalFrameEventQueuePushOutcome::Enqueued
+    );
+
+    let blocked_rx = queue.notify_when_next_push_blocks();
+    let producer_queue = queue.clone();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let producer = std::thread::spawn(move || {
+        let screen = TerminalScreen::default();
+        let outcome =
+            producer_queue.push(TerminalFrameEvent::Snapshot(TerminalFrameSnapshotEvent {
+                session_id: "s1".to_string(),
+                offset: 0,
+                snapshot: Arc::new(screen.snapshot()),
+                action_links: None,
+                revision: 1,
+                snapshot_duration: Duration::ZERO,
+                snapshot_stats: Default::default(),
+                action_link_stats: Default::default(),
+                process_duration: Duration::ZERO,
+            }));
+        let _ = result_tx.send(outcome);
+    });
+    blocked_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("snapshot producer did not block on the full queue");
+
+    let mut drained = VecDeque::new();
+    assert_eq!(queue.drain_into(&mut drained, 1), 1);
+    assert_eq!(
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("snapshot producer did not wake after drain"),
+        TerminalFrameEventQueuePushOutcome::Enqueued
+    );
+    producer.join().expect("snapshot producer panicked");
+
+    let mut view = TerminalViewState::new();
+    view.pending_snapshot_offsets.insert(0);
+    view.priority_pending_snapshot_offsets.insert(0);
+    let Some(TerminalFrameEvent::Snapshot(reply)) = queue.try_recv() else {
+        panic!("snapshot reply should arrive after pressure drains");
+    };
+    view.complete_snapshot_request(reply.offset);
+    assert!(view.pending_snapshot_offsets.is_empty());
+    assert!(view.priority_pending_snapshot_offsets.is_empty());
+}
+
+#[test]
+fn terminal_frame_pipeline_last_handle_closes_queue_despite_worker_clone() {
+    let pipeline = TerminalFramePipeline::default();
+    let event_queue = pipeline.event_queue.clone();
+    let other_handle = pipeline.clone();
+
+    drop(pipeline);
+    assert!(!event_queue.is_closed());
+    drop(other_handle);
+    assert!(event_queue.is_closed());
 }
 
 #[test]
@@ -1725,9 +2023,8 @@ fn terminal_frame_worker_batches_output_burst_into_single_frame() {
     }));
     drop(tx);
 
-    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
     let recording_pipeline =
-        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+        super::super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES);
     let mut pending = VecDeque::new();
     let mut sessions = HashMap::new();
     let event_queue = TerminalFrameEventQueue::new(8);
@@ -1740,7 +2037,12 @@ fn terminal_frame_worker_batches_output_burst_into_single_frame() {
         b"a".to_vec(),
         "UTF-8".to_string(),
         1000,
-        |event| event_queue.push(TerminalFrameEvent::Output(event)),
+        |event| {
+            assert_eq!(
+                event_queue.push(TerminalFrameEvent::Output(event)),
+                TerminalFrameEventQueuePushOutcome::Enqueued
+            );
+        },
     );
     let Some(TerminalFrameEvent::Output(event)) = event_queue.try_recv() else {
         panic!("worker should emit one coalesced output frame");
@@ -1775,9 +2077,8 @@ fn terminal_frame_worker_collects_trailing_output_before_emitting() {
         scrollback_limit: 1000,
     }));
     drop(tx);
-    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
     let recording_pipeline =
-        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+        super::super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES);
     let mut pending = VecDeque::new();
     let mut sessions = HashMap::new();
     let mut events = Vec::new();
@@ -1812,9 +2113,8 @@ fn terminal_frame_worker_amortizes_snapshot_across_sixteen_pty_chunks() {
     }
     drop(tx);
 
-    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
     let recording_pipeline =
-        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+        super::super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES);
     let mut pending = VecDeque::new();
     let mut sessions = HashMap::new();
     let mut events = Vec::new();
@@ -1859,9 +2159,8 @@ fn terminal_frame_worker_batch_stops_at_resize_boundary() {
     }));
     drop(tx);
 
-    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
     let recording_pipeline =
-        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+        super::super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES);
     let mut pending = VecDeque::new();
     let mut sessions = HashMap::new();
     let mut events = Vec::new();
@@ -1896,9 +2195,8 @@ fn terminal_frame_worker_batch_stops_at_resize_boundary() {
 fn terminal_frame_output_burst_does_not_wait_for_a_live_sender() {
     let (tx, rx) = terminal_frame_command_channel();
 
-    let recording_manager = Arc::new(nyaterm_transport::RecordingManager::new());
     let recording_pipeline =
-        super::super::RecordingWritePipeline::spawn(Arc::clone(&recording_manager));
+        super::super::RecordingWritePipeline::spawn(nyaterm_transport::DEFAULT_MEMORY_LIMIT_BYTES);
     let mut pending = VecDeque::new();
     let mut sessions = HashMap::new();
     let mut events = Vec::new();
@@ -2427,6 +2725,44 @@ fn terminal_frame_command_queue_prioritizes_user_scroll_snapshot() {
     assert!(matches!(
         rx.try_recv(),
         Some(TerminalFrameCommand::RequestSearch { .. })
+    ));
+}
+
+#[test]
+fn terminal_frame_command_priority_work_does_not_cross_fence() {
+    let (tx, rx) = terminal_frame_command_channel();
+    assert!(tx.send(TerminalFrameCommand::Output {
+        session_id: "s1".to_string(),
+        data: b"before".to_vec(),
+        encoding: "UTF-8".to_string(),
+        scrollback_limit: 1000,
+    }));
+    let (complete_tx, _complete_rx) = std::sync::mpsc::sync_channel(0);
+    assert!(tx.send(TerminalFrameCommand::Fence { complete_tx }));
+    assert!(tx.send(TerminalFrameCommand::RequestSnapshot {
+        session_id: "s1".to_string(),
+        offset: 7,
+        action_links_enabled: false,
+        action_link_matchers: ActionLinksMatcherSettings::default(),
+        priority: true,
+        purpose: TerminalFrameSnapshotPurpose::Paint,
+    }));
+
+    assert!(matches!(
+        rx.try_recv(),
+        Some(TerminalFrameCommand::Output { data, .. }) if data == b"before"
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Some(TerminalFrameCommand::Fence { .. })
+    ));
+    assert!(matches!(
+        rx.try_recv(),
+        Some(TerminalFrameCommand::RequestSnapshot {
+            offset: 7,
+            priority: true,
+            ..
+        })
     ));
 }
 

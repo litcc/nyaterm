@@ -23,8 +23,11 @@ const SESSION_EVENT_BRIDGE_IDLE_SLEEP: Duration = Duration::from_millis(4);
 const SESSION_EVENT_BRIDGE_WAIT_TIMEOUT: Duration = Duration::from_millis(50);
 const SESSION_EVENT_BRIDGE_BUSY_SLEEP: Duration = Duration::from_millis(1);
 const SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT: usize = 1024 * 1024;
-const SESSION_EVENT_BRIDGE_UI_OUTPUT_EVENT_LIMIT: usize = 128 * 1024;
+const SESSION_EVENT_BRIDGE_UI_OUTPUT_LOW_WATERMARK: usize =
+    SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT / 2;
 const SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE: usize = 2 * 1024 * 1024;
+const SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_LOW_WATERMARK: usize =
+    SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE / 2;
 const SESSION_EVENT_BRIDGE_SIDEBAND_PROBE_EVENTS: usize = 4;
 const SESSION_EVENT_BRIDGE_SIDEBAND_PROBE_WINDOW: Duration = Duration::from_millis(250);
 
@@ -379,96 +382,18 @@ impl SessionEventBridgeQueue {
 
 impl SessionEventBridgeQueueInner {
     fn push(&mut self, event: SessionEvent) {
-        match event {
-            SessionEvent::Output {
-                session_id,
-                mut data,
-            } => {
-                if data.is_empty() {
-                    return;
-                }
-                let mut leading_drop = 0usize;
-                if data.len() > SESSION_EVENT_BRIDGE_UI_OUTPUT_EVENT_LIMIT {
-                    leading_drop = data.len() - SESSION_EVENT_BRIDGE_UI_OUTPUT_EVENT_LIMIT;
-                    data.drain(..leading_drop);
-                }
-                if leading_drop > 0 {
-                    self.push_output_drop_event(session_id.clone(), leading_drop);
-                }
+        match &event {
+            SessionEvent::Output { data, .. } if data.is_empty() => return,
+            SessionEvent::Output { data, .. } => {
                 self.queued_output_bytes = self.queued_output_bytes.saturating_add(data.len());
-                self.events
-                    .push_back(SessionEvent::Output { session_id, data });
-                self.enforce_output_limit();
             }
-            other => self.events.push_back(other),
+            SessionEvent::OutputDropped { .. }
+            | SessionEvent::CwdChanged { .. }
+            | SessionEvent::CommandAccepted { .. }
+            | SessionEvent::Exited { .. }
+            | SessionEvent::Error { .. } => {}
         }
-    }
-
-    fn push_output_drop_event(&mut self, session_id: String, bytes: usize) {
-        if bytes == 0 {
-            return;
-        }
-        if let Some(SessionEvent::OutputDropped {
-            session_id: last_session_id,
-            bytes: last_bytes,
-        }) = self.events.back_mut()
-            && last_session_id == &session_id
-        {
-            *last_bytes = last_bytes.saturating_add(bytes);
-            return;
-        }
-        self.events
-            .push_back(SessionEvent::OutputDropped { session_id, bytes });
-    }
-
-    fn insert_output_drop_event(&mut self, index: usize, session_id: String, bytes: usize) {
-        if bytes == 0 {
-            return;
-        }
-        if index > 0
-            && let Some(SessionEvent::OutputDropped {
-                session_id: previous_session_id,
-                bytes: previous_bytes,
-            }) = self.events.get_mut(index - 1)
-            && previous_session_id == &session_id
-        {
-            *previous_bytes = previous_bytes.saturating_add(bytes);
-            return;
-        }
-        self.events.insert(
-            index.min(self.events.len()),
-            SessionEvent::OutputDropped { session_id, bytes },
-        );
-    }
-
-    fn enforce_output_limit(&mut self) {
-        while self.queued_output_bytes > SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT {
-            let excess = self.queued_output_bytes - SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT;
-            let Some(index) = self
-                .events
-                .iter()
-                .position(|event| matches!(event, SessionEvent::Output { .. }))
-            else {
-                self.queued_output_bytes = 0;
-                break;
-            };
-            let mut remove_event = false;
-            let mut dropped = None;
-            if let Some(SessionEvent::Output { session_id, data }) = self.events.get_mut(index) {
-                let remove = excess.min(data.len());
-                let dropped_session_id = session_id.clone();
-                data.drain(..remove);
-                self.queued_output_bytes = self.queued_output_bytes.saturating_sub(remove);
-                remove_event = data.is_empty();
-                dropped = Some((dropped_session_id, remove));
-            }
-            if let Some((session_id, bytes)) = dropped {
-                if remove_event {
-                    self.events.remove(index);
-                }
-                self.insert_output_drop_event(index, session_id, bytes);
-            }
-        }
+        self.events.push_back(event);
     }
 
     fn drain(&mut self, max_events: usize, max_output_bytes: usize) -> SessionEventBridgeDrain {
@@ -540,12 +465,18 @@ fn run_session_event_bridge(
 ) {
     let mut sideband_probe_sessions: HashMap<String, SessionEventBridgeSidebandProbe> =
         HashMap::new();
+    let mut source_drain_backpressured = false;
     while !state.stop.load(Ordering::Relaxed) {
         let Some(control) = state.control_snapshot() else {
             thread::sleep(SESSION_EVENT_BRIDGE_IDLE_SLEEP);
             continue;
         };
-        if bridge_should_pause_source_drain(frame_pipeline.queued_output_bytes()) {
+        source_drain_backpressured = bridge_should_pause_source_drain(
+            frame_pipeline.queued_output_bytes(),
+            state.ui_queue.queued_output_bytes(),
+            source_drain_backpressured,
+        );
+        if source_drain_backpressured {
             thread::sleep(SESSION_EVENT_BRIDGE_BUSY_SLEEP);
             continue;
         }
@@ -677,8 +608,18 @@ fn run_session_event_bridge(
     }
 }
 
-fn bridge_should_pause_source_drain(frame_pipeline_queued_output_bytes: usize) -> bool {
-    frame_pipeline_queued_output_bytes >= SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE
+fn bridge_should_pause_source_drain(
+    frame_pipeline_queued_output_bytes: usize,
+    ui_queued_output_bytes: usize,
+    currently_backpressured: bool,
+) -> bool {
+    if currently_backpressured {
+        frame_pipeline_queued_output_bytes > SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_LOW_WATERMARK
+            || ui_queued_output_bytes > SESSION_EVENT_BRIDGE_UI_OUTPUT_LOW_WATERMARK
+    } else {
+        frame_pipeline_queued_output_bytes >= SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE
+            || ui_queued_output_bytes >= SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT
+    }
 }
 
 fn flush_bridge_direct_outputs(
@@ -766,7 +707,9 @@ mod tests {
 
     use super::{
         SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE,
+        SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_LOW_WATERMARK,
         SESSION_EVENT_BRIDGE_SIDEBAND_PROBE_EVENTS, SESSION_EVENT_BRIDGE_SIDEBAND_PROBE_WINDOW,
+        SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT, SESSION_EVENT_BRIDGE_UI_OUTPUT_LOW_WATERMARK,
         SessionEventBridgeControlSnapshot, SessionEventBridgeQueue, bridge_arm_sideband_probe,
         bridge_consume_sideband_probe, bridge_output_can_go_direct, bridge_output_is_backpressured,
         bridge_output_may_contain_sideband_trigger, bridge_should_pause_source_drain,
@@ -912,13 +855,56 @@ mod tests {
     }
 
     #[test]
-    fn bridge_pauses_source_drain_on_frame_backpressure() {
+    fn bridge_pauses_source_drain_with_high_low_watermark_hysteresis() {
         assert!(bridge_should_pause_source_drain(
-            SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE
+            SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE,
+            0,
+            false,
+        ));
+        assert!(bridge_should_pause_source_drain(
+            SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_LOW_WATERMARK + 1,
+            0,
+            true,
         ));
         assert!(!bridge_should_pause_source_drain(
-            SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_BACKPRESSURE - 1
+            SESSION_EVENT_BRIDGE_DIRECT_OUTPUT_LOW_WATERMARK,
+            SESSION_EVENT_BRIDGE_UI_OUTPUT_LOW_WATERMARK,
+            true,
         ));
+        assert!(bridge_should_pause_source_drain(
+            0,
+            SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT,
+            false,
+        ));
+    }
+
+    #[test]
+    fn bridge_ui_queue_preserves_output_above_the_old_limit() {
+        let queue = SessionEventBridgeQueue::new();
+        let first = vec![b'a'; SESSION_EVENT_BRIDGE_UI_OUTPUT_LIMIT];
+        let second = vec![b'b'; 32];
+        queue.push(SessionEvent::Output {
+            session_id: "s1".to_string(),
+            data: first.clone(),
+        });
+        queue.push(SessionEvent::Output {
+            session_id: "s1".to_string(),
+            data: second.clone(),
+        });
+
+        let drain = queue.drain_with_output_budget(8, usize::MAX);
+        let output = drain
+            .events
+            .into_iter()
+            .flat_map(|event| match event {
+                SessionEvent::Output { data, .. } => data,
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(output.len(), first.len() + second.len());
+        assert_eq!(&output[..first.len()], first.as_slice());
+        assert_eq!(&output[first.len()..], second.as_slice());
+        assert_eq!(drain.stats.dropped_output_bytes, 0);
     }
 
     #[test]

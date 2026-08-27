@@ -128,6 +128,31 @@ fn underline_ranges_as_tuples(ranges: &[TerminalRowUnderlineRange]) -> Vec<(u32,
 }
 
 #[test]
+fn layout_cache_stats_report_local_deltas_without_resetting_cache() {
+    let mut cache = NyaTerminalLayoutCache::default();
+    let before = cache.stats();
+
+    let _ = cache.shaped_line(0, 42, || {
+        (Arc::new(ShapedLine::default()), std::time::Duration::ZERO)
+    });
+    let shaped = cache.stats();
+
+    assert_eq!(
+        shaped.delta_since(before),
+        super::NyaTerminalLayoutCacheStats {
+            hits: 0,
+            misses: 1,
+            shape_calls: 1,
+            shape_duration_us: 0,
+        }
+    );
+
+    let _ = cache.shaped_line(7, 42, || panic!("matching key should reuse the cache"));
+    assert_eq!(cache.stats().delta_since(shaped).hits, 1);
+    assert_eq!(cache.stats().delta_since(shaped).shape_calls, 0);
+}
+
+#[test]
 fn shaped_line_cache_reuses_matching_row_key() {
     let mut cache = NyaTerminalLayoutCache::default();
 

@@ -1,7 +1,8 @@
 use crate::models::WorkspaceSplitDirection;
 use crate::models::{
     TerminalFrameSearchKey, TerminalFrameSearchPurpose, TerminalFrameSearchResult,
-    TerminalSearchMode, TerminalViewState, TerminalWindowNode,
+    TerminalPresentation, TerminalSearchMode, TerminalViewState, TerminalWindowNode,
+    TerminalWorkPolicy,
 };
 use nyaterm_terminal::{TerminalClipboardLoad, TerminalEffects};
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use super::{
     terminal_effects_need_ui_apply, terminal_local_log_text,
     terminal_output_frame_needs_chrome_notify, terminal_output_frame_surface_notify,
     terminal_search_frame_apply_result, terminal_selected_occurrence_frame_is_current,
-    terminal_window_node_visible_tab_ids,
+    terminal_snapshot_priority_session_ids, terminal_window_node_visible_tab_ids,
 };
 
 fn search_key(query: &str) -> TerminalFrameSearchKey {
@@ -95,15 +96,21 @@ fn terminal_output_frame_notify_tracks_visible_unread_or_effects() {
     assert!(terminal_output_frame_needs_chrome_notify(true, false));
     assert!(terminal_output_frame_needs_chrome_notify(false, true));
     assert_eq!(
-        terminal_output_frame_surface_notify(true, 0, 8),
+        terminal_output_frame_surface_notify(TerminalPresentation::VisibleActive, 0, 8),
         Some(TerminalSurfaceFrameNotify::Full(String::new()))
     );
     assert_eq!(
-        terminal_output_frame_surface_notify(true, 5, 8),
+        terminal_output_frame_surface_notify(TerminalPresentation::VisibleInactive, 5, 8),
         Some(TerminalSurfaceFrameNotify::ScrollPositionOnly(String::new()))
     );
-    assert_eq!(terminal_output_frame_surface_notify(false, 0, 8), None);
-    assert_eq!(terminal_output_frame_surface_notify(true, 0, 0), None);
+    assert_eq!(
+        terminal_output_frame_surface_notify(TerminalPresentation::Background, 0, 8),
+        None
+    );
+    assert_eq!(
+        terminal_output_frame_surface_notify(TerminalPresentation::VisibleActive, 0, 0),
+        None
+    );
 }
 
 #[test]
@@ -378,6 +385,23 @@ fn terminal_window_visible_tab_ids_returns_leaf_active_tabs() {
     };
 
     assert_eq!(terminal_window_node_visible_tab_ids(&root), vec!["b", "c"]);
+}
+
+#[test]
+fn split_visible_inactive_is_not_background_hidden_tab() {
+    let visible = ["b", "c"];
+    let priority = terminal_snapshot_priority_session_ids(Some("b"), &visible);
+
+    let active = TerminalPresentation::resolve(true, priority.iter().any(|id| id == "b"));
+    let split_inactive = TerminalPresentation::resolve(false, priority.iter().any(|id| id == "c"));
+    let hidden_tab = TerminalPresentation::resolve(false, priority.iter().any(|id| id == "a"));
+
+    assert_eq!(active, TerminalPresentation::VisibleActive);
+    assert_eq!(split_inactive, TerminalPresentation::VisibleInactive);
+    assert_eq!(hidden_tab, TerminalPresentation::Background);
+    assert!(TerminalWorkPolicy::for_presentation(split_inactive).live_snapshot);
+    assert!(!TerminalWorkPolicy::for_presentation(split_inactive).active_decorations);
+    assert!(!TerminalWorkPolicy::for_presentation(hidden_tab).live_snapshot);
 }
 
 #[test]

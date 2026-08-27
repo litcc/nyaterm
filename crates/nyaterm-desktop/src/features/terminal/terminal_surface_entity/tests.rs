@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::features::terminal::terminal_surface::{
@@ -14,7 +14,7 @@ use gpui::{
     AppContext, Context, Entity, Render, TestAppContext, Window, bounds, div, point, px, size,
 };
 use nyaterm_terminal::{TerminalScreen, TerminalSnapshot};
-use nyaterm_terminal_gpui::precompute_terminal_keyword_highlights;
+use nyaterm_terminal_gpui::{NyaTerminalLayoutCache, precompute_terminal_keyword_highlights};
 
 use super::{
     TERMINAL_KEYWORD_HIGHLIGHT_PREFETCH_VIEWPORTS,
@@ -34,6 +34,7 @@ use super::{
 
 struct TerminalSurfaceLayoutTestView {
     surface: Entity<TerminalSurface>,
+    mounted: bool,
 }
 
 #[test]
@@ -67,7 +68,7 @@ impl Render for TerminalSurfaceLayoutTestView {
             .flex()
             .min_w_0()
             .min_h_0()
-            .child(self.surface.clone())
+            .when(self.mounted, |view| view.child(self.surface.clone()))
     }
 }
 
@@ -98,7 +99,10 @@ fn rendered_terminal_grid_bounds(show_line_numbers: bool) -> gpui::Bounds<gpui::
     });
     let window = cx.open_window(size(px(400.0), px(240.0)), {
         let surface = surface.clone();
-        move |_window, _cx| TerminalSurfaceLayoutTestView { surface }
+        move |_window, _cx| TerminalSurfaceLayoutTestView {
+            surface,
+            mounted: true,
+        }
     });
 
     cx.update_window(window.into(), |_, window, cx| {
@@ -131,6 +135,174 @@ fn painted_hit_test_grid_bounds_start_after_the_rendered_gutter() {
 
     assert_eq!(grid_bounds.origin, point(px(expected_gutter), px(0.0)));
     assert_eq!(grid_bounds.size.height, px(240.0));
+}
+
+#[test]
+fn real_window_draw_renders_visible_inactive_but_skips_unmounted_surface() {
+    let mut cx = TestAppContext::single();
+    let layout_cache = Arc::new(Mutex::new(NyaTerminalLayoutCache::default()));
+    let mut screen = TerminalScreen::default();
+    screen.advance_decoded_text(&terminal_test_output_lines(32));
+    let snapshot = Arc::new(screen.viewport_snapshot(0));
+    let viewport_rows = snapshot.row_count().max(1);
+    let surface = cx.new({
+        let layout_cache = Arc::clone(&layout_cache);
+        let snapshot = Arc::clone(&snapshot);
+        move |_| {
+            let mut surface = TerminalSurface::new("session");
+            assert!(surface.set_layout_cache(layout_cache));
+            assert!(
+                surface.apply_frame_snapshot(
+                    TerminalSurfaceFrameSnapshot::new(
+                        snapshot,
+                        TerminalScrollVisualState {
+                            session_id: "session".to_string(),
+                            scroll_offset: 0,
+                            scroll_residual_lines: 0.0,
+                            display_offset: 0,
+                            scrollback_len: 8,
+                            viewport_rows,
+                            has_new_while_scrolled: false,
+                            performance_overlay: None,
+                            skipped_output_chars: 0,
+                        },
+                    )
+                    .with_presentation(false, false, "block"),
+                )
+            );
+            surface
+        }
+    });
+    let window = cx.open_window(size(px(400.0), px(viewport_rows as f32 * 16.0)), {
+        let surface = surface.clone();
+        move |_window, _cx| TerminalSurfaceLayoutTestView {
+            surface,
+            mounted: true,
+        }
+    });
+    let host = window.root(&mut cx).expect("terminal fixture root view");
+    let draw = |cx: &mut TestAppContext| {
+        cx.update_window(window.into(), |_, window, cx| {
+            window.draw(cx).clear(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+    };
+
+    draw(&mut cx);
+    let first_draw = layout_cache.lock().unwrap().stats();
+    assert!(first_draw.shape_calls > 0);
+    assert!(first_draw.shape_calls <= viewport_rows as u64 + 1);
+
+    let before_repeated = first_draw;
+    cx.update_entity(&surface, |surface, cx| {
+        assert!(
+            !surface.apply_frame_snapshot(
+                TerminalSurfaceFrameSnapshot::new(
+                    Arc::clone(&snapshot),
+                    TerminalScrollVisualState {
+                        session_id: "session".to_string(),
+                        scroll_offset: 0,
+                        scroll_residual_lines: 0.0,
+                        display_offset: 0,
+                        scrollback_len: 8,
+                        viewport_rows,
+                        has_new_while_scrolled: false,
+                        performance_overlay: None,
+                        skipped_output_chars: 0,
+                    },
+                )
+                .with_presentation(false, false, "block"),
+            )
+        );
+        cx.notify();
+    });
+    draw(&mut cx);
+    let repeated_delta = layout_cache
+        .lock()
+        .unwrap()
+        .stats()
+        .delta_since(before_repeated);
+    assert!(repeated_delta.hits > 0);
+    assert_eq!(repeated_delta.shape_calls, 0);
+
+    cx.update_entity(&host, |host, cx| {
+        host.mounted = false;
+        cx.notify();
+    });
+    draw(&mut cx);
+    let before_hidden = layout_cache.lock().unwrap().stats();
+    let painted_revision_before_hidden = cx.read_entity(&surface, |surface, _cx| {
+        surface
+            .painted_hit_test_geometry
+            .expect("visible surface should have painted geometry")
+            .revision
+    });
+
+    screen.advance_decoded_text("hidden surface update\n");
+    let hidden_snapshot = Arc::new(screen.viewport_snapshot(0));
+    cx.update_entity(&surface, |surface, cx| {
+        assert!(
+            surface.apply_frame_snapshot(
+                TerminalSurfaceFrameSnapshot::new(
+                    hidden_snapshot,
+                    TerminalScrollVisualState {
+                        session_id: "session".to_string(),
+                        scroll_offset: 0,
+                        scroll_residual_lines: 0.0,
+                        display_offset: 0,
+                        scrollback_len: 9,
+                        viewport_rows,
+                        has_new_while_scrolled: false,
+                        performance_overlay: None,
+                        skipped_output_chars: 0,
+                    },
+                )
+                .with_presentation(false, false, "block"),
+            )
+        );
+        cx.notify();
+    });
+    draw(&mut cx);
+
+    let hidden_delta = layout_cache
+        .lock()
+        .unwrap()
+        .stats()
+        .delta_since(before_hidden);
+    assert_eq!(hidden_delta, Default::default());
+    cx.read_entity(&surface, |surface, _cx| {
+        assert_eq!(
+            surface
+                .painted_hit_test_geometry
+                .expect("hidden surface should retain its last painted geometry")
+                .revision,
+            painted_revision_before_hidden
+        );
+        assert!(surface.revision > painted_revision_before_hidden);
+    });
+
+    let before_remount = layout_cache.lock().unwrap().stats();
+    cx.update_entity(&host, |host, cx| {
+        host.mounted = true;
+        cx.notify();
+    });
+    draw(&mut cx);
+    let remount_delta = layout_cache
+        .lock()
+        .unwrap()
+        .stats()
+        .delta_since(before_remount);
+    assert!(remount_delta.shape_calls > 0);
+    cx.read_entity(&surface, |surface, _cx| {
+        assert_eq!(
+            surface
+                .painted_hit_test_geometry
+                .expect("remounted surface should paint")
+                .revision,
+            surface.revision
+        );
+    });
 }
 
 #[test]

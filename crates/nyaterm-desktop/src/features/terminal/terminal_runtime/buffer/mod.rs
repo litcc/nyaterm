@@ -16,10 +16,10 @@ use crate::models::{
     MainMode, TERMINAL_UI_OUTPUT_TAIL_CAP, TerminalFrameActionLinks, TerminalFrameEvent,
     TerminalFrameOutputEvent, TerminalFrameOutputSubmission, TerminalFrameParts,
     TerminalFrameSearchEvent, TerminalFrameSearchKey, TerminalFrameSearchPurpose,
-    TerminalFrameSnapshotEvent, TerminalSearchMode, TerminalViewState, TerminalWindowNode,
-    WorkspacePaneNode, append_terminal_ui_output_tail, terminal_action_link_matcher_key,
-    terminal_frame_scroll_window_extra_rows, terminal_frame_search_result_is_current,
-    terminal_snapshot_matches_grid_geometry,
+    TerminalFrameSnapshotEvent, TerminalPresentation, TerminalSearchMode, TerminalViewState,
+    TerminalWindowNode, TerminalWorkPolicy, WorkspacePaneNode, append_terminal_ui_output_tail,
+    terminal_action_link_matcher_key, terminal_frame_scroll_window_extra_rows,
+    terminal_frame_search_result_is_current, terminal_snapshot_matches_grid_geometry,
 };
 
 use super::view_io::terminal_visual_display_offset;
@@ -395,11 +395,9 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn sync_terminal_frame_snapshot_priority(&self) {
-        let session_ids = self
-            .visible_terminal_session_ids()
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>();
+        let visible_session_ids = self.visible_terminal_session_ids();
+        let session_ids =
+            terminal_snapshot_priority_session_ids(self.session.active_id(), &visible_session_ids);
         self.terminal
             .view
             .frame_pipeline
@@ -822,7 +820,12 @@ impl NyaTermApp {
         } = frame;
         let has_snapshot = snapshot.is_some();
         let is_active = self.session.active_id() == Some(session_id.as_str());
-        let is_visible = self.terminal_session_has_visible_surface(&session_id);
+        let presentation = TerminalPresentation::resolve(
+            is_active,
+            self.terminal_session_has_visible_surface(&session_id),
+        );
+        let work_policy = TerminalWorkPolicy::for_presentation(presentation);
+        let is_visible = work_policy.surface_notify;
         if is_visible && accepted_bytes > 0 && !self.shell.connect_settle_active(Instant::now()) {
             self.enter_connect_settle();
         }
@@ -941,8 +944,11 @@ impl NyaTermApp {
                 "terminal frame snapshot row reuse"
             );
         }
-        let surface_notify =
-            terminal_output_frame_surface_notify(is_visible, output_scroll_offset, accepted_bytes);
+        let surface_notify = terminal_output_frame_surface_notify(
+            presentation,
+            output_scroll_offset,
+            accepted_bytes,
+        );
         let chrome_notify =
             terminal_output_frame_needs_chrome_notify(unread_changed, effects_need_ui_apply);
         if chrome_notify {
@@ -955,7 +961,10 @@ impl NyaTermApp {
         }
     }
 
-    fn terminal_session_has_visible_surface(&self, session_id: &str) -> bool {
+    pub(in crate::features) fn terminal_session_has_visible_surface(
+        &self,
+        session_id: &str,
+    ) -> bool {
         if session_id.is_empty() || self.shell.main_mode() != MainMode::Workspace {
             return false;
         }
@@ -986,8 +995,7 @@ impl NyaTermApp {
             let Some(view) = self.terminal.view.views.get_mut(&frame.session_id) else {
                 return TerminalFrameApplyResult::default();
             };
-            view.pending_snapshot_offsets.remove(&frame.offset);
-            view.priority_pending_snapshot_offsets.remove(&frame.offset);
+            view.complete_snapshot_request(frame.offset);
             if !terminal_snapshot_matches_grid_geometry(
                 frame.snapshot.as_ref(),
                 view.screen.cols(),
@@ -2660,12 +2668,29 @@ fn terminal_effects_need_ui_apply(effects: &TerminalEffects) -> bool {
         || !effects.clipboard_loads.is_empty()
 }
 
+fn terminal_snapshot_priority_session_ids(
+    active_session_id: Option<&str>,
+    visible_session_ids: &[&str],
+) -> Vec<String> {
+    visible_session_ids
+        .iter()
+        .copied()
+        .filter(|session_id| {
+            let presentation =
+                TerminalPresentation::resolve(active_session_id == Some(*session_id), true);
+            TerminalWorkPolicy::for_presentation(presentation).live_snapshot
+        })
+        .map(str::to_string)
+        .collect()
+}
+
 fn terminal_output_frame_surface_notify(
-    is_visible: bool,
+    presentation: TerminalPresentation,
     scroll_offset: usize,
     accepted_bytes: usize,
 ) -> Option<TerminalSurfaceFrameNotify> {
-    if !is_visible || accepted_bytes == 0 {
+    let policy = TerminalWorkPolicy::for_presentation(presentation);
+    if !policy.surface_notify || accepted_bytes == 0 {
         return None;
     }
     if scroll_offset > 0 {

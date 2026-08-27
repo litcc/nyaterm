@@ -145,6 +145,31 @@ struct TerminalKeywordLayoutState {
     result_known_empty: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NyaTerminalLayoutCacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub shape_calls: u64,
+    pub shape_duration_us: u64,
+}
+
+impl NyaTerminalLayoutCacheStats {
+    /// Returns work recorded by one cache since an earlier observation.
+    ///
+    /// Counters remain cumulative so independent surfaces and parallel tests do
+    /// not need a process-wide reset.
+    pub fn delta_since(self, earlier: Self) -> Self {
+        Self {
+            hits: self.hits.saturating_sub(earlier.hits),
+            misses: self.misses.saturating_sub(earlier.misses),
+            shape_calls: self.shape_calls.saturating_sub(earlier.shape_calls),
+            shape_duration_us: self
+                .shape_duration_us
+                .saturating_sub(earlier.shape_duration_us),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct NyaTerminalLayoutCache {
     rows: HashMap<u64, Arc<CachedTerminalPaintRow>>,
@@ -167,6 +192,15 @@ const TERMINAL_ELEMENT_PREPAINT_SLOW_MS: u128 = 12;
 const TERMINAL_ELEMENT_PAINT_SLOW_MS: u128 = 12;
 
 impl NyaTerminalLayoutCache {
+    pub fn stats(&self) -> NyaTerminalLayoutCacheStats {
+        NyaTerminalLayoutCacheStats {
+            hits: self.hits,
+            misses: self.misses,
+            shape_calls: self.shape_calls,
+            shape_duration_us: self.shape_duration_us,
+        }
+    }
+
     pub fn clear(&mut self) {
         self.rows.clear();
         self.row_order.clear();
