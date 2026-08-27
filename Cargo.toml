@@ -72,6 +72,7 @@ nyaterm-terminal = { path = "crates/nyaterm-terminal" }
 nyaterm-terminal-gpui = { path = "crates/nyaterm-terminal-gpui" }
 nyaterm-transport = { path = "crates/nyaterm-transport" }
 nyaterm-ui = { path = "crates/nyaterm-ui" }
+percent-encoding = "=2.3.2"
 portable-pty = "0.9"
 quick-xml = "0.40"
 rand = { version = "0.10", features = ["thread_rng"] }
@@ -99,6 +100,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Test-only. Feature set must mirror gpui's own usvg dependency (default-features
 # = false) so asset tests cannot pass under capabilities the app does not build.
 usvg = { version = "0.45", default-features = false }
+url = "=2.5.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 vnc = { package = "vnc-rs", git = "https://github.com/nyakang/vnc-rs", rev = "d855f22e301835cdf63a7aa1520877e3153ec66a" }
 vte = "0.14"

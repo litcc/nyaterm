@@ -1,3 +1,4 @@
+pub mod activation;
 pub mod agent_capture;
 pub mod ai;
 pub mod cloud_sync;
@@ -35,6 +36,14 @@ pub mod text_edit;
 pub mod translation;
 pub mod updater;
 
+pub use activation::{
+    ACTIVATION_QUEUE_CAPACITY, ActivationAck, ActivationAckStatus, ActivationAction,
+    ActivationParseError, ActivationProtocolError, ActivationQueueError, ActivationReceiver,
+    ActivationRequest, ActivationSender, ExternalConnectionRequest, MAX_ACTIVATION_ACTIONS,
+    MAX_ACTIVATION_FRAME_BYTES, MAX_DEEP_LINK_BYTES, RawActivationArg, activation_channel,
+    decode_activation_ack, decode_activation_request, encode_activation_ack,
+    encode_activation_request, parse_activation_request, parse_deep_link,
+};
 pub use agent_capture::{
     AgentCaptureCancelResult, AgentCaptureProcessResult, AgentCapturedOutput,
     AgentOutputCaptureProcessor, build_agent_capture_command,

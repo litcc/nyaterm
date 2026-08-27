@@ -207,14 +207,13 @@ NyaTerm 可以在同一条 SSH 连接上多路复用多个终端会话。向同�
 支持两种输入形式：
 
 - `ssh://user@host:port` 形式的 URL
-- `ssh://user:password@host:port` 形式的 URL；密码只用于本次临时 SSH 会话，不会保存
 - `ssh [-p port] [-l user] user@host` 形式的命令字符串
 
 约定与限制：
 
 - 默认用户名为 `root`，默认端口为 `22`
 - 使用密码认证，不带代理、跳板机、登录后命令或 X11
-- 出于安全考虑，只有 `ssh://` URL 可携带一次性密码；命令形式的内联密码（`user:pass@host`）以及 `-J`、`-L/-R/-D`、`-i`、`-o ProxyJump/ProxyCommand` 等不支持的选项会被拒绝
+- 出于安全考虑，所有 URL 和命令形式的内联密码（`user:pass@host`）都会被拒绝；`-J`、`-L/-R/-D`、`-i`、`-o ProxyJump/ProxyCommand` 等不支持的选项同样会被拒绝
 
 临时会话不会写入已保存连接：NyaTerm 会剥离连接 ID、代理、跳板机、登录后命令、X11 与算法偏好，因此它始终只是一次性会话。
 
@@ -225,12 +224,11 @@ NyaTerm 也可以从浏览器、脚本、启动器或其他工具中打开连接
 支持的入口：
 
 - 程序调用：把链接作为启动参数传给 NyaTerm，例如 `NyaTerm.exe ssh://root@example.com:22`
-- 协议调用：通过系统 URL Scheme 打开 `ssh://`、`telnet://` 或 `nyaterm://` 链接
+- 协议调用：安装版通过系统 URL Scheme 处理 `nyaterm://` 链接；通用 `ssh://` 和 `telnet://` 不会被 NyaTerm 抢占，但仍可作为程序启动参数传入
 
 支持的链接格式：
 
 - `ssh://user@host:port`
-- `ssh://user:password@host:port`；密码只用于本次 SSH 临时会话，不会保存
 - `telnet://host:port`
 - `nyaterm://connect/ssh?host=host&port=22&username=user`
 - `nyaterm://connect/telnet?host=host&port=23`
@@ -239,9 +237,8 @@ NyaTerm 也可以从浏览器、脚本、启动器或其他工具中打开连接
 
 - SSH 默认用户名为 `root`，默认端口为 `22`；Telnet 默认端口为 `23`
 - NyaTerm 会优先匹配同协议、同主机、同端口的已保存连接；SSH 链接显式写了用户名时，还会按用户名精确匹配
-- 如果匹配到多个已保存连接，会弹出选择窗口；如果没有匹配项，会按临时连接打开
-- 带一次性密码的 `ssh://` 链接始终作为临时连接处理，避免把外部传入的密码绑定到已保存连接
-- `nyaterm://` 链接不接受 `password`、登录后命令、代理、跳板机、端口转发或私钥参数；需要这些能力时，请先保存连接后再打开
+- 如果匹配到多个已保存连接，NyaTerm 会拒绝任意选择；SSH 链接可显式提供用户名来消除歧义。如果没有匹配项，会按临时连接打开
+- 所有外部链接都拒绝密码、登录后命令、代理、跳板机、端口转发或私钥参数；需要这些能力时，请先保存连接后再打开
 
 ## 会话输入同步
 

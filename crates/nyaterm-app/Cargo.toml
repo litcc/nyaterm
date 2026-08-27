@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+futures.workspace = true
 gpui.workspace = true
 gpui-component.workspace = true
 gpui-component-assets.workspace = true
@@ -16,9 +17,11 @@ nyaterm-core.workspace = true
 nyaterm-desktop.workspace = true
 nyaterm-ui.workspace = true
 rust-embed.workspace = true
+
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 usvg.workspace = true

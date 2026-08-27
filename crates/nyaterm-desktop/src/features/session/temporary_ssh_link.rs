@@ -104,6 +104,38 @@ impl NyaTermApp {
         cx.notify();
     }
 
+    pub(in crate::features) fn start_external_ssh_link(
+        &mut self,
+        parsed: TemporarySshLinkConfig,
+        cx: &mut Context<Self>,
+    ) {
+        let config = self.temporary_ssh_session_config(parsed.clone());
+        self.begin_background_ssh_start(
+            parsed.name,
+            config,
+            None,
+            AiExecutionProfile::Auto,
+            SavedConnectionStartOptions::default(),
+            cx,
+        );
+    }
+
+    pub(in crate::features) fn start_external_telnet_link(
+        &mut self,
+        parsed: TemporaryTelnetLinkConfig,
+        cx: &mut Context<Self>,
+    ) {
+        let config = self.temporary_telnet_session_config(parsed.clone());
+        self.begin_background_session_start(
+            parsed.name,
+            SessionLaunchConfig::Telnet(config),
+            None,
+            AiExecutionProfile::SendOnly,
+            SavedConnectionStartOptions::default(),
+            cx,
+        );
+    }
+
     fn submit_temporary_ssh_link(&mut self, cx: &mut Context<Self>) -> bool {
         let parsed = match parse_temporary_ssh_link(self.session.dialogs.temporary_ssh_link_draft())
         {

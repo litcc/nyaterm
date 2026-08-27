@@ -1,12 +1,16 @@
 //! Root GPUI shell boundary.
 
+use std::collections::{HashSet, VecDeque};
+use std::time::Duration;
+
 use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, Menu, MenuItem,
     OsAction, ParentElement, Render, Styled, Subscription, SystemMenuType, WeakEntity, Window,
     actions, div, prelude::FluentBuilder, px, rgb,
 };
 use nyaterm_core::{
-    AppRuntime, DiagnosticsExportOptions, DiagnosticsRuntimeSnapshot, export_diagnostics_archive,
+    ACTIVATION_QUEUE_CAPACITY, ActivationReceiver, ActivationRequest, AppRuntime,
+    DiagnosticsExportOptions, DiagnosticsRuntimeSnapshot, export_diagnostics_archive,
 };
 use nyaterm_store::{
     FlushBarrier, LoadBootstrap, StoreConfig, StoreOperationError, StoreRuntime, StoreTask,
@@ -79,6 +83,10 @@ pub struct AppShell {
     pending_bootstrap: Option<StoreTask<nyaterm_store::BootstrapSnapshot>>,
     startup_restore: Entity<StartupRestoreStore>,
     overlays: Entity<OverlayStore>,
+    activation_rx: Option<ActivationReceiver>,
+    pending_activations: VecDeque<ActivationRequest>,
+    recent_activation_ids: HashSet<[u8; 16]>,
+    recent_activation_order: VecDeque<[u8; 16]>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -97,7 +105,11 @@ struct RecoveryState {
 }
 
 impl AppShell {
-    pub fn new(runtime: AppRuntime, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        runtime: AppRuntime,
+        activation_rx: ActivationReceiver,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let startup_restore = cx.new(|_| StartupRestoreStore::default());
         let overlays = cx.new(|_| OverlayStore::default());
         install_native_app_menus(cx);
@@ -115,6 +127,10 @@ impl AppShell {
             pending_bootstrap: None,
             startup_restore,
             overlays,
+            activation_rx: Some(activation_rx),
+            pending_activations: VecDeque::new(),
+            recent_activation_ids: HashSet::new(),
+            recent_activation_order: VecDeque::new(),
             _subscriptions: subscriptions,
         };
         let quit_subscription = cx.on_app_quit(|this, cx| {
@@ -134,7 +150,81 @@ impl AppShell {
     }
 
     pub fn start_after_window_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_activation_drain(window, cx);
         self.launch_pending_bootstrap(window, cx);
+    }
+
+    fn start_activation_drain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mut activation_rx) = self.activation_rx.take() else {
+            return;
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                let can_receive = this
+                    .update(cx, |this, _| {
+                        matches!(this.lifecycle, AppShellLifecycle::Ready)
+                            || this.pending_activations.len() < ACTIVATION_QUEUE_CAPACITY
+                    })
+                    .unwrap_or(false);
+                if !can_receive {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(40))
+                        .await;
+                    continue;
+                }
+                let Some(request) = activation_rx.recv().await else {
+                    break;
+                };
+                if cx
+                    .update(|window, cx| {
+                        window.activate_window();
+                        cx.activate(true);
+                        this.update(cx, |this, cx| this.receive_activation(request, cx))
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn receive_activation(&mut self, request: ActivationRequest, cx: &mut Context<Self>) {
+        if !self.remember_activation(request.request_id) {
+            return;
+        }
+        if matches!(self.lifecycle, AppShellLifecycle::Ready) {
+            if let Some(app) = &self.app {
+                app.update(cx, |app, cx| app.handle_activation(request, cx));
+            }
+        } else if !matches!(self.lifecycle, AppShellLifecycle::Flushing) {
+            self.pending_activations.push_back(request);
+        }
+    }
+
+    fn remember_activation(&mut self, request_id: [u8; 16]) -> bool {
+        const RECENT_ACTIVATION_CAPACITY: usize = ACTIVATION_QUEUE_CAPACITY * 4;
+
+        if !self.recent_activation_ids.insert(request_id) {
+            return false;
+        }
+        self.recent_activation_order.push_back(request_id);
+        while self.recent_activation_order.len() > RECENT_ACTIVATION_CAPACITY {
+            if let Some(expired) = self.recent_activation_order.pop_front() {
+                self.recent_activation_ids.remove(&expired);
+            }
+        }
+        true
+    }
+
+    fn drain_pending_activations(&mut self, cx: &mut Context<Self>) {
+        let Some(app) = self.app.clone() else {
+            return;
+        };
+        while let Some(request) = self.pending_activations.pop_front() {
+            app.update(cx, |app, cx| app.handle_activation(request, cx));
+        }
     }
 
     fn begin_bootstrap(&mut self) {
@@ -219,6 +309,7 @@ impl AppShell {
         self.app = Some(app);
         self.lifecycle = AppShellLifecycle::Ready;
         self.start_ready_app(window, cx);
+        self.drain_pending_activations(cx);
         cx.notify();
     }
 

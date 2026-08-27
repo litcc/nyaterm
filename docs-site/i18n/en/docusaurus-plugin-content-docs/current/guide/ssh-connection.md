@@ -209,14 +209,13 @@ If you just want a one-off connection without saving it, use a **temporary SSH l
 Two input forms are supported:
 
 - `ssh://user@host:port` URLs
-- `ssh://user:password@host:port` URLs; the password is used only for this temporary SSH session and is not saved
 - `ssh [-p port] [-l user] user@host` command strings
 
 Conventions and limits:
 
 - Default username is `root` and default port is `22`
 - Uses password authentication, with no proxy, jump host, post-login command, or X11
-- For safety, only `ssh://` URLs may include one-time passwords; command-style inline passwords (`user:pass@host`) and unsupported options such as `-J`, `-L/-R/-D`, `-i`, and `-o ProxyJump/ProxyCommand` are rejected
+- For safety, inline passwords (`user:pass@host`) are rejected in every URL and command form; unsupported options such as `-J`, `-L/-R/-D`, `-i`, and `-o ProxyJump/ProxyCommand` are also rejected
 
 A temporary session never becomes a saved connection: NyaTerm strips the connection ID, proxy, jump host, post-login command, X11, and algorithm preferences, so it stays a one-off session.
 
@@ -227,12 +226,11 @@ NyaTerm can also open connection links from browsers, scripts, launchers, or oth
 Supported entry points:
 
 - Program invocation: pass a link as a NyaTerm startup argument, for example `NyaTerm.exe ssh://root@example.com:22`
-- Protocol invocation: open an `ssh://`, `telnet://`, or `nyaterm://` link through the operating system URL scheme handler
+- Protocol invocation: installed packages register the `nyaterm://` operating-system URL scheme. NyaTerm does not claim the generic `ssh://` or `telnet://` handlers, but those links can still be passed as startup arguments
 
 Supported link formats:
 
 - `ssh://user@host:port`
-- `ssh://user:password@host:port`; the password is used only for this temporary SSH session and is not saved
 - `telnet://host:port`
 - `nyaterm://connect/ssh?host=host&port=22&username=user`
 - `nyaterm://connect/telnet?host=host&port=23`
@@ -241,9 +239,8 @@ Handling rules:
 
 - SSH defaults to username `root` and port `22`; Telnet defaults to port `23`
 - NyaTerm first looks for saved connections with the same protocol, host, and port; when an SSH link includes a username, the username must match exactly
-- If multiple saved connections match, NyaTerm shows a chooser; if none match, it opens a temporary connection
-- `ssh://` links with one-time passwords always open as temporary connections, so an externally supplied password is not attached to a saved connection
-- `nyaterm://` links do not accept `password`, post-login command, proxy, jump host, port forwarding, or private-key parameters; save a connection first if you need those capabilities
+- If multiple saved connections match, NyaTerm refuses to choose one arbitrarily; add an explicit SSH username to disambiguate. If none match, it opens a temporary connection
+- Every external link rejects passwords, post-login commands, proxies, jump hosts, port forwarding, and private-key parameters; save a connection first if you need those capabilities
 
 ## Session input synchronization
 

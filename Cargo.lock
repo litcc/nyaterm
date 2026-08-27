@@ -5498,6 +5498,7 @@ name = "nyaterm-app"
 version = "2.0.0"
 dependencies = [
  "anyhow",
+ "futures",
  "gpui",
  "gpui-component",
  "gpui-component-assets",
@@ -5510,6 +5511,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "usvg 0.45.1",
+ "uuid",
 ]
 
 [[package]]
@@ -5521,9 +5523,11 @@ dependencies = [
  "crypto_secretbox",
  "dirs",
  "encoding_rs",
+ "futures",
  "hex",
  "hmac 0.13.0",
  "md5",
+ "percent-encoding",
  "quick-xml 0.40.1",
  "rand 0.10.2",
  "regex",
@@ -5534,6 +5538,7 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror 2.0.19",
  "time",
+ "url",
  "uuid",
  "zeroize",
  "zip",

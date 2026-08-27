@@ -1,3 +1,4 @@
+mod activation;
 mod ai;
 mod app_state;
 mod commands;
