@@ -79,6 +79,85 @@ def macho_cpu_type(data: bytes) -> int:
     return int.from_bytes(data[4:8], byte_order)
 
 
+def verify_macos_url_scheme(plist: dict[str, object], artifact: str) -> None:
+    url_types = plist.get("CFBundleURLTypes")
+    if not isinstance(url_types, list) or len(url_types) != 1:
+        raise RuntimeError(f"{artifact} must register exactly one macOS URL type")
+    url_type = url_types[0]
+    if not isinstance(url_type, dict):
+        raise RuntimeError(f"{artifact} contains an invalid macOS URL type")
+    schemes = url_type.get("CFBundleURLSchemes")
+    if schemes != [package_native.URL_SCHEME]:
+        raise RuntimeError(
+            f"{artifact} must register only the {package_native.URL_SCHEME} URL scheme"
+        )
+
+
+def verify_linux_desktop(
+    content: str, expected_executable: str, artifact: str
+) -> None:
+    fields: dict[str, str] = {}
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "[")):
+            continue
+        if "=" not in stripped:
+            raise RuntimeError(f"{artifact} contains an invalid desktop entry line")
+        key, value = stripped.split("=", 1)
+        if key in fields:
+            raise RuntimeError(f"{artifact} contains duplicate desktop field {key}")
+        fields[key] = value
+
+    expected = {
+        "Type": "Application",
+        "Exec": f"{expected_executable} %U",
+        "MimeType": f"x-scheme-handler/{package_native.URL_SCHEME};",
+    }
+    for key, value in expected.items():
+        if fields.get(key) != value:
+            raise RuntimeError(
+                f"{artifact} desktop field {key} is {fields.get(key)!r}, expected {value!r}"
+            )
+
+
+def read_rpm_member(path: Path, member: str) -> bytes:
+    rpm2cpio = shutil.which("rpm2cpio")
+    if not rpm2cpio:
+        raise RuntimeError("rpm2cpio is required to verify RPM contents")
+    archive = subprocess.check_output([rpm2cpio, str(path)])
+    offset = 0
+    while offset < len(archive):
+        header = archive[offset : offset + 110]
+        if len(header) != 110 or header[:6] not in (b"070701", b"070702"):
+            raise RuntimeError(f"{path.name} contains an invalid RPM cpio payload")
+        try:
+            fields = [
+                int(header[6 + index * 8 : 14 + index * 8], 16)
+                for index in range(13)
+            ]
+        except ValueError as error:
+            raise RuntimeError(
+                f"{path.name} contains an invalid RPM cpio header"
+            ) from error
+        file_size = fields[6]
+        name_size = fields[11]
+        offset += 110
+        name_end = offset + name_size
+        if name_size < 1 or name_end > len(archive):
+            raise RuntimeError(f"{path.name} contains an invalid RPM cpio name")
+        name = archive[offset : name_end - 1].decode("utf-8")
+        offset = (name_end + 3) & ~3
+        data_end = offset + file_size
+        if data_end > len(archive):
+            raise RuntimeError(f"{path.name} contains a truncated RPM cpio entry")
+        if name == "TRAILER!!!":
+            break
+        if name.removeprefix("./") == member.removeprefix("/"):
+            return archive[offset:data_end]
+        offset = (data_end + 3) & ~3
+    raise RuntimeError(f"{path.name} is missing {member}")
+
+
 def verify_windows_portable(path: Path, target: str, version: str) -> None:
     root = "NyaTerm-portable"
     executables = ["NyaTerm.exe", *helper_filenames(target)]
@@ -170,6 +249,7 @@ def verify_macos_archive(path: Path, target: str, version: str) -> None:
         raise RuntimeError(f"{path.name} contains inconsistent version metadata")
     if plist.get("CFBundleIdentifier") != package_native.MACOS_IDENTIFIER:
         raise RuntimeError(f"{path.name} contains the wrong bundle identifier")
+    verify_macos_url_scheme(plist, path.name)
     expected_cpu = {
         "x86_64-apple-darwin": 0x01000007,
         "aarch64-apple-darwin": 0x0100000C,
@@ -236,10 +316,11 @@ def verify_appimage(path: Path, target: str, version: str) -> None:
             for name in ("nyaterm", *helper_filenames(target))
         ]
         version_file = root / "usr" / "share" / "doc" / "nyaterm" / "VERSION"
+        desktop_file = root / "usr" / "share" / "applications" / "nyaterm.desktop"
         required = [
             root / "AppRun",
             *executables,
-            root / "usr" / "share" / "applications" / "nyaterm.desktop",
+            desktop_file,
             root / "usr" / "share" / "doc" / "nyaterm" / "LICENSE",
             version_file,
         ]
@@ -247,12 +328,14 @@ def verify_appimage(path: Path, target: str, version: str) -> None:
         if missing:
             raise RuntimeError(f"{path.name} is missing AppImage entries: {missing}")
         packaged_version = version_file.read_text(encoding="utf-8").strip()
+        desktop_content = desktop_file.read_text(encoding="utf-8")
         machines = {}
         for executable in executables:
             with executable.open("rb") as handle:
                 machines[executable.name] = elf_machine(handle.read(64))
     if packaged_version != version:
         raise RuntimeError(f"{path.name} contains inconsistent version")
+    verify_linux_desktop(desktop_content, package_native.APP_BIN, path.name)
     for name, binary_machine in machines.items():
         if binary_machine != expected_machine:
             raise RuntimeError(
@@ -282,6 +365,16 @@ def verify_deb(path: Path, target: str, version: str) -> None:
     ):
         if required not in contents:
             raise RuntimeError(f"{path.name} is missing {required}")
+    with tempfile.TemporaryDirectory() as directory:
+        subprocess.run(
+            ["dpkg-deb", "--extract", str(path), directory],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        desktop_content = (
+            Path(directory) / "usr" / "share" / "applications" / "nyaterm.desktop"
+        ).read_text(encoding="utf-8")
+    verify_linux_desktop(desktop_content, "/opt/nyaterm/nyaterm", path.name)
 
 
 def verify_rpm(path: Path, target: str, version: str) -> None:
@@ -302,6 +395,10 @@ def verify_rpm(path: Path, target: str, version: str) -> None:
     ):
         if required not in contents.splitlines():
             raise RuntimeError(f"{path.name} is missing {required}")
+    desktop_content = read_rpm_member(
+        path, "/usr/share/applications/nyaterm.desktop"
+    ).decode("utf-8")
+    verify_linux_desktop(desktop_content, "/opt/nyaterm/nyaterm", path.name)
 
 
 def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:

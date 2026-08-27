@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 RELEASE_SCRIPTS = Path(__file__).resolve().parents[1] / "release"
@@ -28,6 +29,16 @@ def fake_pe(machine: int) -> bytes:
 
 def fake_macho(cpu_type: int) -> bytes:
     return b"\xcf\xfa\xed\xfe" + cpu_type.to_bytes(4, "little") + bytes(504)
+
+
+def newc_entry(name: str, content: bytes) -> bytes:
+    encoded_name = name.encode("utf-8") + b"\0"
+    fields = [0, 0, 0, 0, 1, 0, len(content), 0, 0, 0, 0, len(encoded_name), 0]
+    entry = b"070701" + b"".join(f"{value:08x}".encode() for value in fields)
+    entry += encoded_name
+    entry += bytes((-len(entry)) % 4)
+    entry += content
+    return entry + bytes((-len(entry)) % 4)
 
 
 def write_portable(path: Path, machine: int, *, helper_machine: int | None = None) -> None:
@@ -105,6 +116,9 @@ class VerifyNativePackageTests(unittest.TestCase):
                     {
                         "CFBundleIdentifier": "com.kang.nyaterm",
                         "CFBundleShortVersionString": "2.0.0",
+                        "CFBundleURLTypes": [
+                            {"CFBundleURLSchemes": ["nyaterm"]}
+                        ],
                     }
                 ),
                 "NyaTerm.app/Contents/Resources/VERSION": b"2.0.0\n",
@@ -119,6 +133,67 @@ class VerifyNativePackageTests(unittest.TestCase):
             verify_native_package.verify_macos_archive(
                 path, "aarch64-apple-darwin", "2.0.0"
             )
+
+    def test_macos_scheme_validation_rejects_extra_protocols(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "must register only"):
+            verify_native_package.verify_macos_url_scheme(
+                {
+                    "CFBundleURLTypes": [
+                        {"CFBundleURLSchemes": ["nyaterm", "ssh", "telnet"]}
+                    ]
+                },
+                "Info.plist",
+            )
+
+    def test_linux_desktop_validation_requires_nyaterm_scheme_and_percent_u(
+        self,
+    ) -> None:
+        desktop = "\n".join(
+            (
+                "[Desktop Entry]",
+                "Type=Application",
+                "Exec=/opt/nyaterm/nyaterm %U",
+                "MimeType=x-scheme-handler/nyaterm;",
+            )
+        )
+        verify_native_package.verify_linux_desktop(
+            desktop, "/opt/nyaterm/nyaterm", "nyaterm.desktop"
+        )
+        with self.assertRaisesRegex(RuntimeError, "MimeType"):
+            verify_native_package.verify_linux_desktop(
+                desktop.replace(
+                    "x-scheme-handler/nyaterm;",
+                    "x-scheme-handler/nyaterm;x-scheme-handler/ssh;",
+                ),
+                "/opt/nyaterm/nyaterm",
+                "nyaterm.desktop",
+            )
+        with self.assertRaisesRegex(RuntimeError, "Exec"):
+            verify_native_package.verify_linux_desktop(
+                desktop.replace(" %U", ""),
+                "/opt/nyaterm/nyaterm",
+                "nyaterm.desktop",
+            )
+
+    def test_rpm_member_reader_extracts_desktop_from_newc_payload(self) -> None:
+        desktop = b"MimeType=x-scheme-handler/nyaterm;\n"
+        payload = newc_entry(
+            "./usr/share/applications/nyaterm.desktop", desktop
+        ) + newc_entry("TRAILER!!!", b"")
+        with (
+            mock.patch.object(
+                verify_native_package.shutil, "which", return_value="rpm2cpio"
+            ),
+            mock.patch.object(
+                verify_native_package.subprocess,
+                "check_output",
+                return_value=payload,
+            ),
+        ):
+            actual = verify_native_package.read_rpm_member(
+                Path("nyaterm.rpm"), "/usr/share/applications/nyaterm.desktop"
+            )
+        self.assertEqual(actual, desktop)
 
     def test_release_verification_fails_before_platform_tools_when_asset_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

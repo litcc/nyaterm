@@ -73,46 +73,84 @@ RDP and VNC each run in a separate helper process that the application resolves 
 cargo build -p nyaterm-rdp-helper -p nyaterm-vnc-helper
 ```
 
-A bare `cargo build` or `cargo check` covers all three — they are the workspace `default-members`.
+A bare `cargo build` builds the application and both helpers because they are the workspace `default-members`. `cargo check` checks all three too, but does not produce helper executables that the application can launch. If you use a custom `CARGO_TARGET_DIR`, `--target`, or profile, keep the helpers in the same directory as the application.
 
 `NYATERM_RDP_HELPER` and `NYATERM_VNC_HELPER` override the lookup with an explicit path, which is handy for pointing at binaries in another target directory.
 
 ## Common checks
 
-Prefer checks scoped to the affected crate while iterating:
+Prefer locked checks scoped to the affected crate while iterating:
 
 ```bash
-cargo check -p nyaterm-app
-cargo test -p <crate-name>
+cargo check -p <crate-name> --locked
+cargo test -p <crate-name> --locked
 ```
 
-Run the relevant workspace checks before review:
+Rust CI runs fmt and clippy on Linux, then runs workspace tests independently on Linux x64, macOS arm64, and Windows x64. The exact commands are:
 
 ```bash
-cargo check --workspace
-cargo test --workspace
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets --locked
+cargo test --workspace --locked --no-fail-fast
 ```
 
-`cargo fmt --all` writes formatting changes; use it only when you intend to apply them.
+The separate Linux Python packaging-test job runs:
+
+```bash
+python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
+```
+
+The non-ignored RDP/VNC helper lifecycle integration tests are covered automatically by workspace tests, including handshake, normal exit, and crash/hang reaping. They can also be run directly:
+
+```bash
+cargo test -p nyaterm-rdp-helper --test lifecycle --locked
+cargo test -p nyaterm-vnc-helper --test lifecycle --locked
+```
+
+These lifecycle tests launch real helper executables but do not connect to real RDP/VNC servers, so they do not replace manual protocol interoperability, framebuffer, clipboard, or input-path acceptance. `cargo fmt --all` writes formatting changes; use it only when you intend to apply them.
 
 ## Release-profile build
 
 ```bash
-cargo build -p nyaterm-app --bin nyaterm --release
+cargo build -p nyaterm-app --bin nyaterm --release --locked
 ```
 
 The native binary is written to `target/release/nyaterm`, or `target/release/nyaterm.exe` on Windows. This command builds only the application binary — neither the helpers nor any installer.
 
-Release packages come from `scripts/release/package_native.py`, which puts the helpers next to the application and produces `-setup.exe` / `_portable.zip`, `.dmg` / `.app.tar.gz`, and `.AppImage` / `.deb` / `.rpm` per platform. When you add a helper, its `HELPER_BINS` list must be updated too.
+Release packages come from `scripts/release/package_native.py`. It builds the application and both helpers with locked dependencies, puts the helpers next to the application, and produces native installers and portable packages. When you add a helper, its `HELPER_BINS` list must be updated too.
+
+### Six release targets
+
+| Platform | Rust target | Artifacts |
+| --- | --- | --- |
+| macOS arm64 | `aarch64-apple-darwin` | `.dmg`, `.app.tar.gz` |
+| macOS x64 | `x86_64-apple-darwin` | `.dmg`, `.app.tar.gz` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | `.AppImage`, `.deb`, `.rpm` |
+| Linux arm64 | `aarch64-unknown-linux-gnu` | `.AppImage`, `.deb`, `.rpm` |
+| Windows x64 | `x86_64-pc-windows-msvc` | `_portable.zip`, `-setup.exe` |
+| Windows arm64 | `aarch64-pc-windows-msvc` | `_portable.zip`, `-setup.exe` |
+
+Every release CI matrix leg runs:
+
+```bash
+python scripts/release/package_native.py "${TARGET}"
+python scripts/release/verify_native_package.py --target "${TARGET}" --version "${VERSION}" --dist dist
+```
+
+Before publication, `scripts/ci/check_release_assets.py` also rejects missing or extra artifacts in the combined six-target asset set.
+
+### Native tools and the manual-acceptance boundary
+
+Native packaging depends on target-platform tools: Windows uses NSIS and package verification also needs 7-Zip; macOS uses `codesign` and `hdiutil`; Linux uses tools such as `appimagetool`, `dpkg-shlibdeps`, `dpkg-deb`, `rpmbuild`, and `rpm`/`rpm2cpio`. Running only the Python packaging unit tests on a machine without those tools is therefore not a native package build.
+
+Automated verification checks the artifact set, archive paths, application and helper presence, binary architecture, version, and package metadata. It does not prove that the GUI launches, and does not cover real install/upgrade/uninstall flows, shortcuts or `nyaterm:` URL-handler invocation, signing/notarization and Gatekeeper/SmartScreen trust, real RDP/VNC sessions, or GPU, IME, PTY, clipboard, and window lifecycle behavior. Release candidates must be accepted manually on the corresponding target OS, with the actual platform and results recorded truthfully.
 
 ## Documentation development
 
 When editing `docs-site`, also install Node.js 22.13+ and [pnpm](https://pnpm.io/). Docusaurus itself only needs Node 18+, but the pnpm version this repository pins imports `node:sqlite` and crashes outright on anything older. The `packageManager` field in `docs-site/package.json` pins that pnpm version, and corepack picks it up automatically.
 
 ```bash
-pnpm --dir docs-site install
+pnpm --dir docs-site install --frozen-lockfile
 pnpm --dir docs-site start:zh
 ```
 
@@ -122,21 +160,15 @@ Start the English documentation server with:
 pnpm --dir docs-site start:en
 ```
 
-Build every locale with:
-
-```bash
-pnpm --dir docs-site build
-```
-
-The build checks pages and sidebars, and reports Markdown-link problems according to the site configuration.
-
-What the build cannot catch is checked by a separate script:
+The exact documentation CI commands are:
 
 ```bash
 python3 scripts/ci/check_docs_translations.py
+pnpm --dir docs-site install --frozen-lockfile
+pnpm --dir docs-site build
 ```
 
-It verifies that every page exists in both locales, that both copies have the same heading count (which catches a whole section going untranslated), that every page is referenced from `sidebars.ts`, and that no authoring notes were left in the published text. The `Documentation site` CI job runs this script and then builds every locale.
+The build checks pages and sidebars for every locale and reports Markdown-link problems according to the site configuration. The translation script verifies that every page exists in both locales, that both copies have the same heading count (which catches a whole section going untranslated), that every page is referenced from `sidebars.ts`, and that no authoring notes were left in the published text. The `Documentation site` CI job runs the script before installing locked dependencies and building every locale.
 
 Note that the script compares heading counts, not translated wording.
 

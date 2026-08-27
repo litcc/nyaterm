@@ -31,6 +31,7 @@ APP_BIN = "nyaterm"
 HELPER_BINS = ("nyaterm-rdp-helper", "nyaterm-vnc-helper")
 MACOS_IDENTIFIER = "com.kang.nyaterm"
 LINUX_PACKAGE = "nyaterm"
+URL_SCHEME = "nyaterm"
 PORTABLE_MARKER = "nyaterm-portable"
 
 
@@ -296,6 +297,10 @@ def create_windows_packages(
               File "{nsis_path(installer_root / 'icon.ico')}"
               WriteUninstaller "$INSTDIR\Uninstall.exe"
               WriteRegStr HKCU "Software\NyaTerm" "InstallDir" "$INSTDIR"
+              WriteRegStr HKCU "Software\Classes\{URL_SCHEME}" "" "URL:NyaTerm Protocol"
+              WriteRegStr HKCU "Software\Classes\{URL_SCHEME}" "URL Protocol" ""
+              WriteRegStr HKCU "Software\Classes\{URL_SCHEME}\DefaultIcon" "" "$INSTDIR\NyaTerm.exe,0"
+              WriteRegStr HKCU "Software\Classes\{URL_SCHEME}\shell\open\command" "" "$\"$INSTDIR\NyaTerm.exe$\" $\"%1$\""
               WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\NyaTerm" "DisplayName" "NyaTerm"
               WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\NyaTerm" "DisplayVersion" "{version}"
               WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\NyaTerm" "DisplayIcon" "$INSTDIR\NyaTerm.exe"
@@ -316,6 +321,7 @@ def create_windows_packages(
               Delete "$INSTDIR\icon.ico"
               Delete "$INSTDIR\Uninstall.exe"
               RMDir "$INSTDIR"
+              DeleteRegKey HKCU "Software\Classes\{URL_SCHEME}"
               DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\NyaTerm"
               DeleteRegKey HKCU "Software\NyaTerm"
             SectionEnd
@@ -349,6 +355,13 @@ def create_macos_packages(binary: Path, info: TargetInfo, version: str) -> None:
         "CFBundleName": APP_NAME,
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": version,
+        "CFBundleURLTypes": [
+            {
+                "CFBundleTypeRole": "Viewer",
+                "CFBundleURLName": MACOS_IDENTIFIER,
+                "CFBundleURLSchemes": [URL_SCHEME],
+            }
+        ],
         "CFBundleVersion": version,
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
@@ -432,6 +445,7 @@ def write_desktop_file(path: Path, executable: str) -> None:
             StartupWMClass=nyaterm
             Terminal=false
             Categories=Development;TerminalEmulator;Network;
+            MimeType=x-scheme-handler/{URL_SCHEME};
             StartupNotify=true
             """
         ).lstrip(),

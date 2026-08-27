@@ -354,7 +354,10 @@ cargo run -p nyaterm-app --bin nyaterm
 │   ├── nyaterm-transport/       # SSH、PTY、SFTP、Telnet、串口和传输
 │   ├── nyaterm-store/           # 持久化和数据库兼容层
 │   ├── nyaterm-ui/              # 共享 GPUI 控件和主题集成
-│   └── nyaterm-otp/              # OTP 兼容实现
+│   ├── nyaterm-remote-desktop/  # 与 UI 无关的 RDP/VNC 会话和类型化 IPC
+│   ├── nyaterm-rdp-helper/      # 隔离的 IronRDP 协议 helper 进程
+│   ├── nyaterm-vnc-helper/      # 隔离的 VNC 协议 helper 进程
+│   └── nyaterm-otp/             # OTP 兼容实现
 ├── docs-site/                   # Docusaurus 文档站点
 ├── Cargo.toml                   # Rust workspace 定义
 └── Cargo.lock

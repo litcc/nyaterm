@@ -28,8 +28,41 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: release-preflight
+
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Test workspace
+        run: cargo test --workspace --locked --no-fail-fast
+
+      - name: Test packaging helpers
+        run: >-
+          python -m unittest
+          scripts.tests.test_package_native
+          scripts.tests.test_verify_native_package
+
   package:
     name: Package ${{ matrix.label }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:

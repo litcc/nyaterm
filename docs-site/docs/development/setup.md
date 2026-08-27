@@ -73,46 +73,84 @@ RDP 和 VNC 各自运行在独立的 helper 进程里，应用在自己的可执
 cargo build -p nyaterm-rdp-helper -p nyaterm-vnc-helper
 ```
 
-不带 `-p` 的 `cargo build` 或 `cargo check` 会覆盖三者，它们是 workspace 的 `default-members`。
+不带 `-p` 的 `cargo build` 会构建应用和两个 helper，因为它们是 workspace 的 `default-members`。`cargo check` 也会检查三者，但不会生成可供应用启动的 helper 可执行文件。若使用自定义 `CARGO_TARGET_DIR`、`--target` 或 profile，请确保 helper 与应用位于同一目录。
 
 `NYATERM_RDP_HELPER` 和 `NYATERM_VNC_HELPER` 可以用显式路径覆盖查找结果，便于指向另一个 target 目录里的构建产物。
 
 ## 常用检查
 
-迭代时优先运行受影响 crate 的检查：
+迭代时优先运行受影响 crate 的锁定依赖检查：
 
 ```bash
-cargo check -p nyaterm-app
-cargo test -p <crate-name>
+cargo check -p <crate-name> --locked
+cargo test -p <crate-name> --locked
 ```
 
-提交评审前运行相关 workspace 检查：
+Rust CI 在 Linux 上执行 fmt 和 clippy，并在 Linux x64、macOS arm64、Windows x64 上分别执行 workspace tests。对应的精确命令是：
 
 ```bash
-cargo check --workspace
-cargo test --workspace
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets --locked
+cargo test --workspace --locked --no-fail-fast
 ```
 
-`cargo fmt --all` 会写回格式化结果，仅在准备应用格式变更时运行。
+Linux 上独立的 Python 打包单测 job 执行：
+
+```bash
+python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
+```
+
+RDP/VNC helper 的非 ignored lifecycle 集成测试已经由 workspace tests 自动覆盖，包括握手、正常退出和 crash/hang 回收；也可定向运行：
+
+```bash
+cargo test -p nyaterm-rdp-helper --test lifecycle --locked
+cargo test -p nyaterm-vnc-helper --test lifecycle --locked
+```
+
+这些 lifecycle 测试会启动真实 helper 可执行文件，但不连接真实 RDP/VNC 服务器，因此不能替代协议互操作、帧缓冲、剪贴板和输入链路的手工验收。`cargo fmt --all` 会写回格式化结果，仅在准备应用格式变更时运行。
 
 ## Release profile 构建
 
 ```bash
-cargo build -p nyaterm-app --bin nyaterm --release
+cargo build -p nyaterm-app --bin nyaterm --release --locked
 ```
 
 原生二进制位于 `target/release/nyaterm`，Windows 下为 `target/release/nyaterm.exe`。该命令只构建应用二进制，既不构建 helper，也不生成安装包。
 
-发布包由 `scripts/release/package_native.py` 生成，它负责把 helper 放到应用旁边，并按平台产出 `-setup.exe` / `_portable.zip`、`.dmg` / `.app.tar.gz`、`.AppImage` / `.deb` / `.rpm`。新增 helper 时必须同时更新该脚本的 `HELPER_BINS` 列表。
+发布包由 `scripts/release/package_native.py` 生成。它会以锁定依赖分别构建应用和两个 helper，把 helper 放到应用旁边，并按平台产出安装包和便携包。新增 helper 时必须同时更新该脚本的 `HELPER_BINS` 列表。
+
+### 六个发布目标
+
+| 平台 | Rust target | 产物 |
+| --- | --- | --- |
+| macOS arm64 | `aarch64-apple-darwin` | `.dmg`、`.app.tar.gz` |
+| macOS x64 | `x86_64-apple-darwin` | `.dmg`、`.app.tar.gz` |
+| Linux x64 | `x86_64-unknown-linux-gnu` | `.AppImage`、`.deb`、`.rpm` |
+| Linux arm64 | `aarch64-unknown-linux-gnu` | `.AppImage`、`.deb`、`.rpm` |
+| Windows x64 | `x86_64-pc-windows-msvc` | `_portable.zip`、`-setup.exe` |
+| Windows arm64 | `aarch64-pc-windows-msvc` | `_portable.zip`、`-setup.exe` |
+
+Release CI 的每个 matrix leg 都执行：
+
+```bash
+python scripts/release/package_native.py "${TARGET}"
+python scripts/release/verify_native_package.py --target "${TARGET}" --version "${VERSION}" --dist dist
+```
+
+发布前还会对六目标合并后的资产集合执行 `scripts/ci/check_release_assets.py`，拒绝缺失或多余的产物。
+
+### 原生工具与手工验收边界
+
+原生打包依赖目标平台工具：Windows 使用 NSIS，验证安装包时还需要 7-Zip；macOS 使用 `codesign` 和 `hdiutil`；Linux 使用 `appimagetool`、`dpkg-shlibdeps`、`dpkg-deb`、`rpmbuild`、`rpm`/`rpm2cpio` 等工具。因此在缺少对应工具的平台上，单独运行 Python 打包单测并不等于完成原生打包。
+
+自动验证会检查产物集合、归档路径、应用与 helper 是否齐全、二进制架构、版本及包元数据。它不会证明 GUI 能实际启动，也不会覆盖真实安装/升级/卸载、快捷方式或 `nyaterm:` URL handler 调用、签名/notarization 与 Gatekeeper/SmartScreen 信任、真实 RDP/VNC 会话，以及 GPU、IME、PTY、剪贴板和窗口生命周期。发布候选必须在对应目标操作系统上手工验收这些行为，并如实记录实际执行的平台与结果。
 
 ## 文档站开发
 
 编辑 `docs-site` 时另外安装 Node.js 22.13+ 和 [pnpm](https://pnpm.io/)。Docusaurus 本身只要求 Node 18+，但本仓库固定的 pnpm 版本用到了 `node:sqlite`，在更低版本上会直接崩溃。`docs-site/package.json` 的 `packageManager` 字段固定了 pnpm 版本，启用 corepack 时会自动对齐。
 
 ```bash
-pnpm --dir docs-site install
+pnpm --dir docs-site install --frozen-lockfile
 pnpm --dir docs-site start:zh
 ```
 
@@ -122,21 +160,15 @@ pnpm --dir docs-site start:zh
 pnpm --dir docs-site start:en
 ```
 
-构建全部 locale：
-
-```bash
-pnpm --dir docs-site build
-```
-
-构建会检查页面和 sidebar，Markdown 链接问题按站点配置报告。
-
-构建不会发现的问题由一个单独的脚本检查：
+文档 CI 的精确检查命令是：
 
 ```bash
 python3 scripts/ci/check_docs_translations.py
+pnpm --dir docs-site install --frozen-lockfile
+pnpm --dir docs-site build
 ```
 
-它校验每个页面都有中英两份、两份的标题数一致（用来发现整节漏译）、每个页面都被 `sidebars.ts` 引用，以及没有把撰稿备注留在正文里。CI 的 `Documentation site` job 会跑这个脚本再构建全部 locale。
+构建会检查全部 locale 的页面和 sidebar，Markdown 链接问题按站点配置报告。翻译脚本校验每个页面都有中英两份、两份的标题数一致（用来发现整节漏译）、每个页面都被 `sidebars.ts` 引用，以及没有把撰稿备注留在正文里。CI 的 `Documentation site` job 会先运行该脚本，再安装锁定依赖并构建全部 locale。
 
 注意脚本比对的是标题数量，不校验译文措辞。
 

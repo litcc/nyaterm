@@ -347,7 +347,10 @@ cargo run -p nyaterm-app --bin nyaterm
 │   ├── nyaterm-transport/       # SSH, PTY, SFTP, Telnet, Serial, and transfers
 │   ├── nyaterm-store/           # Persistence and database compatibility
 │   ├── nyaterm-ui/              # Shared GPUI controls and theme integration
-│   └── nyaterm-otp/              # OTP compatibility implementation
+│   ├── nyaterm-remote-desktop/  # UI-independent RDP/VNC sessions and typed IPC
+│   ├── nyaterm-rdp-helper/      # Isolated IronRDP protocol helper process
+│   ├── nyaterm-vnc-helper/      # Isolated VNC protocol helper process
+│   └── nyaterm-otp/             # OTP compatibility implementation
 ├── docs-site/                   # Docusaurus documentation site
 ├── Cargo.toml                   # Rust workspace definition
 └── Cargo.lock
