@@ -185,16 +185,17 @@ impl NyaTermApp {
             profile.mode = mode;
         }
         self.shell.set_status("starting recording".to_string());
-        let manager = self.recording.manager_for_job();
         let writer = self.recording.writer();
         let job_session_id = session_id.to_string();
         let memory_limit = self.settings.summary().recording_memory_limit_bytes as usize;
         let task = cx.background_spawn(async move {
-            writer.flush();
-            manager.set_memory_limit(memory_limit);
-            manager
-                .start_with_profile(&job_session_id, context, profile, explicit_path)
-                .map_err(|error| error.to_string())
+            writer.start(
+                job_session_id,
+                context,
+                profile,
+                explicit_path,
+                memory_limit,
+            )
         });
         let result_session_id = session_id.to_string();
         cx.spawn(async move |this, cx| {
@@ -208,7 +209,6 @@ impl NyaTermApp {
                             .metadata(&result_session_id)
                             .is_some_and(|metadata| !metadata.disconnected) =>
                     {
-                        this.recording.refresh_active_count();
                         this.shell.set_status(format!("recording started: {path}"));
                         this.append_terminal_log(format!("\n# recording started: {path}\n"));
                     }
@@ -242,21 +242,14 @@ impl NyaTermApp {
             return;
         }
         self.shell.set_status("stopping recording".to_string());
-        let manager = self.recording.manager_for_job();
         let writer = self.recording.writer();
         let job_session_id = session_id.to_string();
-        let task = cx.background_spawn(async move {
-            writer.flush();
-            manager
-                .stop(&job_session_id)
-                .map_err(|error| error.to_string())
-        });
+        let task = cx.background_spawn(async move { writer.stop(job_session_id) });
         let result_session_id = session_id.to_string();
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 this.recording.finish_action(&result_session_id);
-                this.recording.refresh_active_count();
                 match result {
                     Ok(path) => {
                         this.shell.set_status(format!("recording saved: {path}"));
@@ -282,23 +275,19 @@ impl NyaTermApp {
             return;
         }
         self.shell.set_status("saving transcript".to_string());
-        let manager = self.recording.manager_for_job();
         let writer = self.recording.writer();
         let job_session_id = session_id.to_string();
         let memory_limit = self.settings.summary().recording_memory_limit_bytes as usize;
         let include_io_labels = self.settings.summary().recording_include_io_labels;
         let include_timestamps = self.settings.summary().recording_include_timestamps;
         let task = cx.background_spawn(async move {
-            writer.flush();
-            manager.set_memory_limit(memory_limit);
-            manager
-                .save_transcript(
-                    &job_session_id,
-                    &path,
-                    include_io_labels,
-                    include_timestamps,
-                )
-                .map_err(|error| error.to_string())
+            writer.save_transcript(
+                job_session_id,
+                path,
+                include_io_labels,
+                include_timestamps,
+                memory_limit,
+            )
         });
         let result_session_id = session_id.to_string();
         cx.spawn(async move |this, cx| {

@@ -1,7 +1,9 @@
 use rust_i18n::t;
 
 use gpui::{Context, Window};
-use nyaterm_transport::{RemoteFilePath, SshSessionConfig};
+use nyaterm_transport::{
+    RemoteFilePath, RemoteTextGeneration, RemoteTextRevision, SshSessionConfig,
+};
 
 use crate::features::{
     NyaTermApp, transfers::TransferEditorCloseAfterSave, transfers::TransferEditorCloseOutcome,
@@ -131,9 +133,17 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         let remote_path = remote_file_path.display_path.clone();
+        let Some(generation) = self
+            .transfer
+            .editor_tab_snapshot(&tab_id)
+            .map(|tab| tab.generation)
+        else {
+            return;
+        };
         let Some(config) = self.transfer_editor_ssh_config(session_id.as_deref()) else {
             let error = t!("fileEditor.sourceSessionUnavailable").to_string();
-            self.transfer.fail_editor_load_tab(&tab_id, error.clone());
+            self.transfer
+                .fail_editor_load_tab(&tab_id, generation, error.clone());
             self.shell.set_status(error);
             cx.notify();
             return;
@@ -142,7 +152,8 @@ impl NyaTermApp {
             Ok(service) => service,
             Err(error) => {
                 let error = error.to_string();
-                self.transfer.fail_editor_load_tab(&tab_id, error.clone());
+                self.transfer
+                    .fail_editor_load_tab(&tab_id, generation, error.clone());
                 self.shell.set_status(error);
                 cx.notify();
                 return;
@@ -155,6 +166,7 @@ impl NyaTermApp {
             kind: TransferJobKind::LoadEditor {
                 remote_path: remote_path.clone(),
                 tab_id: tab_id.clone(),
+                generation,
             },
             status: TransferJobStatus::Running,
             detail: format!("Opening {remote_path}"),
@@ -168,10 +180,11 @@ impl NyaTermApp {
         let transfer_tx = self.transfer.transfer_event_sender();
         std::thread::spawn(move || {
             let result = service
-                .read_text_file_path(&remote_file_path, NATIVE_EDITOR_MAX_BYTES)
+                .read_text_document_path(&remote_file_path, NATIVE_EDITOR_MAX_BYTES)
                 .map(|file| TransferJobOutput::EditorLoaded {
                     tab_id,
                     remote_path,
+                    generation,
                     file,
                 })
                 .map_err(|error| error.to_string());
@@ -241,8 +254,8 @@ impl NyaTermApp {
             snapshot.id,
             remote_file_path,
             snapshot.content,
-            snapshot.base_modified_at,
-            snapshot.base_size,
+            snapshot.revision,
+            snapshot.generation,
             force,
             window,
             cx,
@@ -278,8 +291,8 @@ impl NyaTermApp {
         tab_id: String,
         remote_file_path: RemoteFilePath,
         content: String,
-        expected_modified_at: Option<u64>,
-        expected_size: Option<u64>,
+        expected_revision: Option<RemoteTextRevision>,
+        generation: RemoteTextGeneration,
         force: bool,
         _window: &mut Window,
         cx: &mut Context<Self>,
@@ -289,7 +302,7 @@ impl NyaTermApp {
             Ok(service) => service,
             Err(error) => {
                 self.transfer
-                    .set_editor_tab_error_by_id(&tab_id, error.to_string());
+                    .fail_editor_operation_tab(&tab_id, generation, error.to_string());
                 self.shell.set_status(error.to_string());
                 cx.notify();
                 return;
@@ -302,6 +315,7 @@ impl NyaTermApp {
             kind: TransferJobKind::SaveEditor {
                 remote_path: remote_path.clone(),
                 tab_id: tab_id.clone(),
+                generation,
             },
             status: TransferJobStatus::Running,
             detail: format!("Saving {remote_path}"),
@@ -315,16 +329,16 @@ impl NyaTermApp {
         let transfer_tx = self.transfer.transfer_event_sender();
         std::thread::spawn(move || {
             let result = service
-                .write_text_file_path(
+                .write_text_document_path(
                     &remote_file_path,
                     &content,
-                    expected_modified_at,
-                    expected_size,
+                    expected_revision.as_ref(),
                     force,
                 )
                 .map(|result| TransferJobOutput::EditorSaved {
                     tab_id,
                     remote_path,
+                    generation,
                     result,
                 })
                 .map_err(|error| error.to_string());

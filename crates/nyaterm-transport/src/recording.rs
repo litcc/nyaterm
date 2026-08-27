@@ -99,6 +99,8 @@ pub enum RecordingError {
     Config(String),
     #[error("invalid regular expression: {0}")]
     Regex(#[from] regex::Error),
+    #[error("recording runtime failure: {0}")]
+    Runtime(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -204,9 +206,9 @@ impl FileRecording {
         }
     }
 
-    fn write_record(&mut self, record: &TranscriptRecord) {
+    fn write_record(&mut self, record: &TranscriptRecord) -> Result<(), RecordingError> {
         if self.profile.mode != RecordingMode::Transcript {
-            return;
+            return Ok(());
         }
         let data = record
             .format(
@@ -214,32 +216,34 @@ impl FileRecording {
                 self.profile.include_timestamps,
             )
             .into_bytes();
-        self.write_bytes(&data);
+        self.write_bytes(&data)
     }
 
-    fn write_raw(&mut self, data: &[u8]) {
+    fn write_raw(&mut self, data: &[u8]) -> Result<(), RecordingError> {
         if self.profile.mode != RecordingMode::Raw || data.is_empty() {
-            return;
+            return Ok(());
         }
-        self.write_bytes(data);
+        self.write_bytes(data)
     }
 
-    fn write_bytes(&mut self, data: &[u8]) {
-        self.maybe_rotate(data.len() as u64);
-        if self.writer.write_all(data).is_ok() {
-            self.written_bytes = self.written_bytes.saturating_add(data.len() as u64);
-        }
+    fn write_bytes(&mut self, data: &[u8]) -> Result<(), RecordingError> {
+        self.maybe_rotate(data.len() as u64)?;
+        self.writer.write_all(data)?;
+        self.written_bytes = self.written_bytes.saturating_add(data.len() as u64);
+        Ok(())
     }
 
-    fn finish(&mut self) {
+    fn finish(&mut self) -> Result<(), RecordingError> {
         if self.profile.mode == RecordingMode::Transcript && self.profile.include_session_metadata {
             let footer = format_session_footer(&self.context, "Stopped").into_bytes();
-            let _ = self.writer.write_all(&footer);
+            self.writer.write_all(&footer)?;
+            self.written_bytes = self.written_bytes.saturating_add(footer.len() as u64);
         }
-        let _ = self.writer.flush();
+        self.writer.flush()?;
+        Ok(())
     }
 
-    fn maybe_rotate(&mut self, incoming_bytes: u64) {
+    fn maybe_rotate(&mut self, incoming_bytes: u64) -> Result<(), RecordingError> {
         let rotate = match self.profile.rotation {
             RecordingRotationPolicy::Session => false,
             RecordingRotationPolicy::Daily => {
@@ -258,34 +262,37 @@ impl FileRecording {
             }
         };
         if !rotate {
-            return;
+            return Ok(());
         }
 
         self.size_rotation_index = self.size_rotation_index.saturating_add(1);
         let suffix = matches!(self.profile.rotation, RecordingRotationPolicy::Size { .. })
             .then_some(self.size_rotation_index);
-        let Ok(path) = resolve_recording_path(&self.profile, &self.context, suffix)
-            .and_then(|path| open_collision_safe_path(&path, self.profile.existing_file_behavior))
-        else {
-            return;
-        };
-        let _ = self.writer.flush();
-        let Ok(file) = open_recording_file(&path, self.profile.existing_file_behavior) else {
-            return;
-        };
-        self.writer = BufWriter::new(file);
-        self.file_path = path;
-        self.written_bytes = 0;
+        let path =
+            resolve_recording_path(&self.profile, &self.context, suffix).and_then(|path| {
+                open_collision_safe_path(&path, self.profile.existing_file_behavior)
+            })?;
+        self.writer.flush()?;
+        let file = open_recording_file(&path, self.profile.existing_file_behavior)?;
+        let mut next_writer = BufWriter::new(file);
+        let mut written_bytes = 0;
         if self.profile.mode == RecordingMode::Transcript && self.profile.include_session_metadata {
             let header = format_session_header(&self.context).into_bytes();
-            let _ = self.writer.write_all(&header);
-            self.written_bytes = self.written_bytes.saturating_add(header.len() as u64);
+            next_writer.write_all(&header)?;
+            written_bytes = header.len() as u64;
         }
+        self.writer = next_writer;
+        self.file_path = path;
+        self.written_bytes = written_bytes;
+        Ok(())
     }
 }
 
 struct SessionCaptureState {
     recording: Option<FileRecording>,
+    recording_state: RecordingStatusState,
+    dropped_bytes: u64,
+    last_error: Option<String>,
     records: VecDeque<TranscriptRecord>,
     record_bytes: usize,
     memory_limit_bytes: usize,
@@ -302,6 +309,9 @@ impl SessionCaptureState {
     fn new(memory_limit_bytes: usize) -> Self {
         Self {
             recording: None,
+            recording_state: RecordingStatusState::Recording,
+            dropped_bytes: 0,
+            last_error: None,
             records: VecDeque::new(),
             record_bytes: 0,
             memory_limit_bytes,
@@ -332,8 +342,12 @@ impl SessionCaptureState {
                 "recording is already active".to_string(),
             ));
         }
+        self.recording_state = RecordingStatusState::Starting;
+        self.last_error = None;
+        self.dropped_bytes = 0;
         self.flush_output_lines(true);
         self.recording = Some(FileRecording::new(file, file_path, profile, context));
+        self.recording_state = RecordingStatusState::Recording;
         Ok(())
     }
 
@@ -341,14 +355,37 @@ impl SessionCaptureState {
         if self.recording.is_none() {
             return Err(RecordingError::Config("no active recording".to_string()));
         }
+        if self.recording_state != RecordingStatusState::Failed {
+            self.recording_state = RecordingStatusState::Stopping;
+        }
         self.commit_partial_input();
         self.flush_output_lines(true);
         let mut recording = self
             .recording
             .take()
             .ok_or_else(|| RecordingError::Config("no active recording".to_string()))?;
-        recording.finish();
-        Ok(recording.file_path.to_string_lossy().to_string())
+        let path = recording.file_path.to_string_lossy().to_string();
+        if let Err(error) = recording.finish() {
+            self.mark_failed(error.to_string());
+        }
+        if let Some(error) = self.last_error.clone() {
+            return Err(RecordingError::Runtime(error));
+        }
+        self.recording_state = RecordingStatusState::Recording;
+        Ok(path)
+    }
+
+    fn mark_failed(&mut self, error: String) {
+        self.recording_state = RecordingStatusState::Failed;
+        self.last_error = Some(error);
+    }
+
+    fn report_dropped(&mut self, bytes: usize) {
+        self.dropped_bytes = self.dropped_bytes.saturating_add(bytes as u64);
+        if self.recording_state != RecordingStatusState::Failed {
+            self.recording_state = RecordingStatusState::Degraded;
+            self.last_error = Some("recording writer queue overflowed".to_string());
+        }
     }
 
     fn write_input(&mut self, data: &[u8]) {
@@ -416,10 +453,19 @@ impl SessionCaptureState {
         if data.is_empty() {
             return;
         }
-        if let Some(recording) = self.recording.as_mut()
-            && recording.profile.mode == RecordingMode::Raw
+        if self
+            .recording
+            .as_ref()
+            .is_some_and(|recording| recording.profile.mode == RecordingMode::Raw)
         {
-            recording.write_raw(data);
+            let result = self
+                .recording
+                .as_mut()
+                .expect("recording checked above")
+                .write_raw(data);
+            if let Err(error) = result {
+                self.mark_failed(error.to_string());
+            }
             return;
         }
 
@@ -429,10 +475,19 @@ impl SessionCaptureState {
     }
 
     fn write_output(&mut self, data: &str) {
-        if let Some(recording) = self.recording.as_mut()
-            && recording.profile.mode == RecordingMode::Raw
+        if self
+            .recording
+            .as_ref()
+            .is_some_and(|recording| recording.profile.mode == RecordingMode::Raw)
         {
-            recording.write_raw(data.as_bytes());
+            let result = self
+                .recording
+                .as_mut()
+                .expect("recording checked above")
+                .write_raw(data.as_bytes());
+            if let Err(error) = result {
+                self.mark_failed(error.to_string());
+            }
             return;
         }
         let mut sanitized = strip_terminal_control_sequences(data);
@@ -473,8 +528,11 @@ impl SessionCaptureState {
     fn finish(&mut self) {
         self.commit_partial_input();
         self.flush_output_lines(true);
-        if let Some(recording) = self.recording.as_mut() {
-            recording.finish();
+        if let Some(recording) = self.recording.as_mut()
+            && let Err(error) = recording.finish()
+        {
+            self.recording_state = RecordingStatusState::Failed;
+            self.last_error = Some(error.to_string());
         }
         self.recording = None;
     }
@@ -492,8 +550,11 @@ impl SessionCaptureState {
         let line_id = self.next_line_id;
         self.next_line_id = self.next_line_id.saturating_add(1);
         let record = TranscriptRecord::new(line_id, label, data);
-        if let Some(recording) = self.recording.as_mut() {
-            recording.write_record(&record);
+        if let Some(recording) = self.recording.as_mut()
+            && let Err(error) = recording.write_record(&record)
+        {
+            self.recording_state = RecordingStatusState::Failed;
+            self.last_error = Some(error.to_string());
         }
 
         self.record_bytes += record.size_bytes;
@@ -666,8 +727,11 @@ impl RecordingManager {
         if profile.mode == RecordingMode::Transcript
             && profile.include_session_metadata
             && let Some(recording) = state.recording.as_mut()
+            && let Err(error) = recording.write_bytes(format_session_header(&context).as_bytes())
         {
-            recording.write_bytes(format_session_header(&context).as_bytes());
+            state.recording = None;
+            state.mark_failed(error.to_string());
+            return Err(error);
         }
         Ok(path.to_string_lossy().to_string())
     }
@@ -845,6 +909,15 @@ impl RecordingManager {
         state.write_raw_input(data);
     }
 
+    pub fn report_dropped(&self, session_id: &str, bytes: usize) {
+        let mut sessions = lock_recover(&self.sessions);
+        if let Some(state) = sessions.get_mut(session_id)
+            && state.recording.is_some()
+        {
+            state.report_dropped(bytes);
+        }
+    }
+
     pub fn cleanup_session(&self, session_id: &str) {
         let removed = {
             let mut sessions = lock_recover(&self.sessions);
@@ -863,14 +936,14 @@ fn recording_status_for_state(
     let recording = state.recording.as_ref()?;
     Some(RecordingStatus {
         session_id: session_id.to_string(),
-        state: RecordingStatusState::Recording,
+        state: state.recording_state,
         mode: recording.profile.mode,
         file_path: Some(recording.file_path.clone()),
         started_at: Some(recording.context.started_at),
         written_bytes: recording.written_bytes,
         queued_bytes: 0,
-        dropped_bytes: 0,
-        last_error: None,
+        dropped_bytes: state.dropped_bytes,
+        last_error: state.last_error.clone(),
     })
 }
 
@@ -1890,5 +1963,54 @@ mod tests {
         assert!(recorded.contains("after"));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn rotation_write_failure_marks_recording_failed_and_surfaces_on_stop() {
+        let manager = RecordingManager::new();
+        let initial_path = std::path::PathBuf::from(unique_path("rotation-initial"));
+        let blocked_base_path = std::path::PathBuf::from(unique_path("rotation-blocked-base"));
+        fs::write(&blocked_base_path, b"not a directory").unwrap();
+        let context = super::RecordingContext {
+            session_id: "s1".to_string(),
+            session_name: "session".to_string(),
+            connection_id: None,
+            connection_name: None,
+            group_path: None,
+            protocol: "local".to_string(),
+            host: None,
+            port: None,
+            username: None,
+            started_at: time::OffsetDateTime::now_utc(),
+        };
+        let profile = super::RecordingProfile {
+            mode: super::RecordingMode::Transcript,
+            base_path: blocked_base_path.clone(),
+            path_template: "rotated.log".to_string(),
+            include_timestamps: false,
+            include_io_labels: true,
+            include_session_metadata: false,
+            rotation: super::RecordingRotationPolicy::Size { max_bytes: 1 },
+            existing_file_behavior: super::ExistingFileBehavior::Overwrite,
+            include_binary_transfer_payloads: false,
+        };
+
+        manager
+            .start_with_profile("s1", context, profile, Some(initial_path.clone()))
+            .unwrap();
+        manager.write_output("s1", "rotation must fail\n");
+
+        let status = manager
+            .status("s1")
+            .expect("recording should remain observable");
+        assert_eq!(status.state, super::RecordingStatusState::Failed);
+        assert!(status.last_error.is_some());
+        let error = manager
+            .stop("s1")
+            .expect_err("stop must surface the failure");
+        assert!(matches!(error, super::RecordingError::Runtime(_)));
+
+        let _ = fs::remove_file(initial_path);
+        let _ = fs::remove_file(blocked_base_path);
     }
 }

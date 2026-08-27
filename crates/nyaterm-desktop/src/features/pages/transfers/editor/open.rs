@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{Context, Window};
 use nyaterm_core::AiCustomActionConfig;
-use nyaterm_transport::{SftpFileEntry, SftpFileType, SftpTransferControl, SshSessionConfig};
+use nyaterm_transport::{
+    RemoteTextGeneration, SftpFileEntry, SftpFileType, SftpTransferControl, SshSessionConfig,
+};
 
 use crate::features::NyaTermApp;
 use crate::models::{
@@ -283,8 +285,8 @@ impl NyaTermApp {
             content: String::new(),
             search_query: String::new(),
             active_match: 0,
-            base_size: entry.size,
-            base_modified_at: entry.modified_at.map(u64::from),
+            revision: None,
+            generation: RemoteTextGeneration::next(),
             loading: true,
             saving: false,
             dirty: false,
@@ -382,11 +384,16 @@ impl NyaTermApp {
             name: tab.name,
             path: tab.remote_path,
             file_type: SftpFileType::File,
-            size: tab.base_size,
+            size: tab.revision.as_ref().map(|revision| revision.metadata.size),
             permissions: None,
             owner: String::new(),
             group: String::new(),
-            modified_at: tab.base_modified_at.and_then(|value| value.try_into().ok()),
+            modified_at: tab.revision.as_ref().and_then(|revision| {
+                revision
+                    .metadata
+                    .modified_at
+                    .and_then(|value| value.try_into().ok())
+            }),
             raw_path_token: tab.raw_path_token,
             symlink_target_is_directory: false,
         };

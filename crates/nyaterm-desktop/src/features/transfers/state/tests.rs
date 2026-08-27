@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use gpui::{ScrollHandle, ScrollStrategy, TestAppContext, UniformListScrollHandle, point, px};
 use nyaterm_transport::{
-    SftpDuplicatePolicy, SftpFileEntry, SftpFileProperties, SftpFileType, SftpTransferControl,
-    SftpWriteTextResult,
+    RemoteTextDocument, RemoteTextGeneration, RemoteTextMetadata, RemoteTextRevision,
+    RemoteTextWriteResult, SftpDuplicatePolicy, SftpFileEntry, SftpFileProperties, SftpFileType,
+    SftpTransferControl, SftpWriteTextResult,
 };
 
 use crate::models::{
@@ -637,8 +638,14 @@ fn editor_tab(session_id: &str, remote_path: &str) -> TransferEditorState {
         content: String::new(),
         search_query: String::new(),
         active_match: 0,
-        base_size: Some(0),
-        base_modified_at: Some(1),
+        revision: Some(RemoteTextRevision::from_bytes(
+            b"",
+            RemoteTextMetadata {
+                size: 0,
+                modified_at: Some(1),
+            },
+        )),
+        generation: RemoteTextGeneration::next(),
         loading: false,
         saving: false,
         dirty: false,
@@ -1198,4 +1205,133 @@ fn transfer_queue_batches_are_scoped_to_the_visible_session() {
     assert!(queue.job_menu().is_none());
     assert!(queue.job("running-b").is_some());
     assert_eq!(queue.clear_stopped_jobs(Some("session-b")), 0);
+}
+
+#[test]
+fn transfer_editor_ignores_stale_load_and_failure_generations() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let mut tab = editor_tab("session-a", "/srv/a.txt");
+    tab.loading = true;
+    let tab_id = tab.id.clone();
+    let baseline = tab.revision.clone();
+    let stale_generation = tab.generation;
+    transfer.open_editor_tab(tab);
+
+    let current_generation = RemoteTextGeneration::next();
+    {
+        let tab = transfer.active_editor_tab_mut().unwrap();
+        tab.generation = current_generation;
+        tab.content = "new incarnation".to_string();
+    }
+    let stale_revision = RemoteTextRevision::from_bytes(
+        b"stale",
+        RemoteTextMetadata {
+            size: 5,
+            modified_at: Some(2),
+        },
+    );
+    assert!(!transfer.complete_editor_load_tab(
+        &tab_id,
+        stale_generation,
+        RemoteTextDocument {
+            path: "/srv/a.txt".to_string(),
+            content: "stale".to_string(),
+            revision: stale_revision,
+        },
+    ));
+    assert!(!transfer.fail_editor_operation_tab(
+        &tab_id,
+        stale_generation,
+        "stale failure".to_string(),
+    ));
+    {
+        let tab = transfer.active_editor_tab().unwrap();
+        assert_eq!(tab.content, "new incarnation");
+        assert!(tab.loading);
+        assert!(tab.error.is_none());
+        assert_eq!(tab.revision, baseline);
+    }
+    assert!(transfer.fail_editor_load_tab(
+        &tab_id,
+        current_generation,
+        "reload failed".to_string(),
+    ));
+    let tab = transfer.active_editor_tab().unwrap();
+    assert!(!tab.loading);
+    assert_eq!(tab.revision, baseline);
+}
+
+#[test]
+fn transfer_editor_conflict_preserves_baseline_and_stale_save_is_ignored() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let tab = editor_tab("session-a", "/srv/a.txt");
+    let tab_id = tab.id.clone();
+    let baseline = tab.revision.clone();
+    let stale_generation = tab.generation;
+    transfer.open_editor_tab(tab);
+    assert!(transfer.sync_editor_content(&tab_id, "local edit".to_string()));
+    assert!(transfer.begin_editor_tab_save(&tab_id));
+    assert_eq!(
+        transfer.complete_editor_save_tab(
+            &tab_id,
+            stale_generation,
+            RemoteTextWriteResult::Conflict,
+        ),
+        Some(TransferEditorSaveOutcome::Conflict)
+    );
+    assert_eq!(transfer.active_editor_tab().unwrap().revision, baseline);
+
+    let current_generation = RemoteTextGeneration::next();
+    {
+        let tab = transfer.active_editor_tab_mut().unwrap();
+        tab.generation = current_generation;
+        tab.saving = false;
+        tab.dirty = true;
+        tab.content = "newer edit".to_string();
+    }
+    let stale_saved_revision = RemoteTextRevision::from_bytes(
+        b"local edit",
+        RemoteTextMetadata {
+            size: 10,
+            modified_at: Some(3),
+        },
+    );
+    assert_eq!(
+        transfer.complete_editor_save_tab(
+            &tab_id,
+            stale_generation,
+            RemoteTextWriteResult::Saved {
+                revision: stale_saved_revision,
+            },
+        ),
+        None
+    );
+    let tab = transfer.active_editor_tab().unwrap();
+    assert_eq!(tab.content, "newer edit");
+    assert!(tab.dirty);
+    assert_eq!(tab.revision, baseline);
+}
+
+#[test]
+fn transfer_editor_cannot_discard_a_save_in_flight() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let tab = editor_tab("session-a", "/srv/a.txt");
+    let tab_id = tab.id.clone();
+    transfer.open_editor_tab(tab);
+    assert!(transfer.sync_editor_content(&tab_id, "local edit".to_string()));
+    assert_eq!(
+        transfer.request_editor_tab_close(&tab_id),
+        TransferEditorCloseOutcome::ConfirmationRequired
+    );
+    assert!(transfer.begin_editor_tab_save(&tab_id));
+
+    assert_eq!(
+        transfer.discard_editor(),
+        super::TransferEditorDiscardOutcome::Missing
+    );
+    assert!(transfer.editor_has_workspace());
+    assert!(transfer.active_editor_tab().is_some_and(|tab| tab.saving));
 }

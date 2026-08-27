@@ -5,6 +5,7 @@ use gpui::{
     SharedString, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_transport::RemoteTextGeneration;
 use nyaterm_ui::NyaScrollable;
 
 use crate::features::transfers::RemoteTextEditor;
@@ -292,8 +293,8 @@ impl NyaTermApp {
                 content: String::new(),
                 search_query: String::new(),
                 active_match: 0,
-                base_size: None,
-                base_modified_at: None,
+                revision: None,
+                generation: RemoteTextGeneration::next(),
                 loading: false,
                 saving: false,
                 dirty: false,
@@ -689,6 +690,10 @@ impl NyaTermApp {
                                                     cx.notify();
                                                     return;
                                                 }
+                                                if state.saving {
+                                                    return;
+                                                }
+                                                state.generation = RemoteTextGeneration::next();
                                                 state.loading = true;
                                                 state.error = None;
                                                 state.conflict = false;
@@ -959,6 +964,10 @@ impl NyaTermApp {
                                         else {
                                             return;
                                         };
+                                        if state.saving {
+                                            return;
+                                        }
+                                        state.generation = RemoteTextGeneration::next();
                                         state.loading = true;
                                         state.error = None;
                                         state.conflict = false;
@@ -1062,6 +1071,10 @@ impl NyaTermApp {
                                             else {
                                                 return;
                                             };
+                                            if state.saving {
+                                                return;
+                                            }
+                                            state.generation = RemoteTextGeneration::next();
                                             state.loading = true;
                                             state.error = None;
                                             state.conflict = false;

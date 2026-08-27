@@ -716,6 +716,7 @@ impl NyaTermApp {
             TransferJobEvent::Finished(Ok(TransferJobOutput::EditorLoaded {
                 tab_id,
                 remote_path,
+                generation,
                 file,
             })) => {
                 job.status = TransferJobStatus::Completed;
@@ -723,7 +724,8 @@ impl NyaTermApp {
                 job.summary = None;
                 job.progress = None;
                 job.control = None;
-                self.transfer.complete_editor_load_tab(&tab_id, file);
+                self.transfer
+                    .complete_editor_load_tab(&tab_id, generation, file);
                 self.transfer.browser.status = format!("opened text file {remote_path}");
                 self.shell
                     .set_status(format!("remote text file opened: {remote_path}"));
@@ -770,6 +772,7 @@ impl NyaTermApp {
             TransferJobEvent::Finished(Ok(TransferJobOutput::EditorSaved {
                 tab_id,
                 remote_path,
+                generation,
                 result,
             })) => {
                 job.status = TransferJobStatus::Completed;
@@ -777,7 +780,10 @@ impl NyaTermApp {
                 job.summary = None;
                 job.progress = None;
                 job.control = None;
-                if let Some(outcome) = self.transfer.complete_editor_save_tab(&tab_id, result) {
+                if let Some(outcome) = self
+                    .transfer
+                    .complete_editor_save_tab(&tab_id, generation, result)
+                {
                     self.shell.set_status(match outcome {
                         TransferEditorSaveOutcome::Saved => {
                             format!("remote text file saved: {remote_path}")
@@ -978,10 +984,15 @@ impl NyaTermApp {
                         error.clone(),
                     );
                 }
-                if let TransferJobKind::LoadEditor { tab_id, .. }
-                | TransferJobKind::SaveEditor { tab_id, .. } = &job.kind
+                if let TransferJobKind::LoadEditor {
+                    tab_id, generation, ..
+                }
+                | TransferJobKind::SaveEditor {
+                    tab_id, generation, ..
+                } = &job.kind
                 {
-                    self.transfer.fail_editor_operation_tab(tab_id, error);
+                    self.transfer
+                        .fail_editor_operation_tab(tab_id, *generation, error);
                 }
                 job.summary = None;
                 job.control = None;

@@ -1,10 +1,12 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use super::{SessionDrain, SessionDrainStats, SessionEvent};
+use crate::{SessionDrain, SessionDrainStats, SessionEvent};
 
 pub(super) const SESSION_EVENT_QUEUE_OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
+pub(super) const SESSION_EVENT_QUEUE_OUTPUT_LOW_WATERMARK: usize =
+    SESSION_EVENT_QUEUE_OUTPUT_LIMIT / 2;
 pub(super) const SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT: usize = 256 * 1024;
 
 #[derive(Clone)]
@@ -14,14 +16,44 @@ pub(super) struct SessionEventQueue {
 
 struct SessionEventQueueShared {
     inner: Mutex<SessionEventQueueInner>,
+    /// Serializes complete producer events so splitting a large output event
+    /// cannot interleave its chunks with another producer. The turn lives in
+    /// `inner` so cancellation can wake a waiter without acquiring the turn.
+    producer_order: Condvar,
     /// Signalled on every push so a consumer can park instead of polling.
     ready: Condvar,
+    /// Signalled after a drain crosses the low watermark, or when cancellation
+    /// makes a producer ineligible to enqueue more output.
+    output_space: Condvar,
 }
 
 #[derive(Default)]
 struct SessionEventQueueInner {
     events: VecDeque<SessionEvent>,
     queued_output_bytes: usize,
+    output_backpressured: bool,
+    producer_active: bool,
+    closed: bool,
+    cancelled_sessions: HashSet<String>,
+    #[cfg(test)]
+    waiting_output_producers: usize,
+    #[cfg(test)]
+    waiting_consumers: usize,
+}
+
+struct ProducerOrderGuard<'a> {
+    shared: &'a SessionEventQueueShared,
+}
+
+impl Drop for ProducerOrderGuard<'_> {
+    fn drop(&mut self) {
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return;
+        };
+        inner.producer_active = false;
+        drop(inner);
+        self.shared.producer_order.notify_all();
+    }
 }
 
 impl SessionEventQueue {
@@ -29,18 +61,135 @@ impl SessionEventQueue {
         Self {
             shared: Arc::new(SessionEventQueueShared {
                 inner: Mutex::new(SessionEventQueueInner::default()),
+                producer_order: Condvar::new(),
                 ready: Condvar::new(),
+                output_space: Condvar::new(),
             }),
         }
     }
 
     pub(super) fn push(&self, event: SessionEvent) {
+        let session_id = event_session_id(&event).to_string();
+        let Some(_producer_order) = self.begin_push(&session_id) else {
+            return;
+        };
+        match event {
+            SessionEvent::Output { session_id, data } => {
+                for chunk in data.chunks(SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT) {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    if !self.push_output_chunk(session_id.clone(), chunk.to_vec()) {
+                        return;
+                    }
+                }
+            }
+            other => {
+                let Ok(mut inner) = self.shared.inner.lock() else {
+                    return;
+                };
+                if !inner.accepts(&session_id) {
+                    return;
+                }
+                inner.events.push_back(other);
+                drop(inner);
+                self.shared.ready.notify_one();
+            }
+        }
+    }
+
+    fn begin_push(&self, session_id: &str) -> Option<ProducerOrderGuard<'_>> {
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return None;
+        };
+        loop {
+            if !inner.accepts(session_id) {
+                return None;
+            }
+            if !inner.producer_active {
+                inner.producer_active = true;
+                return Some(ProducerOrderGuard {
+                    shared: &self.shared,
+                });
+            }
+            let Ok(waited) = self.shared.producer_order.wait(inner) else {
+                return None;
+            };
+            inner = waited;
+        }
+    }
+
+    fn push_output_chunk(&self, session_id: String, data: Vec<u8>) -> bool {
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return false;
+        };
+        loop {
+            if !inner.accepts(&session_id) {
+                return false;
+            }
+            let fits = inner.queued_output_bytes.saturating_add(data.len())
+                <= SESSION_EVENT_QUEUE_OUTPUT_LIMIT;
+            if !inner.output_backpressured && fits {
+                inner.queued_output_bytes = inner.queued_output_bytes.saturating_add(data.len());
+                inner
+                    .events
+                    .push_back(SessionEvent::Output { session_id, data });
+                if inner.queued_output_bytes >= SESSION_EVENT_QUEUE_OUTPUT_LIMIT {
+                    inner.output_backpressured = true;
+                }
+                drop(inner);
+                self.shared.ready.notify_one();
+                return true;
+            }
+            inner.output_backpressured = true;
+            inner.output_wait_started();
+            let waited = self.shared.output_space.wait(inner);
+            let Ok(mut waited) = waited else {
+                return false;
+            };
+            waited.output_wait_finished();
+            inner = waited;
+        }
+    }
+
+    pub(super) fn cancel_session(&self, session_id: &str) {
         let Ok(mut inner) = self.shared.inner.lock() else {
             return;
         };
-        inner.push(event);
+        inner.cancelled_sessions.insert(session_id.to_string());
+        let removed_output_bytes = inner
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                SessionEvent::Output {
+                    session_id: event_session_id,
+                    data,
+                } if event_session_id == session_id => Some(data.len()),
+                _ => None,
+            })
+            .sum::<usize>();
+        inner
+            .events
+            .retain(|event| event_session_id(event) != session_id);
+        inner.queued_output_bytes = inner
+            .queued_output_bytes
+            .saturating_sub(removed_output_bytes);
+        inner.resume_output_if_below_low_watermark();
         drop(inner);
-        self.shared.ready.notify_one();
+        self.shared.producer_order.notify_all();
+        self.shared.output_space.notify_all();
+        self.shared.ready.notify_all();
+    }
+
+    pub(super) fn close(&self) {
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return;
+        };
+        inner.closed = true;
+        drop(inner);
+        self.shared.producer_order.notify_all();
+        self.shared.output_space.notify_all();
+        self.shared.ready.notify_all();
     }
 
     pub(super) fn drain(&self, max_events: usize) -> SessionDrain {
@@ -55,7 +204,13 @@ impl SessionEventQueue {
         let Ok(mut inner) = self.shared.inner.lock() else {
             return SessionDrain::default();
         };
-        inner.drain(max_events, max_output_bytes)
+        let drain = inner.drain(max_events, max_output_bytes);
+        let resumed = inner.resume_output_if_below_low_watermark();
+        drop(inner);
+        if resumed {
+            self.shared.output_space.notify_all();
+        }
+        drain
     }
 
     /// Drain, parking up to `timeout` for the first event rather than returning
@@ -63,122 +218,103 @@ impl SessionEventQueue {
     /// instead of sleeping on a fixed interval and eating the latency.
     ///
     /// The timeout still bounds the park so a caller keeps its shutdown flag
-    /// and periodic bookkeeping on schedule.
+    /// and periodic bookkeeping on schedule. A globally closed empty queue
+    /// returns immediately, including when close races with entering the wait.
     pub(super) fn drain_blocking_with_output_budget(
         &self,
         max_events: usize,
         max_output_bytes: Option<usize>,
         timeout: Duration,
     ) -> SessionDrain {
+        let wait_started = Instant::now();
         let Ok(mut inner) = self.shared.inner.lock() else {
             return SessionDrain::default();
         };
-        if inner.events.is_empty() {
-            let Ok((waited, _)) = self.shared.ready.wait_timeout(inner, timeout) else {
+        while inner.events.is_empty() && !inner.closed {
+            let remaining = timeout.saturating_sub(wait_started.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            inner.consumer_wait_started();
+            let waited = self.shared.ready.wait_timeout(inner, remaining);
+            let Ok((mut waited, wait_result)) = waited else {
                 return SessionDrain::default();
             };
+            waited.consumer_wait_finished();
             inner = waited;
+            if wait_result.timed_out() {
+                break;
+            }
         }
-        inner.drain(max_events, max_output_bytes)
+        let drain = inner.drain(max_events, max_output_bytes);
+        let resumed = inner.resume_output_if_below_low_watermark();
+        drop(inner);
+        if resumed {
+            self.shared.output_space.notify_all();
+        }
+        drain
+    }
+
+    #[cfg(test)]
+    pub(super) fn waiting_output_producers(&self) -> usize {
+        self.shared
+            .inner
+            .lock()
+            .map(|inner| inner.waiting_output_producers)
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(super) fn waiting_consumers(&self) -> usize {
+        self.shared
+            .inner
+            .lock()
+            .map(|inner| inner.waiting_consumers)
+            .unwrap_or_default()
     }
 }
 
 impl SessionEventQueueInner {
-    fn push(&mut self, event: SessionEvent) {
-        match event {
-            SessionEvent::Output {
-                session_id,
-                mut data,
-            } => {
-                if data.is_empty() {
-                    return;
-                }
-                let mut leading_drop = 0usize;
-                if data.len() > SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT {
-                    leading_drop = data.len() - SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT;
-                    data.drain(..leading_drop);
-                }
-                if leading_drop > 0 {
-                    self.push_output_drop_event(session_id.clone(), leading_drop);
-                }
-                self.queued_output_bytes = self.queued_output_bytes.saturating_add(data.len());
-                self.events.push_back(SessionEvent::Output {
-                    session_id: session_id.clone(),
-                    data,
-                });
-                self.enforce_output_limit();
-            }
-            other => self.events.push_back(other),
-        }
-    }
-
-    fn push_output_drop_event(&mut self, session_id: String, bytes: usize) {
-        if bytes == 0 {
-            return;
-        }
-        if let Some(SessionEvent::OutputDropped {
-            session_id: last_session_id,
-            bytes: last_bytes,
-        }) = self.events.back_mut()
-            && last_session_id == &session_id
+    fn output_wait_started(&mut self) {
+        #[cfg(test)]
         {
-            *last_bytes = last_bytes.saturating_add(bytes);
-            return;
+            self.waiting_output_producers = self.waiting_output_producers.saturating_add(1);
         }
-        self.events
-            .push_back(SessionEvent::OutputDropped { session_id, bytes });
     }
 
-    fn insert_output_drop_event(&mut self, index: usize, session_id: String, bytes: usize) {
-        if bytes == 0 {
-            return;
-        }
-        if index > 0
-            && let Some(SessionEvent::OutputDropped {
-                session_id: previous_session_id,
-                bytes: previous_bytes,
-            }) = self.events.get_mut(index - 1)
-            && previous_session_id == &session_id
+    fn output_wait_finished(&mut self) {
+        #[cfg(test)]
         {
-            *previous_bytes = previous_bytes.saturating_add(bytes);
-            return;
+            self.waiting_output_producers = self.waiting_output_producers.saturating_sub(1);
         }
-        let index = index.min(self.events.len());
-        self.events
-            .insert(index, SessionEvent::OutputDropped { session_id, bytes });
     }
 
-    fn enforce_output_limit(&mut self) {
-        while self.queued_output_bytes > SESSION_EVENT_QUEUE_OUTPUT_LIMIT {
-            let excess = self.queued_output_bytes - SESSION_EVENT_QUEUE_OUTPUT_LIMIT;
-            let Some(index) = self
-                .events
-                .iter()
-                .position(|event| matches!(event, SessionEvent::Output { .. }))
-            else {
-                self.queued_output_bytes = 0;
-                break;
-            };
-            let mut remove_event = false;
-            let mut dropped: Option<(String, usize)> = None;
-            if let Some(SessionEvent::Output { session_id, data }) = self.events.get_mut(index) {
-                let remove = excess.min(data.len());
-                let dropped_session_id = session_id.clone();
-                data.drain(..remove);
-                self.queued_output_bytes = self.queued_output_bytes.saturating_sub(remove);
-                remove_event = data.is_empty();
-                dropped = Some((dropped_session_id, remove));
-            }
-            if let Some((session_id, bytes)) = dropped {
-                if remove_event {
-                    self.events.remove(index);
-                    self.insert_output_drop_event(index, session_id, bytes);
-                } else {
-                    self.insert_output_drop_event(index, session_id, bytes);
-                }
-            } else if remove_event {
-                self.events.remove(index);
-            }
+    fn consumer_wait_started(&mut self) {
+        #[cfg(test)]
+        {
+            self.waiting_consumers = self.waiting_consumers.saturating_add(1);
+        }
+    }
+
+    fn consumer_wait_finished(&mut self) {
+        #[cfg(test)]
+        {
+            self.waiting_consumers = self.waiting_consumers.saturating_sub(1);
+        }
+    }
+
+    fn accepts(&self, session_id: &str) -> bool {
+        !self.closed && !self.cancelled_sessions.contains(session_id)
+    }
+
+    fn resume_output_if_below_low_watermark(&mut self) -> bool {
+        if self.output_backpressured
+            && self.queued_output_bytes <= SESSION_EVENT_QUEUE_OUTPUT_LOW_WATERMARK
+        {
+            self.output_backpressured = false;
+            true
+        } else {
+            false
         }
     }
 
@@ -195,12 +331,6 @@ impl SessionEventQueueInner {
                 }
                 let remaining_output_budget =
                     max_output_bytes.saturating_sub(stats.drained_output_bytes);
-                if remaining_output_budget == 0
-                    && stats.drained_events > 0
-                    && matches!(self.events.front(), Some(SessionEvent::Output { .. }))
-                {
-                    break;
-                }
                 if remaining_output_budget == 0
                     && matches!(self.events.front(), Some(SessionEvent::Output { .. }))
                 {
@@ -248,5 +378,16 @@ impl SessionEventQueueInner {
         stats.queued_events = self.events.len();
         stats.queued_output_bytes = self.queued_output_bytes;
         SessionDrain { events, stats }
+    }
+}
+
+fn event_session_id(event: &SessionEvent) -> &str {
+    match event {
+        SessionEvent::Output { session_id, .. }
+        | SessionEvent::OutputDropped { session_id, .. }
+        | SessionEvent::CwdChanged { session_id, .. }
+        | SessionEvent::CommandAccepted { session_id, .. }
+        | SessionEvent::Exited { session_id, .. }
+        | SessionEvent::Error { session_id, .. } => session_id,
     }
 }

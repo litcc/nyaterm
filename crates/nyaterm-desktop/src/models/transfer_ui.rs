@@ -1,5 +1,7 @@
 use gpui::Pixels;
-use nyaterm_transport::{SftpFileEntry, SftpFileProperties};
+use nyaterm_transport::{
+    RemoteTextGeneration, RemoteTextRevision, SftpFileEntry, SftpFileProperties,
+};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -175,8 +177,8 @@ pub(crate) struct TransferEditorState {
     pub(crate) content: String,
     pub(crate) search_query: String,
     pub(crate) active_match: usize,
-    pub(crate) base_size: Option<u64>,
-    pub(crate) base_modified_at: Option<u64>,
+    pub(crate) revision: Option<RemoteTextRevision>,
+    pub(crate) generation: RemoteTextGeneration,
     pub(crate) loading: bool,
     pub(crate) saving: bool,
     pub(crate) dirty: bool,
@@ -293,7 +295,7 @@ pub(crate) enum TransferEditorField {
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_transport::RemoteFilePath;
+    use nyaterm_transport::{RemoteFilePath, RemoteTextGeneration};
 
     use super::{TransferEditorField, TransferEditorState, TransferEditorWorkspaceState};
 
@@ -311,8 +313,8 @@ mod tests {
             content: String::new(),
             search_query: String::new(),
             active_match: 0,
-            base_size: None,
-            base_modified_at: None,
+            revision: None,
+            generation: RemoteTextGeneration::next(),
             loading: false,
             saving: false,
             dirty: false,

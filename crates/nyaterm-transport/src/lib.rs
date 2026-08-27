@@ -164,6 +164,8 @@ pub use recording::{
 pub use remote_file::{
     FileCopyRequest, FileCopySummary, FileTransferEndpoint, RemoteFileBackendKind,
     RemoteFileBackendPreference, RemoteFileBackendPreferenceStore, RemoteFileService,
+    RemoteTextDocument, RemoteTextGeneration, RemoteTextMetadata, RemoteTextRevision,
+    RemoteTextWriteResult,
 };
 pub use remote_process::{
     PROCESS_LIST_SCRIPT, PROCESS_LIST_UNSUPPORTED_ERROR, PROCESS_LIST_UNSUPPORTED_MARKER,
@@ -1103,6 +1105,7 @@ impl SessionManager {
             .map_err(|_| SessionError::LockPoisoned)?
             .remove(session_id)
             .ok_or_else(|| SessionError::NotFound(session_id.to_string()))?;
+        self.event_queue.cancel_session(session_id);
         session.close();
         Ok(())
     }
@@ -1355,6 +1358,19 @@ impl TerminalTransport for SerialTransport {
             let _ = reader_thread.join();
         }
         Ok(())
+    }
+}
+
+impl Drop for SessionManager {
+    fn drop(&mut self) {
+        self.event_queue.close();
+        let sessions = match self.sessions.get_mut() {
+            Ok(sessions) => std::mem::take(sessions),
+            Err(poisoned) => std::mem::take(poisoned.into_inner()),
+        };
+        for (_, mut session) in sessions {
+            session.close();
+        }
     }
 }
 

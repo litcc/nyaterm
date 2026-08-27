@@ -624,15 +624,17 @@ mod tests {
         let app = menu_app(&mut cx);
         let recording_path = unique_test_dir("active").join("recording.log");
         let (clicked_items, other_items) = cx.update_entity(&app, |app, cx| {
-            app.recording
-                .manager_for_job()
-                .start(
-                    "clicked-pane",
-                    recording_path.to_string_lossy().as_ref(),
-                    true,
-                    true,
-                )
-                .expect("start recording fixture");
+            app.recording.apply_status(RecordingStatus {
+                session_id: "clicked-pane".to_string(),
+                state: RecordingStatusState::Recording,
+                mode: RecordingMode::Transcript,
+                file_path: Some(recording_path.clone()),
+                started_at: None,
+                written_bytes: 0,
+                queued_bytes: 0,
+                dropped_bytes: 0,
+                last_error: None,
+            });
             (
                 app.terminal_recording_menu_items("clicked-pane", "Ctrl+Shift+R".to_string(), cx),
                 app.terminal_recording_menu_items("other-pane", "Ctrl+Shift+R".to_string(), cx),
@@ -665,12 +667,11 @@ mod tests {
             Some("icons/session/folder-open.svg")
         );
 
-        cx.update_entity(&app, |app, _| {
-            app.recording
-                .manager_for_job()
-                .stop("clicked-pane")
-                .expect("stop recording fixture");
+        let stopped_items = cx.update_entity(&app, |app, cx| {
+            app.recording.remove_status("clicked-pane");
+            app.terminal_recording_menu_items("clicked-pane", "Ctrl+Shift+R".to_string(), cx)
         });
+        assert_eq!(labels(&stopped_items)[0], "Start Transcript Log");
         let _ = std::fs::remove_file(recording_path);
     }
 

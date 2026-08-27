@@ -19,6 +19,11 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
 
+use crate::remote_file::{
+    RemoteTextDocument, RemoteTextMetadata, RemoteTextRevision, RemoteTextWriteResult,
+    metadata_is_stable,
+};
+
 use super::{
     PROCESS_TIMEOUT, SftpDuplicateDecision, SftpDuplicatePolicy, SftpDuplicateRequest,
     SftpDuplicateResolver, SftpPathTransferOptions, SftpTransferDirection, SftpTransferOptions,
@@ -1102,23 +1107,57 @@ impl SftpService {
                         "File is too large to open as text ({size} bytes > {max_bytes} bytes)"
                     );
                 }
-                let mut file = session.sftp.open_bytes(remote_path_bytes).await?;
+                let mut file = session.sftp.open_bytes(remote_path_bytes.clone()).await?;
                 let mut bytes = Vec::with_capacity(size as usize);
                 file.read_to_end(&mut bytes).await?;
                 file.shutdown().await?;
                 ensure_remote_text_bytes(&bytes, max_bytes)?;
+                let after_attrs = session.sftp.metadata_bytes(remote_path_bytes).await?;
+                let before_metadata = RemoteTextMetadata {
+                    size,
+                    modified_at: attrs.mtime.map(u64::from),
+                };
+                let after_metadata = RemoteTextMetadata {
+                    size: after_attrs.size.unwrap_or(0),
+                    modified_at: after_attrs.mtime.map(u64::from),
+                };
+                if !metadata_is_stable(&before_metadata, &after_metadata)
+                    || after_metadata.size != bytes.len() as u64
+                {
+                    anyhow::bail!("Remote file changed while it was being read");
+                }
                 let content = String::from_utf8(bytes)
                     .map_err(|_| anyhow::anyhow!("Only UTF-8 text files are supported"))?;
                 Ok(SftpRemoteTextFile {
                     path: remote_path.display_path,
                     content,
-                    size,
-                    modified_at: u64::from(attrs.mtime.unwrap_or(0)),
+                    size: after_metadata.size,
+                    modified_at: after_metadata.modified_at.unwrap_or(0),
                 })
             }
             .await;
             close_sftp_session(session).await;
             result
+        })
+    }
+
+    pub fn read_text_document_path(
+        &self,
+        remote_path: &RemoteFilePath,
+        max_bytes: u64,
+    ) -> anyhow::Result<RemoteTextDocument> {
+        let file = self.read_text_file_path(remote_path, max_bytes)?;
+        let revision = RemoteTextRevision::from_bytes(
+            file.content.as_bytes(),
+            RemoteTextMetadata {
+                size: file.size,
+                modified_at: Some(file.modified_at),
+            },
+        );
+        Ok(RemoteTextDocument {
+            path: file.path,
+            content: file.content,
+            revision,
         })
     }
 
@@ -1265,6 +1304,135 @@ impl SftpService {
                     modified_at: u64::from(attrs.mtime.unwrap_or(0)),
                     size: attrs.size.unwrap_or(content.len() as u64),
                 })
+            }
+            .await;
+            close_sftp_session(session).await;
+            result
+        })
+    }
+
+    pub fn write_text_document_path(
+        &self,
+        remote_path: &RemoteFilePath,
+        content: impl AsRef<str>,
+        expected_revision: Option<RemoteTextRevision>,
+        force: bool,
+    ) -> anyhow::Result<RemoteTextWriteResult> {
+        if !force && expected_revision.is_none() {
+            anyhow::bail!("Remote text revision is required for a safe save");
+        }
+        let expected_revision = if force { None } else { expected_revision };
+        let remote_path = remote_path.clone();
+        let content = content.as_ref().to_string();
+        let config = self.config.clone();
+        let multiplex = self.multiplex.clone();
+        self.run_operation(async move {
+            let codec = SftpPathCodec::from_ssh_config(&config)?;
+            let remote_path_bytes = remote_file_path_bytes(&codec, &remote_path)?;
+            let session = open_sftp_session(&config, multiplex.as_ref()).await?;
+            let result = async {
+                let mut temporary_path = remote_path_bytes.clone();
+                temporary_path.extend_from_slice(
+                    format!(".nyaterm-edit-{}", uuid::Uuid::new_v4().simple()).as_bytes(),
+                );
+                let operation = async {
+                    let mut temporary = session.sftp.create_bytes(temporary_path.clone()).await?;
+                    temporary.write_all(content.as_bytes()).await?;
+                    temporary.flush().await?;
+                    temporary.shutdown().await?;
+                    let temporary_attrs =
+                        session.sftp.metadata_bytes(temporary_path.clone()).await?;
+                    if temporary_attrs.size != Some(content.len() as u64) {
+                        anyhow::bail!("Remote temporary file size verification failed");
+                    }
+
+                    if let Some(expected) = expected_revision.as_ref() {
+                        let before_attrs = session
+                            .sftp
+                            .metadata_bytes(remote_path_bytes.clone())
+                            .await?;
+                        let before_metadata = RemoteTextMetadata {
+                            size: before_attrs.size.unwrap_or(0),
+                            modified_at: Some(u64::from(before_attrs.mtime.unwrap_or(0))),
+                        };
+                        if before_metadata != expected.metadata {
+                            return Ok(RemoteTextWriteResult::Conflict);
+                        }
+                        let mut current_file =
+                            session.sftp.open_bytes(remote_path_bytes.clone()).await?;
+                        let mut current = Vec::with_capacity(before_metadata.size as usize);
+                        current_file.read_to_end(&mut current).await?;
+                        current_file.shutdown().await?;
+                        let after_attrs = session
+                            .sftp
+                            .metadata_bytes(remote_path_bytes.clone())
+                            .await?;
+                        let after_metadata = RemoteTextMetadata {
+                            size: after_attrs.size.unwrap_or(0),
+                            modified_at: Some(u64::from(after_attrs.mtime.unwrap_or(0))),
+                        };
+                        if !metadata_is_stable(&before_metadata, &after_metadata)
+                            || after_metadata.size != current.len() as u64
+                        {
+                            anyhow::bail!("Remote file changed while it was being verified");
+                        }
+                        if RemoteTextRevision::from_bytes(&current, after_metadata) != *expected {
+                            return Ok(RemoteTextWriteResult::Conflict);
+                        }
+                    }
+
+                    let replacement_attrs = session
+                        .sftp
+                        .metadata_bytes(remote_path_bytes.clone())
+                        .await?;
+                    let replacement_metadata = RemoteTextMetadata {
+                        size: replacement_attrs.size.unwrap_or(0),
+                        modified_at: Some(u64::from(replacement_attrs.mtime.unwrap_or(0))),
+                    };
+                    if expected_revision
+                        .as_ref()
+                        .is_some_and(|expected| replacement_metadata != expected.metadata)
+                    {
+                        return Ok(RemoteTextWriteResult::Conflict);
+                    }
+                    if replacement_attrs.permissions.is_some() {
+                        session
+                            .sftp
+                            .set_metadata_bytes(
+                                temporary_path.clone(),
+                                russh_sftp::protocol::FileAttributes {
+                                    permissions: replacement_attrs.permissions,
+                                    ..russh_sftp::protocol::FileAttributes::empty()
+                                },
+                            )
+                            .await?;
+                    }
+                    // SFTP has no portable conditional rename. The full revision and final
+                    // metadata check above narrow the race to this replacement operation.
+                    session
+                        .sftp
+                        .rename_bytes(temporary_path.clone(), remote_path_bytes.clone())
+                        .await?;
+                    let attrs = session
+                        .sftp
+                        .metadata_bytes(remote_path_bytes.clone())
+                        .await?;
+                    let metadata = RemoteTextMetadata {
+                        size: attrs.size.unwrap_or(0),
+                        modified_at: Some(u64::from(attrs.mtime.unwrap_or(0))),
+                    };
+                    if metadata.size != content.len() as u64 {
+                        anyhow::bail!("Remote text save verification failed");
+                    }
+                    Ok(RemoteTextWriteResult::Saved {
+                        revision: RemoteTextRevision::from_bytes(content.as_bytes(), metadata),
+                    })
+                }
+                .await;
+                if !matches!(&operation, Ok(RemoteTextWriteResult::Saved { .. })) {
+                    let _ = session.sftp.remove_file_bytes(temporary_path).await;
+                }
+                operation
             }
             .await;
             close_sftp_session(session).await;

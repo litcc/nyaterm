@@ -10,8 +10,14 @@ use crate::{
     SftpWriteTextResult, SshMultiplexHandle, SshSessionConfig,
 };
 
+mod revision;
 mod shell;
 
+pub(crate) use revision::metadata_is_stable;
+pub use revision::{
+    RemoteTextDocument, RemoteTextGeneration, RemoteTextMetadata, RemoteTextRevision,
+    RemoteTextWriteResult,
+};
 use shell::{ShellRemote, shell_quote};
 
 pub const REMOTE_FILE_MANAGER_UNAVAILABLE: &str =
@@ -471,6 +477,17 @@ impl RemoteFileService {
         }
     }
 
+    pub fn read_text_document_path(
+        &self,
+        path: &RemoteFilePath,
+        max_bytes: u64,
+    ) -> anyhow::Result<RemoteTextDocument> {
+        match self.backend()? {
+            RemoteFileBackendKind::Sftp => self.sftp()?.read_text_document_path(path, max_bytes),
+            kind => read_shell_text_document(&self.shell(kind), path, max_bytes),
+        }
+    }
+
     pub fn read_file_bytes(
         &self,
         path: impl AsRef<str>,
@@ -541,6 +558,34 @@ impl RemoteFileService {
                 content.as_ref(),
                 expected_modified_at,
                 expected_size,
+                force,
+            ),
+        }
+    }
+
+    pub fn write_text_document_path(
+        &self,
+        path: &RemoteFilePath,
+        content: impl AsRef<str>,
+        expected_revision: Option<&RemoteTextRevision>,
+        force: bool,
+    ) -> anyhow::Result<RemoteTextWriteResult> {
+        if !force && expected_revision.is_none() {
+            anyhow::bail!("Remote text revision is required for a safe save");
+        }
+        let expected_revision = if force { None } else { expected_revision };
+        match self.backend()? {
+            RemoteFileBackendKind::Sftp => self.sftp()?.write_text_document_path(
+                path,
+                content,
+                expected_revision.cloned(),
+                force,
+            ),
+            kind => write_shell_text_document(
+                &self.shell(kind),
+                path,
+                content.as_ref(),
+                expected_revision,
                 force,
             ),
         }
@@ -1541,6 +1586,141 @@ fn update_shell_attributes(
         )?;
     }
     Ok(())
+}
+
+fn shell_text_metadata(properties: &SftpFileProperties) -> RemoteTextMetadata {
+    RemoteTextMetadata {
+        size: properties.size.unwrap_or(0),
+        modified_at: properties.modified_at.map(u64::from),
+    }
+}
+
+fn read_shell_text_document(
+    shell: &ShellRemote,
+    path: &RemoteFilePath,
+    max_bytes: u64,
+) -> anyhow::Result<RemoteTextDocument> {
+    let before = shell_properties(shell, path)?;
+    if before.is_directory() {
+        anyhow::bail!("Directories cannot be opened as text");
+    }
+    let before_metadata = shell_text_metadata(&before);
+    if before_metadata.size > max_bytes {
+        anyhow::bail!("File is too large to open as text");
+    }
+    let bytes = shell.exec_ok(format!("cat -- {}", shell_quote(&path.display_path)), None)?;
+    if bytes.len() as u64 > max_bytes {
+        anyhow::bail!("File is too large to open as text");
+    }
+    if bytes.contains(&0) {
+        anyhow::bail!("Binary files are not supported by the built-in editor");
+    }
+    let after = shell_properties(shell, path)?;
+    let after_metadata = shell_text_metadata(&after);
+    if !metadata_is_stable(&before_metadata, &after_metadata)
+        || after_metadata.size != bytes.len() as u64
+    {
+        anyhow::bail!("Remote file changed while it was being read");
+    }
+    let content = String::from_utf8(bytes)
+        .map_err(|_| anyhow::anyhow!("Only UTF-8 text files are supported"))?;
+    let revision = RemoteTextRevision::from_bytes(content.as_bytes(), after_metadata);
+    Ok(RemoteTextDocument {
+        path: path.display_path.clone(),
+        content,
+        revision,
+    })
+}
+
+fn write_shell_text_document(
+    shell: &ShellRemote,
+    path: &RemoteFilePath,
+    content: &str,
+    expected_revision: Option<&RemoteTextRevision>,
+    force: bool,
+) -> anyhow::Result<RemoteTextWriteResult> {
+    let expected_revision = match (force, expected_revision) {
+        (false, None) => anyhow::bail!("Remote text revision is required for a safe save"),
+        (true, _) => None,
+        (false, revision) => revision,
+    };
+    let temporary = format!(
+        "{}.nyaterm-edit-{}",
+        path.display_path,
+        uuid::Uuid::new_v4().simple()
+    );
+    let cleanup_temporary = || {
+        let _ = shell.exec(format!("rm -f -- {}", shell_quote(&temporary)), None);
+    };
+    let write_temporary = format!(
+        "umask 077; cat > {} && test $(wc -c < {}) -eq {}",
+        shell_quote(&temporary),
+        shell_quote(&temporary),
+        content.len()
+    );
+    if let Err(error) = shell.exec_ok(write_temporary, Some(content.as_bytes().to_vec())) {
+        cleanup_temporary();
+        return Err(error);
+    }
+
+    if let Some(expected) = expected_revision {
+        let current_properties = match shell_properties(shell, path) {
+            Ok(properties) => properties,
+            Err(error) => {
+                cleanup_temporary();
+                return Err(error);
+            }
+        };
+        if shell_text_metadata(&current_properties) != expected.metadata {
+            cleanup_temporary();
+            return Ok(RemoteTextWriteResult::Conflict);
+        }
+        let current = match read_shell_text_document(shell, path, expected.metadata.size) {
+            Ok(current) => current,
+            Err(error) => {
+                cleanup_temporary();
+                return Err(error);
+            }
+        };
+        if current.revision != *expected {
+            cleanup_temporary();
+            return Ok(RemoteTextWriteResult::Conflict);
+        }
+    }
+
+    let replacement_properties = match shell_properties(shell, path) {
+        Ok(properties) => properties,
+        Err(error) => {
+            cleanup_temporary();
+            return Err(error);
+        }
+    };
+    if expected_revision
+        .is_some_and(|expected| shell_text_metadata(&replacement_properties) != expected.metadata)
+    {
+        cleanup_temporary();
+        return Ok(RemoteTextWriteResult::Conflict);
+    }
+    let mode = replacement_properties.permissions.unwrap_or(0o600) & 0o7777;
+    // POSIX shell fallback has no universal compare-and-swap primitive. Keep the
+    // verified revision check adjacent to the final atomic rename.
+    let replace = format!(
+        "chmod {mode:o} -- {} && mv -f -- {} {}",
+        shell_quote(&temporary),
+        shell_quote(&temporary),
+        shell_quote(&path.display_path)
+    );
+    if let Err(error) = shell.exec_ok(replace, None) {
+        cleanup_temporary();
+        return Err(error);
+    }
+    let metadata = shell_text_metadata(&shell_properties(shell, path)?);
+    if metadata.size != content.len() as u64 {
+        anyhow::bail!("Remote text save verification failed");
+    }
+    Ok(RemoteTextWriteResult::Saved {
+        revision: RemoteTextRevision::from_bytes(content.as_bytes(), metadata),
+    })
 }
 
 fn write_shell_text(

@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use futures::channel::mpsc::UnboundedReceiver;
-use nyaterm_transport::{RecordingManager, RecordingStatus};
+use nyaterm_transport::RecordingStatus;
 
 use crate::models::{
     RecordingHistorySearchKey, RecordingPathPromptKind, RecordingWriteEvent, RecordingWriteHandle,
@@ -10,27 +9,25 @@ use crate::models::{
 };
 
 pub(in crate::features) struct RecordingFeatureState {
-    manager: Arc<RecordingManager>,
     active_count: usize,
     pending_auto_start: Option<(String, String)>,
     pipeline: RecordingWritePipeline,
     search_draft: String,
     busy_actions: HashMap<String, String>,
+    statuses: HashMap<String, RecordingStatus>,
     path_prompt: Option<RecordingPathPromptKind>,
 }
 
 impl RecordingFeatureState {
     pub(in crate::features) fn new(memory_limit_bytes: usize) -> Self {
-        let manager = Arc::new(RecordingManager::new());
-        manager.set_memory_limit(memory_limit_bytes);
-        let pipeline = RecordingWritePipeline::spawn(Arc::clone(&manager));
+        let pipeline = RecordingWritePipeline::spawn(memory_limit_bytes);
         Self {
-            manager,
             active_count: 0,
             pending_auto_start: None,
             pipeline,
             search_draft: String::new(),
             busy_actions: HashMap::new(),
+            statuses: HashMap::new(),
             path_prompt: None,
         }
     }
@@ -39,12 +36,8 @@ impl RecordingFeatureState {
         self.pipeline.writer()
     }
 
-    pub(in crate::features) fn manager_for_job(&self) -> Arc<RecordingManager> {
-        Arc::clone(&self.manager)
-    }
-
     pub(in crate::features) fn set_memory_limit(&self, memory_limit_bytes: usize) {
-        self.manager.set_memory_limit(memory_limit_bytes);
+        self.pipeline.set_memory_limit(memory_limit_bytes);
     }
 
     pub(in crate::features) fn active_count(&self) -> usize {
@@ -52,11 +45,30 @@ impl RecordingFeatureState {
     }
 
     pub(in crate::features) fn is_recording(&self, session_id: &str) -> bool {
-        self.manager.is_recording(session_id)
+        self.statuses.contains_key(session_id)
     }
 
     pub(in crate::features) fn status(&self, session_id: &str) -> Option<RecordingStatus> {
-        self.manager.status(session_id)
+        self.statuses.get(session_id).cloned()
+    }
+
+    pub(in crate::features) fn apply_status(&mut self, status: RecordingStatus) {
+        if matches!(
+            status.state,
+            nyaterm_transport::RecordingStatusState::Recording
+                | nyaterm_transport::RecordingStatusState::Degraded
+                | nyaterm_transport::RecordingStatusState::Failed
+        ) {
+            self.statuses.insert(status.session_id.clone(), status);
+        } else {
+            self.statuses.remove(&status.session_id);
+        }
+        self.active_count = self.statuses.len();
+    }
+
+    pub(in crate::features) fn remove_status(&mut self, session_id: &str) {
+        self.statuses.remove(session_id);
+        self.active_count = self.statuses.len();
     }
 
     pub(in crate::features) fn busy_action(&self, session_id: &str) -> Option<&str> {
@@ -154,15 +166,10 @@ impl RecordingFeatureState {
         self.pipeline.take_event_receiver()
     }
 
-    pub(in crate::features) fn refresh_active_count(&mut self) {
-        self.active_count = self.manager.list_recording_sessions().len();
-    }
-
     pub(in crate::features) fn cleanup_session(&mut self, session_id: &str) {
-        if self.manager.is_recording(session_id) {
-            self.active_count = self.active_count.saturating_sub(1);
-        }
         self.busy_actions.remove(session_id);
+        self.statuses.remove(session_id);
+        self.active_count = self.statuses.len();
         self.pipeline.cleanup_session(session_id.to_string());
     }
 }

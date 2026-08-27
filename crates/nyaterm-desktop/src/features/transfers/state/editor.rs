@@ -1,7 +1,9 @@
 //! Built-in remote-editor workspace, tab lifecycle and window tracking.
 
 use gpui::FocusHandle;
-use nyaterm_transport::{SftpRemoteTextFile, SftpWriteTextResult};
+use nyaterm_transport::{RemoteTextDocument, RemoteTextGeneration, RemoteTextWriteResult};
+#[cfg(test)]
+use nyaterm_transport::{RemoteTextMetadata, RemoteTextRevision, SftpWriteTextResult};
 use nyaterm_ui::{ChildWindowSlot, NyaWindowHandle};
 
 use crate::models::{TransferEditorState, TransferEditorWorkspaceState};
@@ -147,6 +149,14 @@ impl TransferFeatureState {
             return TransferEditorDiscardOutcome::Missing;
         };
         if let Some(tab_id) = workspace.pending_close_tab_id.clone() {
+            if workspace
+                .tabs
+                .iter()
+                .find(|tab| tab.id == tab_id)
+                .is_some_and(|tab| tab.saving)
+            {
+                return TransferEditorDiscardOutcome::Missing;
+            }
             workspace.remove_tab(&tab_id);
             Self::clear_editor_close_state(workspace);
             if workspace.tabs.is_empty() {
@@ -155,6 +165,9 @@ impl TransferFeatureState {
             }
             TransferEditorDiscardOutcome::TabDiscarded
         } else {
+            if workspace.tabs.iter().any(|tab| tab.saving) {
+                return TransferEditorDiscardOutcome::Missing;
+            }
             self.editor.workspace = None;
             self.editor.tabs_menu_open = false;
             self.editor.window.cancel_open();
@@ -249,6 +262,7 @@ impl TransferFeatureState {
     pub(in crate::features) fn fail_editor_load_tab(
         &mut self,
         tab_id: &str,
+        generation: RemoteTextGeneration,
         error: String,
     ) -> bool {
         let Some(tab) = self
@@ -259,6 +273,9 @@ impl TransferFeatureState {
         else {
             return false;
         };
+        if tab.generation != generation {
+            return false;
+        }
         tab.loading = false;
         tab.error = Some(error);
         true
@@ -312,7 +329,8 @@ impl TransferFeatureState {
     pub(in crate::features) fn complete_editor_load_tab(
         &mut self,
         tab_id: &str,
-        file: SftpRemoteTextFile,
+        generation: RemoteTextGeneration,
+        file: RemoteTextDocument,
     ) -> bool {
         let Some(tab) = self
             .editor
@@ -322,9 +340,11 @@ impl TransferFeatureState {
         else {
             return false;
         };
+        if tab.generation != generation {
+            return false;
+        }
         tab.content = file.content;
-        tab.base_size = Some(file.size);
-        tab.base_modified_at = Some(file.modified_at);
+        tab.revision = Some(file.revision);
         tab.loading = false;
         tab.saving = false;
         tab.dirty = false;
@@ -342,33 +362,45 @@ impl TransferFeatureState {
         remote_path: &str,
         result: SftpWriteTextResult,
     ) -> Option<TransferEditorSaveOutcome> {
-        let tab_id = self
-            .editor
-            .workspace
-            .as_ref()?
-            .tabs
-            .iter()
-            .find(|tab| tab.session_id.as_deref() == session_id && tab.remote_path == remote_path)?
-            .id
-            .clone();
-        self.complete_editor_save_tab(&tab_id, result)
+        let tab = self.editor.workspace.as_ref()?.tabs.iter().find(|tab| {
+            tab.session_id.as_deref() == session_id && tab.remote_path == remote_path
+        })?;
+        let tab_id = tab.id.clone();
+        let generation = tab.generation;
+        let content = tab.content.clone();
+        let result = match result {
+            SftpWriteTextResult::Saved { modified_at, size } => RemoteTextWriteResult::Saved {
+                revision: RemoteTextRevision::from_bytes(
+                    content.as_bytes(),
+                    RemoteTextMetadata {
+                        size,
+                        modified_at: Some(modified_at),
+                    },
+                ),
+            },
+            SftpWriteTextResult::Conflict { .. } => RemoteTextWriteResult::Conflict,
+        };
+        self.complete_editor_save_tab(&tab_id, generation, result)
     }
 
     pub(in crate::features) fn complete_editor_save_tab(
         &mut self,
         tab_id: &str,
-        result: SftpWriteTextResult,
+        generation: RemoteTextGeneration,
+        result: RemoteTextWriteResult,
     ) -> Option<TransferEditorSaveOutcome> {
         let workspace = self.editor.workspace.as_mut()?;
         let tab = workspace.tabs.iter_mut().find(|tab| tab.id == tab_id)?;
+        if tab.generation != generation {
+            return None;
+        }
         let mut remove_tab_id = None;
         let outcome = match result {
-            SftpWriteTextResult::Saved { modified_at, size } => {
+            RemoteTextWriteResult::Saved { revision } => {
                 if tab.close_after_save {
                     remove_tab_id = Some(tab.id.clone());
                 }
-                tab.base_size = Some(size);
-                tab.base_modified_at = Some(modified_at);
+                tab.revision = Some(revision);
                 tab.saving = false;
                 tab.dirty = false;
                 tab.conflict = false;
@@ -377,9 +409,7 @@ impl TransferFeatureState {
                 tab.error = None;
                 TransferEditorSaveOutcome::Saved
             }
-            SftpWriteTextResult::Conflict { modified_at, size } => {
-                tab.base_size = Some(size);
-                tab.base_modified_at = Some(modified_at);
+            RemoteTextWriteResult::Conflict => {
                 tab.saving = false;
                 tab.conflict = true;
                 tab.close_after_save = false;
@@ -410,6 +440,7 @@ impl TransferFeatureState {
     pub(in crate::features) fn fail_editor_operation_tab(
         &mut self,
         tab_id: &str,
+        generation: RemoteTextGeneration,
         error: String,
     ) -> bool {
         let Some(workspace) = self.editor.workspace.as_mut() else {
@@ -418,6 +449,9 @@ impl TransferFeatureState {
         let Some(tab) = workspace.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
             return false;
         };
+        if tab.generation != generation {
+            return false;
+        }
         tab.loading = false;
         tab.saving = false;
         tab.close_after_save = false;
@@ -466,10 +500,14 @@ impl TransferFeatureState {
         let Some(workspace) = self.editor.workspace.as_mut() else {
             return false;
         };
-        Self::clear_editor_close_state(workspace);
-        let Some(tab) = workspace.tabs.iter_mut().find(|tab| tab.id == tab_id) else {
+        let Some(index) = workspace.tabs.iter().position(|tab| tab.id == tab_id) else {
             return false;
         };
+        if workspace.tabs[index].loading || workspace.tabs[index].saving {
+            return false;
+        }
+        Self::clear_editor_close_state(workspace);
+        let tab = &mut workspace.tabs[index];
         tab.focused_field = crate::models::TransferEditorField::Content;
         if tab.content == content {
             return false;

@@ -1,7 +1,8 @@
 use gpui::{Pixels, ScrollHandle, UniformListScrollHandle, px};
 use nyaterm_transport::{
-    SftpFileEntry, SftpFileProperties, SftpRemoteTextFile, SftpTransferControl,
-    SftpTransferProgress, SftpTransferSummary, SftpWriteTextResult,
+    RemoteTextDocument, RemoteTextGeneration, RemoteTextWriteResult, SftpFileEntry,
+    SftpFileProperties, SftpRemoteTextFile, SftpTransferControl, SftpTransferProgress,
+    SftpTransferSummary,
 };
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -65,10 +66,12 @@ pub(crate) enum TransferJobKind {
     LoadEditor {
         remote_path: String,
         tab_id: String,
+        generation: RemoteTextGeneration,
     },
     SaveEditor {
         remote_path: String,
         tab_id: String,
+        generation: RemoteTextGeneration,
     },
     OpenExternal {
         remote_path: String,
@@ -430,12 +433,14 @@ pub(crate) enum TransferJobOutput {
     EditorLoaded {
         tab_id: String,
         remote_path: String,
-        file: SftpRemoteTextFile,
+        generation: RemoteTextGeneration,
+        file: RemoteTextDocument,
     },
     EditorSaved {
         tab_id: String,
         remote_path: String,
-        result: SftpWriteTextResult,
+        generation: RemoteTextGeneration,
+        result: RemoteTextWriteResult,
     },
     ExternalOpened {
         remote_path: String,

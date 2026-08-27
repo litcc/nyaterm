@@ -25,6 +25,17 @@ use super::{
     unregister_x11_sender, validate_ssh_algorithm_preferences,
 };
 
+fn wait_for_queue_state(mut predicate: impl FnMut() -> bool, description: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !predicate() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for {description}"
+        );
+        std::thread::yield_now();
+    }
+}
+
 /// A push must hand the event straight to a parked consumer. Before the
 /// queue carried a condvar the bridge could only poll, so every event paid
 /// an arbitrary slice of the poll interval before anyone looked at it.
@@ -1821,7 +1832,7 @@ fn session_event_queue_zero_output_budget_does_not_drain_output() {
 }
 
 #[test]
-fn session_event_queue_zero_output_budget_can_drain_drop_marker() {
+fn session_event_queue_zero_output_budget_preserves_oversized_output() {
     let queue = SessionEventQueue::new();
     queue.push(SessionEvent::Output {
         session_id: "a".to_string(),
@@ -1829,28 +1840,16 @@ fn session_event_queue_zero_output_budget_can_drain_drop_marker() {
     });
 
     let drain = queue.drain_with_output_budget(8, Some(0));
-    assert_eq!(drain.events.len(), 1);
-    assert!(matches!(
-        &drain.events[0],
-        SessionEvent::OutputDropped { session_id, bytes } if session_id == "a" && *bytes == 32
-    ));
+    assert!(drain.events.is_empty());
     assert_eq!(drain.stats.drained_output_bytes, 0);
     assert_eq!(
         drain.stats.queued_output_bytes,
-        SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT
-    );
-
-    let drain = queue.drain_with_output_budget(8, Some(8));
-    assert_eq!(drain.events.len(), 1);
-    assert_eq!(drain.stats.drained_output_bytes, 8);
-    assert_eq!(
-        drain.stats.queued_output_bytes,
-        SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT - 8
+        SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT + 32
     );
 }
 
 #[test]
-fn session_event_queue_trims_oversized_output_and_reports_drop() {
+fn session_event_queue_splits_oversized_output_without_dropping_bytes() {
     let queue = SessionEventQueue::new();
     queue.push(SessionEvent::Output {
         session_id: "a".to_string(),
@@ -1861,13 +1860,17 @@ fn session_event_queue_trims_oversized_output_and_reports_drop() {
     assert_eq!(drain.events.len(), 2);
     assert!(matches!(
         &drain.events[0],
-        SessionEvent::OutputDropped { session_id, bytes } if session_id == "a" && *bytes == 32
+        SessionEvent::Output { data, .. } if data.len() == SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT
     ));
     assert!(matches!(
         &drain.events[1],
-        SessionEvent::Output { data, .. } if data.len() == SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT
+        SessionEvent::Output { data, .. } if data.len() == 32
     ));
-    assert_eq!(drain.stats.dropped_output_bytes, 32);
+    assert_eq!(
+        drain.stats.drained_output_bytes,
+        SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT + 32
+    );
+    assert_eq!(drain.stats.dropped_output_bytes, 0);
 }
 
 #[test]
@@ -1900,42 +1903,164 @@ fn session_event_queue_keeps_adjacent_output_chunks_separate() {
 }
 
 #[test]
-fn session_event_queue_reports_global_limit_drops_for_trimmed_session() {
+fn session_event_queue_backpressures_and_resumes_without_dropping_bytes() {
     let queue = SessionEventQueue::new();
-    let event_count =
-        (SESSION_EVENT_QUEUE_OUTPUT_LIMIT / SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT) + 2;
-    for index in 0..event_count {
-        queue.push(SessionEvent::Output {
-            session_id: format!("session-{index}"),
-            data: vec![b'x'; SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT],
+    let producer_queue = queue.clone();
+    let payload_bytes = SESSION_EVENT_QUEUE_OUTPUT_LIMIT + SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT;
+    let producer = std::thread::spawn(move || {
+        producer_queue.push(SessionEvent::Output {
+            session_id: "session-a".to_string(),
+            data: vec![b'x'; payload_bytes],
         });
-    }
+    });
 
-    let drain = queue.drain(event_count + 8);
-    let dropped = drain
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            SessionEvent::OutputDropped { session_id, bytes } => {
-                Some((session_id.as_str(), *bytes))
+    let started = Instant::now();
+    let mut received = Vec::with_capacity(payload_bytes);
+    while received.len() < payload_bytes && started.elapsed() < Duration::from_secs(5) {
+        let drain = queue.drain_with_output_budget(64, Some(1024 * 1024));
+        for event in drain.events {
+            match event {
+                SessionEvent::Output { data, .. } => received.extend(data),
+                SessionEvent::OutputDropped { bytes, .. } => {
+                    panic!("local backpressure must not drop {bytes} bytes")
+                }
+                _ => {}
             }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+        }
+        if received.len() < payload_bytes {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    producer
+        .join()
+        .expect("producer resumes below low watermark");
 
-    assert_eq!(
-        dropped,
-        vec![
-            ("session-0", SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT),
-            ("session-1", SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT),
-        ]
+    assert_eq!(received.len(), payload_bytes);
+    assert!(received.iter().all(|byte| *byte == b'x'));
+}
+
+#[test]
+fn cancelling_full_session_releases_producer_without_affecting_another_session() {
+    let queue = SessionEventQueue::new();
+    queue.push(SessionEvent::Output {
+        session_id: "cancelled".to_string(),
+        data: vec![b'x'; SESSION_EVENT_QUEUE_OUTPUT_LIMIT],
+    });
+
+    let blocked_queue = queue.clone();
+    let (done_tx, done_rx) = mpsc::sync_channel(1);
+    let producer = std::thread::spawn(move || {
+        blocked_queue.push(SessionEvent::Output {
+            session_id: "cancelled".to_string(),
+            data: vec![b'y'; SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT],
+        });
+        done_tx.send(()).expect("report cancelled producer exit");
+    });
+    wait_for_queue_state(
+        || queue.waiting_output_producers() == 1,
+        "the full-queue producer to park",
     );
-    assert_eq!(
-        drain.stats.drained_output_bytes,
-        SESSION_EVENT_QUEUE_OUTPUT_LIMIT
+
+    queue.cancel_session("cancelled");
+    done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("cancellation must release the producer");
+    producer.join().expect("cancelled producer");
+
+    queue.push(SessionEvent::Output {
+        session_id: "cancelled".to_string(),
+        data: b"late output".to_vec(),
+    });
+    queue.push(SessionEvent::Exited {
+        session_id: "cancelled".to_string(),
+        reason: "late exit".to_string(),
+    });
+    queue.push(SessionEvent::Error {
+        session_id: "cancelled".to_string(),
+        message: "late error".to_string(),
+    });
+    queue.push(SessionEvent::Output {
+        session_id: "active".to_string(),
+        data: b"still running".to_vec(),
+    });
+    queue.push(SessionEvent::Exited {
+        session_id: "active".to_string(),
+        reason: "done".to_string(),
+    });
+
+    let drain = queue.drain(64);
+    assert_eq!(drain.events.len(), 2);
+    assert!(matches!(
+        &drain.events[0],
+        SessionEvent::Output { session_id, data }
+            if session_id == "active" && data == b"still running"
+    ));
+    assert!(matches!(
+        &drain.events[1],
+        SessionEvent::Exited { session_id, reason }
+            if session_id == "active" && reason == "done"
+    ));
+    assert_eq!(drain.stats.dropped_output_bytes, 0);
+    assert_eq!(drain.stats.queued_output_bytes, 0);
+}
+
+#[test]
+fn global_close_releases_full_producer_and_blocking_consumer() {
+    let producer_queue = SessionEventQueue::new();
+    producer_queue.push(SessionEvent::Output {
+        session_id: "producer".to_string(),
+        data: vec![b'x'; SESSION_EVENT_QUEUE_OUTPUT_LIMIT],
+    });
+    let blocked_producer_queue = producer_queue.clone();
+    let (producer_done_tx, producer_done_rx) = mpsc::sync_channel(1);
+    let producer = std::thread::spawn(move || {
+        blocked_producer_queue.push(SessionEvent::Output {
+            session_id: "producer".to_string(),
+            data: vec![b'y'; SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT],
+        });
+        producer_done_tx
+            .send(())
+            .expect("report closed producer exit");
+    });
+    wait_for_queue_state(
+        || producer_queue.waiting_output_producers() == 1,
+        "the producer to park at the high watermark",
     );
-    assert_eq!(
-        drain.stats.dropped_output_bytes,
-        SESSION_EVENT_QUEUE_OUTPUT_EVENT_LIMIT * 2
+
+    let consumer_queue = SessionEventQueue::new();
+    let blocked_consumer_queue = consumer_queue.clone();
+    let (consumer_done_tx, consumer_done_rx) = mpsc::sync_channel(1);
+    let consumer = std::thread::spawn(move || {
+        let drain = blocked_consumer_queue.drain_blocking_with_output_budget(
+            16,
+            Some(64 * 1024),
+            Duration::from_secs(30),
+        );
+        consumer_done_tx
+            .send(drain)
+            .expect("report closed consumer exit");
+    });
+    wait_for_queue_state(
+        || consumer_queue.waiting_consumers() == 1,
+        "the blocking consumer to park",
     );
+
+    producer_queue.close();
+    consumer_queue.close();
+
+    producer_done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("global close must release the producer");
+    let consumer_drain = consumer_done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("global close must release the consumer");
+    producer.join().expect("closed producer");
+    consumer.join().expect("closed consumer");
+    assert!(consumer_drain.events.is_empty());
+
+    consumer_queue.push(SessionEvent::Error {
+        session_id: "late".to_string(),
+        message: "after close".to_string(),
+    });
+    assert!(consumer_queue.drain(1).events.is_empty());
 }
