@@ -43,6 +43,8 @@ pub enum PortableSnapshotError {
     UnsupportedVersion(u32),
     #[error("portable snapshot payload hash mismatch")]
     PayloadHashMismatch,
+    #[error("portable snapshot entity map hash mismatch")]
+    EntitiesHashMismatch,
     #[error("portable snapshot codec error: {0}")]
     Codec(String),
     #[error("zip snapshot error: {0}")]
@@ -68,6 +70,8 @@ pub struct PortableSnapshotMeta {
     pub device_id: String,
     pub created_at_ms: u64,
     pub payload_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entities_hash: Option<String>,
     pub app_version: String,
 }
 
@@ -103,6 +107,7 @@ impl RawPortableSnapshot {
                 device_id,
                 created_at_ms: current_time_ms(),
                 payload_hash: String::new(),
+                entities_hash: None,
                 app_version,
             },
             entities: default_entities(),
@@ -111,6 +116,7 @@ impl RawPortableSnapshot {
 
     pub fn recalculate_hash(&mut self) -> Result<(), PortableSnapshotError> {
         self.meta.payload_hash = calculate_v3_raw_payload_hash(&self.entities)?;
+        self.meta.entities_hash = Some(calculate_entities_hash(&self.entities)?);
         Ok(())
     }
 }
@@ -220,7 +226,19 @@ pub fn validate_raw_snapshot(snapshot: &RawPortableSnapshot) -> Result<(), Porta
     if expected != snapshot.meta.payload_hash {
         return Err(PortableSnapshotError::PayloadHashMismatch);
     }
+    if let Some(expected) = snapshot.meta.entities_hash.as_deref()
+        && calculate_entities_hash(&snapshot.entities)? != expected
+    {
+        return Err(PortableSnapshotError::EntitiesHashMismatch);
+    }
     Ok(())
+}
+
+fn calculate_entities_hash(
+    entities: &BTreeMap<String, String>,
+) -> Result<String, PortableSnapshotError> {
+    let bytes = serde_json::to_vec(entities)?;
+    Ok(hex_encode(&Sha256::digest(bytes)))
 }
 
 fn calculate_v3_raw_payload_hash(
@@ -242,6 +260,27 @@ fn calculate_v3_raw_payload_hash(
     if entities.contains_key("proxy_groups") || entities.contains_key("tunnel_groups") {
         let proxy_groups = read_raw_entity(entities, "proxy_groups")?;
         let tunnel_groups = read_raw_entity(entities, "tunnel_groups")?;
+        if entities.contains_key("notes") {
+            let notes = read_raw_entity(entities, "notes")?;
+            let payload_bytes = serde_json::to_vec(&SnapshotRawHashInputWithNotes {
+                settings: settings.as_ref(),
+                sessions: sessions.as_ref(),
+                keys: keys.as_ref(),
+                passwords: passwords.as_ref(),
+                credentials: credentials.as_ref(),
+                otp: otp.as_ref(),
+                proxies: proxies.as_ref(),
+                proxy_groups: proxy_groups.as_ref(),
+                tunnels: tunnels.as_ref(),
+                tunnel_groups: tunnel_groups.as_ref(),
+                quick_commands: quick_commands.as_ref(),
+                history: history.as_ref(),
+                master_key_token: master_key_token.as_ref(),
+                known_hosts: known_hosts.as_ref(),
+                notes: notes.as_ref(),
+            })?;
+            return Ok(hex_encode(&Sha256::digest(&payload_bytes)));
+        }
         let payload_bytes = serde_json::to_vec(&SnapshotRawHashInput {
             settings: settings.as_ref(),
             sessions: sessions.as_ref(),
@@ -421,6 +460,25 @@ struct SnapshotRawHashInput<'a> {
     history: &'a RawValue,
     master_key_token: &'a RawValue,
     known_hosts: &'a RawValue,
+}
+
+#[derive(Serialize)]
+struct SnapshotRawHashInputWithNotes<'a> {
+    settings: &'a RawValue,
+    sessions: &'a RawValue,
+    keys: &'a RawValue,
+    passwords: &'a RawValue,
+    credentials: &'a RawValue,
+    otp: &'a RawValue,
+    proxies: &'a RawValue,
+    proxy_groups: &'a RawValue,
+    tunnels: &'a RawValue,
+    tunnel_groups: &'a RawValue,
+    quick_commands: &'a RawValue,
+    history: &'a RawValue,
+    master_key_token: &'a RawValue,
+    known_hosts: &'a RawValue,
+    notes: &'a RawValue,
 }
 
 #[derive(Serialize)]

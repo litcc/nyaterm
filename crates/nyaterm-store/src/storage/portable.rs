@@ -4,27 +4,30 @@
 //! encrypted envelope and the merge rules for imported settings are
 //! unchanged; this only moves the code.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use redb::TableDefinition;
+use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use serde::de::DeserializeOwned;
 
 use super::vault::bump_ssh_key_revision;
 use super::{
     CREDENTIAL_PREFIX, CREDENTIALS_TABLE, ConfigBackupInfo, ConnectionStore, DATABASE_FILE,
-    LEGACY_TEXT_MASTER_KEY, META_MASTER_KEY, META_TABLE, OTP_ACCOUNTS_TABLE, OTP_PREFIX,
-    PASSWORD_PREFIX, PROXIES_TABLE, PROXY_PREFIX, SETTINGS_DEFAULT, SETTINGS_PROXY_GROUPS,
-    SETTINGS_QUICK_COMMANDS, SETTINGS_TABLE, SETTINGS_TUNNEL_GROUPS, SSH_KEY_PREFIX, StorageError,
-    TEXT_DOCS_TABLE, TUNNEL_PREFIX, TUNNELS_TABLE, clear_prefix_in_txn, copy_config_database,
-    current_time_ms, ensure_not_same_existing_file, ensure_parent_dir, entity_key,
-    replace_command_history_in_txn, replace_known_hosts_text_in_txn, replace_sessions_in_txn,
-    set_nested_json_value, validate_config_backup_file, validate_config_backup_source,
-    write_json_in_txn, write_portable_snapshot_file,
+    LEGACY_TEXT_MASTER_KEY, META_MASTER_KEY, META_PORTABLE_SOURCE_PAYLOAD_HASH,
+    META_PORTABLE_SOURCE_SCHEMA_VERSION, META_TABLE, OTP_ACCOUNTS_TABLE, OTP_PREFIX,
+    PASSWORD_PREFIX, PORTABLE_OPAQUE_ENTITIES_TABLE, PROXIES_TABLE, PROXY_PREFIX, SETTINGS_DEFAULT,
+    SETTINGS_PROXY_GROUPS, SETTINGS_QUICK_COMMANDS, SETTINGS_TABLE, SETTINGS_TUNNEL_GROUPS,
+    SSH_KEY_PREFIX, StorageError, TEXT_DOCS_TABLE, TUNNEL_PREFIX, TUNNELS_TABLE,
+    clear_prefix_in_txn, copy_config_database, current_time_ms, ensure_not_same_existing_file,
+    ensure_parent_dir, entity_key, replace_command_history_in_txn, replace_known_hosts_text_in_txn,
+    replace_sessions_in_txn, set_nested_json_value, validate_config_backup_file,
+    validate_config_backup_source, write_json_in_txn, write_portable_snapshot_file,
 };
 use crate::{
     decode_encrypted_raw_portable_snapshot, decode_raw_portable_snapshot,
     encode_encrypted_raw_portable_snapshot, encode_raw_portable_snapshot,
 };
+use nyaterm_core::portable_snapshot::validate_raw_snapshot;
 use nyaterm_core::{
     CommandHistoryEntry, ConnectionType, PortableSnapshotKind, RawPortableSnapshot, SessionsConfig,
     SshAgentEndpoint, TunnelGroup, migrate_legacy_ssh_agent_settings,
@@ -329,6 +332,12 @@ impl ConnectionStore {
             PortableSnapshotKind::Sync => RawPortableSnapshot::sync(device_id, app_version),
             PortableSnapshotKind::Backup => RawPortableSnapshot::backup(device_id, app_version),
         };
+        // Preserve entities introduced by newer NyaTerm versions even when this
+        // build has no domain model for them. Known entities below deliberately
+        // overwrite same-named opaque values with current authoritative data.
+        snapshot
+            .entities
+            .extend(self.load_opaque_portable_entities()?);
         let mut settings = self.load_settings_value()?;
         set_nested_json_value(
             &mut settings,
@@ -418,10 +427,41 @@ impl ConnectionStore {
         );
         Ok(snapshot)
     }
+
+    fn load_opaque_portable_entities(&self) -> Result<BTreeMap<String, String>, StorageError> {
+        let txn = self.db.begin_read()?;
+        let table = match txn.open_table(PORTABLE_OPAQUE_ENTITIES_TABLE) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(BTreeMap::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let mut entities = BTreeMap::new();
+        for entry in table.iter()? {
+            let (key, value) = entry?;
+            entities.insert(key.value().to_string(), value.value().to_string());
+        }
+        Ok(entities)
+    }
+
     pub(crate) fn apply_raw_portable_snapshot(
         &self,
         snapshot: &RawPortableSnapshot,
     ) -> Result<(), StorageError> {
+        validate_raw_snapshot(snapshot)?;
+        for (entity, raw) in &snapshot.entities {
+            serde_json::from_str::<serde_json::Value>(raw).map_err(|error| {
+                StorageError::PortableSnapshotEntity {
+                    entity: entity.clone(),
+                    message: error.to_string(),
+                }
+            })?;
+        }
+        let opaque_entities = snapshot
+            .entities
+            .iter()
+            .filter(|(entity, _)| !is_known_portable_entity(entity))
+            .map(|(entity, raw)| (entity.clone(), raw.clone()))
+            .collect::<BTreeMap<_, _>>();
         let mut sessions: SessionsConfig = read_snapshot_entity(snapshot, "sessions")?;
         let settings: serde_json::Value = read_snapshot_entity(snapshot, "settings")?;
         let known_hosts: String = read_snapshot_entity(snapshot, "known_hosts")?;
@@ -437,6 +477,32 @@ impl ConnectionStore {
         }
 
         let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(PORTABLE_OPAQUE_ENTITIES_TABLE)?;
+            let mut existing_keys = Vec::new();
+            for entry in table.iter()? {
+                let (key, _) = entry?;
+                existing_keys.push(key.value().to_string());
+            }
+            for key in existing_keys {
+                table.remove(key.as_str())?;
+            }
+            for (entity, raw) in &opaque_entities {
+                table.insert(entity.as_str(), raw.as_str())?;
+            }
+        }
+        let source_schema_version = snapshot.meta.schema_version.to_string();
+        {
+            let mut meta = txn.open_table(META_TABLE)?;
+            meta.insert(
+                META_PORTABLE_SOURCE_PAYLOAD_HASH,
+                snapshot.meta.payload_hash.as_str(),
+            )?;
+            meta.insert(
+                META_PORTABLE_SOURCE_SCHEMA_VERSION,
+                source_schema_version.as_str(),
+            )?;
+        }
         replace_sessions_in_txn(&txn, &sessions)?;
         replace_raw_wrapped_array_in_txn(
             &txn,
@@ -511,6 +577,26 @@ impl ConnectionStore {
         bump_ssh_key_revision();
         Ok(())
     }
+}
+
+fn is_known_portable_entity(entity: &str) -> bool {
+    matches!(
+        entity,
+        "settings"
+            | "sessions"
+            | "keys"
+            | "passwords"
+            | "credentials"
+            | "otp"
+            | "proxies"
+            | "proxy_groups"
+            | "tunnels"
+            | "tunnel_groups"
+            | "quick_commands"
+            | "history"
+            | "master_key_token"
+            | "known_hosts"
+    )
 }
 
 fn strip_device_local_ssh_agent_settings(sessions: &mut SessionsConfig) {

@@ -11,7 +11,7 @@ pub use runtime::{
 };
 
 pub use storage::{
-    ConfigBackupInfo, ConnectionStore, KnownHostCheck, RdpCertificateMetadata,
+    ConfigBackupInfo, ConnectionStore, KnownHostCheck, RdpCertificateMetadata, RdpKnownHostCheck,
     RemoteFileBackendCache, RemoteFileBackendCacheEntry, StorageError,
 };
 
@@ -28,7 +28,8 @@ pub use portable_codec::{
 #[cfg(test)]
 mod tests {
     use super::{
-        PortableSnapshotKind, RawPortableSnapshot, decode_raw_portable_snapshot,
+        PortableSnapshotKind, RawPortableSnapshot, decode_encrypted_raw_portable_snapshot,
+        decode_raw_portable_snapshot, encode_encrypted_raw_portable_snapshot,
         encode_raw_portable_snapshot,
     };
 
@@ -46,6 +47,25 @@ mod tests {
 
         assert_eq!(decoded.meta.snapshot_kind, PortableSnapshotKind::Backup);
         assert_eq!(decoded.meta.device_id, "test-device");
+        assert_eq!(decoded.meta.entities_hash, snapshot.meta.entities_hash);
+        assert_eq!(decoded.entities, snapshot.entities);
+    }
+
+    #[test]
+    fn encrypted_portable_snapshot_preserves_entity_map_hash() {
+        let mut snapshot = RawPortableSnapshot::backup("test-device", "test-version");
+        snapshot.entities.insert(
+            "future_entity".into(),
+            r#"{"schema":7,"future":true}"#.into(),
+        );
+        snapshot.recalculate_hash().expect("hash snapshot");
+
+        let encoded = encode_encrypted_raw_portable_snapshot(&snapshot, "test-password")
+            .expect("encrypt snapshot");
+        let decoded = decode_encrypted_raw_portable_snapshot(&encoded, "test-password")
+            .expect("decrypt snapshot");
+
+        assert_eq!(decoded.meta.entities_hash, snapshot.meta.entities_hash);
         assert_eq!(decoded.entities, snapshot.entities);
     }
 

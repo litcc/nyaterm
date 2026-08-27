@@ -10,8 +10,9 @@ use sha1::Sha1;
 
 use super::{
     ConnectionStore, KNOWN_HOST_PREFIX, KNOWN_HOST_RAW_PREFIX, KNOWN_HOSTS_TABLE,
-    LEGACY_TEXT_KNOWN_HOSTS, RDP_KNOWN_HOST_PREFIX, StorageError, TEXT_DOCS_TABLE,
-    clear_prefix_in_txn, current_time_ms, deserialize_json, stable_id, write_json_in_txn,
+    LEGACY_TEXT_KNOWN_HOSTS, RDP_KNOWN_HOST_PREFIX, RDP_KNOWN_HOSTS_TABLE, StorageError,
+    TEXT_DOCS_TABLE, clear_prefix_in_txn, current_time_ms, deserialize_json, stable_id,
+    write_json_in_txn,
 };
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
@@ -21,6 +22,13 @@ type HmacSha1 = Hmac<Sha1>;
 pub enum KnownHostCheck {
     Match,
     HostSeen,
+    UnknownHost,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RdpKnownHostCheck {
+    Match,
+    Changed { remembered_fingerprint: String },
     UnknownHost,
 }
 
@@ -58,6 +66,12 @@ pub struct RdpCertificateMetadata {
     pub valid_from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_to: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct RdpKnownHostMigration {
+    pub migrated: usize,
+    pub already_present: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,19 +170,24 @@ impl ConnectionStore {
         host: &str,
         port: u16,
         sha256_fingerprint: &str,
-    ) -> Result<KnownHostCheck, StorageError> {
+    ) -> Result<RdpKnownHostCheck, StorageError> {
         let key = rdp_known_host_key(host, port);
-        let Some(value) = self.read_json_table::<RdpKnownHostRecord>(KNOWN_HOSTS_TABLE, &key)?
-        else {
-            return Ok(KnownHostCheck::UnknownHost);
+        let value = match self.read_json_table::<RdpKnownHostRecord>(RDP_KNOWN_HOSTS_TABLE, &key)? {
+            Some(record) => Some(record),
+            None => self.read_json_table::<RdpKnownHostRecord>(KNOWN_HOSTS_TABLE, &key)?,
+        };
+        let Some(value) = value else {
+            return Ok(RdpKnownHostCheck::UnknownHost);
         };
         if value
             .sha256_fingerprint
             .eq_ignore_ascii_case(sha256_fingerprint)
         {
-            Ok(KnownHostCheck::Match)
+            Ok(RdpKnownHostCheck::Match)
         } else {
-            Ok(KnownHostCheck::HostSeen)
+            Ok(RdpKnownHostCheck::Changed {
+                remembered_fingerprint: value.sha256_fingerprint,
+            })
         }
     }
 
@@ -181,7 +200,11 @@ impl ConnectionStore {
     ) -> Result<(), StorageError> {
         let key = rdp_known_host_key(host, port);
         let now = current_time_ms();
-        let existing = self.read_json_table::<RdpKnownHostRecord>(KNOWN_HOSTS_TABLE, &key)?;
+        let existing =
+            match self.read_json_table::<RdpKnownHostRecord>(RDP_KNOWN_HOSTS_TABLE, &key)? {
+                Some(record) => Some(record),
+                None => self.read_json_table::<RdpKnownHostRecord>(KNOWN_HOSTS_TABLE, &key)?,
+            };
         let record = RdpKnownHostRecord {
             host: host.trim().to_ascii_lowercase(),
             port,
@@ -194,10 +217,93 @@ impl ConnectionStore {
             updated_at_ms: now,
         };
         let txn = self.db.begin_write()?;
-        write_json_in_txn(&txn, KNOWN_HOSTS_TABLE, &key, &record)?;
+        write_json_in_txn(&txn, RDP_KNOWN_HOSTS_TABLE, &key, &record)?;
         txn.commit()?;
         Ok(())
     }
+
+    pub fn replace_rdp_known_host_if_matches(
+        &self,
+        host: &str,
+        port: u16,
+        expected_previous_fingerprint: Option<&str>,
+        sha256_fingerprint: &str,
+        certificate: RdpCertificateMetadata,
+    ) -> Result<bool, StorageError> {
+        let key = rdp_known_host_key(host, port);
+        let txn = self.db.begin_write()?;
+        let current = {
+            let table = txn.open_table(RDP_KNOWN_HOSTS_TABLE)?;
+            table
+                .get(key.as_str())?
+                .map(|raw| deserialize_json::<RdpKnownHostRecord>(raw.value()))
+                .transpose()?
+        };
+        let current = match current {
+            Some(record) => Some(record),
+            None => {
+                let table = txn.open_table(KNOWN_HOSTS_TABLE)?;
+                table
+                    .get(key.as_str())?
+                    .map(|raw| deserialize_json::<RdpKnownHostRecord>(raw.value()))
+                    .transpose()?
+            }
+        };
+        let current_matches = match (&current, expected_previous_fingerprint) {
+            (None, None) => true,
+            (Some(record), Some(expected)) => {
+                record.sha256_fingerprint.eq_ignore_ascii_case(expected)
+            }
+            _ => false,
+        };
+        if !current_matches {
+            return Ok(false);
+        }
+
+        let now = current_time_ms();
+        let record = RdpKnownHostRecord {
+            host: host.trim().to_ascii_lowercase(),
+            port,
+            sha256_fingerprint: sha256_fingerprint.to_string(),
+            subject: certificate.subject,
+            issuer: certificate.issuer,
+            valid_from: certificate.valid_from,
+            valid_to: certificate.valid_to,
+            created_at_ms: current.map_or(now, |record| record.created_at_ms),
+            updated_at_ms: now,
+        };
+        write_json_in_txn(&txn, RDP_KNOWN_HOSTS_TABLE, &key, &record)?;
+        txn.commit()?;
+        Ok(true)
+    }
+
+    pub(crate) fn migrate_legacy_rdp_known_hosts(
+        &self,
+    ) -> Result<RdpKnownHostMigration, StorageError> {
+        let legacy = self.list_raw_by_prefix(KNOWN_HOSTS_TABLE, RDP_KNOWN_HOST_PREFIX)?;
+        let mut validated = Vec::with_capacity(legacy.len());
+        for (key, raw) in legacy {
+            let _: RdpKnownHostRecord = deserialize_json(&raw)?;
+            validated.push((key, raw));
+        }
+
+        let txn = self.db.begin_write()?;
+        let mut migration = RdpKnownHostMigration::default();
+        {
+            let mut table = txn.open_table(RDP_KNOWN_HOSTS_TABLE)?;
+            for (key, raw) in validated {
+                if table.get(key.as_str())?.is_some() {
+                    migration.already_present += 1;
+                } else {
+                    table.insert(key.as_str(), raw.as_slice())?;
+                    migration.migrated += 1;
+                }
+            }
+        }
+        txn.commit()?;
+        Ok(migration)
+    }
+
     pub(super) fn import_legacy_known_hosts_if_needed(&self) -> Result<(), StorageError> {
         let has_native = !self
             .list_raw_by_prefix(KNOWN_HOSTS_TABLE, KNOWN_HOST_PREFIX)?
@@ -262,7 +368,9 @@ fn remove_known_hosts_for_host_in_txn(
     let mut keys = Vec::new();
     for entry in table.iter()? {
         let (key, value) = entry?;
-        if key.value().starts_with(KNOWN_HOST_RAW_PREFIX) {
+        let key_value = key.value();
+        if !key_value.starts_with(KNOWN_HOST_PREFIX) || key_value.starts_with(KNOWN_HOST_RAW_PREFIX)
+        {
             continue;
         }
         let record: KnownHostRecord = deserialize_json(value.value())?;

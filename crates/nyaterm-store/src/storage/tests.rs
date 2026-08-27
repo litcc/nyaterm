@@ -13,13 +13,16 @@ use sha2::{Digest, Sha256};
 use super::{
     AiSettings, COMMAND_HISTORY_PREFIX, COMMAND_HISTORY_TABLE, CONNECTION_PASSWORD_PREFIX,
     CONNECTIONS_TABLE, CREDENTIALS_TABLE, ConnectionPasswordRecord, ConnectionStore, DATABASE_FILE,
-    Group, KnownHostCheck, LEGACY_TEXT_CLOUD_SYNC_STATE, LEGACY_TEXT_KNOWN_HOSTS,
-    LEGACY_TEXT_REMOTE_FILE_BACKEND_CACHE, META_MASTER_KEY, META_TABLE, OTP_ACCOUNTS_TABLE,
-    OTP_PREFIX, QuickCommand, QuickCommandCategory, QuickCommandsConfig, SETTINGS_CLOUD_SYNC,
-    SETTINGS_DEFAULT, SETTINGS_QUICK_COMMANDS, SETTINGS_TABLE, SSH_KEY_FILE_IMPORT_MAX_BYTES,
-    SSH_KEY_PREFIX, SavedConnection, SessionsConfig, StorageError, TEXT_DOCS_TABLE, TUNNELS_TABLE,
-    TunnelConfig, TunnelGroup, current_time_ms, default_settings_value, deserialize_json,
-    entity_key, json_path, set_nested_json_value, write_json_in_txn,
+    Group, KNOWN_HOSTS_TABLE, KnownHostCheck, LEGACY_TEXT_CLOUD_SYNC_STATE,
+    LEGACY_TEXT_KNOWN_HOSTS, LEGACY_TEXT_REMOTE_FILE_BACKEND_CACHE, META_MASTER_KEY,
+    META_PORTABLE_SOURCE_PAYLOAD_HASH, META_PORTABLE_SOURCE_SCHEMA_VERSION, META_TABLE,
+    OTP_ACCOUNTS_TABLE, OTP_PREFIX, PORTABLE_OPAQUE_ENTITIES_TABLE, QuickCommand,
+    QuickCommandCategory, QuickCommandsConfig, RDP_KNOWN_HOST_PREFIX, RDP_KNOWN_HOSTS_TABLE,
+    RdpKnownHostCheck, SETTINGS_CLOUD_SYNC, SETTINGS_DEFAULT, SETTINGS_QUICK_COMMANDS,
+    SETTINGS_TABLE, SSH_KEY_FILE_IMPORT_MAX_BYTES, SSH_KEY_PREFIX, SavedConnection, SessionsConfig,
+    StorageError, TEXT_DOCS_TABLE, TUNNELS_TABLE, TunnelConfig, TunnelGroup, current_time_ms,
+    default_settings_value, deserialize_json, entity_key, json_path, set_nested_json_value,
+    stable_id, write_json_in_txn,
 };
 
 #[test]
@@ -1206,7 +1209,7 @@ fn rdp_known_hosts_check_distinguishes_match_changed_and_unknown() {
         store
             .check_rdp_known_host("Windows.EXAMPLE.com", 3389, "sha256:a")
             .expect("unknown rdp host"),
-        KnownHostCheck::UnknownHost
+        RdpKnownHostCheck::UnknownHost
     );
 
     store
@@ -1227,13 +1230,15 @@ fn rdp_known_hosts_check_distinguishes_match_changed_and_unknown() {
         store
             .check_rdp_known_host("WINDOWS.example.com", 3389, "SHA256:A")
             .expect("matching rdp host"),
-        KnownHostCheck::Match
+        RdpKnownHostCheck::Match
     );
     assert_eq!(
         store
             .check_rdp_known_host("windows.example.com", 3389, "sha256:b")
             .expect("changed rdp host"),
-        KnownHostCheck::HostSeen
+        RdpKnownHostCheck::Changed {
+            remembered_fingerprint: "sha256:a".to_string(),
+        }
     );
 
     std::fs::remove_dir_all(dir).ok();
@@ -3146,9 +3151,10 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     });
     store.replace_sessions(&sessions).expect("save sessions");
 
-    let snapshot = store
+    let mut snapshot = store
         .build_raw_portable_snapshot(nyaterm_core::PortableSnapshotKind::Sync, "device", "test")
         .expect("build sync snapshot");
+    snapshot.recalculate_hash().expect("hash sync snapshot");
     let portable: SessionsConfig =
         serde_json::from_str(snapshot.entities.get("sessions").expect("sessions entity"))
             .expect("decode sessions");
@@ -3166,9 +3172,10 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
     );
     assert!(agent_forwarding_config.is_none());
 
-    let backup = store
+    let mut backup = store
         .build_raw_portable_snapshot(nyaterm_core::PortableSnapshotKind::Backup, "device", "test")
         .expect("build backup snapshot");
+    backup.recalculate_hash().expect("hash backup snapshot");
     let ConnectionType::Ssh {
         auth_agent_endpoint,
         agent_forwarding_config,
@@ -3318,4 +3325,228 @@ fn home_wrapping_key() -> Key<Aes256Gcm> {
     hasher.update(b"nyaterm-key-wrap-v1:");
     hasher.update(dirs::home_dir().expect("home").to_string_lossy().as_bytes());
     *Key::<Aes256Gcm>::from_slice(&hasher.finalize())
+}
+
+#[test]
+fn portable_snapshot_preserves_notes_and_unknown_entities_after_apply() {
+    let dir = unique_temp_dir("portable-opaque-entities");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut incoming = store
+        .build_raw_portable_snapshot(
+            nyaterm_core::PortableSnapshotKind::Backup,
+            "tauri-device",
+            "tauri-test",
+        )
+        .expect("build source snapshot");
+    let notes = r#"{"folders":[],"notes":[{"id":"note-1","markdown":"preserve me"}]}"#;
+    let future = r#"{"schema":7,"payload":{"future":true}}"#;
+    incoming
+        .entities
+        .insert("notes".to_string(), notes.to_string());
+    incoming
+        .entities
+        .insert("future_entity".to_string(), future.to_string());
+    incoming.recalculate_hash().expect("source hash");
+    let source_hash = incoming.meta.payload_hash.clone();
+
+    store
+        .apply_raw_portable_snapshot(&incoming)
+        .expect("apply source snapshot");
+
+    assert_eq!(
+        store
+            .read_string_table(PORTABLE_OPAQUE_ENTITIES_TABLE, "notes")
+            .expect("read opaque notes")
+            .as_deref(),
+        Some(notes)
+    );
+    assert_eq!(
+        store
+            .read_string_table(META_TABLE, META_PORTABLE_SOURCE_PAYLOAD_HASH)
+            .expect("read source hash")
+            .as_deref(),
+        Some(source_hash.as_str())
+    );
+    assert_eq!(
+        store
+            .read_string_table(META_TABLE, META_PORTABLE_SOURCE_SCHEMA_VERSION)
+            .expect("read source schema")
+            .as_deref(),
+        Some("3")
+    );
+
+    let mut rebuilt = store
+        .build_raw_portable_snapshot(
+            nyaterm_core::PortableSnapshotKind::Backup,
+            "gpui-device",
+            "gpui-test",
+        )
+        .expect("rebuild snapshot");
+    assert_eq!(
+        rebuilt.entities.get("notes").map(String::as_str),
+        Some(notes)
+    );
+    assert_eq!(
+        rebuilt.entities.get("future_entity").map(String::as_str),
+        Some(future)
+    );
+    rebuilt.recalculate_hash().expect("rebuilt hash");
+    nyaterm_core::portable_snapshot::validate_raw_snapshot(&rebuilt)
+        .expect("rebuilt snapshot is valid");
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn portable_snapshot_rejects_tampered_unknown_entity_before_writing() {
+    let dir = unique_temp_dir("portable-opaque-entity-integrity");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut snapshot = store
+        .build_raw_portable_snapshot(
+            nyaterm_core::PortableSnapshotKind::Backup,
+            "source-device",
+            "source-version",
+        )
+        .expect("build snapshot");
+    let original = r#"{"schema":7,"payload":{"future":true}}"#;
+    snapshot
+        .entities
+        .insert("future_entity".to_string(), original.to_string());
+    snapshot.recalculate_hash().expect("hash snapshot");
+    store
+        .apply_raw_portable_snapshot(&snapshot)
+        .expect("apply valid snapshot");
+
+    snapshot.entities.insert(
+        "future_entity".to_string(),
+        r#"{"schema":7,"payload":{"future":false}}"#.to_string(),
+    );
+    let error = store
+        .apply_raw_portable_snapshot(&snapshot)
+        .expect_err("tampered opaque entity must be rejected");
+    assert!(matches!(
+        error,
+        StorageError::PortableSnapshot(nyaterm_core::PortableSnapshotError::EntitiesHashMismatch)
+    ));
+    assert_eq!(
+        store
+            .read_string_table(PORTABLE_OPAQUE_ENTITIES_TABLE, "future_entity")
+            .expect("read preserved entity")
+            .as_deref(),
+        Some(original)
+    );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn legacy_rdp_known_hosts_migrate_to_the_dedicated_table_idempotently() {
+    let dir = unique_temp_dir("rdp-known-host-migration");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let host = "legacy.example.com";
+    let port = 3389;
+    let key = format!(
+        "{RDP_KNOWN_HOST_PREFIX}{}",
+        stable_id(&format!("{host}:{port}"))
+    );
+    let legacy_record = serde_json::json!({
+        "host": host,
+        "port": port,
+        "sha256_fingerprint": "sha256:legacy",
+        "subject": "CN=legacy.example.com",
+        "issuer": "CN=legacy-ca",
+        "valid_from": null,
+        "valid_to": null,
+        "created_at_ms": 10,
+        "updated_at_ms": 20
+    });
+    {
+        let db = Database::create(dir.join(DATABASE_FILE)).expect("db");
+        let txn = db.begin_write().expect("txn");
+        write_json_in_txn(&txn, KNOWN_HOSTS_TABLE, &key, &legacy_record)
+            .expect("seed legacy rdp record");
+        txn.commit().expect("commit");
+    }
+
+    let store = ConnectionStore::open(&dir).expect("store");
+    assert_eq!(
+        store
+            .check_rdp_known_host(host, port, "SHA256:LEGACY")
+            .expect("migrated match"),
+        RdpKnownHostCheck::Match
+    );
+    let migrated: Option<serde_json::Value> = store
+        .read_json_table(RDP_KNOWN_HOSTS_TABLE, &key)
+        .expect("read dedicated record");
+    assert_eq!(
+        migrated
+            .as_ref()
+            .and_then(|record| record.get("created_at_ms"))
+            .and_then(serde_json::Value::as_u64),
+        Some(10)
+    );
+    let second = store
+        .migrate_legacy_rdp_known_hosts()
+        .expect("repeat migration");
+    assert_eq!(second.migrated, 0);
+    assert_eq!(second.already_present, 1);
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn dedicated_rdp_records_win_conflicts_and_do_not_break_ssh_replacement() {
+    let dir = unique_temp_dir("rdp-known-host-conflict");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let host = "windows.example.com";
+    let port = 3389;
+    let key = format!(
+        "{RDP_KNOWN_HOST_PREFIX}{}",
+        stable_id(&format!("{host}:{port}"))
+    );
+    let legacy_record = serde_json::json!({
+        "host": host,
+        "port": port,
+        "sha256_fingerprint": "sha256:legacy",
+        "created_at_ms": 1,
+        "updated_at_ms": 1
+    });
+    let dedicated_record = serde_json::json!({
+        "host": host,
+        "port": port,
+        "sha256_fingerprint": "sha256:dedicated",
+        "created_at_ms": 2,
+        "updated_at_ms": 3
+    });
+    {
+        let db = Database::create(dir.join(DATABASE_FILE)).expect("db");
+        let txn = db.begin_write().expect("txn");
+        write_json_in_txn(&txn, KNOWN_HOSTS_TABLE, &key, &legacy_record)
+            .expect("seed legacy record");
+        write_json_in_txn(&txn, RDP_KNOWN_HOSTS_TABLE, &key, &dedicated_record)
+            .expect("seed dedicated record");
+        txn.commit().expect("commit");
+    }
+
+    let store = ConnectionStore::open(&dir).expect("store");
+    assert_eq!(
+        store
+            .check_rdp_known_host(host, port, "SHA256:DEDICATED")
+            .expect("dedicated match"),
+        RdpKnownHostCheck::Match
+    );
+    store
+        .upsert_known_host("ssh.example.com ssh-ed25519 AAAA")
+        .expect("seed ssh host");
+    store
+        .replace_known_host_for_host("ssh.example.com", "ssh.example.com ssh-ed25519 BBBB")
+        .expect("replace ssh host without parsing legacy rdp json");
+    assert_eq!(
+        store
+            .check_known_host("ssh.example.com", "ssh-ed25519", "BBBB")
+            .expect("ssh replacement"),
+        KnownHostCheck::Match
+    );
+
+    std::fs::remove_dir_all(dir).ok();
 }

@@ -39,7 +39,7 @@ use self::keyword_highlights::{
     merge_keyword_highlight_rules, normalize_keyword_highlight_rule, parse_keyword_highlight_import,
 };
 use self::known_hosts::replace_known_hosts_text_in_txn;
-pub use self::known_hosts::{KnownHostCheck, RdpCertificateMetadata};
+pub use self::known_hosts::{KnownHostCheck, RdpCertificateMetadata, RdpKnownHostCheck};
 pub use self::remote_file_backend::{RemoteFileBackendCache, RemoteFileBackendCacheEntry};
 
 const DATABASE_FILE: &str = "nyaterm.redb";
@@ -58,6 +58,8 @@ const KNOWN_HOST_RAW_PREFIX: &str = "known_hosts/raw/";
 const RDP_KNOWN_HOST_PREFIX: &str = "rdp_known_hosts/";
 const COMMAND_HISTORY_PREFIX: &str = "command_history/";
 const META_MASTER_KEY: &str = "security/master_key";
+const META_PORTABLE_SOURCE_PAYLOAD_HASH: &str = "portable_snapshot/source_payload_hash";
+const META_PORTABLE_SOURCE_SCHEMA_VERSION: &str = "portable_snapshot/source_schema_version";
 const LEGACY_TEXT_MASTER_KEY: &str = "master.key";
 const LEGACY_TEXT_KNOWN_HOSTS: &str = "known_hosts";
 const SETTINGS_DEFAULT: &str = "settings/default";
@@ -83,6 +85,9 @@ const PROXIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("proxie
 const CREDENTIALS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("credentials");
 const OTP_ACCOUNTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("otp_accounts");
 const KNOWN_HOSTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("known_hosts");
+const RDP_KNOWN_HOSTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("rdp_known_hosts");
+const PORTABLE_OPAQUE_ENTITIES_TABLE: TableDefinition<&str, &str> =
+    TableDefinition::new("portable_snapshot_opaque_entities");
 const COMMAND_HISTORY_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("command_history");
 const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
 const IDX_CONNECTIONS_BY_GROUP_TABLE: TableDefinition<&str, &str> =
@@ -190,6 +195,7 @@ impl ConnectionStore {
             portable_key_path,
         };
         store.ensure_tables()?;
+        store.migrate_legacy_rdp_known_hosts()?;
         store.import_legacy_known_hosts_if_needed()?;
         Ok(store)
     }
@@ -649,6 +655,8 @@ impl ConnectionStore {
         txn.open_table(CREDENTIALS_TABLE)?;
         txn.open_table(OTP_ACCOUNTS_TABLE)?;
         txn.open_table(KNOWN_HOSTS_TABLE)?;
+        txn.open_table(RDP_KNOWN_HOSTS_TABLE)?;
+        txn.open_table(PORTABLE_OPAQUE_ENTITIES_TABLE)?;
         txn.open_table(COMMAND_HISTORY_TABLE)?;
         txn.open_table(SETTINGS_TABLE)?;
         txn.open_table(IDX_CONNECTIONS_BY_GROUP_TABLE)?;
