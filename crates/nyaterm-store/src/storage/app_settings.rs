@@ -15,7 +15,8 @@ use super::{
 use nyaterm_core::{
     AppSettingsSummary, CredentialCrypto, DEFAULT_RECORDING_PATH_TEMPLATE,
     DEFAULT_TERMINAL_TIMESTAMP_FORMAT, ExistingFileBehavior, RecordingMode,
-    RecordingRotationPolicy, SearchEngineConfig, default_search_engines,
+    RecordingRotationPolicy, SearchEngineConfig, default_panel_open_mode, default_search_engines,
+    normalize_panel_open_mode,
 };
 
 impl ConnectionStore {
@@ -285,8 +286,17 @@ impl ConnectionStore {
                 &["ui", "activity_bar_layout", "show_labels"],
                 false,
             ),
+            ui_activity_bar_hidden_items: json_string_vec(
+                &value,
+                &["ui", "activity_bar_layout", "hidden_items"],
+                64,
+            ),
             ui_panel_multi_open: json_bool(&value, &["appearance", "panel_multi_open"], false)
                 || json_bool(&value, &["ui", "panel_multi_open"], false),
+            ui_panel_open_mode: normalize_panel_open_mode(
+                &json_optional_string(&value, &["ui", "panel_open_mode"])
+                    .unwrap_or_else(default_panel_open_mode),
+            ),
             ui_left_open_panels: json_string_vec(&value, &["ui", "left_open_panels"], 32),
             ui_right_open_panels: json_string_vec(&value, &["ui", "right_open_panels"], 32),
             ui_panel_stack_sizes: json_u32_map(&value, &["ui", "panel_stack_sizes"]),
@@ -816,10 +826,17 @@ impl ConnectionStore {
         );
         set_nested_json_value(
             &mut value,
+            &["ui", "activity_bar_layout", "hidden_items"],
+            string_vec_json_value(&settings.ui_activity_bar_hidden_items, 64),
+        );
+        let panel_open_mode = normalize_panel_open_mode(&settings.ui_panel_open_mode);
+        set_nested_json_string(&mut value, &["ui", "panel_open_mode"], panel_open_mode);
+        set_nested_json_value(
+            &mut value,
             &["ui", "panel_multi_open"],
             serde_json::Value::Bool(settings.ui_panel_multi_open),
         );
-        // Keep appearance key for Tauri compatibility.
+        // Keep the appearance key used by current Tauri builds.
         set_nested_json_value(
             &mut value,
             &["appearance", "panel_multi_open"],

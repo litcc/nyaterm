@@ -309,7 +309,17 @@ fn exports_and_imports_portable_snapshot() {
             "appearance": {
                 "theme": "github-light",
                 "font_family": "Berkeley Mono",
-                "font_size": 14
+                "font_size": 14,
+                "panel_multi_open": true
+            },
+            "ui": {
+                "activity_bar_layout": {
+                    "left_top": ["fileExplorer", "notes", "network"],
+                    "hidden_items": ["network"]
+                },
+                "panel_open_mode": "floating",
+                "panel_multi_open": true,
+                "show_notes_panel": true
             },
             "security": {
                 "master_password": "source-local-secret",
@@ -410,6 +420,18 @@ fn exports_and_imports_portable_snapshot() {
         json_path(&settings, &["appearance", "theme"]).and_then(serde_json::Value::as_str),
         Some("github-light")
     );
+    assert_eq!(settings["ui"]["panel_open_mode"], "floating");
+    assert_eq!(settings["ui"]["panel_multi_open"], true);
+    assert_eq!(settings["appearance"]["panel_multi_open"], true);
+    assert_eq!(
+        settings["ui"]["activity_bar_layout"]["left_top"],
+        serde_json::json!(["fileExplorer", "notes", "network"])
+    );
+    assert_eq!(
+        settings["ui"]["activity_bar_layout"]["hidden_items"],
+        serde_json::json!(["network"])
+    );
+    assert_eq!(settings["ui"]["show_notes_panel"], true);
     assert_eq!(
         json_path(&settings, &["security", "master_password"]).and_then(serde_json::Value::as_str),
         Some("target-local-secret")
@@ -1544,6 +1566,99 @@ fn save_ui_layout_preserves_explicit_empty_activity_zone() {
         raw["ui"]["activity_bar_layout"]["left_top"],
         serde_json::json!([])
     );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn activity_bar_hidden_items_and_panel_open_mode_roundtrip() {
+    let dir = unique_temp_dir("settings-hidden-items-panel-mode");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut summary = store.load_app_settings_summary().expect("load");
+    summary.ui_activity_bar_hidden_items =
+        vec!["gpuMonitor".to_string(), "dockerManager".to_string()];
+    summary.ui_panel_open_mode = "floating".to_string();
+    summary.ui_panel_multi_open = true;
+
+    let saved = store.save_ui_layout_settings(&summary).expect("save");
+    assert_eq!(
+        saved.ui_activity_bar_hidden_items,
+        vec!["gpuMonitor".to_string(), "dockerManager".to_string()]
+    );
+    assert_eq!(saved.ui_panel_open_mode, "floating");
+    assert!(saved.ui_panel_multi_open);
+
+    let raw = store.load_settings_value().expect("raw");
+    assert_eq!(
+        raw["ui"]["activity_bar_layout"]["hidden_items"],
+        serde_json::json!(["gpuMonitor", "dockerManager"])
+    );
+    assert_eq!(raw["ui"]["panel_open_mode"], "floating");
+    assert_eq!(raw["ui"]["panel_multi_open"], true);
+    assert_eq!(raw["appearance"]["panel_multi_open"], true);
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn legacy_settings_default_hidden_items_and_docked_panel_mode() {
+    let dir = unique_temp_dir("settings-hidden-items-legacy-defaults");
+    let store = ConnectionStore::open(&dir).expect("store");
+
+    let summary = store.load_app_settings_summary().expect("load");
+    assert!(summary.ui_activity_bar_hidden_items.is_empty());
+    assert_eq!(summary.ui_panel_open_mode, "docked");
+    assert!(!summary.ui_panel_multi_open);
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn legacy_panel_multi_open_boolean_stays_independent_from_docked_mode() {
+    let dir = unique_temp_dir("settings-legacy-panel-multi-open");
+    let store = ConnectionStore::open(&dir).expect("store");
+    store
+        .save_settings_value(&serde_json::json!({
+            "ui": {
+                "panel_multi_open": true,
+                "future_ui_option": { "keep": true }
+            }
+        }))
+        .expect("seed legacy settings");
+
+    let summary = store.load_app_settings_summary().expect("load");
+    assert_eq!(summary.ui_panel_open_mode, "docked");
+    assert!(summary.ui_panel_multi_open);
+
+    let saved = store.save_ui_layout_settings(&summary).expect("save");
+    assert_eq!(saved.ui_panel_open_mode, "docked");
+    let raw = store.load_settings_value().expect("raw");
+    assert_eq!(raw["ui"]["panel_open_mode"], "docked");
+    assert_eq!(raw["ui"]["future_ui_option"]["keep"], true);
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn panel_open_mode_normalizes_unknown_without_changing_multi_open() {
+    let dir = unique_temp_dir("settings-panel-mode-normalize");
+    let store = ConnectionStore::open(&dir).expect("store");
+    store
+        .save_settings_value(&serde_json::json!({
+            "appearance": { "panel_multi_open": true },
+            "ui": { "panel_open_mode": "weird" }
+        }))
+        .expect("seed settings");
+
+    let summary = store.load_app_settings_summary().expect("load");
+    assert_eq!(summary.ui_panel_open_mode, "docked");
+    assert!(summary.ui_panel_multi_open);
+
+    let mut summary = summary;
+    summary.ui_panel_open_mode = "FLOATING".to_string();
+    let saved = store.save_ui_layout_settings(&summary).expect("save");
+    assert_eq!(saved.ui_panel_open_mode, "floating");
+    assert!(saved.ui_panel_multi_open);
 
     std::fs::remove_dir_all(dir).ok();
 }

@@ -232,8 +232,19 @@ pub struct AppSettingsSummary {
     pub ui_activity_bar_right_bottom: Vec<String>,
     #[serde(default)]
     pub ui_activity_bar_show_labels: bool,
+    /// Activity-bar item ids the user has hidden from the rail (Tauri
+    /// `ui.activity_bar_layout.hidden_items`). Empty by default so legacy
+    /// data with no hidden entries keeps every item visible.
+    #[serde(default)]
+    pub ui_activity_bar_hidden_items: Vec<String>,
+    /// Docked multi-open preference. This is independent from
+    /// `ui_panel_open_mode`: main keeps multi-open configured while floating
+    /// panels are active and applies it again after returning to docked mode.
     #[serde(default)]
     pub ui_panel_multi_open: bool,
+    /// Tauri-compatible panel presentation mode: `"docked"` or `"floating"`.
+    #[serde(default = "default_panel_open_mode")]
+    pub ui_panel_open_mode: String,
     #[serde(default)]
     pub ui_left_open_panels: Vec<String>,
     #[serde(default)]
@@ -422,7 +433,9 @@ impl Default for AppSettingsSummary {
             ui_activity_bar_right_top: default_activity_right_top(),
             ui_activity_bar_right_bottom: default_activity_right_bottom(),
             ui_activity_bar_show_labels: false,
+            ui_activity_bar_hidden_items: Vec::new(),
             ui_panel_multi_open: false,
+            ui_panel_open_mode: default_panel_open_mode(),
             ui_left_open_panels: Vec::new(),
             ui_right_open_panels: Vec::new(),
             ui_panel_stack_sizes: HashMap::new(),
@@ -482,6 +495,9 @@ impl Default for AppSettingsSummary {
 fn default_activity_left_top() -> Vec<String> {
     vec![
         "fileExplorer".to_string(),
+        // Main keeps this schema slot even when a client has not implemented
+        // the Notes panel; desktop availability prevents a dead button.
+        "notes".to_string(),
         "network".to_string(),
         "securityAuth".to_string(),
     ]
@@ -544,6 +560,22 @@ fn default_quick_cmd_sort_mode() -> String {
 
 fn default_header_status_mode() -> String {
     "session".to_string()
+}
+
+/// Tauri defaults panel presentation to docked. Multi-open is a separate
+/// appearance preference and must not be encoded into this field.
+pub fn default_panel_open_mode() -> String {
+    "docked".to_string()
+}
+
+/// Only the explicit `floating` value enables floating presentation. Legacy,
+/// unknown and obsolete values safely fall back to docked.
+pub fn normalize_panel_open_mode(raw: &str) -> String {
+    if raw.trim().eq_ignore_ascii_case("floating") {
+        "floating".to_string()
+    } else {
+        "docked".to_string()
+    }
 }
 
 fn default_terminal_keep_alive_mode() -> String {
@@ -616,4 +648,109 @@ fn default_highlight_color_dark() -> String {
 
 fn default_highlight_color_light() -> String {
     "#0969da".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppSettingsSummary, default_panel_open_mode, normalize_panel_open_mode};
+
+    #[test]
+    fn default_panel_open_mode_is_docked() {
+        assert_eq!(default_panel_open_mode(), "docked");
+    }
+
+    #[test]
+    fn normalize_panel_open_mode_accepts_only_floating() {
+        assert_eq!(normalize_panel_open_mode("floating"), "floating");
+        assert_eq!(normalize_panel_open_mode(" FLOATING "), "floating");
+    }
+
+    #[test]
+    fn normalize_panel_open_mode_falls_back_to_docked() {
+        assert_eq!(normalize_panel_open_mode("docked"), "docked");
+        assert_eq!(normalize_panel_open_mode("multi"), "docked");
+        assert_eq!(normalize_panel_open_mode(""), "docked");
+        assert_eq!(normalize_panel_open_mode("unknown"), "docked");
+    }
+
+    #[test]
+    fn summary_default_has_empty_hidden_items_and_docked_mode() {
+        let summary = AppSettingsSummary::default();
+        assert!(summary.ui_activity_bar_hidden_items.is_empty());
+        assert_eq!(summary.ui_panel_open_mode, "docked");
+        assert!(!summary.ui_panel_multi_open);
+    }
+
+    #[test]
+    fn summary_deserializes_missing_new_fields_to_defaults() {
+        // A minimal JSON document (legacy shape) must fill the new fields with
+        // serde defaults rather than failing to deserialize. Built from a raw
+        // string to avoid the `json!` macro recursion limit on this many keys.
+        let json = r#"{
+            "theme": "github-dark",
+            "language": "en",
+            "terminal_font_family": "JetBrains Mono",
+            "terminal_font_size": 16,
+            "x11_display": "",
+            "terminal_scrollback_lines": 5000,
+            "terminal_keep_alive_interval": 30,
+            "terminal_hardware_acceleration": true,
+            "terminal_show_workspace_padding": false,
+            "terminal_show_line_numbers": false,
+            "terminal_show_timestamps": false,
+            "terminal_show_multi_line_paste_dialog": true,
+            "terminal_paste_image_as_path": true,
+            "ui_show_remote_stats": true,
+            "ui_remote_stats_interval": 3,
+            "ui_show_process_manager": true,
+            "ui_process_manager_interval": 5,
+            "ui_show_docker_manager": true,
+            "ui_docker_manager_interval": 10,
+            "interaction_copy_on_select": false,
+            "interaction_right_click_paste": false,
+            "interaction_command_suggestions_enabled": true,
+            "interaction_command_suggestion_min_chars": 2,
+            "interaction_command_suggestion_max_chars": 64,
+            "interaction_word_separators": " ",
+            "interaction_duplicate_session_command_delay_ms": 1000,
+            "interaction_alt_as_meta": false,
+            "interaction_mac_ime_compatibility": true,
+            "interaction_tab_double_click_action": "disconnect_session",
+            "interaction_tab_middle_click_action": "rename_tab",
+            "interaction_tab_right_click_action": "none",
+            "interaction_default_encoding": "UTF-8",
+            "host_key_policy": "prompt",
+            "transfer_download_path": "",
+            "transfer_ask_save_location": false,
+            "transfer_duplicate_strategy": "ask",
+            "transfer_editor_type": "external",
+            "transfer_default_editor": "",
+            "transfer_download_threads": 3,
+            "transfer_upload_threads": 3,
+            "transfer_max_retries": 2,
+            "transfer_buffer_size": 32,
+            "transfer_default_file_permissions": "644",
+            "transfer_preserve_timestamps": true,
+            "transfer_resume_broken_transfer": true,
+            "recording_path": "",
+            "recording_auto_start": false,
+            "recording_include_io_labels": true,
+            "recording_include_timestamps": true,
+            "recording_memory_limit_bytes": 5242880,
+            "diagnostics_level": "info",
+            "diagnostics_retention_days": 7,
+            "startup_restore": false,
+            "confirm_on_close": true,
+            "enable_screen_lock": false,
+            "idle_lock_minutes": 0,
+            "has_master_password": false,
+            "keybindings": {}
+        }"#;
+
+        let summary: AppSettingsSummary =
+            serde_json::from_str(json).expect("legacy summary deserializes");
+        assert!(summary.ui_activity_bar_hidden_items.is_empty());
+        assert_eq!(summary.ui_panel_open_mode, "docked");
+        assert!(!summary.ui_panel_multi_open);
+    }
 }
