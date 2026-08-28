@@ -616,6 +616,16 @@ mod tests {
         assert_eq!(menu.test_min_width(), Some(px(200.)));
     }
 
+    /// The SFTP browser context menu pins itself to 208px (the Tauri `w-52` /
+    /// `min-w-[200px]` equivalent) so item labels and shortcut hints do not
+    /// reflow between rows when the menu opens. Lock that exact value.
+    #[test]
+    fn context_menu_supports_the_sftp_browser_minimum_width() {
+        let menu = NyaContextMenu::new(div(), [NyaMenuItem::action("Preview")]).min_width(px(208.));
+
+        assert_eq!(menu.test_min_width(), Some(px(208.)));
+    }
+
     #[test]
     fn submenu_retains_nested_items() {
         let item = NyaMenuItem::submenu(

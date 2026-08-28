@@ -532,6 +532,55 @@ impl NyaTermApp {
                     "remote delete completed in {parent_path}: {remote_path}"
                 ));
             }
+            TransferJobEvent::Finished(Ok(TransferJobOutput::Sent {
+                source_path,
+                target_session_id,
+                target_path,
+                target_parent_path,
+                bytes,
+                used_local_staging,
+                entries,
+            })) => {
+                job.status = TransferJobStatus::Completed;
+                job.detail = format!("{} sent", format_file_size(Some(bytes)));
+                // Keep the row's kind pointing at the resolved destination so a
+                // subsequent read shows where it actually landed.
+                job.kind = TransferJobKind::SendTo {
+                    source_path: source_path.clone(),
+                    target_session_id: target_session_id.clone(),
+                    target_path: target_path.clone(),
+                    target_parent_path: target_parent_path.clone(),
+                };
+                job.entries.clear();
+                job.summary = None;
+                job.progress = None;
+                job.control = None;
+                // Refresh the target session's cached listing in place if it is
+                // showing the destination directory — never switch the active
+                // session, and never touch the source browser.
+                let refreshed = !entries.is_empty()
+                    && self.transfer.refresh_browser_session_cache_listing(
+                        &target_session_id,
+                        &target_parent_path,
+                        entries,
+                    );
+                let staging_note = if used_local_staging { " (staged)" } else { "" };
+                self.transfer.browser.status = format!(
+                    "sent {} to {}{}",
+                    truncate_preview(&source_path, 48),
+                    truncate_preview(&target_path, 48),
+                    staging_note,
+                );
+                self.shell.set_status(format!(
+                    "remote send completed: {source_path} -> {target_path}{}{}",
+                    staging_note,
+                    if refreshed {
+                        " · target refreshed"
+                    } else {
+                        ""
+                    }
+                ));
+            }
             TransferJobEvent::Finished(Ok(TransferJobOutput::CreatedDirectory {
                 remote_path,
                 parent_path,
@@ -729,6 +778,48 @@ impl NyaTermApp {
                 self.transfer.browser.status = format!("opened text file {remote_path}");
                 self.shell
                     .set_status(format!("remote text file opened: {remote_path}"));
+            }
+            TransferJobEvent::Finished(Ok(TransferJobOutput::PreviewLoaded {
+                tab_id,
+                remote_path,
+                generation,
+                content,
+            })) => {
+                job.status = TransferJobStatus::Completed;
+                job.detail = format!("Previewed {remote_path}");
+                job.summary = None;
+                job.progress = None;
+                job.control = None;
+                // Generation guard inside: a result for a superseded generation
+                // (the user refreshed or closed the tab) is dropped.
+                self.transfer
+                    .complete_preview_tab(&tab_id, generation, content);
+                self.transfer.browser.status = format!("previewed {remote_path}");
+                self.shell
+                    .set_status(format!("remote file preview ready: {remote_path}"));
+            }
+            TransferJobEvent::Finished(Ok(TransferJobOutput::PdfPageRendered {
+                tab_id,
+                generation,
+                page_index,
+                page,
+            })) => {
+                job.status = TransferJobStatus::Completed;
+                job.detail = format!("Rendered PDF page {}", page_index + 1);
+                job.summary = None;
+                job.progress = None;
+                job.control = None;
+                // Generation guard inside: a page for a superseded generation
+                // (refresh/rotate) is discarded rather than cached.
+                match page {
+                    Ok(page) => {
+                        self.transfer
+                            .complete_pdf_page(&tab_id, generation, page_index, page);
+                    }
+                    Err(_) => {
+                        self.transfer.fail_pdf_page(&tab_id, generation, page_index);
+                    }
+                }
             }
             TransferJobEvent::Finished(Ok(TransferJobOutput::AiFileActionLoaded {
                 remote_path,

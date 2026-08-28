@@ -147,4 +147,39 @@ mod tests {
         assert!(icons.len() <= all.len());
         assert!(icons.iter().all(|entry| entry.starts_with("icons/")));
     }
+
+    /// Locks the tintable monochrome icons that the SFTP entry context menu and
+    /// the remote file preview window address by path. A rename or accidental
+    /// deletion of one of these assets would silently paint nothing (the icon is
+    /// mask-rendered through `svg()`/`mono_icon`), so pin them here. All live
+    /// under `icons/**`, so `no_icon_asset_carries_a_raster_payload` also proves
+    /// each stays tintable.
+    #[test]
+    fn transfer_menu_and_preview_icons_are_embedded() {
+        const REQUIRED: &[&str] = &[
+            // SFTP entry / current-directory context menu.
+            "icons/eye.svg",                 // Preview
+            "icons/session/folder-open.svg", // Open
+            "icons/copy.svg",                // Copy path / name / dir
+            "icons/fe/send-path.svg",        // Send path / name / dir to terminal
+            "icons/net/delete.svg",          // Delete (danger)
+            // Preview window toolbar.
+            "icons/fe/refresh.svg",         // Refresh
+            "icons/menu/external.svg",      // Open externally
+            "icons/menu/zoom-in.svg",       // Zoom in
+            "icons/menu/zoom-out.svg",      // Zoom out
+            "icons/menu/fit.svg",           // Reset / fit view
+            "icons/menu/rotate-left.svg",   // Rotate left
+            "icons/menu/rotate-right.svg",  // Rotate right
+            "icons/menu/chevron-left.svg",  // Previous PDF page
+            "icons/menu/chevron-right.svg", // Next PDF page
+            "icons/file/table.svg",         // Delimited header toggle
+        ];
+        for path in REQUIRED {
+            assert!(
+                EmbeddedAssets::get(path).is_some(),
+                "{path} is referenced by the SFTP menu or preview window but is not embedded"
+            );
+        }
+    }
 }

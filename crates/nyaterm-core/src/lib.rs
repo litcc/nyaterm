@@ -11,6 +11,7 @@ pub mod keyword_highlight_presets;
 pub mod models;
 pub mod natural_order;
 pub mod portable_snapshot;
+pub mod remote_preview;
 pub mod runtime;
 pub mod session_import;
 pub mod terminal;
@@ -126,6 +127,10 @@ pub use natural_order::natural_compare;
 pub use portable_snapshot::{
     PortableSnapshotError, PortableSnapshotKind, PortableSnapshotMeta, RawPortableSnapshot,
     decrypt_snapshot_bytes, encrypt_snapshot_bytes,
+};
+pub use remote_preview::{
+    PREVIEW_CSV_MAX_BYTES, PREVIEW_IMAGE_MAX_BYTES, PREVIEW_PDF_MAX_BYTES, PREVIEW_TEXT_MAX_BYTES,
+    PreviewCategory, classify_preview, is_known_text_file, preview_within_limit,
 };
 pub use runtime::{AppRuntime, RuntimeMode};
 pub use session_import::{

@@ -35,6 +35,11 @@ pub(in crate::features) fn transfer_job_title(kind: &TransferJobKind) -> String 
             old_path, new_path, ..
         } => format!("Move {old_path} -> {new_path}"),
         TransferJobKind::Delete { remote_path, .. } => format!("Delete {remote_path}"),
+        TransferJobKind::SendTo {
+            source_path,
+            target_path,
+            ..
+        } => format!("Send {source_path} -> {target_path}"),
         TransferJobKind::Mkdir { remote_path, .. } => format!("Create folder {remote_path}"),
         TransferJobKind::CreateFile { remote_path, .. } => format!("Create file {remote_path}"),
         TransferJobKind::Symlink {
@@ -49,6 +54,12 @@ pub(in crate::features) fn transfer_job_title(kind: &TransferJobKind) -> String 
             format!("Update properties {remote_path}")
         }
         TransferJobKind::LoadEditor { remote_path, .. } => format!("Open text {remote_path}"),
+        TransferJobKind::LoadPreview { remote_path, .. } => format!("Preview {remote_path}"),
+        TransferJobKind::RasterizePdfPage {
+            remote_path,
+            page_index,
+            ..
+        } => format!("Render PDF page {} {remote_path}", page_index + 1),
         TransferJobKind::SaveEditor { remote_path, .. } => format!("Save text {remote_path}"),
         TransferJobKind::OpenExternal {
             remote_path,

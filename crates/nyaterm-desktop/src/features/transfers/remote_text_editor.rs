@@ -68,6 +68,61 @@ impl RemoteTextEditor {
         }
     }
 
+    /// Construct a read-only surface for previewing `content`.
+    ///
+    /// Reuses the editor's selection, copy, IME `text_for_range`, and painting,
+    /// but is permanently `read_only`, so every mutating path early-returns and
+    /// it never writes back to any editor tab. `id` only namespaces the scroll
+    /// and element ids; it does not have to correspond to an open editor tab.
+    pub(in crate::features) fn new_read_only(
+        app: Entity<NyaTermApp>,
+        id: String,
+        content: String,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            app,
+            tab_id: id,
+            focus_handle: cx.focus_handle(),
+            content,
+            anchor: 0,
+            head: 0,
+            marked_range: None,
+            last_layout: None,
+            selecting: false,
+            read_only: true,
+            scroll: ScrollHandle::new(),
+            scroll_cursor_pending: false,
+            search_query: String::new(),
+            active_match: 0,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+        }
+    }
+
+    /// Replace the read-only surface's content, resetting the selection. Used
+    /// when the previewed tab or its content changes under a stable surface.
+    pub(in crate::features) fn sync_read_only(
+        &mut self,
+        id: &str,
+        content: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let changed = self.tab_id != id || self.content != content;
+        if !changed {
+            return;
+        }
+        self.tab_id = id.to_string();
+        self.content = content.to_string();
+        self.anchor = 0;
+        self.head = 0;
+        self.marked_range = None;
+        self.last_layout = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        cx.notify();
+    }
+
     pub(in crate::features) fn sync_from_tab(
         &mut self,
         tab: &TransferEditorState,

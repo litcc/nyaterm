@@ -53,6 +53,12 @@ gpui-base = { git = "https://github.com/nyakang/gpui-component", rev = "626ec5fa
 gpui-component = { git = "https://github.com/nyakang/gpui-component", rev = "626ec5fad136d652f444178c7e52a7b36854480a" }
 gpui-component-assets = { git = "https://github.com/nyakang/gpui-component", rev = "626ec5fad136d652f444178c7e52a7b36854480a" }
 gpui_platform = { git = "https://github.com/nyakang/zed", rev = "275f31ac7293280e86763ec33933d4b6a4508847" }
+# Pure-Rust, `#![forbid(unsafe)]` PDF rasterizer (MIT OR Apache-2.0). Pinned
+# exactly: the crate is pre-1.0 and explicitly experimental, so a caret range
+# could pull in a breaking 0.8 without review. `embed-fonts` bundles the 14
+# permissively-licensed standard-font substitutes so previews of PDFs that rely
+# on non-embedded base fonts still render without custom font loading.
+hayro = { version = "=0.7.1", features = ["embed-fonts"] }
 hex = "0.4"
 hmac = "0.13"
 keyring = { version = "3.6", features = [

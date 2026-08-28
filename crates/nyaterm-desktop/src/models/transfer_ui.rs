@@ -101,6 +101,20 @@ pub(crate) struct TransferMoveState {
     pub(crate) raw_path_token: Option<String>,
     pub(crate) name: String,
     pub(crate) value: String,
+    /// Additional selected entries when moving more than one item at once.
+    ///
+    /// Empty for a single-item move, where `value` is the full destination path
+    /// (rename-style). When non-empty, `value` is a destination *directory* and
+    /// every entry (including `old_path`) is moved into it, matching the Tauri
+    /// `openMoveDialog(getContextMenuEntries)` batch behavior.
+    pub(crate) additional_entries: Vec<TransferMoveEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TransferMoveEntry {
+    pub(crate) old_path: String,
+    pub(crate) raw_path_token: Option<String>,
+    pub(crate) name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -206,6 +206,7 @@ impl NyaTermApp {
         self.transfer
             .close_properties_dialog_for_session(session_id);
         self.transfer.remove_editor_tabs_for_session(session_id);
+        self.transfer.remove_preview_tabs_for_session(session_id);
         self.sync_input.purge_session(session_id);
         self.reconcile_terminal_windows();
         if self.session.restore_is_complete() {

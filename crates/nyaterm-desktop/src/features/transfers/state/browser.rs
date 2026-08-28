@@ -129,6 +129,37 @@ impl TransferFeatureState {
         self.browser.session_cache.contains_key(session_id)
     }
 
+    pub(in crate::features) fn browser_session_cache(
+        &self,
+        session_id: &str,
+    ) -> Option<&TransferBrowserSessionCacheState> {
+        self.browser.session_cache.get(session_id)
+    }
+
+    /// Refresh a cached session's listing after a background write to it (e.g. a
+    /// cross-session "Send to"). Only replaces the listing when the cache's
+    /// current directory matches `parent_path`, so an unrelated cached directory
+    /// is left untouched. Returns whether a cache entry was updated. The active
+    /// session is never switched by this.
+    pub(in crate::features) fn refresh_browser_session_cache_listing(
+        &mut self,
+        session_id: &str,
+        parent_path: &str,
+        entries: Vec<SftpFileEntry>,
+    ) -> bool {
+        let Some(cache) = self.browser.session_cache.get_mut(session_id) else {
+            return false;
+        };
+        fn normalize(value: &str) -> &str {
+            value.trim().trim_end_matches('/')
+        }
+        if normalize(&cache.current_path) != normalize(parent_path) {
+            return false;
+        }
+        cache.entries = Arc::new(entries);
+        true
+    }
+
     pub(in crate::features) fn browser_navigation_job_running_for_session(
         &self,
         session_id: &str,

@@ -43,6 +43,15 @@ pub(crate) enum TransferJobKind {
         remote_path: String,
         parent_path: String,
     },
+    /// Copy a remote entry from the active (source) session to another connected
+    /// SSH session's directory. Reuses `FileCopyRequest` under the hood; the copy
+    /// runs SFTP-to-SFTP directly or via local staging for mixed backends.
+    SendTo {
+        source_path: String,
+        target_session_id: String,
+        target_path: String,
+        target_parent_path: String,
+    },
     Mkdir {
         remote_path: String,
         parent_path: String,
@@ -67,6 +76,20 @@ pub(crate) enum TransferJobKind {
         remote_path: String,
         tab_id: String,
         generation: RemoteTextGeneration,
+    },
+    LoadPreview {
+        remote_path: String,
+        tab_id: String,
+        generation: RemoteTextGeneration,
+    },
+    /// Rasterize a single PDF page for a preview tab, on demand. Only the pages
+    /// the user actually views are rendered, keyed by `generation` so a result
+    /// for a superseded generation (refresh/rotate) is discarded.
+    RasterizePdfPage {
+        remote_path: String,
+        tab_id: String,
+        generation: RemoteTextGeneration,
+        page_index: usize,
     },
     SaveEditor {
         remote_path: String,
@@ -180,6 +203,8 @@ impl TransferJobState {
             TransferJobKind::Download { remote_path, .. }
             | TransferJobKind::OpenExternal { remote_path, .. }
             | TransferJobKind::LoadEditor { remote_path, .. }
+            | TransferJobKind::LoadPreview { remote_path, .. }
+            | TransferJobKind::RasterizePdfPage { remote_path, .. }
             | TransferJobKind::SaveEditor { remote_path, .. }
             | TransferJobKind::LoadProperties { remote_path }
             | TransferJobKind::UpdateProperties { remote_path, .. }
@@ -197,6 +222,7 @@ impl TransferJobState {
             TransferJobKind::Rename { new_path, .. } | TransferJobKind::Move { new_path, .. } => {
                 remote_file_name(new_path)
             }
+            TransferJobKind::SendTo { target_path, .. } => remote_file_name(target_path),
             TransferJobKind::ZmodemUpload { file_name, .. }
             | TransferJobKind::ZmodemDownload { file_name, .. }
             | TransferJobKind::TrzszDownload { file_name, .. }
@@ -220,6 +246,7 @@ impl TransferJobState {
             &self.kind,
             TransferJobKind::Download { .. }
                 | TransferJobKind::Upload { .. }
+                | TransferJobKind::SendTo { .. }
                 | TransferJobKind::OpenExternal { .. }
                 | TransferJobKind::ZmodemUpload { .. }
                 | TransferJobKind::ZmodemDownload { .. }
@@ -321,6 +348,29 @@ mod transfer_job_state_tests {
     }
 
     #[test]
+    fn send_to_jobs_are_visible_user_transfers_scoped_to_the_source_session() {
+        let send = job(
+            TransferJobKind::SendTo {
+                source_path: "/remote/file.txt".to_string(),
+                target_session_id: "session-b".to_string(),
+                target_path: "/srv/file.txt".to_string(),
+                target_parent_path: "/srv".to_string(),
+            },
+            Some("session-a"),
+        );
+
+        assert!(send.is_user_transfer());
+        assert!(send.is_visible_for_session(None));
+        // Scoped to the source session's queue, not the target session.
+        assert!(send.is_visible_for_session(Some("session-a")));
+        assert!(!send.is_visible_for_session(Some("session-b")));
+        assert_eq!(
+            TransferJobState::display_name_for_kind(&send.kind),
+            "file.txt"
+        );
+    }
+
+    #[test]
     fn display_names_are_stable_from_initial_transfer_kind() {
         assert_eq!(
             TransferJobState::display_name_for_kind(&TransferJobKind::OpenExternal {
@@ -402,6 +452,18 @@ pub(crate) enum TransferJobOutput {
         parent_path: String,
         entries: Vec<SftpFileEntry>,
     },
+    /// A cross-session "Send to" copy finished. `entries` is the refreshed listing
+    /// of the target session's destination directory, used to update that
+    /// session's browser cache without switching the active session.
+    Sent {
+        source_path: String,
+        target_session_id: String,
+        target_path: String,
+        target_parent_path: String,
+        bytes: u64,
+        used_local_staging: bool,
+        entries: Vec<SftpFileEntry>,
+    },
     CreatedDirectory {
         remote_path: String,
         parent_path: String,
@@ -435,6 +497,19 @@ pub(crate) enum TransferJobOutput {
         remote_path: String,
         generation: RemoteTextGeneration,
         file: RemoteTextDocument,
+    },
+    PreviewLoaded {
+        tab_id: String,
+        remote_path: String,
+        generation: RemoteTextGeneration,
+        content: crate::models::PreviewContent,
+    },
+    /// A single lazily-rasterized PDF page finished rendering.
+    PdfPageRendered {
+        tab_id: String,
+        generation: RemoteTextGeneration,
+        page_index: usize,
+        page: Result<crate::models::PreviewPdfPage, String>,
     },
     EditorSaved {
         tab_id: String,

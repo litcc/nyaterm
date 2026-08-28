@@ -256,6 +256,7 @@ impl NyaTermApp {
                     queue: cx.focus_handle(),
                     browser: cx.focus_handle(),
                     editor: cx.focus_handle(),
+                    preview: cx.focus_handle(),
                     external_sync: cx.focus_handle(),
                 },
             ),

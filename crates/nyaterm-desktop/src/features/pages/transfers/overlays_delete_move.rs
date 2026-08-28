@@ -19,6 +19,7 @@ impl NyaTermApp {
                 raw_path_token: None,
                 name: String::new(),
                 value: String::new(),
+                additional_entries: Vec::new(),
             });
         let path_input = self
             .text_input_box(

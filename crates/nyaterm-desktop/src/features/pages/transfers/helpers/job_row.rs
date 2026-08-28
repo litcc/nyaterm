@@ -268,6 +268,7 @@ fn transfer_job_icon_path(kind: &TransferJobKind, job: &TransferJobRowSnapshot) 
         TransferJobKind::Upload { .. }
         | TransferJobKind::ZmodemUpload { .. }
         | TransferJobKind::TrzszUpload { .. } => "icons/fe/upload.svg",
+        TransferJobKind::SendTo { .. } => "icons/send.svg",
         _ => "icons/fe/download.svg",
     }
 }

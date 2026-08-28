@@ -3,6 +3,7 @@
 mod cwd_sync_clock;
 mod editor_window;
 mod external_sync_window;
+pub(in crate::features) mod preview;
 mod remote_text_editor;
 mod state;
 mod transfer_events;
@@ -124,8 +125,9 @@ pub(in crate::features) use state::natural_compare_ascii;
 #[cfg(test)]
 pub(in crate::features) use state::transfer_browser_entry_is_visible;
 pub(in crate::features) use state::{
-    TransferEditorCloseAfterSave, TransferEditorCloseOutcome, TransferEditorDiscardOutcome,
-    TransferFeatureFocus, TransferFeatureState,
+    PdfPageRequest, TransferEditorCloseAfterSave, TransferEditorCloseOutcome,
+    TransferEditorDiscardOutcome, TransferFeatureFocus, TransferFeatureState,
+    TransferPreviewCloseOutcome,
 };
 pub(in crate::features) use transfer_widgets::{
     duplicate_decision_label, duplicate_policy_label, format_file_size,

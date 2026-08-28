@@ -3,13 +3,13 @@ use rust_i18n::t;
 use crate::features::NyaTermApp;
 use crate::models::{
     TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
-    TransferJobStatus, TransferMoveState,
+    TransferJobStatus, TransferMoveEntry, TransferMoveState,
 };
 use gpui::{Context, Window};
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::RemoteFilePath;
 
-use super::super::helpers::{remote_file_name, remote_parent_path};
+use super::super::helpers::{remote_child_path, remote_file_name, remote_parent_path};
 
 impl NyaTermApp {
     pub(in crate::features) fn open_transfer_move_dialog(
@@ -32,7 +32,8 @@ impl NyaTermApp {
             .unwrap_or(identity);
         let name = remote_file_name(&old_path);
         if old_path.trim().is_empty() || old_path == "/" || name == "." || name == ".." {
-            self.shell.set_status(format!("cannot move {old_path}"));
+            self.shell
+                .set_status(t!("fileTransfer.statusCannotMove", path = old_path).to_string());
             cx.notify();
             return;
         }
@@ -41,8 +42,10 @@ impl NyaTermApp {
             raw_path_token: entry.and_then(|entry| entry.raw_path_token),
             name: name.clone(),
             value: old_path,
+            additional_entries: Vec::new(),
         });
-        self.shell.set_status("remote move opened".to_string());
+        self.shell
+            .set_status(t!("fileTransfer.statusMoveOpened").to_string());
         self.open_form_dialog(
             (
                 t!("fileExplorer.moveTo", name = truncate_preview(&name, 48)).to_string(),
@@ -58,10 +61,80 @@ impl NyaTermApp {
         cx.notify();
     }
 
+    /// Open the move dialog for the current selection set (Tauri
+    /// `openMoveDialog(getContextMenuEntries)`).
+    ///
+    /// A single selected item keeps the rename-style behavior (the dialog edits
+    /// the full destination path). More than one item switches to a batch move:
+    /// the dialog edits a destination *directory* and every entry is moved into
+    /// it under its own name.
+    pub(in crate::features) fn open_transfer_move_dialog_for_selection(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let entries = self
+            .selected_transfer_entries()
+            .into_iter()
+            .filter(|entry| {
+                let name = remote_file_name(&entry.path);
+                !entry.path.trim().is_empty() && entry.path != "/" && name != "." && name != ".."
+            })
+            .collect::<Vec<_>>();
+
+        let Some(first) = entries.first().cloned() else {
+            self.shell
+                .set_status(t!("fileTransfer.statusMarkBeforeMoving").to_string());
+            cx.notify();
+            return;
+        };
+
+        if entries.len() == 1 {
+            self.open_transfer_move_dialog(first.path.clone(), window, cx);
+            return;
+        }
+
+        self.forget_text_inputs("transfer.move.");
+        let additional_entries = entries
+            .iter()
+            .skip(1)
+            .map(|entry| TransferMoveEntry {
+                old_path: entry.path.clone(),
+                raw_path_token: entry.raw_path_token.clone(),
+                name: remote_file_name(&entry.path),
+            })
+            .collect::<Vec<_>>();
+        // The default destination directory is the parent the selection lives in.
+        let default_dir = remote_parent_path(&first.path);
+        self.transfer.open_move_dialog(TransferMoveState {
+            old_path: first.path.clone(),
+            raw_path_token: first.raw_path_token.clone(),
+            name: remote_file_name(&first.path),
+            value: default_dir,
+            additional_entries,
+        });
+        self.shell
+            .set_status(t!("fileTransfer.statusBatchMoveOpened").to_string());
+        self.open_form_dialog(
+            (
+                t!("fileExplorer.moveMultipleTo", count = entries.len()).to_string(),
+                384.,
+                t!("common.save").to_string(),
+                |app, _, cx| app.transfer_move_dialog_content(cx),
+                |app, window, cx| app.submit_transfer_move(window, cx),
+                |app, cx| app.close_transfer_move_dialog(cx),
+            ),
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
     pub(in crate::features) fn close_transfer_move_dialog(&mut self, cx: &mut Context<Self>) {
         self.forget_text_inputs("transfer.move.");
         self.transfer.close_move_dialog();
-        self.shell.set_status("remote move cancelled".to_string());
+        self.shell
+            .set_status(t!("fileTransfer.statusMoveCancelled").to_string());
         cx.notify();
     }
 
@@ -72,20 +145,62 @@ impl NyaTermApp {
     ) -> bool {
         let Some(state) = self.transfer.move_dialog().cloned() else {
             self.shell
-                .set_status("no remote move is active".to_string());
+                .set_status(t!("fileTransfer.statusMoveInactive").to_string());
             cx.notify();
             return true;
         };
         let new_path = state.value.trim().to_string();
         if new_path.is_empty() {
             self.shell
-                .set_status("target path cannot be empty".to_string());
+                .set_status(t!("fileTransfer.statusMovePathRequired").to_string());
             cx.notify();
             return false;
         }
+
+        // Batch move: `value` is a destination directory and each selected entry
+        // is moved into it under its own name.
+        if !state.additional_entries.is_empty() {
+            let target_dir = new_path.trim_end_matches('/').to_string();
+            let target_dir = if target_dir.is_empty() {
+                "/".to_string()
+            } else {
+                target_dir
+            };
+            self.transfer.close_move_dialog();
+            let mut started = 0;
+            let all_entries = std::iter::once(TransferMoveEntry {
+                old_path: state.old_path.clone(),
+                raw_path_token: state.raw_path_token.clone(),
+                name: state.name.clone(),
+            })
+            .chain(state.additional_entries)
+            .collect::<Vec<_>>();
+            for entry in all_entries {
+                let destination = remote_child_path(&target_dir, &entry.name);
+                if destination == entry.old_path {
+                    continue;
+                }
+                self.start_sftp_move_job(
+                    RemoteFilePath {
+                        display_path: entry.old_path,
+                        raw_path_token: entry.raw_path_token,
+                    },
+                    destination,
+                    window,
+                    cx,
+                );
+                started += 1;
+            }
+            self.shell
+                .set_status(t!("fileTransfer.statusMoveJobsStarted", count = started).to_string());
+            cx.notify();
+            return true;
+        }
+
         if new_path == state.old_path {
             self.transfer.close_move_dialog();
-            self.shell.set_status("remote move unchanged".to_string());
+            self.shell
+                .set_status(t!("fileTransfer.statusMoveUnchanged").to_string());
             cx.notify();
             return true;
         }
@@ -140,7 +255,7 @@ impl NyaTermApp {
                 parent_path: parent_path.clone(),
             },
             status: TransferJobStatus::Running,
-            detail: format!("Moving {old_display_path}"),
+            detail: t!("fileTransfer.detailMoving", path = old_display_path.clone()).to_string(),
             created_at_ms: TransferJobState::now_ms(),
             display_name: String::new(),
             entries: Vec::new(),
@@ -148,9 +263,14 @@ impl NyaTermApp {
             progress: None,
             control: None,
         });
-        self.shell.set_status(format!(
-            "remote move started: {old_display_path} -> {new_path}"
-        ));
+        self.shell.set_status(
+            t!(
+                "fileTransfer.statusMoveStarted",
+                from = old_display_path.clone(),
+                to = new_path.clone()
+            )
+            .to_string(),
+        );
         let transfer_tx = self.transfer.transfer_event_sender();
         std::thread::spawn(move || {
             let result = service
@@ -190,7 +310,7 @@ impl NyaTermApp {
             .collect::<Vec<_>>();
         if paths.is_empty() {
             self.shell
-                .set_status("mark remote items before deleting".to_string());
+                .set_status(t!("fileTransfer.statusMarkBeforeDeleting").to_string());
             cx.notify();
             return;
         }
@@ -221,7 +341,7 @@ impl NyaTermApp {
             }
         }
         self.shell
-            .set_status("remote delete confirmation opened".to_string());
+            .set_status(t!("fileTransfer.statusDeleteConfirmOpened").to_string());
         self.open_confirm_dialog(
             (
                 title,
@@ -232,8 +352,10 @@ impl NyaTermApp {
                     for remote_path in &paths {
                         app.start_sftp_delete_job(remote_path.clone(), window, cx);
                     }
-                    app.shell
-                        .set_status(format!("{delete_count} remote delete job(s) started"));
+                    app.shell.set_status(
+                        t!("fileTransfer.statusDeleteJobsStarted", count = delete_count)
+                            .to_string(),
+                    );
                     cx.notify();
                     true
                 },
@@ -269,7 +391,11 @@ impl NyaTermApp {
                 parent_path: parent_path.clone(),
             },
             status: TransferJobStatus::Running,
-            detail: format!("Deleting {remote_display_path}"),
+            detail: t!(
+                "fileTransfer.detailDeleting",
+                path = remote_display_path.clone()
+            )
+            .to_string(),
             created_at_ms: TransferJobState::now_ms(),
             display_name: String::new(),
             entries: Vec::new(),
@@ -277,8 +403,13 @@ impl NyaTermApp {
             progress: None,
             control: None,
         });
-        self.shell
-            .set_status(format!("remote delete started: {remote_display_path}"));
+        self.shell.set_status(
+            t!(
+                "fileTransfer.statusDeleteStarted",
+                path = remote_display_path.clone()
+            )
+            .to_string(),
+        );
         let transfer_tx = self.transfer.transfer_event_sender();
         std::thread::spawn(move || {
             let result = service

@@ -30,6 +30,7 @@ fn transfer_focus(cx: &TestAppContext) -> TransferFeatureFocus {
         queue: cx.focus_handle(),
         browser: cx.focus_handle(),
         editor: cx.focus_handle(),
+        preview: cx.focus_handle(),
         external_sync: cx.focus_handle(),
     })
 }
@@ -203,6 +204,84 @@ fn browser_entry_context_target_preserves_an_existing_multi_selection() {
         transfer.browser.selected_remote_path.as_deref(),
         Some("/first.txt")
     );
+}
+
+#[test]
+fn browser_entry_context_on_unmarked_path_collapses_to_a_single_selection() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let selected = HashSet::from(["/first.txt".to_string(), "/second.txt".to_string()]);
+    transfer.replace_browser_selection(selected, Some("/second.txt".to_string()));
+
+    // A right-click on a path that is NOT part of the marked set is not a marked
+    // activation, so the caller falls back to a single-entry selection.
+    assert_eq!(transfer.activate_marked_browser_path("/third.txt"), None);
+    transfer.select_browser_entry("/third.txt".to_string());
+
+    assert_eq!(
+        transfer.browser.selected_remote_paths,
+        HashSet::from(["/third.txt".to_string()])
+    );
+    assert_eq!(
+        transfer.browser.selected_remote_path.as_deref(),
+        Some("/third.txt")
+    );
+}
+
+#[test]
+fn send_to_refreshes_only_a_matching_target_session_cache() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    transfer.store_browser_session_cache(
+        "target".to_string(),
+        TransferBrowserSessionCacheState {
+            entries: Arc::new(vec![file_entry("/srv/existing.txt")]),
+            current_path: "/srv".to_string(),
+            current_raw_path_token: None,
+            home_dir: "/home/target".to_string(),
+            history: VecDeque::from(["/srv".to_string()]),
+            history_index: 0,
+            visited_history: VecDeque::from(["/srv".to_string()]),
+        },
+    );
+
+    // A refresh for a directory the cache is not showing leaves it untouched.
+    assert!(!transfer.refresh_browser_session_cache_listing(
+        "target",
+        "/other",
+        vec![file_entry("/other/x.txt")],
+    ));
+    assert_eq!(
+        transfer
+            .browser_session_cache("target")
+            .unwrap()
+            .entries
+            .len(),
+        1
+    );
+
+    // A refresh for the cached directory (trailing-slash insensitive) replaces it.
+    assert!(transfer.refresh_browser_session_cache_listing(
+        "target",
+        "/srv/",
+        vec![file_entry("/srv/existing.txt"), file_entry("/srv/sent.txt")],
+    ));
+    assert_eq!(
+        transfer
+            .browser_session_cache("target")
+            .unwrap()
+            .entries
+            .len(),
+        2
+    );
+
+    // An unknown session is never created by a refresh.
+    assert!(!transfer.refresh_browser_session_cache_listing(
+        "missing",
+        "/srv",
+        vec![file_entry("/srv/x.txt")],
+    ));
+    assert!(transfer.browser_session_cache("missing").is_none());
 }
 
 #[test]
@@ -1334,4 +1413,208 @@ fn transfer_editor_cannot_discard_a_save_in_flight() {
     );
     assert!(transfer.editor_has_workspace());
     assert!(transfer.active_editor_tab().is_some_and(|tab| tab.saving));
+}
+
+fn preview_tab(session_id: &str, remote_path: &str) -> crate::models::TransferPreviewState {
+    crate::models::TransferPreviewState {
+        id: crate::models::TransferPreviewState::tab_id_for_remote_path(
+            Some(session_id),
+            &nyaterm_transport::RemoteFilePath::new(remote_path),
+        ),
+        session_id: Some(session_id.to_string()),
+        ssh_config: None,
+        remote_path: remote_path.to_string(),
+        raw_path_token: None,
+        name: remote_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(remote_path)
+            .to_string(),
+        size: None,
+        modified_at: None,
+        category: nyaterm_core::PreviewCategory::Text,
+        generation: RemoteTextGeneration::next(),
+        content: crate::models::PreviewContent::Loading,
+        viewport: crate::models::PreviewViewport::default(),
+    }
+}
+
+#[test]
+fn preview_workspace_opens_activates_and_closes_tabs() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let first = preview_tab("session", "/a.txt");
+    let second = preview_tab("session", "/b.txt");
+    let first_id = first.id.clone();
+    let second_id = second.id.clone();
+
+    assert!(!transfer.open_preview_tab(first));
+    // Re-opening the same tab returns true (already open) rather than duplicating.
+    assert!(!transfer.open_preview_tab(second));
+    assert!(
+        transfer.open_preview_tab(preview_tab("session", "/a.txt")),
+        "an already-open path reports already_open"
+    );
+    assert_eq!(transfer.preview_workspace().unwrap().tabs.len(), 2);
+
+    assert!(transfer.activate_preview_tab(&first_id));
+    assert_eq!(
+        transfer.active_preview_tab().map(|tab| tab.id.clone()),
+        Some(first_id.clone())
+    );
+
+    assert_eq!(
+        transfer.close_preview_tab(&first_id),
+        super::TransferPreviewCloseOutcome::Closed
+    );
+    assert_eq!(
+        transfer.active_preview_tab().map(|tab| tab.id.clone()),
+        Some(second_id)
+    );
+    assert_eq!(
+        transfer.close_preview(),
+        super::TransferPreviewCloseOutcome::Closed
+    );
+    assert!(!transfer.preview_has_workspace());
+}
+
+#[test]
+fn preview_completion_is_dropped_for_a_stale_generation() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let tab = preview_tab("session", "/a.txt");
+    let tab_id = tab.id.clone();
+    let stale_generation = tab.generation;
+    transfer.open_preview_tab(tab);
+
+    // Refresh bumps the generation, so the earlier load must be discarded.
+    let fresh_generation = transfer.begin_preview_tab_reload(&tab_id).unwrap();
+    assert_ne!(stale_generation, fresh_generation);
+    assert!(!transfer.complete_preview_tab(
+        &tab_id,
+        stale_generation,
+        crate::models::PreviewContent::Text("stale".to_string()),
+    ));
+    assert!(matches!(
+        transfer.active_preview_tab().map(|tab| &tab.content),
+        Some(crate::models::PreviewContent::Loading)
+    ));
+
+    // The current generation is applied.
+    assert!(transfer.complete_preview_tab(
+        &tab_id,
+        fresh_generation,
+        crate::models::PreviewContent::Text("fresh".to_string()),
+    ));
+    assert!(matches!(
+        transfer.active_preview_tab().map(|tab| &tab.content),
+        Some(crate::models::PreviewContent::Text(text)) if text == "fresh"
+    ));
+}
+
+#[test]
+fn preview_tabs_are_removed_when_their_session_ends() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    transfer.open_preview_tab(preview_tab("session-a", "/a.txt"));
+    transfer.open_preview_tab(preview_tab("session-b", "/b.txt"));
+    assert_eq!(transfer.remove_preview_tabs_for_session("session-a"), 1);
+    assert_eq!(
+        transfer
+            .active_preview_tab()
+            .map(|tab| tab.remote_path.clone()),
+        Some("/b.txt".to_string())
+    );
+    assert_eq!(transfer.remove_preview_tabs_for_session("session-b"), 1);
+    assert!(!transfer.preview_has_workspace());
+}
+
+#[test]
+fn preview_zoom_clamps_and_reset_restores_defaults() {
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    transfer.open_preview_tab(preview_tab("session", "/a.txt"));
+
+    assert!(transfer.preview_zoom_active_tab(100.0));
+    assert_eq!(
+        transfer.active_preview_tab().unwrap().viewport.zoom,
+        crate::models::PreviewViewport::MAX_ZOOM
+    );
+    assert!(transfer.preview_reset_active_viewport());
+    assert_eq!(transfer.active_preview_tab().unwrap().viewport.zoom, 1.0);
+    assert!(transfer.preview_rotate_active_tab(true));
+    assert_eq!(
+        transfer
+            .active_preview_tab()
+            .unwrap()
+            .viewport
+            .rotation_quarter_turns,
+        1
+    );
+    // Rotating left from a single clockwise turn returns to zero.
+    assert!(transfer.preview_rotate_active_tab(false));
+    assert_eq!(
+        transfer
+            .active_preview_tab()
+            .unwrap()
+            .viewport
+            .rotation_quarter_turns,
+        0
+    );
+}
+
+#[test]
+fn preview_pdf_navigation_requests_pages_and_applies_under_generation() {
+    use std::sync::Arc;
+    let cx = TestAppContext::single();
+    let mut transfer = transfer_state(&cx);
+    let mut tab = preview_tab("session", "/doc.pdf");
+    tab.category = nyaterm_core::PreviewCategory::Pdf;
+    tab.content = crate::models::PreviewContent::Pdf(crate::models::PreviewPdfDocument::new(
+        Arc::new(Vec::new()),
+        5,
+    ));
+    let generation = tab.generation;
+    let tab_id = tab.id.clone();
+    transfer.open_preview_tab(tab);
+
+    // The active page (0) needs rendering, so a request is produced once.
+    let request = transfer.pdf_page_request_for_active_tab();
+    assert!(request.is_some());
+    assert_eq!(request.unwrap().page_index, 0);
+    // A second call returns nothing because page 0 is now pending.
+    assert!(transfer.pdf_page_request_for_active_tab().is_none());
+
+    // Navigating forward clamps within range and requests page 2.
+    transfer.preview_next_pdf_page();
+    let next = transfer.preview_next_pdf_page();
+    assert!(next.is_some());
+    assert_eq!(next.unwrap().page_index, 2);
+
+    // A stale generation is rejected.
+    let stale = crate::models::PreviewPdfDocument::new(Arc::new(Vec::new()), 5);
+    let _ = stale;
+    assert!(!transfer.complete_pdf_page(
+        &tab_id,
+        RemoteTextGeneration::next(),
+        2,
+        dummy_pdf_page(),
+    ));
+    // The current generation is applied and clears the pending marker.
+    assert!(transfer.complete_pdf_page(&tab_id, generation, 2, dummy_pdf_page()));
+}
+
+fn dummy_pdf_page() -> crate::models::PreviewPdfPage {
+    use gpui::RenderImage;
+    use std::sync::Arc;
+    let bytes = vec![0u8, 0, 0, 255];
+    let buffer = image::RgbaImage::from_raw(1, 1, bytes.clone()).unwrap();
+    crate::models::PreviewPdfPage {
+        image: Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])),
+        pixels: Arc::new(bytes),
+        src_width: 1,
+        src_height: 1,
+        width: 1,
+        height: 1,
+    }
 }

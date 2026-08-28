@@ -626,14 +626,16 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
                     ),
                 // Items are still built on the app, and still only when the menu
                 // opens, reached weakly rather than held.
-                // Items are still built on the app, and still only when the menu
-                // opens, reached weakly rather than held.
                 move |_, cx| {
                     menu_app
                         .update(cx, |this, cx| this.transfer_browser_context_menu_items(cx))
                         .unwrap_or_default()
                 },
-            ))
+            )
+            // Match the Tauri file-explorer menu width (w-52 / min-w-[200px]);
+            // 208px is the 13rem (w-52) equivalent so labels and shortcuts do not
+            // reflow between items when the menu opens.
+            .min_width(px(208.)))
             // Tauri FileExplorer footer: totals left, cwd sync / send icons right.
             .child(
                 div()

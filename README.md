@@ -137,6 +137,8 @@ NyaTerm is built for people who move between servers, local commands, devices, a
 - Transfer queue with speed display, pause, resume, cancel, retry, duplicate-target handling, timestamp preservation, and configurable concurrency
 - Enhanced SCP and directory-transfer handling with original-property preservation where available
 - Open remote files in a local editor and upload saved changes back through the watcher-driven auto-upload flow, with content fingerprinting so only real content changes trigger re-upload
+- Multi-tab read-only remote file preview for text, JSON, Markdown, CSV/TSV, images, and PDF, with per-tab session labels, zoom/rotate/fit controls, and paged PDF rendering
+- Preview loading and decoding run off the render thread with per-format size limits, so oversized or unsupported files surface a clear message instead of blocking the UI
 - SFTP channel concurrency limiting and automatic retry on transient channel-open failures
 - External drag-and-drop upload support on Windows
 - Zmodem transfers track local paths and can reveal completed files in the system file manager

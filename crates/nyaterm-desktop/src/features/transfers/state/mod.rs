@@ -13,6 +13,8 @@ pub(in crate::features) use self::browser_logic::natural_compare_ascii;
 #[cfg(test)]
 pub(in crate::features) use self::browser_logic::transfer_browser_entry_is_visible;
 mod editor;
+mod preview;
+pub(in crate::features) use self::preview::{PdfPageRequest, TransferPreviewCloseOutcome};
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -32,7 +34,8 @@ use crate::models::{
     TransferExternalSyncPromptState, TransferHeightResizeState, TransferJobMenuState,
     TransferJobResult, TransferJobState, TransferJobStatus, TransferMoveState,
     TransferNewFileState, TransferNewFolderState, TransferNewSymlinkState, TransferPathPromptKind,
-    TransferPropertiesState, TransferRenameState, TransferUnknownFileState,
+    TransferPreviewWorkspaceState, TransferPropertiesState, TransferRenameState,
+    TransferUnknownFileState,
 };
 
 pub(in crate::features) struct TransferFeatureState {
@@ -48,6 +51,7 @@ pub(in crate::features) struct TransferFeatureState {
     browser_filter: BrowserFilterCache,
     file_ops: TransferFileOpsState,
     editor: TransferEditorFeatureState,
+    preview: TransferPreviewFeatureState,
     external_sync: TransferExternalSyncState,
     panel: TransferPanelState,
     /// How many times the event drain has entered GPUI.
@@ -68,6 +72,7 @@ pub(in crate::features) struct TransferFeatureFocus {
     pub queue: FocusHandle,
     pub browser: FocusHandle,
     pub editor: FocusHandle,
+    pub preview: FocusHandle,
     pub external_sync: FocusHandle,
 }
 
@@ -197,6 +202,18 @@ struct TransferEditorFeatureState {
     window: ChildWindowSlot,
 }
 
+/// Built-in read-only remote file preview workspace.
+///
+/// A sibling of the editor state, kept as its own authoritative owner rather
+/// than folded into the editor: a file can be open for editing and for preview
+/// at once, the preview carries no dirty/save lifecycle, and the two windows are
+/// independent. Nothing outside `TransferFeatureState` holds preview state.
+struct TransferPreviewFeatureState {
+    workspace: Option<TransferPreviewWorkspaceState>,
+    focus: FocusHandle,
+    window: ChildWindowSlot,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::features) enum TransferEditorCloseOutcome {
     Missing,
@@ -303,6 +320,7 @@ impl TransferFeatureState {
                 focus: focus.browser,
             },
             editor: TransferEditorFeatureState::new(focus.editor),
+            preview: TransferPreviewFeatureState::new(focus.preview),
             external_sync: TransferExternalSyncState::new(focus.external_sync),
             panel: TransferPanelState {
                 focus: focus.panel,

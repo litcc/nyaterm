@@ -400,7 +400,7 @@ impl NyaTermApp {
         self.open_transfer_external_for_session(entry, tab.session_id, config, cx);
     }
 
-    fn open_transfer_external_for_session(
+    pub(in crate::features::pages::transfers) fn open_transfer_external_for_session(
         &mut self,
         entry: SftpFileEntry,
         session_id: Option<String>,
