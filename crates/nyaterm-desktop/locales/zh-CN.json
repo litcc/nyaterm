@@ -2144,6 +2144,14 @@
       "view": "视图与布局"
     },
     "shortcutLabels": {
+      "clearScreen": "清屏",
+      "copy": "复制",
+      "find": "查找",
+      "paste": "粘贴",
+      "pasteSelectedText": "粘贴选定的文本",
+      "selectAll": "全选",
+      "showCommandSuggestions": "显示命令建议",
+      "toggleSessionRecording": "切换会话录制",
       "closeTab": "关闭当前标签",
       "copySelectedSavedConnections": "复制选中的已保存连接",
       "duplicateSession": "复制会话",

@@ -9,14 +9,14 @@ pub(crate) enum ShortcutCategory {
 }
 
 impl ShortcutCategory {
-    pub(crate) fn label(self) -> &'static str {
+    pub(crate) fn label_key(self) -> &'static str {
         match self {
-            Self::Terminal => "Terminal",
-            Self::Tab => "Tab / Session",
-            Self::View => "View / Layout",
-            Self::FileExplorer => "File Explorer",
-            Self::SavedConnections => "Saved Connections",
-            Self::Special => "Special",
+            Self::Terminal => "settings.shortcutCategories.terminal",
+            Self::Tab => "settings.shortcutCategories.tab",
+            Self::View => "settings.shortcutCategories.view",
+            Self::FileExplorer => "settings.shortcutCategories.fileExplorer",
+            Self::SavedConnections => "settings.shortcutCategories.savedConnections",
+            Self::Special => "settings.shortcutCategories.special",
         }
     }
 }
@@ -32,7 +32,7 @@ pub(crate) enum ShortcutNativeStatus {
 pub(crate) struct ShortcutDefinition {
     pub(crate) id: &'static str,
     pub(crate) category: ShortcutCategory,
-    pub(crate) label: &'static str,
+    pub(crate) label_key: &'static str,
     pub(crate) default_keys: &'static str,
     pub(crate) native_status: ShortcutNativeStatus,
     pub(crate) note: &'static str,
@@ -51,7 +51,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.copy",
         category: ShortcutCategory::Terminal,
-        label: "Copy",
+        label_key: "settings.shortcutLabels.copy",
         default_keys: "Ctrl+Shift+C / Cmd+Shift+C",
         native_status: ShortcutNativeStatus::Supported,
         note: "Copies the current selection, otherwise the visible terminal text.",
@@ -59,7 +59,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.paste",
         category: ShortcutCategory::Terminal,
-        label: "Paste",
+        label_key: "settings.shortcutLabels.paste",
         default_keys: "Ctrl+Shift+V / Cmd+Shift+V / Shift+Insert",
         native_status: ShortcutNativeStatus::Partial,
         note: "Native terminal accepts Ctrl/Cmd+V and toolbar paste.",
@@ -67,7 +67,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.pasteSelected",
         category: ShortcutCategory::Terminal,
-        label: "Paste Selected Text",
+        label_key: "settings.shortcutLabels.pasteSelectedText",
         default_keys: "Ctrl+Shift+X / Cmd+Shift+X",
         native_status: ShortcutNativeStatus::Supported,
         note: "Pastes the current terminal text selection into the active session.",
@@ -75,7 +75,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.find",
         category: ShortcutCategory::Terminal,
-        label: "Find",
+        label_key: "settings.shortcutLabels.find",
         default_keys: "Ctrl+Shift+F / Cmd+Shift+F",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens native buffer/history search.",
@@ -83,7 +83,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.clear",
         category: ShortcutCategory::Terminal,
-        label: "Clear Screen",
+        label_key: "settings.shortcutLabels.clearScreen",
         default_keys: "Ctrl+L / Cmd+L",
         native_status: ShortcutNativeStatus::Supported,
         note: "Clears the active terminal screen.",
@@ -91,7 +91,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.selectAll",
         category: ShortcutCategory::Terminal,
-        label: "Select All",
+        label_key: "settings.shortcutLabels.selectAll",
         default_keys: "Ctrl+Shift+A / Cmd+Shift+A",
         native_status: ShortcutNativeStatus::Supported,
         note: "Selects the visible terminal grid; copy uses the selection when present.",
@@ -99,7 +99,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.manageSyncGroups",
         category: ShortcutCategory::Terminal,
-        label: "Manage Sync Groups",
+        label_key: "settings.shortcutLabels.manageSyncGroups",
         default_keys: "Ctrl+Shift+G / Cmd+Shift+G",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens native synchronized input groups and broadcasts terminal input to peers.",
@@ -107,7 +107,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.showCommandSuggestions",
         category: ShortcutCategory::Terminal,
-        label: "Show Command Suggestions",
+        label_key: "settings.shortcutLabels.showCommandSuggestions",
         default_keys: "Alt+R",
         native_status: ShortcutNativeStatus::Supported,
         note: "Shows recent history and pinned quick commands when the command line is empty.",
@@ -115,7 +115,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "terminal.recording.toggle",
         category: ShortcutCategory::Terminal,
-        label: "Toggle Session Recording",
+        label_key: "settings.shortcutLabels.toggleSessionRecording",
         default_keys: "Ctrl+Shift+R / Cmd+Shift+R",
         native_status: ShortcutNativeStatus::Supported,
         note: "Starts or stops transcript recording for the active terminal session.",
@@ -123,7 +123,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.newSession",
         category: ShortcutCategory::Tab,
-        label: "New Session",
+        label_key: "settings.shortcutLabels.newSession",
         default_keys: "Ctrl+Shift+N / Cmd+Shift+N",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens the native saved connections page.",
@@ -131,7 +131,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.temporarySshLink",
         category: ShortcutCategory::Tab,
-        label: "Temporary SSH Link",
+        label_key: "settings.shortcutLabels.temporarySshLink",
         default_keys: "Ctrl+Alt+N / Cmd+Alt+N",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens the native temporary SSH link dialog and starts a transient SSH session.",
@@ -139,7 +139,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.quickSwitch",
         category: ShortcutCategory::Tab,
-        label: "Quick Switch",
+        label_key: "settings.shortcutLabels.quickSwitch",
         default_keys: "Ctrl+Shift+S / Cmd+Shift+S",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens the native session/connection switcher.",
@@ -147,7 +147,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.newLocalTerminal",
         category: ShortcutCategory::Tab,
-        label: "New Local Terminal",
+        label_key: "settings.shortcutLabels.newLocalTerminal",
         default_keys: "Ctrl+` / Cmd+`",
         native_status: ShortcutNativeStatus::Supported,
         note: "Starts a local PTY session.",
@@ -155,7 +155,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.close",
         category: ShortcutCategory::Tab,
-        label: "Close Tab",
+        label_key: "settings.shortcutLabels.closeTab",
         default_keys: "Ctrl+Shift+W / Cmd+Shift+W",
         native_status: ShortcutNativeStatus::Supported,
         note: "Closes the active native session.",
@@ -163,7 +163,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.next",
         category: ShortcutCategory::Tab,
-        label: "Next Tab",
+        label_key: "settings.shortcutLabels.nextTab",
         default_keys: "Ctrl+Tab",
         native_status: ShortcutNativeStatus::Supported,
         note: "Cycles forward through ordered sessions.",
@@ -171,7 +171,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.prev",
         category: ShortcutCategory::Tab,
-        label: "Previous Tab",
+        label_key: "settings.shortcutLabels.prevTab",
         default_keys: "Ctrl+Shift+Tab",
         native_status: ShortcutNativeStatus::Supported,
         note: "Cycles backward through ordered sessions.",
@@ -179,7 +179,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.switchTo",
         category: ShortcutCategory::Tab,
-        label: "Switch Tab",
+        label_key: "settings.shortcutLabels.switchTab",
         default_keys: "Ctrl+1-9 / Cmd+1-9",
         native_status: ShortcutNativeStatus::Supported,
         note: "Switches to tabs 1-8, or the last tab with 9.",
@@ -187,7 +187,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.duplicateSession",
         category: ShortcutCategory::Tab,
-        label: "Duplicate Session",
+        label_key: "settings.shortcutLabels.duplicateSession",
         default_keys: "Ctrl+Shift+D / Cmd+Shift+D",
         native_status: ShortcutNativeStatus::Supported,
         note: "Duplicates the active session.",
@@ -195,7 +195,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.multiplexSsh",
         category: ShortcutCategory::Tab,
-        label: "Multiplex SSH",
+        label_key: "settings.shortcutLabels.multiplexSsh",
         default_keys: "Ctrl+Shift+M / Cmd+Shift+M",
         native_status: ShortcutNativeStatus::Supported,
         note: "Creates a native SSH session through the multiplex handle pool.",
@@ -203,7 +203,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.duplicateSessionWithCommand",
         category: ShortcutCategory::Tab,
-        label: "Duplicate Session With Command",
+        label_key: "settings.shortcutLabels.duplicateSessionWithCommand",
         default_keys: "Ctrl+Alt+D / Cmd+Alt+D",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens the duplicate-and-run command dialog.",
@@ -211,7 +211,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "tab.multiplexSshWithCommand",
         category: ShortcutCategory::Tab,
-        label: "Multiplex SSH With Command",
+        label_key: "settings.shortcutLabels.multiplexSshWithCommand",
         default_keys: "Ctrl+Alt+M / Cmd+Alt+M",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens the multiplex-and-run command dialog.",
@@ -219,7 +219,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.toggleLeftSidebar",
         category: ShortcutCategory::View,
-        label: "Toggle Left Sidebar",
+        label_key: "settings.shortcutLabels.toggleLeftSidebar",
         default_keys: "Ctrl+Shift+E / Cmd+Shift+E",
         native_status: ShortcutNativeStatus::Supported,
         note: "Collapses or expands the native Explorer panel.",
@@ -227,7 +227,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.toggleRightSidebar",
         category: ShortcutCategory::View,
-        label: "Toggle Right Sidebar",
+        label_key: "settings.shortcutLabels.toggleRightSidebar",
         default_keys: "Ctrl+Shift+B / Cmd+Shift+B",
         native_status: ShortcutNativeStatus::Supported,
         note: "Collapses or expands the native Inspector panel.",
@@ -235,7 +235,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.zoomIn",
         category: ShortcutCategory::View,
-        label: "Zoom In",
+        label_key: "settings.shortcutLabels.zoomIn",
         default_keys: "Ctrl+= / Cmd+=",
         native_status: ShortcutNativeStatus::Supported,
         note: "Increases the native terminal font size and saves the appearance setting.",
@@ -243,7 +243,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.zoomOut",
         category: ShortcutCategory::View,
-        label: "Zoom Out",
+        label_key: "settings.shortcutLabels.zoomOut",
         default_keys: "Ctrl+- / Cmd+-",
         native_status: ShortcutNativeStatus::Supported,
         note: "Decreases the native terminal font size and saves the appearance setting.",
@@ -251,7 +251,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.resetZoom",
         category: ShortcutCategory::View,
-        label: "Reset Zoom",
+        label_key: "settings.shortcutLabels.resetZoom",
         default_keys: "Ctrl+0 / Cmd+0",
         native_status: ShortcutNativeStatus::Supported,
         note: "Resets the native terminal font size to the default appearance value.",
@@ -259,7 +259,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.openSettings",
         category: ShortcutCategory::View,
-        label: "Open Settings",
+        label_key: "settings.shortcutLabels.openSettings",
         default_keys: "Ctrl+, / Cmd+,",
         native_status: ShortcutNativeStatus::Supported,
         note: "Opens the native Settings page.",
@@ -267,7 +267,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.openChat",
         category: ShortcutCategory::View,
-        label: "Open Chat",
+        label_key: "settings.shortcutLabels.openChat",
         default_keys: "Ctrl+Alt+I / Cmd+Alt+I",
         native_status: ShortcutNativeStatus::Supported,
         note: "Focuses the native AI command panel.",
@@ -275,7 +275,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "view.showAllCommands",
         category: ShortcutCategory::View,
-        label: "Show All Commands",
+        label_key: "settings.shortcutLabels.showAllCommands",
         default_keys: "Ctrl+Shift+P / Cmd+Shift+P",
         native_status: ShortcutNativeStatus::Supported,
         note: "Focuses the command center in the right inspector.",
@@ -283,7 +283,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "fileExplorer.rename",
         category: ShortcutCategory::FileExplorer,
-        label: "Rename File",
+        label_key: "settings.shortcutLabels.renameFile",
         default_keys: "F2",
         native_status: ShortcutNativeStatus::Contextual,
         note: "Renames the selected entry in the native SFTP transfers listing.",
@@ -291,7 +291,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "savedConnections.copySelected",
         category: ShortcutCategory::SavedConnections,
-        label: "Copy Selected Saved Connections",
+        label_key: "settings.shortcutLabels.copySelectedSavedConnections",
         default_keys: "Ctrl+Alt+C / Cmd+Alt+C",
         native_status: ShortcutNativeStatus::Supported,
         note: "Duplicates the selected native saved connections without copying stored secrets.",
@@ -299,7 +299,7 @@ pub(crate) const SHORTCUT_REGISTRY: [ShortcutDefinition; 32] = [
     ShortcutDefinition {
         id: "special.lockScreen",
         category: ShortcutCategory::Special,
-        label: "Lock Screen",
+        label_key: "settings.shortcutLabels.lockScreen",
         default_keys: "Ctrl+Shift+L / Cmd+Shift+L",
         native_status: ShortcutNativeStatus::Supported,
         note: "Locks the native workspace.",
@@ -387,6 +387,38 @@ pub(crate) fn hotkey_keystrokes_for_display(keys: &str) -> Option<Vec<Keystroke>
         .collect::<Option<Vec<_>>>()?;
 
     (!keystrokes.is_empty()).then_some(keystrokes)
+}
+
+pub(crate) fn compact_indexed_hotkey_keystrokes_for_display(
+    keystrokes: Vec<Keystroke>,
+) -> Vec<Keystroke> {
+    const INDEXED_KEY_COUNT: usize = 9;
+
+    let mut compacted = Vec::with_capacity(keystrokes.len());
+    let mut index = 0;
+    while index < keystrokes.len() {
+        let complete_indexed_group = keystrokes
+            .get(index..index + INDEXED_KEY_COUNT)
+            .is_some_and(|group| {
+                let modifiers = group[0].modifiers;
+                group.iter().enumerate().all(|(offset, stroke)| {
+                    stroke.modifiers == modifiers && stroke.key == (offset + 1).to_string()
+                })
+            });
+
+        if complete_indexed_group {
+            let mut range = keystrokes[index].clone();
+            range.key = "1–9".to_string();
+            range.key_char = None;
+            compacted.push(range);
+            index += INDEXED_KEY_COUNT;
+        } else {
+            compacted.push(keystrokes[index].clone());
+            index += 1;
+        }
+    }
+
+    compacted
 }
 
 pub(crate) fn is_indexed_shortcut_template(keys: &str) -> bool {
@@ -557,7 +589,10 @@ mod tests {
 
     use gpui::{KeyDownEvent, Keystroke, Modifiers};
 
-    use super::{hotkey_keystrokes_for_display, shortcut_matches};
+    use super::{
+        compact_indexed_hotkey_keystrokes_for_display, hotkey_keystrokes_for_display,
+        shortcut_matches,
+    };
 
     #[test]
     fn display_hotkeys_parse_chords_and_key_aliases_for_kbd() {
@@ -581,6 +616,37 @@ mod tests {
     fn display_hotkeys_reject_invalid_or_empty_chord_sets() {
         assert!(hotkey_keystrokes_for_display("").is_none());
         assert!(hotkey_keystrokes_for_display("ctrl+shift+c,not-a-valid-key").is_none());
+    }
+
+    #[test]
+    fn indexed_display_hotkeys_compact_complete_modifier_groups() {
+        let keystrokes = hotkey_keystrokes_for_display(
+            "ctrl+1,ctrl+2,ctrl+3,ctrl+4,ctrl+5,ctrl+6,ctrl+7,ctrl+8,ctrl+9,\
+             meta+1,meta+2,meta+3,meta+4,meta+5,meta+6,meta+7,meta+8,meta+9",
+        )
+        .expect("indexed hotkeys should parse");
+
+        let compacted = compact_indexed_hotkey_keystrokes_for_display(keystrokes);
+
+        assert_eq!(compacted.len(), 2);
+        assert_eq!(compacted[0].key, "1–9");
+        assert!(compacted[0].modifiers.control);
+        assert_eq!(compacted[1].key, "1–9");
+        assert!(compacted[1].modifiers.platform);
+    }
+
+    #[test]
+    fn indexed_display_hotkeys_leave_incomplete_and_ordinary_chords_unchanged() {
+        for keys in ["ctrl+1", "ctrl+1,ctrl+2", "ctrl+shift+c,meta+shift+c"] {
+            let keystrokes =
+                hotkey_keystrokes_for_display(keys).expect("test hotkeys should parse");
+            let expected = keystrokes.clone();
+
+            assert_eq!(
+                compact_indexed_hotkey_keystrokes_for_display(keystrokes),
+                expected
+            );
+        }
     }
 
     fn key_event(key: &str, modifiers: Modifiers) -> KeyDownEvent {

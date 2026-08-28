@@ -2151,6 +2151,14 @@
       "view": "表示とレイアウト"
     },
     "shortcutLabels": {
+      "clearScreen": "画面をクリア",
+      "copy": "コピー",
+      "find": "検索",
+      "paste": "貼り付け",
+      "pasteSelectedText": "選択したテキストを貼り付け",
+      "selectAll": "すべて選択",
+      "showCommandSuggestions": "コマンド候補を表示",
+      "toggleSessionRecording": "セッション記録を切り替え",
       "closeTab": "アクティブなタブを閉じる",
       "copySelectedSavedConnections": "選択した保存済み接続をコピー",
       "duplicateSession": "セッションを複製",

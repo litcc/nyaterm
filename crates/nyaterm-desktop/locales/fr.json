@@ -2144,6 +2144,14 @@
       "view": "Affichage et disposition"
     },
     "shortcutLabels": {
+      "clearScreen": "Effacer l'écran",
+      "copy": "Copier",
+      "find": "Rechercher",
+      "paste": "Coller",
+      "pasteSelectedText": "Coller le texte sélectionné",
+      "selectAll": "Tout sélectionner",
+      "showCommandSuggestions": "Afficher les suggestions de commandes",
+      "toggleSessionRecording": "Activer/désactiver l'enregistrement de session",
       "closeTab": "Fermer l'onglet actif",
       "copySelectedSavedConnections": "Copier les connexions enregistrées sélectionnées",
       "duplicateSession": "Dupliquer la session",

@@ -179,7 +179,7 @@ impl NyaTermApp {
                 .iter()
                 .any(|n| normalized_existing.iter().any(|e| e == n))
             {
-                return Some(shortcut.label.to_string());
+                return Some(rust_i18n::t!(shortcut.label_key).into_owned());
             }
         }
         None

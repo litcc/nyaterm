@@ -2144,6 +2144,14 @@
       "view": "View & Layout"
     },
     "shortcutLabels": {
+      "clearScreen": "Clear Screen",
+      "copy": "Copy",
+      "find": "Find",
+      "paste": "Paste",
+      "pasteSelectedText": "Paste Selected Text",
+      "selectAll": "Select All",
+      "showCommandSuggestions": "Show Command Suggestions",
+      "toggleSessionRecording": "Toggle Session Recording",
       "closeTab": "Close Active Tab",
       "copySelectedSavedConnections": "Copy Selected Saved Connections",
       "duplicateSession": "Duplicate Session",

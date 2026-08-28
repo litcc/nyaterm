@@ -1876,7 +1876,7 @@ impl SettingsPanel {
                 .iter()
                 .any(|n| normalized_existing.iter().any(|e| e == n))
             {
-                return Some(shortcut.label.to_string());
+                return Some(t!(shortcut.label_key).into_owned());
             }
         }
         None

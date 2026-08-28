@@ -120,6 +120,8 @@ mod tests {
     use regex::Regex;
     use serde_json::Value;
 
+    use crate::shortcuts::{SHORTCUT_CATEGORIES, SHORTCUT_REGISTRY, ShortcutCategory};
+
     use super::{CANONICAL_LOCALES, Cow, available_locales, locale_display_name, normalize_locale};
 
     /// Translate against an explicit language instead of the process-wide locale,
@@ -396,6 +398,50 @@ mod tests {
                 "{locale} key mismatch — missing {missing:?}, extra {extra:?}"
             );
         }
+    }
+
+    #[test]
+    fn shortcut_registry_translation_keys_exist_in_every_catalog() {
+        for (locale, json) in CATALOGS {
+            let catalog = flatten(json);
+            for category in SHORTCUT_CATEGORIES {
+                let key = category.label_key();
+                let value = catalog
+                    .get(key)
+                    .unwrap_or_else(|| panic!("{locale} missing shortcut category key {key}"));
+                assert!(!value.trim().is_empty(), "{locale}/{key} is blank");
+            }
+            for shortcut in SHORTCUT_REGISTRY {
+                let key = shortcut.label_key;
+                let value = catalog
+                    .get(key)
+                    .unwrap_or_else(|| panic!("{locale} missing shortcut label key {key}"));
+                assert!(!value.trim().is_empty(), "{locale}/{key} is blank");
+            }
+        }
+    }
+
+    #[test]
+    fn simplified_chinese_shortcut_labels_and_conflicts_are_localized() {
+        let switch_tab = SHORTCUT_REGISTRY
+            .iter()
+            .find(|shortcut| shortcut.id == "tab.switchTo")
+            .expect("switch-tab shortcut should exist");
+        let switch_tab_label = text("zh-CN", switch_tab.label_key);
+
+        assert_eq!(
+            text("zh-CN", ShortcutCategory::Terminal.label_key()),
+            "终端操作"
+        );
+        assert_eq!(switch_tab_label, "切换到标签 1-9");
+        assert_eq!(
+            rust_i18n::t!(
+                "settings.keybindingsConflict",
+                locale = "zh-CN",
+                name = switch_tab_label
+            ),
+            "已被占用: 切换到标签 1-9"
+        );
     }
 
     #[test]

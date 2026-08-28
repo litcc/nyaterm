@@ -2144,6 +2144,14 @@
       "view": "보기 및 레이아웃"
     },
     "shortcutLabels": {
+      "clearScreen": "화면 지우기",
+      "copy": "복사",
+      "find": "찾기",
+      "paste": "붙여넣기",
+      "pasteSelectedText": "선택한 텍스트 붙여넣기",
+      "selectAll": "모두 선택",
+      "showCommandSuggestions": "명령 제안 표시",
+      "toggleSessionRecording": "세션 녹화 전환",
       "closeTab": "활성 탭 닫기",
       "copySelectedSavedConnections": "선택한 저장된 연결 복사",
       "duplicateSession": "세션 복제",

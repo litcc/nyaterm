@@ -2144,6 +2144,14 @@
       "view": "檢視與佈局"
     },
     "shortcutLabels": {
+      "clearScreen": "清屏",
+      "copy": "複製",
+      "find": "查詢",
+      "paste": "貼上",
+      "pasteSelectedText": "貼上選取的文字",
+      "selectAll": "全選",
+      "showCommandSuggestions": "顯示命令建議",
+      "toggleSessionRecording": "切換工作階段錄製",
       "closeTab": "關閉目前標籤",
       "copySelectedSavedConnections": "複製選取的已儲存連線",
       "duplicateSession": "複製工作階段",

@@ -1,15 +1,13 @@
 use rust_i18n::t;
 
-use std::borrow::Cow;
-
 use gpui::{Context, FontWeight, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
 use nyaterm_ui::{NyaKbd, NyaSearchInput};
 
 use crate::features::pages::settings::panel::SettingsPanel;
 use crate::shortcuts::{
     SHORTCUT_CATEGORIES, SHORTCUT_REGISTRY, ShortcutCategory, ShortcutDefinition,
-    ShortcutNativeStatus, format_hotkey_for_display, hotkey_keystrokes_for_display,
-    shortcut_keys_for,
+    ShortcutNativeStatus, compact_indexed_hotkey_keystrokes_for_display, format_hotkey_for_display,
+    hotkey_keystrokes_for_display, shortcut_keys_for,
 };
 use crate::widgets::small_button;
 
@@ -90,7 +88,9 @@ impl SettingsPanel {
                 let keys = shortcut_keys_for(shortcut.id, &self.settings.summary().keybindings)
                     .unwrap_or_else(|| shortcut.default_keys.to_string());
                 let display = format_hotkey_for_display(&keys).to_ascii_lowercase();
-                shortcut.label.to_ascii_lowercase().contains(&needle)
+                t!(shortcut.label_key)
+                    .to_ascii_lowercase()
+                    .contains(&needle)
                     || shortcut.id.to_ascii_lowercase().contains(&needle)
                     || display.contains(&needle)
                     || keys.to_ascii_lowercase().contains(&needle)
@@ -104,7 +104,7 @@ impl SettingsPanel {
             rows = rows.child(self.shortcut_registry_row(shortcut, cx));
         }
 
-        settings_form_section(palette, Some(Cow::Borrowed(category.label())), None, rows)
+        settings_form_section(palette, Some(t!(category.label_key())), None, rows)
             .into_any_element()
     }
 
@@ -143,12 +143,22 @@ impl SettingsPanel {
         let recording_label = t!("settings.keybindingsRecording");
         let reset_label = t!("settings.keybindingsReset");
         let indexed_hint = t!("settings.keybindingsIndexedHint");
+        let shortcut_label = t!(shortcut.label_key);
+        let is_switch_to = shortcut.id == "tab.switchTo";
         let displayed_keys = if is_recording {
             interaction.pending_keys.as_deref()
         } else {
             Some(effective_keys.as_str())
         };
-        let key_strokes = displayed_keys.and_then(hotkey_keystrokes_for_display);
+        let key_strokes = displayed_keys
+            .and_then(hotkey_keystrokes_for_display)
+            .map(|strokes| {
+                if is_switch_to && !is_recording {
+                    compact_indexed_hotkey_keystrokes_for_display(strokes)
+                } else {
+                    strokes
+                }
+            });
         let key_color = if conflict.is_some() {
             rgb(palette.danger)
         } else if is_recording {
@@ -205,7 +215,6 @@ impl SettingsPanel {
         }
         let shortcut_id = shortcut.id.to_string();
         let reset_shortcut_id = shortcut.id.to_string();
-        let is_switch_to = shortcut.id == "tab.switchTo";
 
         div()
             .rounded_md()
@@ -238,7 +247,7 @@ impl SettingsPanel {
                                 .font_weight(FontWeight(600.))
                                 .text_color(rgb(palette.text))
                                 .overflow_hidden()
-                                .child(shortcut.label),
+                                .child(shortcut_label),
                         )
                         .when(is_custom, |this| {
                             this.child(
@@ -263,7 +272,7 @@ impl SettingsPanel {
                             div()
                                 .text_size(px(10.))
                                 .text_color(rgb(palette.danger))
-                                .child(format!("conflicts: {name}")),
+                                .child(t!("settings.keybindingsConflict", name = name)),
                         )
                     }),
             )
