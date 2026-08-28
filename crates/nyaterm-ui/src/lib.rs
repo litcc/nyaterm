@@ -28,6 +28,7 @@ pub use gpui_component::input::{
     Copy as NyaCopy, Cut as NyaCut, Paste as NyaPaste, Redo as NyaRedo, SelectAll as NyaSelectAll,
     Undo as NyaUndo,
 };
+pub use gpui_component::kbd::Kbd as NyaKbd;
 pub use gpui_component::scroll::ScrollableElement as NyaScrollable;
 pub use gpui_component::scroll::ScrollbarAxis as NyaScrollbarAxis;
 pub use input::{

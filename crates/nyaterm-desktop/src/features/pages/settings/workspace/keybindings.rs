@@ -3,12 +3,13 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use gpui::{Context, FontWeight, IntoElement, KeyDownEvent, div, prelude::*, px, rgb};
-use nyaterm_ui::NyaSearchInput;
+use nyaterm_ui::{NyaKbd, NyaSearchInput};
 
-use crate::features::{pages::settings::panel::SettingsPanel, shell::gpui_code_font_family};
+use crate::features::pages::settings::panel::SettingsPanel;
 use crate::shortcuts::{
     SHORTCUT_CATEGORIES, SHORTCUT_REGISTRY, ShortcutCategory, ShortcutDefinition,
-    ShortcutNativeStatus, format_hotkey_for_display, shortcut_keys_for,
+    ShortcutNativeStatus, format_hotkey_for_display, hotkey_keystrokes_for_display,
+    shortcut_keys_for,
 };
 use crate::widgets::small_button;
 
@@ -142,15 +143,66 @@ impl SettingsPanel {
         let recording_label = t!("settings.keybindingsRecording");
         let reset_label = t!("settings.keybindingsReset");
         let indexed_hint = t!("settings.keybindingsIndexedHint");
-        let key_display = if is_recording {
-            interaction
-                .pending_keys
-                .as_deref()
-                .map(format_hotkey_for_display)
-                .unwrap_or_else(|| recording_label.to_string())
+        let displayed_keys = if is_recording {
+            interaction.pending_keys.as_deref()
         } else {
-            format_hotkey_for_display(&effective_keys)
+            Some(effective_keys.as_str())
         };
+        let key_strokes = displayed_keys.and_then(hotkey_keystrokes_for_display);
+        let key_color = if conflict.is_some() {
+            rgb(palette.danger)
+        } else if is_recording {
+            rgb(palette.link)
+        } else {
+            rgb(palette.text_muted)
+        };
+        let key_border = if conflict.is_some() {
+            rgb(palette.danger)
+        } else if is_recording {
+            rgb(0x388bfd)
+        } else {
+            rgb(palette.border)
+        };
+        let mut key_display = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_end()
+            .gap_1();
+        if let Some(key_strokes) = key_strokes {
+            for (index, stroke) in key_strokes.into_iter().enumerate() {
+                if index > 0 {
+                    key_display = key_display.child(
+                        div()
+                            .text_size(px(10.))
+                            .text_color(rgb(palette.text_muted))
+                            .child("/"),
+                    );
+                }
+                key_display = key_display.child(
+                    NyaKbd::new(stroke)
+                        .outline()
+                        .border_color(key_border)
+                        .text_color(key_color),
+                );
+            }
+        } else if let Some(keys) = displayed_keys {
+            key_display = key_display.child(
+                div()
+                    .text_size(px(10.))
+                    .font_weight(FontWeight(600.))
+                    .text_color(key_color)
+                    .child(format_hotkey_for_display(keys)),
+            );
+        } else {
+            key_display = key_display.child(
+                div()
+                    .text_size(px(10.))
+                    .font_weight(FontWeight(600.))
+                    .text_color(key_color)
+                    .child(recording_label),
+            );
+        }
         let shortcut_id = shortcut.id.to_string();
         let reset_shortcut_id = shortcut.id.to_string();
         let is_switch_to = shortcut.id == "tab.switchTo";
@@ -205,35 +257,7 @@ impl SettingsPanel {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .child(
-                        div()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(if conflict.is_some() {
-                                rgb(palette.danger)
-                            } else if is_recording {
-                                rgb(0x388bfd)
-                            } else {
-                                rgb(palette.border)
-                            })
-                            .bg(rgb(palette.surface))
-                            .px_2()
-                            .py_0()
-                            .h(px(24.))
-                            .flex()
-                            .items_center()
-                            .font_family(gpui_code_font_family())
-                            .text_size(px(10.))
-                            .font_weight(FontWeight(700.))
-                            .text_color(if conflict.is_some() {
-                                rgb(palette.danger)
-                            } else if is_recording {
-                                rgb(palette.link)
-                            } else {
-                                rgb(palette.text)
-                            })
-                            .child(key_display),
-                    )
+                    .child(key_display)
                     .when_some(conflict.clone(), |this, name| {
                         this.child(
                             div()

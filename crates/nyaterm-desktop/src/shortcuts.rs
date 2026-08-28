@@ -364,6 +364,31 @@ pub(crate) fn format_hotkey_for_display(keys: &str) -> String {
         .join(" / ")
 }
 
+pub(crate) fn hotkey_keystrokes_for_display(keys: &str) -> Option<Vec<Keystroke>> {
+    let keystrokes = keys
+        .split(',')
+        .map(str::trim)
+        .filter(|combo| !combo.is_empty())
+        .map(|combo| {
+            let parts = combo
+                .split('+')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(|part| match part.to_ascii_lowercase().as_str() {
+                    "control" => "ctrl".to_string(),
+                    "meta" | "command" => "cmd".to_string(),
+                    "option" => "alt".to_string(),
+                    _ => normalize_key_name(part),
+                })
+                .collect::<Vec<_>>();
+
+            Keystroke::parse(&parts.join("-")).ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    (!keystrokes.is_empty()).then_some(keystrokes)
+}
+
 pub(crate) fn is_indexed_shortcut_template(keys: &str) -> bool {
     keys.split(',')
         .map(str::trim)
@@ -532,7 +557,31 @@ mod tests {
 
     use gpui::{KeyDownEvent, Keystroke, Modifiers};
 
-    use super::shortcut_matches;
+    use super::{hotkey_keystrokes_for_display, shortcut_matches};
+
+    #[test]
+    fn display_hotkeys_parse_chords_and_key_aliases_for_kbd() {
+        let keystrokes =
+            hotkey_keystrokes_for_display("ctrl+shift+c,meta+comma,control+-,option+return")
+                .expect("valid hotkeys should parse");
+
+        assert_eq!(keystrokes.len(), 4);
+        assert!(keystrokes[0].modifiers.control);
+        assert!(keystrokes[0].modifiers.shift);
+        assert_eq!(keystrokes[0].key, "c");
+        assert!(keystrokes[1].modifiers.platform);
+        assert_eq!(keystrokes[1].key, "comma");
+        assert!(keystrokes[2].modifiers.control);
+        assert_eq!(keystrokes[2].key, "-");
+        assert!(keystrokes[3].modifiers.alt);
+        assert_eq!(keystrokes[3].key, "enter");
+    }
+
+    #[test]
+    fn display_hotkeys_reject_invalid_or_empty_chord_sets() {
+        assert!(hotkey_keystrokes_for_display("").is_none());
+        assert!(hotkey_keystrokes_for_display("ctrl+shift+c,not-a-valid-key").is_none());
+    }
 
     fn key_event(key: &str, modifiers: Modifiers) -> KeyDownEvent {
         KeyDownEvent {
@@ -600,4 +649,4 @@ mod tests {
 }
 use std::collections::HashMap;
 
-use gpui::KeyDownEvent;
+use gpui::{KeyDownEvent, Keystroke};
