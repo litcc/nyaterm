@@ -602,15 +602,25 @@ fn local_now() -> OffsetDateTime {
 }
 
 fn format_header_datetime(datetime: OffsetDateTime, language: &str) -> String {
-    let date_time = datetime
-        .format(format_description!("[year]-[month]-[day] [hour]:[minute]"))
+    // Resolve every catalog lookup against the stored language explicitly rather
+    // than the process-wide locale, so this stays a pure function the tests can
+    // drive for any language without racing `rust_i18n::set_locale`.
+    let locale = crate::i18n::normalize_locale(language);
+    let date = datetime
+        .format(format_description!("[year]-[month]-[day]"))
         .unwrap_or_default();
-    let weekday = localized_weekday(datetime.weekday(), language);
-    if language.trim().to_ascii_lowercase().starts_with("zh") {
-        format!("{date_time} {weekday}")
-    } else {
-        format!("{weekday}, {date_time}")
-    }
+    let time = datetime
+        .format(format_description!("[hour]:[minute]"))
+        .unwrap_or_default();
+    let weekday = localized_weekday(datetime.weekday(), locale.as_ref());
+    t!(
+        "titleBar.dateTime",
+        locale = locale.as_ref(),
+        date = date,
+        time = time,
+        weekday = weekday
+    )
+    .into_owned()
 }
 
 fn average_optional_percent(values: impl Iterator<Item = f64>) -> f64 {
@@ -623,24 +633,17 @@ fn average_optional_percent(values: impl Iterator<Item = f64>) -> f64 {
     if count > 0. { total / count } else { 0. }
 }
 
-fn localized_weekday(weekday: Weekday, language: &str) -> &'static str {
-    let chinese = language.trim().to_ascii_lowercase().starts_with("zh");
-    match (chinese, weekday) {
-        (true, Weekday::Monday) => "周一",
-        (true, Weekday::Tuesday) => "周二",
-        (true, Weekday::Wednesday) => "周三",
-        (true, Weekday::Thursday) => "周四",
-        (true, Weekday::Friday) => "周五",
-        (true, Weekday::Saturday) => "周六",
-        (true, Weekday::Sunday) => "周日",
-        (false, Weekday::Monday) => "Mon",
-        (false, Weekday::Tuesday) => "Tue",
-        (false, Weekday::Wednesday) => "Wed",
-        (false, Weekday::Thursday) => "Thu",
-        (false, Weekday::Friday) => "Fri",
-        (false, Weekday::Saturday) => "Sat",
-        (false, Weekday::Sunday) => "Sun",
-    }
+fn localized_weekday(weekday: Weekday, locale: &str) -> String {
+    let key = match weekday {
+        Weekday::Monday => "titleBar.weekday.monday",
+        Weekday::Tuesday => "titleBar.weekday.tuesday",
+        Weekday::Wednesday => "titleBar.weekday.wednesday",
+        Weekday::Thursday => "titleBar.weekday.thursday",
+        Weekday::Friday => "titleBar.weekday.friday",
+        Weekday::Saturday => "titleBar.weekday.saturday",
+        Weekday::Sunday => "titleBar.weekday.sunday",
+    };
+    t!(key, locale = locale).into_owned()
 }
 
 #[cfg(test)]
@@ -656,29 +659,38 @@ mod tests {
             .with_time(Time::from_hms(9, 5, 0).expect("time"))
             .assume_offset(UtcOffset::from_hms(8, 0, 0).expect("offset"));
 
-        assert_eq!(
-            format_header_datetime(datetime, "en"),
-            "Mon, 2026-07-27 09:05"
-        );
-        assert_eq!(
-            format_header_datetime(datetime, "zh-CN"),
-            "2026-07-27 09:05 周一"
-        );
+        for (locale, expected) in [
+            ("en", "Mon, 2026-07-27 09:05"),
+            ("zh-CN", "2026-07-27 09:05 周一"),
+            ("zh-TW", "2026-07-27 09:05 週一"),
+            ("ja", "2026-07-27 09:05 月"),
+            ("ko", "2026-07-27 09:05 월"),
+            ("fr", "lun. 2026-07-27 09:05"),
+        ] {
+            assert_eq!(
+                format_header_datetime(datetime, locale),
+                expected,
+                "{locale}"
+            );
+        }
     }
 
     #[test]
     fn localizes_every_weekday_without_falling_back() {
-        for weekday in [
-            time::Weekday::Monday,
-            time::Weekday::Tuesday,
-            time::Weekday::Wednesday,
-            time::Weekday::Thursday,
-            time::Weekday::Friday,
-            time::Weekday::Saturday,
-            time::Weekday::Sunday,
-        ] {
-            assert!(!localized_weekday(weekday, "en").is_empty());
-            assert!(!localized_weekday(weekday, "zh-CN").is_empty());
+        for locale in ["en", "zh-CN", "zh-TW", "ja", "ko", "fr"] {
+            for weekday in [
+                time::Weekday::Monday,
+                time::Weekday::Tuesday,
+                time::Weekday::Wednesday,
+                time::Weekday::Thursday,
+                time::Weekday::Friday,
+                time::Weekday::Saturday,
+                time::Weekday::Sunday,
+            ] {
+                let localized = localized_weekday(weekday, locale);
+                assert!(!localized.is_empty(), "{locale}/{weekday:?}");
+                assert!(!localized.starts_with("titleBar."), "{locale}/{weekday:?}");
+            }
         }
     }
 }

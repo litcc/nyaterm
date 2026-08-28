@@ -7,21 +7,52 @@ const FALLBACK_LOCALE: &str = "en";
 /// The single simplified-Chinese catalog. Several legacy ids map onto it.
 const SIMPLIFIED_CHINESE_LOCALE: &str = "zh-CN";
 
+/// The single traditional-Chinese catalog. Region/script variants fold here.
+const TRADITIONAL_CHINESE_LOCALE: &str = "zh-TW";
+
+/// Canonical catalog ids in the order the pickers must present them.
+///
+/// This order is authoritative: both the settings language selector and the
+/// title-bar language menu iterate [`available_locales`], so listing the ids
+/// here fixes the menu order (English, 简体中文, 繁體中文, 日本語, 한국어,
+/// Français) without touching the view code. Adding a language means shipping
+/// its `<id>.json` catalog and adding the id here.
+const CANONICAL_LOCALES: &[&str] = &["en", "zh-CN", "zh-TW", "ja", "ko", "fr"];
+
 /// Map a stored UI language onto a catalog id rust-i18n can resolve.
 ///
 /// rust-i18n only de-specialises by stripping subtags, so `zh-Hans` would walk to
 /// `zh` and then to English because no `zh` catalog exists. NyaTerm has persisted
-/// `zh`, `zh_CN`, and `zh-Hans` since the Tauri builds, so those aliases have to be
-/// folded onto `zh-CN` here or existing installs silently switch to English.
+/// `zh`, `zh_CN`, and `zh-Hans` since the Tauri builds, and now ships several more
+/// languages, so region and script aliases have to be folded onto their canonical
+/// catalog here or existing installs silently switch to English.
+///
+/// The folding rules are:
+/// * `zh-Hans` / `zh-CN` / `zh-SG` / bare `zh` -> `zh-CN`
+/// * `zh-Hant` / `zh-TW` / `zh-HK` / `zh-MO` -> `zh-TW`
+/// * `en-*` -> `en`, `ja-*` -> `ja`, `ko-*` -> `ko`, `fr-*` -> `fr`
+/// * anything else -> `en`
 pub(crate) fn normalize_locale(language: &str) -> Cow<'static, str> {
     let requested = language.trim().replace('_', "-");
-    if is_simplified_chinese(&requested) {
+    let lower = requested.to_ascii_lowercase();
+
+    if is_simplified_chinese(&lower) {
         return Cow::Borrowed(SIMPLIFIED_CHINESE_LOCALE);
     }
+    if is_traditional_chinese(&lower) {
+        return Cow::Borrowed(TRADITIONAL_CHINESE_LOCALE);
+    }
 
-    rust_i18n::available_locales!()
-        .into_iter()
-        .find(|locale| locale.eq_ignore_ascii_case(&requested))
+    // Match the exact canonical id first, then the primary language subtag, so
+    // `fr-FR` and `ja-JP` resolve to their base catalog rather than English.
+    let primary = lower.split('-').next().unwrap_or(&lower);
+    CANONICAL_LOCALES
+        .iter()
+        .copied()
+        .find(|canonical| {
+            canonical.eq_ignore_ascii_case(&requested) || canonical.eq_ignore_ascii_case(primary)
+        })
+        .map(Cow::Borrowed)
         .unwrap_or(Cow::Borrowed(FALLBACK_LOCALE))
 }
 
@@ -35,13 +66,25 @@ pub(crate) fn apply_locale(language: &str) {
     rust_i18n::set_locale(&normalize_locale(language));
 }
 
-/// The locales NyaTerm ships a catalog for, in a stable order.
+/// The locales NyaTerm ships a catalog for, in a stable, authoritative order.
 ///
-/// Adding a language is a data-only change: drop a `<locale>.json` into
-/// `locales/` and it appears here, in the settings selector, and in the
-/// title-bar menu.
+/// Order is fixed by [`CANONICAL_LOCALES`] rather than by
+/// `rust_i18n::available_locales!()`, whose ordering is unspecified. Only ids
+/// that rust-i18n has actually loaded a catalog for are returned, so a canonical
+/// id whose `<id>.json` is not yet shipped is skipped instead of surfacing an
+/// unresolvable entry in the pickers.
 pub(crate) fn available_locales() -> Vec<Cow<'static, str>> {
-    rust_i18n::available_locales!()
+    let loaded = rust_i18n::available_locales!();
+    CANONICAL_LOCALES
+        .iter()
+        .copied()
+        .filter(|canonical| {
+            loaded
+                .iter()
+                .any(|locale| locale.eq_ignore_ascii_case(canonical))
+        })
+        .map(Cow::Borrowed)
+        .collect()
 }
 
 /// A locale's name in its own language, for the language pickers.
@@ -60,9 +103,12 @@ pub(crate) fn language_options() -> Vec<nyaterm_ui::NyaSelectOption> {
         .collect()
 }
 
-fn is_simplified_chinese(language: &str) -> bool {
-    let normalized = language.to_ascii_lowercase();
-    normalized == "zh" || normalized == "zh-cn" || normalized.starts_with("zh-hans")
+fn is_simplified_chinese(lower: &str) -> bool {
+    matches!(lower, "zh" | "zh-cn" | "zh-sg") || lower.starts_with("zh-hans")
+}
+
+fn is_traditional_chinese(lower: &str) -> bool {
+    matches!(lower, "zh-tw" | "zh-hk" | "zh-mo") || lower.starts_with("zh-hant")
 }
 
 #[cfg(test)]
@@ -74,7 +120,7 @@ mod tests {
     use regex::Regex;
     use serde_json::Value;
 
-    use super::{Cow, available_locales, locale_display_name, normalize_locale};
+    use super::{CANONICAL_LOCALES, Cow, available_locales, locale_display_name, normalize_locale};
 
     /// Translate against an explicit language instead of the process-wide locale,
     /// so no test has to touch `rust_i18n::set_locale` and race the others.
@@ -83,8 +129,29 @@ mod tests {
         rust_i18n::t!(key, locale = locale.as_ref())
     }
 
+    // The English catalog is the single schema every other catalog is measured
+    // against. It is always shipped, so it always compiles in.
     const EN_JSON: &str = include_str!("../../locales/en.json");
     const ZH_CN_JSON: &str = include_str!("../../locales/zh-CN.json");
+
+    // Every shipped catalog is included explicitly so the structural tests
+    // below validate the exact bytes compiled by rust-i18n.
+    const ZH_TW_JSON: &str = include_str!("../../locales/zh-TW.json");
+    const JA_JSON: &str = include_str!("../../locales/ja.json");
+    const KO_JSON: &str = include_str!("../../locales/ko.json");
+    const FR_JSON: &str = include_str!("../../locales/fr.json");
+
+    /// Every catalog currently shipped, paired with its canonical id. The
+    /// structural tests below iterate this table, so extending it is the only
+    /// change a new language's catalog needs to be fully validated.
+    const CATALOGS: &[(&str, &str)] = &[
+        ("en", EN_JSON),
+        ("zh-CN", ZH_CN_JSON),
+        ("zh-TW", ZH_TW_JSON),
+        ("ja", JA_JSON),
+        ("ko", KO_JSON),
+        ("fr", FR_JSON),
+    ];
 
     /// Mirror of the flattening `rust_i18n` applies to a version-1 locale file, so
     /// these tests can reason about the on-disk files rather than the loaded catalog.
@@ -111,6 +178,15 @@ mod tests {
         output
     }
 
+    /// The set of `%{name}` placeholders a translation references.
+    fn placeholder_names(value: &str) -> BTreeSet<String> {
+        let placeholder = Regex::new(r"%\{(\w+)\}").expect("placeholder regex");
+        placeholder
+            .captures_iter(value)
+            .map(|c| c[1].to_string())
+            .collect()
+    }
+
     #[test]
     fn resolves_tauri_locale_keys_and_normalizes_chinese_ids() {
         assert_eq!(text("en", "menu.file"), "File");
@@ -125,7 +201,10 @@ mod tests {
 
     #[test]
     fn falls_back_to_english_then_the_key() {
-        assert_eq!(text("fr", "menu.help"), "Help");
+        // `fr` ships a catalog now, so it resolves to its own translation.
+        assert_eq!(text("fr", "menu.help"), "Aide");
+        // `de` has no shipped catalog, so it resolves back to English.
+        assert_eq!(text("de", "menu.help"), "Help");
         assert_eq!(
             text("zh-CN", "missing.translation.key"),
             "missing.translation.key"
@@ -133,25 +212,73 @@ mod tests {
     }
 
     #[test]
-    fn normalizes_legacy_language_ids_onto_shipped_catalogs() {
-        for legacy in ["zh", "zh-CN", "zh_CN", "zh-Hans", "zh-hans-cn", " zh-cn "] {
-            assert_eq!(normalize_locale(legacy), "zh-CN", "for {legacy:?}");
+    fn normalizes_region_and_script_aliases_onto_canonical_ids() {
+        for simplified in [
+            "zh",
+            "zh-CN",
+            "zh_CN",
+            "zh-Hans",
+            "zh-hans-cn",
+            "zh-SG",
+            " zh-cn ",
+        ] {
+            assert_eq!(normalize_locale(simplified), "zh-CN", "for {simplified:?}");
         }
-        for other in ["en", "en-US", "fr", "", "nonsense"] {
-            assert_eq!(normalize_locale(other), "en", "for {other:?}");
+        for traditional in ["zh-TW", "zh_TW", "zh-Hant", "zh-hant-tw", "zh-HK", "zh-MO"] {
+            assert_eq!(
+                normalize_locale(traditional),
+                "zh-TW",
+                "for {traditional:?}"
+            );
+        }
+        assert_eq!(normalize_locale("ja"), "ja");
+        assert_eq!(normalize_locale("ja-JP"), "ja");
+        assert_eq!(normalize_locale("ko"), "ko");
+        assert_eq!(normalize_locale("ko-KR"), "ko");
+        assert_eq!(normalize_locale("fr"), "fr");
+        assert_eq!(normalize_locale("fr-FR"), "fr");
+        assert_eq!(normalize_locale("en"), "en");
+        assert_eq!(normalize_locale("en-US"), "en");
+        for unknown in ["", "nonsense", "de", "es-ES"] {
+            assert_eq!(normalize_locale(unknown), "en", "for {unknown:?}");
         }
     }
 
     #[test]
-    fn normalized_locales_are_always_catalogs_rust_i18n_can_resolve() {
-        let available = rust_i18n::available_locales!();
-        for language in ["zh", "zh-CN", "zh-Hans", "en", "en-US", "fr", ""] {
-            let normalized = normalize_locale(language);
-            assert!(
-                available.contains(&normalized),
-                "{language:?} normalized to {normalized:?}, which is not in {available:?}"
+    fn every_canonical_locale_normalizes_to_itself() {
+        // A canonical id must be a fixed point of normalization, or storing the
+        // value the picker offers would silently rewrite it to something else.
+        for canonical in CANONICAL_LOCALES {
+            assert_eq!(
+                normalize_locale(canonical),
+                *canonical,
+                "canonical id {canonical:?} did not normalize to itself"
             );
         }
+    }
+
+    #[test]
+    fn available_locales_follow_the_canonical_menu_order() {
+        // The pickers must expose every shipped catalog exactly once in the
+        // product-defined order, rather than rust-i18n's unspecified order.
+        let available = available_locales();
+        assert_eq!(
+            available, CANONICAL_LOCALES,
+            "language picker catalogs changed"
+        );
+
+        let loaded = rust_i18n::available_locales!()
+            .into_iter()
+            .map(|locale| locale.into_owned())
+            .collect::<HashSet<_>>();
+        let canonical = CANONICAL_LOCALES
+            .iter()
+            .map(|locale| (*locale).to_string())
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            loaded, canonical,
+            "rust-i18n loaded an unexpected catalog set"
+        );
     }
 
     /// Entries whose `{{..}}` is literal text rather than an i18n slot.
@@ -166,26 +293,36 @@ mod tests {
         // The selector and the title-bar menu label each entry with
         // `language.name` read in that entry's own locale, so a catalog without
         // one would show a bare key.
-        let locales = available_locales();
-        assert_eq!(locales, ["en", "zh-CN"], "shipped catalogs changed");
-        for locale in &locales {
-            let name = locale_display_name(locale);
-            assert_ne!(name, "language.name", "{locale} has no language.name");
+        for (locale, json) in CATALOGS {
+            let flattened = flatten(json);
+            let name = flattened
+                .get("language.name")
+                .unwrap_or_else(|| panic!("{locale} has no language.name"));
             assert!(
                 !name.trim().is_empty(),
                 "{locale} has a blank language.name"
             );
+            // The loaded catalog must agree with the on-disk file.
+            assert_eq!(
+                locale_display_name(locale),
+                name.as_str(),
+                "{locale} language.name disagrees between file and catalog"
+            );
         }
         assert_eq!(locale_display_name("en"), "English");
         assert_eq!(locale_display_name("zh-CN"), "中文 (简体)");
+        assert_eq!(locale_display_name("zh-TW"), "繁體中文");
+        assert_eq!(locale_display_name("ja"), "日本語");
+        assert_eq!(locale_display_name("ko"), "한국어");
+        assert_eq!(locale_display_name("fr"), "Français");
     }
 
     #[test]
-    fn placeholders_use_the_rust_i18n_syntax() {
+    fn no_catalog_leaves_handlebars_placeholders_behind() {
         // A leftover `{{name}}` would render literally: rust-i18n only substitutes
         // `%{name}`, and nothing else interpolates these strings any more.
         let mut stragglers = Vec::new();
-        for (locale, json) in [("en", EN_JSON), ("zh-CN", ZH_CN_JSON)] {
+        for (locale, json) in CATALOGS {
             for (key, value) in flatten(json) {
                 if value.contains("{{") && !HANDLEBARS_IS_LITERAL.contains(&key.as_str()) {
                     stragglers.push(format!("{locale}/{key}: {value}"));
@@ -200,30 +337,41 @@ mod tests {
     }
 
     #[test]
-    fn translations_agree_on_their_placeholders() {
+    fn no_catalog_has_blank_translations() {
+        let mut blanks = Vec::new();
+        for (locale, json) in CATALOGS {
+            for (key, value) in flatten(json) {
+                if value.trim().is_empty() {
+                    blanks.push(format!("{locale}/{key}"));
+                }
+            }
+        }
+        blanks.sort();
+        assert!(blanks.is_empty(), "blank translations: {blanks:#?}");
+    }
+
+    #[test]
+    fn every_catalog_agrees_with_english_on_placeholders() {
         // A translation that drops or renames a placeholder leaves the argument
         // unsubstituted for that locale only, which no other test would catch.
-        let placeholder = Regex::new(r"%\{(\w+)\}").expect("placeholder regex");
-        let names = |value: &str| {
-            placeholder
-                .captures_iter(value)
-                .map(|c| c[1].to_string())
-                .collect::<BTreeSet<_>>()
-        };
-
         let english = flatten(EN_JSON);
-        let chinese = flatten(ZH_CN_JSON);
         let mut mismatched = Vec::new();
-        for (key, en_value) in &english {
-            if HANDLEBARS_IS_LITERAL.contains(&key.as_str()) {
+        for (locale, json) in CATALOGS {
+            if *locale == "en" {
                 continue;
             }
-            let Some(zh_value) = chinese.get(key) else {
-                continue; // covered by the key-parity test
-            };
-            let (want, got) = (names(en_value), names(zh_value));
-            if want != got {
-                mismatched.push(format!("{key}: en {want:?} vs zh-CN {got:?}"));
+            let catalog = flatten(json);
+            for (key, en_value) in &english {
+                if HANDLEBARS_IS_LITERAL.contains(&key.as_str()) {
+                    continue;
+                }
+                let Some(value) = catalog.get(key) else {
+                    continue; // covered by the key-parity test
+                };
+                let (want, got) = (placeholder_names(en_value), placeholder_names(value));
+                if want != got {
+                    mismatched.push(format!("{locale}/{key}: en {want:?} vs {got:?}"));
+                }
             }
         }
         mismatched.sort();
@@ -234,22 +382,96 @@ mod tests {
     }
 
     #[test]
-    fn english_and_chinese_catalogs_have_identical_keys() {
+    fn every_catalog_has_the_same_keys_as_english() {
         let english = flatten(EN_JSON).into_keys().collect::<HashSet<_>>();
-        let chinese = flatten(ZH_CN_JSON).into_keys().collect::<HashSet<_>>();
-        assert_eq!(english, chinese);
+        for (locale, json) in CATALOGS {
+            if *locale == "en" {
+                continue;
+            }
+            let catalog = flatten(json).into_keys().collect::<HashSet<_>>();
+            let missing = english.difference(&catalog).cloned().collect::<Vec<_>>();
+            let extra = catalog.difference(&english).cloned().collect::<Vec<_>>();
+            assert!(
+                missing.is_empty() && extra.is_empty(),
+                "{locale} key mismatch — missing {missing:?}, extra {extra:?}"
+            );
+        }
     }
 
     #[test]
-    fn every_literal_translation_key_in_the_crate_exists_in_both_catalogs() {
+    fn title_bar_date_keys_are_present_and_shaped_for_every_catalog() {
+        // The header clock feeds `date`, `time`, and `weekday` into
+        // `titleBar.dateTime`, and looks weekday short names up per locale, so
+        // every catalog must carry all seven weekday keys and a template that
+        // references the three slots.
+        let weekday_keys = [
+            "titleBar.weekday.monday",
+            "titleBar.weekday.tuesday",
+            "titleBar.weekday.wednesday",
+            "titleBar.weekday.thursday",
+            "titleBar.weekday.friday",
+            "titleBar.weekday.saturday",
+            "titleBar.weekday.sunday",
+        ];
+        for (locale, json) in CATALOGS {
+            let flattened = flatten(json);
+            for key in weekday_keys {
+                let value = flattened
+                    .get(key)
+                    .unwrap_or_else(|| panic!("{locale} missing {key}"));
+                assert!(!value.trim().is_empty(), "{locale}/{key} is blank");
+            }
+            let template = flattened
+                .get("titleBar.dateTime")
+                .unwrap_or_else(|| panic!("{locale} missing titleBar.dateTime"));
+            let slots = placeholder_names(template);
+            for slot in ["date", "time", "weekday"] {
+                assert!(
+                    slots.contains(slot),
+                    "{locale} titleBar.dateTime is missing %{{{slot}}}: {template:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn title_bar_date_renders_through_the_catalog() {
+        assert_eq!(text("en", "titleBar.weekday.monday"), "Mon");
+        assert_eq!(text("zh-CN", "titleBar.weekday.monday"), "周一");
+        assert_eq!(
+            rust_i18n::t!(
+                "titleBar.dateTime",
+                locale = "en",
+                date = "2026-07-27",
+                time = "09:05",
+                weekday = "Mon"
+            ),
+            "Mon, 2026-07-27 09:05"
+        );
+        assert_eq!(
+            rust_i18n::t!(
+                "titleBar.dateTime",
+                locale = "zh-CN",
+                date = "2026-07-27",
+                time = "09:05",
+                weekday = "周一"
+            ),
+            "2026-07-27 09:05 周一"
+        );
+    }
+
+    #[test]
+    fn every_literal_translation_key_in_the_crate_exists_in_every_catalog() {
         // Walks the crate at test time rather than listing files, so a new module
         // cannot quietly opt out. Only literal keys are visible here - the ones
         // reached through `i18n_key()` and friends are out of reach for any
         // source scan, and stay covered by the key-parity test above.
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let key_pattern = Regex::new(r#"\bt!\(\s*"([^"]+)""#).expect("translation-key regex");
-        let english = flatten(EN_JSON);
-        let chinese = flatten(ZH_CN_JSON);
+        let catalogs: Vec<(&str, HashMap<String, String>)> = CATALOGS
+            .iter()
+            .map(|(locale, json)| (*locale, flatten(json)))
+            .collect();
 
         let mut pending = vec![source_root];
         let mut scanned = 0usize;
@@ -268,8 +490,10 @@ mod tests {
                 scanned += 1;
                 for captures in key_pattern.captures_iter(&source) {
                     let key = captures.get(1).expect("key capture").as_str();
-                    if !english.contains_key(key) || !chinese.contains_key(key) {
-                        missing.push(format!("{key} ({})", path.display()));
+                    for (locale, catalog) in &catalogs {
+                        if !catalog.contains_key(key) {
+                            missing.push(format!("{key} in {locale} ({})", path.display()));
+                        }
                     }
                 }
             }

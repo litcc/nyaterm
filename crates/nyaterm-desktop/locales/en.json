@@ -1105,8 +1105,8 @@
     "tunnelOpen": "Open",
     "tunnelPreview": "Preview",
     "tunnelPreviewDynamic": "SOCKS5 on %{bindHost}:%{listenPort}",
-    "tunnelPreviewLocal": "%{bindHost}:%{listenPort} �?%{targetHost}:%{targetPort}",
-    "tunnelPreviewRemote": "remote (%{bindHost}):%{listenPort} �?%{targetHost}:%{targetPort}",
+    "tunnelPreviewLocal": "%{bindHost}:%{listenPort} → %{targetHost}:%{targetPort}",
+    "tunnelPreviewRemote": "remote (%{bindHost}):%{listenPort} → %{targetHost}:%{targetPort}",
     "tunnelSectionDescription": "Manage port forwarding for a connection.",
     "tunnelTargetRequired": "Enter target host and port.",
     "tunnelType": "Tunnel Type",
@@ -1257,6 +1257,18 @@
   },
   "language": {
     "name": "English"
+  },
+  "titleBar": {
+    "dateTime": "%{weekday}, %{date} %{time}",
+    "weekday": {
+      "monday": "Mon",
+      "tuesday": "Tue",
+      "wednesday": "Wed",
+      "thursday": "Thu",
+      "friday": "Fri",
+      "saturday": "Sat",
+      "sunday": "Sun"
+    }
   },
   "passwordManager": {
     "add": "Add Password",
