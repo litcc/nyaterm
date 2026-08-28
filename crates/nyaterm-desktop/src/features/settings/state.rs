@@ -116,6 +116,9 @@ pub(in crate::features) struct UiLayoutSettingsUpdate {
     pub right_panel_collapsed: bool,
     pub saved_connections_sort_mode: String,
     pub saved_connections_expanded_group_ids: Vec<String>,
+    pub start_workspace_mode: String,
+    pub asset_sort_key: Option<String>,
+    pub asset_sort_direction: Option<String>,
     pub activity_bar_left_top: Vec<String>,
     pub activity_bar_left_bottom: Vec<String>,
     pub activity_bar_right_top: Vec<String>,
@@ -871,6 +874,9 @@ impl SettingsFeatureState {
         self.summary.ui_saved_connections_sort_mode = update.saved_connections_sort_mode;
         self.summary.ui_saved_connections_expanded_group_ids =
             update.saved_connections_expanded_group_ids;
+        self.summary.ui_start_workspace_mode = update.start_workspace_mode;
+        self.summary.ui_asset_sort_key = update.asset_sort_key;
+        self.summary.ui_asset_sort_direction = update.asset_sort_direction;
         self.summary.ui_activity_bar_left_top = update.activity_bar_left_top;
         self.summary.ui_activity_bar_left_bottom = update.activity_bar_left_bottom;
         self.summary.ui_activity_bar_right_top = update.activity_bar_right_top;
@@ -1878,6 +1884,9 @@ mod tests {
             activity_bar_hidden_items: vec!["aiAssistant".to_string()],
             panel_multi_open: true,
             panel_open_mode: "floating".to_string(),
+            start_workspace_mode: "assets".to_string(),
+            asset_sort_key: Some("memory".to_string()),
+            asset_sort_direction: Some("desc".to_string()),
             left_open_panels: vec!["connections".to_string()],
             right_open_panels: vec!["sftp".to_string()],
             panel_stack_sizes: HashMap::from([("left:connections".to_string(), 600)]),
@@ -1897,6 +1906,9 @@ mod tests {
         assert_eq!(summary.ui_activity_bar_right_bottom, ["ai"]);
         assert_eq!(summary.ui_activity_bar_hidden_items, ["aiAssistant"]);
         assert_eq!(summary.ui_panel_open_mode, "floating");
+        assert_eq!(summary.ui_start_workspace_mode, "assets");
+        assert_eq!(summary.ui_asset_sort_key.as_deref(), Some("memory"));
+        assert_eq!(summary.ui_asset_sort_direction.as_deref(), Some("desc"));
         assert!(summary.ui_panel_multi_open);
         assert_eq!(summary.ui_panel_stack_sizes["left:connections"], 600);
     }

@@ -1,6 +1,7 @@
 mod activation;
 mod ai;
 mod app_state;
+mod assets;
 mod commands;
 mod connections;
 mod font_catalog;

@@ -269,7 +269,7 @@ impl NyaTermApp {
         if !known && !disconnected {
             self.shell
                 .set_status("session no longer exists".to_string());
-            self.remove_session_state(&session_id);
+            self.remove_session_state(&session_id, cx);
             cx.notify();
             return;
         }

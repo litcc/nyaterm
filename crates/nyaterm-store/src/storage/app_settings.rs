@@ -216,6 +216,16 @@ impl ConnectionStore {
                 &["ui", "saved_connections_expanded_group_ids"],
                 512,
             ),
+            ui_start_workspace_mode: normalize_start_workspace_mode(&json_string(
+                &value,
+                &["ui", "start_workspace_mode"],
+                "workbench",
+            )),
+            ui_asset_sort_key: json_optional_string(&value, &["ui", "asset_sort_key"]),
+            ui_asset_sort_direction: normalize_asset_sort_direction(&json_optional_string(
+                &value,
+                &["ui", "asset_sort_direction"],
+            )),
             ui_header_status_mode: normalize_header_status_mode(&json_string(
                 &value,
                 &["ui", "header_status_mode"],
@@ -867,6 +877,33 @@ impl ConnectionStore {
             &["ui", "saved_connections_expanded_group_ids"],
             string_vec_json_value(&settings.ui_saved_connections_expanded_group_ids, 512),
         );
+        set_nested_json_string(
+            &mut value,
+            &["ui", "start_workspace_mode"],
+            normalize_start_workspace_mode(&settings.ui_start_workspace_mode),
+        );
+        match &settings.ui_asset_sort_key {
+            Some(key) if !key.trim().is_empty() => set_nested_json_string(
+                &mut value,
+                &["ui", "asset_sort_key"],
+                key.trim().to_string(),
+            ),
+            _ => set_nested_json_value(
+                &mut value,
+                &["ui", "asset_sort_key"],
+                serde_json::Value::Null,
+            ),
+        }
+        match normalize_asset_sort_direction(&settings.ui_asset_sort_direction) {
+            Some(direction) => {
+                set_nested_json_string(&mut value, &["ui", "asset_sort_direction"], direction)
+            }
+            None => set_nested_json_value(
+                &mut value,
+                &["ui", "asset_sort_direction"],
+                serde_json::Value::Null,
+            ),
+        }
         set_nested_json_string(
             &mut value,
             &["ui", "header_status_mode"],
@@ -1807,6 +1844,23 @@ fn normalize_saved_connections_sort_mode(value: &str) -> String {
     match value.trim() {
         "name-asc" | "name-desc" => value.trim().to_string(),
         _ => "default".to_string(),
+    }
+}
+
+fn normalize_start_workspace_mode(value: &str) -> String {
+    match value.trim() {
+        "assets" => "assets".to_string(),
+        _ => "workbench".to_string(),
+    }
+}
+
+/// Keeps only the two known asset sort directions; any other or absent value
+/// leaves the direction unset (`None`) so it round-trips as JSON null.
+fn normalize_asset_sort_direction(value: &Option<String>) -> Option<String> {
+    match value.as_deref().map(str::trim) {
+        Some("asc") => Some("asc".to_string()),
+        Some("desc") => Some("desc".to_string()),
+        _ => None,
     }
 }
 

@@ -19,6 +19,7 @@ use super::NyaTermApp;
 use crate::features::ai::{
     AiFeatureFocus, AiFeatureInit, AiFeatureState, AiPanel, ai_active_profile_drafts,
 };
+use crate::features::assets::StartWorkspaceFeatureState;
 use crate::features::commands::{
     CommandFeatureInit, CommandFeatureState, QuickCommandFeatureFocus,
     quick_command_sort_mode_from_setting, quick_command_view_mode_from_setting,
@@ -180,6 +181,7 @@ impl NyaTermApp {
         let settings_panel = cx.new(|cx| SettingsPanel::new(app_entity.downgrade(), cx));
         let transfer_panel = cx.new(|_| TransferPanel::new(app_entity.downgrade()));
         let ai_panel = cx.new(|_| AiPanel::new(app_entity.downgrade()));
+        let start_workspace = StartWorkspaceFeatureState::new(&connection_groups, &settings, cx);
 
         Self {
             stores,
@@ -196,6 +198,7 @@ impl NyaTermApp {
                 },
                 cx,
             ),
+            start_workspace,
             connection_panel,
             settings_panel,
             native_settings_panel: None,

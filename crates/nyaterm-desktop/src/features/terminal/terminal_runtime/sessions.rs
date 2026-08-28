@@ -96,7 +96,7 @@ impl NyaTermApp {
                 Err(_) => {}
             }
             self.cleanup_recording_for_session(close_id);
-            self.remove_session_state(close_id);
+            self.remove_session_state(close_id, cx);
         }
         self.prune_workspace_split();
         if was_active {
@@ -174,7 +174,7 @@ impl NyaTermApp {
             Err(_) => {}
         }
         self.cleanup_recording_for_session(&pane_id);
-        self.remove_session_state(&pane_id);
+        self.remove_session_state(&pane_id, cx);
         self.prune_workspace_split();
         if was_active {
             self.ai.reset_agent_runtime();
@@ -222,7 +222,7 @@ impl NyaTermApp {
             match close_result {
                 Ok(()) => {
                     self.cleanup_recording_for_session(&session_id);
-                    self.remove_session_state(&session_id);
+                    self.remove_session_state(&session_id, cx);
                     closed += 1;
                 }
                 Err(_) => {

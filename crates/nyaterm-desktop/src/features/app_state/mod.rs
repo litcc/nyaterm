@@ -2,6 +2,7 @@ use nyaterm_core::AppRuntime;
 use nyaterm_store::{StoreBlockingClient, StoreUiClient};
 
 use super::ai::{AiFeatureState, AiPanel};
+use super::assets::StartWorkspaceFeatureState;
 use super::commands::CommandFeatureState;
 use super::connections::ConnectionFeatureState;
 use super::pages::connections::panel::ConnectionPanel;
@@ -37,6 +38,7 @@ pub struct NyaTermApp {
     pub(in crate::features) store_blocking: StoreBlockingClient,
     pub(in crate::features) runtime: AppRuntime,
     pub(in crate::features) connection_state: ConnectionFeatureState,
+    pub(in crate::features) start_workspace: StartWorkspaceFeatureState,
     pub(in crate::features) connection_panel: gpui::Entity<ConnectionPanel>,
     pub(in crate::features) settings_panel: gpui::Entity<SettingsPanel>,
     pub(in crate::features) native_settings_panel: Option<gpui::WeakEntity<SettingsPanel>>,

@@ -136,3 +136,91 @@ fn settings_entity_preserves_activity_bar_hidden_items_and_panel_open_mode() {
         Err(PortableSnapshotError::PayloadHashMismatch)
     ));
 }
+
+#[test]
+fn sessions_entity_preserves_connection_asset_metadata() {
+    // The sessions document is an opaque, schema-neutral blob in the snapshot.
+    // Connection asset metadata (Tauri-compatible) must round-trip unchanged and
+    // stay protected by the payload hash.
+    let mut snapshot = RawPortableSnapshot::backup("device-1", "test");
+    let sessions_json = serde_json::json!({
+        "groups": [],
+        "connections": [{
+            "id": "conn-asset",
+            "name": "Asset Host",
+            "type": "ssh",
+            "host": "10.0.0.2",
+            "port": 22,
+            "username": "root",
+            "asset": {
+                "device_type": "physical",
+                "hostname": "gpu-node-01",
+                "cpu_cores": 192,
+                "accelerators": [
+                    { "type": "gpu", "vendor": "NVIDIA", "model": "H100", "count": 8 }
+                ],
+                "tags": ["training"]
+            }
+        }]
+    })
+    .to_string();
+    snapshot
+        .entities
+        .insert("sessions".to_string(), sessions_json.clone());
+    snapshot.recalculate_hash().expect("hash with sessions");
+    validate_raw_snapshot(&snapshot).expect("valid snapshot");
+
+    let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
+    let decoded: RawPortableSnapshot = serde_json::from_value(value).expect("decode snapshot");
+    let parsed: serde_json::Value =
+        serde_json::from_str(decoded.entities.get("sessions").expect("sessions entity"))
+            .expect("sessions json");
+    let asset = &parsed["connections"][0]["asset"];
+    assert_eq!(asset["device_type"], "physical");
+    assert_eq!(asset["hostname"], "gpu-node-01");
+    assert_eq!(asset["cpu_cores"], 192);
+    assert_eq!(asset["accelerators"][0]["type"], "gpu");
+    assert_eq!(asset["tags"], serde_json::json!(["training"]));
+    validate_raw_snapshot(&decoded).expect("decoded snapshot remains valid");
+
+    // Tampering with the preserved asset blob must be caught by the hash.
+    let mut tampered = decoded;
+    tampered.entities.insert(
+        "sessions".to_string(),
+        sessions_json.replace("gpu-node-01", "attacker-host"),
+    );
+    assert!(matches!(
+        validate_raw_snapshot(&tampered),
+        Err(PortableSnapshotError::PayloadHashMismatch)
+    ));
+}
+
+#[test]
+fn settings_entity_preserves_start_workspace_and_asset_sort_keys() {
+    // The new UI settings keys must round-trip through a snapshot unchanged and
+    // stay protected by the payload hash.
+    let mut snapshot = RawPortableSnapshot::backup("device-1", "test");
+    let settings_json = serde_json::json!({
+        "ui": {
+            "start_workspace_mode": "assets",
+            "asset_sort_key": "hostname",
+            "asset_sort_direction": "desc"
+        }
+    })
+    .to_string();
+    snapshot
+        .entities
+        .insert("settings".to_string(), settings_json.clone());
+    snapshot.recalculate_hash().expect("hash with settings");
+    validate_raw_snapshot(&snapshot).expect("valid snapshot");
+
+    let value = serde_json::to_value(&snapshot).expect("serialize snapshot");
+    let decoded: RawPortableSnapshot = serde_json::from_value(value).expect("decode snapshot");
+    let parsed: serde_json::Value =
+        serde_json::from_str(decoded.entities.get("settings").expect("settings entity"))
+            .expect("settings json");
+    assert_eq!(parsed["ui"]["start_workspace_mode"], "assets");
+    assert_eq!(parsed["ui"]["asset_sort_key"], "hostname");
+    assert_eq!(parsed["ui"]["asset_sort_direction"], "desc");
+    validate_raw_snapshot(&decoded).expect("decoded snapshot remains valid");
+}

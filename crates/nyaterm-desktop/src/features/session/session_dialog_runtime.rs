@@ -1,6 +1,8 @@
 use rust_i18n::t;
 
 use gpui::{Context, Window};
+use nyaterm_core::ConnectionType;
+use nyaterm_store::{StoreDomain, store_request};
 
 use crate::features::NyaTermApp;
 use crate::models::{SessionLaunchConfig, StartupCommandAction};
@@ -190,7 +192,73 @@ impl NyaTermApp {
         cx.notify();
     }
 
-    pub(in crate::features) fn remove_session_state(&mut self, session_id: &str) {
+    fn flush_session_asset_monitoring(&mut self, session_id: &str, cx: &mut Context<Self>) {
+        let expected_connection_id = self
+            .session
+            .metadata(session_id)
+            .and_then(|metadata| metadata.source_connection_id.as_deref())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(ToOwned::to_owned);
+        let Some(entry) = self.start_workspace.monitoring_mut().take(session_id) else {
+            return;
+        };
+        let Some(connection_id) = expected_connection_id.filter(|id| id == &entry.connection_id)
+        else {
+            return;
+        };
+        if !self
+            .connection_state
+            .connections()
+            .iter()
+            .any(|connection| {
+                connection.id == connection_id
+                    && matches!(connection.config, ConnectionType::Ssh { .. })
+            })
+        {
+            return;
+        }
+
+        let persisted_id = connection_id.clone();
+        let patch = entry.last_asset_patch;
+        self.submit_store_request(
+            0,
+            store_request(StoreDomain::Connections, move |store| {
+                if !store.merge_connection_asset_from_monitoring(&persisted_id, patch)? {
+                    return Ok(None);
+                }
+                store.get_connection(&persisted_id)
+            }),
+            move |this, event, cx| match event.outcome {
+                Ok(Some(updated)) => {
+                    this.connection_state.update_connection(updated);
+                    cx.notify();
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(
+                        target: "nyaterm::assets",
+                        connection_id = %connection_id,
+                        category = error.category(),
+                        "failed to persist session monitoring asset snapshot"
+                    );
+                    this.settings.update_store_status(
+                        format!("failed to save monitoring snapshot: {error}"),
+                        false,
+                    );
+                    cx.notify();
+                }
+            },
+            cx,
+        );
+    }
+
+    pub(in crate::features) fn remove_session_state(
+        &mut self,
+        session_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.flush_session_asset_monitoring(session_id, cx);
         self.clear_terminal_selection_state_for_session(session_id);
         self.clear_terminal_mouse_report_for_session(session_id);
         self.session.start.clear_reconnect_failure(session_id);

@@ -187,6 +187,7 @@ impl NyaTermApp {
                 this.reconcile_root_pointer_interactions(event, cx);
                 if event.dragging() {
                     this.update_transfer_browser_column_resize(event, cx);
+                    this.update_asset_column_resize(f32::from(event.position.x), cx);
                     this.update_panel_resize(event, cx);
                     this.update_transfer_height_resize(event, cx);
                     this.update_bottom_panel_resize(event, cx);
@@ -206,6 +207,7 @@ impl NyaTermApp {
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, _, cx| {
                     this.finish_transfer_browser_column_resize(cx);
+                    this.finish_asset_column_resize(cx);
                     this.finish_panel_resize(cx);
                     this.finish_transfer_height_resize(cx);
                     this.finish_bottom_panel_resize(cx);

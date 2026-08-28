@@ -693,3 +693,183 @@ impl Default for VncReconnectSettings {
         }
     }
 }
+
+// ── Static asset metadata ─────────────────────────────────────────────────
+//
+// These types mirror the Tauri persistence contract (`AssetMetadata` and
+// friends). Field names, enum snake_case renamings, and the `Option`-based
+// "field is present" semantics must stay compatible so that connections written
+// by the Tauri edition round-trip unchanged: every field is optional and skips
+// serialization when absent, and unknown values are preserved rather than
+// discarded.
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetDeviceType {
+    Physical,
+    Virtual,
+    Cloud,
+    Network,
+    Storage,
+    Embedded,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetAcceleratorType {
+    Gpu,
+    Npu,
+    #[default]
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssetAccelerator {
+    #[serde(default)]
+    pub r#type: AssetAcceleratorType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetDiskKind {
+    Hdd,
+    Ssd,
+    Nvme,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetDiskPurpose {
+    System,
+    Data,
+    Cache,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AssetDisk {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AssetDiskKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<AssetDiskPurpose>,
+}
+
+/// Static, user- or monitoring-populated asset facts for a saved connection.
+///
+/// `accelerators` and `disks` distinguish "absent" (`None`) from "explicitly
+/// empty" (`Some(vec![])`); the monitoring merge and JSON round-trip rely on
+/// that distinction, so neither is collapsed to the other.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AssetMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_type: Option<AssetDeviceType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub architecture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_sockets: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_cores: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_threads: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accelerators: Option<Vec<AssetAccelerator>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disks: Option<Vec<AssetDisk>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
+impl AssetMetadata {
+    /// Applies a monitoring-derived patch onto `self` in place.
+    ///
+    /// Only fields present in `patch` overwrite the target, so operator-entered
+    /// facts that monitoring never reports (device type, tags, notes, socket and
+    /// thread counts, OS/kernel version) survive a merge. Accelerators are
+    /// merged per-type: any accelerator type included in the patch replaces the
+    /// current entries of that type while leaving other types untouched. This
+    /// mirrors the Tauri `merge_monitoring_asset_patch` contract exactly.
+    pub fn merge_monitoring_patch(&mut self, patch: AssetMetadata) {
+        if patch.hostname.is_some() {
+            self.hostname = patch.hostname;
+        }
+        if patch.os_name.is_some() {
+            self.os_name = patch.os_name;
+        }
+        if patch.architecture.is_some() {
+            self.architecture = patch.architecture;
+        }
+        if patch.cpu_model.is_some() {
+            self.cpu_model = patch.cpu_model;
+        }
+        if patch.cpu_cores.is_some() {
+            self.cpu_cores = patch.cpu_cores;
+        }
+        if patch.memory_bytes.is_some() {
+            self.memory_bytes = patch.memory_bytes;
+        }
+        if patch.disks.is_some() {
+            self.disks = patch.disks;
+        }
+        if patch.updated_at.is_some() {
+            self.updated_at = patch.updated_at;
+        }
+        if let Some(accelerators) = patch.accelerators {
+            self.accelerators = Some(merge_monitoring_accelerators(
+                self.accelerators.take(),
+                accelerators,
+            ));
+        }
+    }
+}
+
+/// Replaces every accelerator whose type appears in `patch` with the patch
+/// entries, preserving accelerator types the patch does not mention.
+fn merge_monitoring_accelerators(
+    current: Option<Vec<AssetAccelerator>>,
+    patch: Vec<AssetAccelerator>,
+) -> Vec<AssetAccelerator> {
+    if patch.is_empty() {
+        return current.unwrap_or_default();
+    }
+
+    let patch_types: Vec<AssetAcceleratorType> = patch
+        .iter()
+        .map(|accelerator| accelerator.r#type.clone())
+        .collect();
+    let mut merged = current.unwrap_or_default();
+    merged.retain(|accelerator| !patch_types.contains(&accelerator.r#type));
+    merged.extend(patch);
+    merged
+}

@@ -1,6 +1,7 @@
 pub mod activation;
 pub mod agent_capture;
 pub mod ai;
+pub mod assets;
 pub mod cloud_sync;
 pub mod command_search;
 pub mod command_suggestion_suppression;
@@ -77,6 +78,21 @@ pub use ai::{
     redact_sensitive_text, resolve_model_credential, resolve_request_model, risk_label,
     system_prompt, trim_ai_audit, trim_ai_history, trim_optional_to_option, trim_string_to_option,
     truncate_preview, uuid, validate_model_credential,
+};
+pub use assets::{
+    ASSET_ROOT_SEGMENT_KEY, AssetAcceleratorSnapshot, AssetDiskSnapshot, AssetDisplayLabels,
+    AssetFilterKey, AssetGroupOption, AssetGroupPathSegment, AssetMonitoringCache,
+    AssetMonitoringCacheEntry, AssetRecord, AssetSortDirection, AssetSortKey, AssetSortState,
+    AssetStatsSnapshot, AssetViewMode, RecordAssetMonitoringPatch, StartWorkspaceMode,
+    build_asset_patch_from_accelerator_snapshot, build_asset_patch_from_stats_snapshot,
+    build_asset_records, build_asset_search_text, build_group_index, build_group_options,
+    build_group_path, collect_descendant_group_ids, compare_asset_address,
+    connection_matches_filters, connections_for_asset_group, format_accelerators,
+    format_asset_address, format_asset_connection_time, format_asset_system,
+    format_asset_updated_at, format_bytes, format_cpu_summary, format_disk_summary,
+    get_asset_connection_time_ms, get_disk_total_bytes, group_path_label, has_gpu, has_npu,
+    is_linux_asset, is_ungrouped_connection, is_windows_asset, normalize_asset_sort_state,
+    parse_asset_view_mode, parse_start_workspace_mode, records_in_group, sort_asset_records,
 };
 pub use cloud_sync::{
     AliyunDriveSyncSettings, CLOUD_SYNC_HISTORY_DOMAIN, CLOUD_SYNC_HISTORY_EVENT,

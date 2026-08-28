@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ConnectionAuth, ConnectionNetwork, ConnectionType, RecordingMode, RecordingRotationPolicy,
-    SftpSettings, SshAlgorithmPreferences, SshProfile, SshTerminalType,
+    AssetMetadata, ConnectionAuth, ConnectionNetwork, ConnectionType, RecordingMode,
+    RecordingRotationPolicy, SftpSettings, SshAlgorithmPreferences, SshProfile, SshTerminalType,
     default_post_login_delay_ms, is_default_sftp_settings, is_standard_ssh_profile, uuid_v4,
 };
 
@@ -69,6 +69,12 @@ pub struct SavedConnection {
     pub terminal_type: Option<SshTerminalType>,
     #[serde(default, skip_serializing_if = "is_default_sftp_settings")]
     pub sftp: SftpSettings,
+    /// Static asset facts (hardware, OS, tags) mirrored from the Tauri contract.
+    ///
+    /// Skipped when absent so connections written by builds predating the field
+    /// round-trip unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset: Option<AssetMetadata>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
