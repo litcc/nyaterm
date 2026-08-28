@@ -2001,16 +2001,19 @@ forward_app_action!(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use gpui::{
         AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, div, px,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::pages::settings::inputs::ALL_SETTINGS_TABS;
     use crate::features::{FontCatalogLoadState, NyaTermApp};
     use crate::models::{AiActionEditorField, AiActionListKind, NavItem, SettingsTab};
+    use crate::test_support::TestConfigDir;
 
     use super::{FontSelectOptionCache, SettingsPanel, SettingsSurface};
 
@@ -2027,15 +2030,10 @@ mod tests {
         assert_eq!(cache.options[0].value(), "JetBrains Mono");
     }
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-settings-panel-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -2117,8 +2115,11 @@ mod tests {
         }
     }
 
-    fn hosted(cx: &mut TestAppContext) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_page(NavItem::Settings, cx);
@@ -2158,8 +2159,9 @@ mod tests {
 
     #[test]
     fn panel_lease_callback_does_not_double_lease() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-panel");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_page(NavItem::Settings, cx);
@@ -2216,8 +2218,9 @@ mod tests {
 
     #[test]
     fn repeated_refresh_requests_coalesce_and_clear_for_next_cycle() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let panel = vcx.update(|_, cx| main_panel(&app, cx));
         let initial = vcx.update(|_, cx| rebuilds(&panel, cx));
 
@@ -2251,8 +2254,9 @@ mod tests {
 
     #[test]
     fn unrelated_app_notify_does_not_repaint_cached_settings_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let before = vcx.update(|_, cx| paints(&app, cx));
         assert!(
             before > 0,
@@ -2272,8 +2276,9 @@ mod tests {
 
     #[test]
     fn inactive_cloud_sync_state_does_not_rebuild_settings_snapshot() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let panel = vcx.update(|_, cx| main_panel(&app, cx));
         let (initial_rebuilds, initial_status) = vcx.update(|_, cx| {
             let panel = panel.read(cx);
@@ -2317,8 +2322,9 @@ mod tests {
 
     #[test]
     fn main_and_native_surfaces_receive_updates_independently() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-panel");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         let native = cx.new(|cx| {
             SettingsPanel::new_for_surface(app.downgrade(), SettingsSurface::NativeWindow, cx)
         });
@@ -2442,8 +2448,9 @@ mod tests {
     #[test]
     #[ignore = "this fixture never parks once a tab with a registry input is active; cause unknown"]
     fn every_settings_surface_draws_only_inputs_it_built() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         // First, before the loop below has visited Security: enabling cloud sync
         // without a master password redirects there, and that jump is not the tab

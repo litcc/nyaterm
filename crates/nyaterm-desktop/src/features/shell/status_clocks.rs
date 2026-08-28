@@ -127,37 +127,27 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::time::Duration;
 
     use gpui::{AppContext as _, TestAppContext};
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::HeaderStatusMode;
+    use crate::test_support::TestConfigDir;
 
     use super::duration_to_next_minute;
 
-    fn unique_test_dir() -> PathBuf {
-        // A uuid rather than a clock reading: these tests run in parallel and
-        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
-        // which would share one config dir and so one settings database.
-        std::env::temp_dir().join(format!(
-            "nyaterm-status-clocks-{}-{}",
-            std::process::id(),
-            uuid()
-        ))
-    }
-
     fn app_with_header_mode(
         cx: &mut TestAppContext,
+        root: &Path,
         mode: HeaderStatusMode,
     ) -> gpui::Entity<NyaTermApp> {
-        let root = unique_test_dir();
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -207,8 +197,9 @@ mod tests {
     /// used to be re-checked on every tick regardless of the header's mode.
     #[test]
     fn no_clock_runs_for_a_header_that_shows_no_time() {
+        let test_dir = TestConfigDir::new("nyaterm-status-clocks");
         let mut cx = TestAppContext::single();
-        let app = app_with_header_mode(&mut cx, HeaderStatusMode::Session);
+        let app = app_with_header_mode(&mut cx, test_dir.path(), HeaderStatusMode::Session);
         cx.update_entity(&app, |app, cx| {
             assert!(!app.header_status_clock_should_run());
             app.ensure_header_status_clock(cx);
@@ -223,8 +214,9 @@ mod tests {
     /// for nothing.
     #[test]
     fn the_header_clock_stops_when_the_header_stops_showing_time() {
+        let test_dir = TestConfigDir::new("nyaterm-status-clocks");
         let mut cx = TestAppContext::single();
-        let app = app_with_header_mode(&mut cx, HeaderStatusMode::DateTime);
+        let app = app_with_header_mode(&mut cx, test_dir.path(), HeaderStatusMode::DateTime);
         cx.update_entity(&app, |app, cx| {
             app.ensure_header_status_clock(cx);
             assert!(app.shell.header_status_clock_is_armed());
@@ -249,8 +241,9 @@ mod tests {
     /// its life in.
     #[test]
     fn no_pending_status_clock_runs_without_a_pending_start() {
+        let test_dir = TestConfigDir::new("nyaterm-status-clocks");
         let mut cx = TestAppContext::single();
-        let app = app_with_header_mode(&mut cx, HeaderStatusMode::Session);
+        let app = app_with_header_mode(&mut cx, test_dir.path(), HeaderStatusMode::Session);
         cx.update_entity(&app, |app, cx| {
             assert!(app.session.start_pending_status_source().is_none());
             app.ensure_pending_session_status_clock(cx);
