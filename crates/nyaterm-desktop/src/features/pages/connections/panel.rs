@@ -288,8 +288,8 @@ mod tests {
     use std::sync::Arc;
 
     use gpui::{
-        AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-        TestAppContext, VisualTestContext, div, px,
+        AppContext as _, Entity, IntoElement, Modifiers, ParentElement as _, Render, ScrollDelta,
+        ScrollWheelEvent, Styled as _, TestAppContext, VisualTestContext, div, point, px,
     };
     use nyaterm_core::{AppRuntime, Group, ProxyConfig, RuntimeMode, SavedConnection, uuid};
     use nyaterm_ui::NyaInputEvent;
@@ -327,6 +327,8 @@ mod tests {
 
     struct AppHost {
         app: Entity<NyaTermApp>,
+        width: f32,
+        cached: bool,
     }
 
     /// Mirrors what `single_side_panel` gives the real panel: a constrained,
@@ -338,15 +340,21 @@ mod tests {
             _window: &mut gpui::Window,
             cx: &mut gpui::Context<Self>,
         ) -> impl IntoElement {
-            div().w(px(280.)).h(px(600.)).flex().flex_col().child(
-                div().flex_1().min_h_0().overflow_hidden().child(
-                    self.app
-                        .read(cx)
-                        .connection_panel
-                        .clone()
-                        .cached(crate::features::layout::cached_panel_style()),
-                ),
-            )
+            let panel = self.app.read(cx).connection_panel.clone();
+            let panel = if self.cached {
+                panel
+                    .cached(crate::features::layout::cached_panel_style())
+                    .into_any_element()
+            } else {
+                panel.into_any_element()
+            };
+            div()
+                .w(px(self.width))
+                .h(px(600.))
+                .flex()
+                .flex_col()
+                .child(div().flex_1().min_h_0().overflow_hidden().child(panel))
+                .into_any_element()
         }
     }
 
@@ -404,6 +412,25 @@ mod tests {
         connections: Vec<SavedConnection>,
         groups: Vec<Group>,
     ) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
+        hosted_with_layout(cx, connections, groups, 280., true)
+    }
+
+    fn hosted_at_width(
+        cx: &mut TestAppContext,
+        connections: Vec<SavedConnection>,
+        groups: Vec<Group>,
+        width: f32,
+    ) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
+        hosted_with_layout(cx, connections, groups, width, false)
+    }
+
+    fn hosted_with_layout(
+        cx: &mut TestAppContext,
+        connections: Vec<SavedConnection>,
+        groups: Vec<Group>,
+        width: f32,
+        cached: bool,
+    ) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
         let app = app(cx);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
@@ -412,7 +439,11 @@ mod tests {
             app.flush_connection_panel_snapshot(cx);
         });
         let host_app = app.clone();
-        let (_, vcx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
+        let (_, vcx) = cx.add_window_view(move |_, _| AppHost {
+            app: host_app,
+            width,
+            cached,
+        });
         let vcx: &mut VisualTestContext = vcx;
         vcx.run_until_parked();
         for _ in 0..3 {
@@ -787,5 +818,97 @@ mod tests {
             Arc::as_ptr(&unique),
             "a unique Arc mutates in place, which is exactly why the snapshot must hold one"
         );
+    }
+
+    #[test]
+    fn long_connection_actions_stay_at_minimum_panel_viewport_right_edge() {
+        let mut cx = TestAppContext::single();
+        let long_name = "生产环境-一段非常长且必须完整显示的-connection-name-0123456789";
+        let (app, vcx) = hosted_at_width(
+            &mut cx,
+            vec![connection("long", long_name, None)],
+            Vec::new(),
+            160.,
+        );
+        vcx.update(|_, cx| {
+            app.update(cx, |app, cx| {
+                select_only(app, "long");
+                app.flush_connection_panel_snapshot(cx);
+            });
+        });
+        draw(&app, vcx);
+
+        assert!(
+            vcx.update(|_, cx| rows_built(&app, cx)) > 0,
+            "the narrow viewport must still materialise its visible connection row"
+        );
+        let list = vcx
+            .debug_bounds("connections-list-rows")
+            .expect("the uniform-list viewport should be visible");
+        let row = vcx
+            .debug_bounds("connection-row-long")
+            .expect("the long connection row should be visible");
+        vcx.simulate_mouse_move(
+            point(list.left() + px(12.), row.center().y),
+            None,
+            Modifiers::default(),
+        );
+        draw(&app, vcx);
+
+        let actions_before = vcx
+            .debug_bounds("connection-actions-long")
+            .expect("hovering a connection should paint its actions");
+        let name_before = vcx
+            .debug_bounds("connection-row-name-long")
+            .expect("the complete connection name should be laid out");
+        assert_eq!(actions_before.right(), list.right() - px(8.));
+        assert!(
+            name_before.right() > list.right(),
+            "the long name must overflow horizontally instead of being ellipsized"
+        );
+
+        vcx.simulate_event(ScrollWheelEvent {
+            position: point(list.left() + px(12.), row.center().y),
+            delta: ScrollDelta::Pixels(point(px(-180.), px(0.))),
+            ..Default::default()
+        });
+        draw(&app, vcx);
+        vcx.simulate_mouse_move(
+            point(list.left() + px(12.), row.center().y),
+            None,
+            Modifiers::default(),
+        );
+        draw(&app, vcx);
+
+        let actions_after = vcx
+            .debug_bounds("connection-actions-long")
+            .expect("actions should remain visible after horizontal scrolling");
+        let name_after = vcx
+            .debug_bounds("connection-row-name-long")
+            .expect("the name should remain laid out after scrolling");
+        assert_eq!(actions_after.right(), actions_before.right());
+        assert!(
+            name_after.left() < name_before.left(),
+            "horizontal wheel input must move the long name"
+        );
+
+        // The second 24px button starts after the strip's 4px left padding and
+        // the first button. Its mouse-down must not bubble to the list and clear
+        // selection before its click opens the editor.
+        vcx.simulate_click(
+            point(actions_after.left() + px(40.), actions_after.center().y),
+            Modifiers::default(),
+        );
+        vcx.run_until_parked();
+        vcx.update(|_, cx| {
+            let app = app.read(cx);
+            assert!(app.connection_state.list_contains_selected_id("long"));
+            assert_eq!(
+                app.connection_state
+                    .active_editor_draft()
+                    .and_then(|draft| draft.id),
+                Some("long".to_string())
+            );
+        });
     }
 }
