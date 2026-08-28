@@ -347,6 +347,15 @@ impl NyaTermApp {
             let has_right_activity_items = self.activity_side_has_items(ActivitySide::Right);
             let left_overlay_mode = compact_layout && self.shell.viewport_size().0 < 1024.;
             let right_overlay_mode = compact_layout && self.shell.viewport_size().0 < 768.;
+            // Floating selections are transient and independent from the
+            // persisted docked active/open stacks.
+            let floating_mode = self.shell.panel_is_floating();
+            let left_floating = floating_mode
+                .then(|| self.shell.floating_panel(PanelSide::Left))
+                .flatten();
+            let right_floating = floating_mode
+                .then(|| self.shell.floating_panel(PanelSide::Right))
+                .flatten();
             let left_drawer_open = has_left_activity_items
                 && left_overlay_mode
                 && self.shell.mobile_left_panel_open()
@@ -366,7 +375,10 @@ impl NyaTermApp {
                     this.child(self.activity_bar(ActivitySide::Left, cx))
                 })
                 .when(
-                    has_left_activity_items && self.left_side_open() && !left_overlay_mode,
+                    has_left_activity_items
+                        && self.left_side_open()
+                        && !left_overlay_mode
+                        && !floating_mode,
                     |this| {
                         this.child(self.sidebar(false, window, cx))
                             .child(self.panel_resize_handle(PanelResizeSide::Left, cx))
@@ -374,7 +386,10 @@ impl NyaTermApp {
                 )
                 .child(self.main_surface(cx))
                 .when(
-                    has_right_activity_items && self.right_side_open() && !right_overlay_mode,
+                    has_right_activity_items
+                        && self.right_side_open()
+                        && !right_overlay_mode
+                        && !floating_mode,
                     |this| {
                         this.child(self.panel_resize_handle(PanelResizeSide::Right, cx))
                             .child(self.right_panel(false, window, cx))
@@ -383,6 +398,92 @@ impl NyaTermApp {
                 .when(has_right_activity_items, |this| {
                     this.child(self.activity_bar(ActivitySide::Right, cx))
                 });
+
+            if let Some(panel) = left_floating {
+                let width = self.shell.left_panel_width();
+                surface = surface.child(
+                    div()
+                        .id("floating-left-panel")
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(40.))
+                        .w(px(width))
+                        .flex()
+                        .border_r_1()
+                        .border_color(rgb(palette.border))
+                        .bg(self.shell_surface_color(palette.surface))
+                        .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(div().flex_1().min_w_0().child(self.floating_side_panel(
+                            PanelSide::Left,
+                            panel,
+                            window,
+                            cx,
+                        )))
+                        .child(self.panel_resize_handle(PanelResizeSide::Left, cx))
+                        .child(
+                            div()
+                                .id("floating-left-panel-close")
+                                .absolute()
+                                .top(px(6.))
+                                .right(px(8.))
+                                .w(px(20.))
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .child("×")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_floating_panel(PanelSide::Left, cx);
+                                })),
+                        ),
+                );
+            }
+
+            if let Some(panel) = right_floating {
+                let width = self.shell.right_panel_width();
+                surface = surface.child(
+                    div()
+                        .id("floating-right-panel")
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right(px(40.))
+                        .w(px(width))
+                        .flex()
+                        .border_l_1()
+                        .border_color(rgb(palette.border))
+                        .bg(self.shell_surface_color(palette.surface))
+                        .shadow_lg()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(self.panel_resize_handle(PanelResizeSide::Right, cx))
+                        .child(div().flex_1().min_w_0().child(self.floating_side_panel(
+                            PanelSide::Right,
+                            panel,
+                            window,
+                            cx,
+                        )))
+                        .child(
+                            div()
+                                .id("floating-right-panel-close")
+                                .absolute()
+                                .top(px(6.))
+                                .right(px(8.))
+                                .w(px(20.))
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .child("×")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.close_floating_panel(PanelSide::Right, cx);
+                                })),
+                        ),
+                );
+            }
 
             if self.terminal_windows_is_multi_leaf() && self.shell.new_session_menu_is_open() {
                 surface = surface.child(self.render_new_session_menu(cx));

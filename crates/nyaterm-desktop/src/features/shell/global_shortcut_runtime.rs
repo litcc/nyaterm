@@ -31,6 +31,10 @@ impl NyaTermApp {
             return true;
         }
 
+        if event.keystroke.key.as_str() == "escape" && self.close_last_floating_panel(cx) {
+            return true;
+        }
+
         let keybindings = self.settings.summary().keybindings.clone();
         if shortcut_matches(event, "terminal.copy", &keybindings) {
             self.copy_terminal_selection_or_visible(cx);

@@ -7,7 +7,10 @@ use nyaterm_ui::{NyaAppMenuBar, NyaDialogWindowExt as _, NyaMenuItem};
 
 use crate::app_shell::NativeMenuCommand;
 use crate::features::NyaTermApp;
-use crate::models::{HeaderStatusMode, NavItem, SmartSplitMode, TitleMenu};
+use crate::models::{
+    ActivityBarEntry, ActivityBarZone, HeaderStatusMode, NavItem, PanelOpenMode, PanelSide,
+    SmartSplitMode, TitleMenu,
+};
 
 impl NyaTermApp {
     pub(crate) fn set_title_menu_bar(&mut self, menu_bar: gpui::Entity<NyaAppMenuBar>) {
@@ -185,7 +188,6 @@ impl NyaTermApp {
         let current_header_status =
             HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode);
         let header_status_visible = self.settings.summary().ui_header_status_visible;
-        let panel_multi_open = self.settings.summary().ui_panel_multi_open;
         vec![
             NyaMenuItem::submenu(t!("menu.theme"), self.title_theme_menu_items(cx))
                 .icon("icons/menu/palette.svg"),
@@ -205,11 +207,8 @@ impl NyaTermApp {
                 ),
             )
             .icon("icons/menu/info.svg"),
-            NyaMenuItem::submenu(
-                t!("menu.panels"),
-                self.title_panels_menu_items(panel_multi_open, cx),
-            )
-            .icon("icons/menu/sidebar.svg"),
+            NyaMenuItem::submenu(t!("menu.panels"), self.title_panels_menu_items(cx))
+                .icon("icons/menu/sidebar.svg"),
             NyaMenuItem::separator(),
             NyaMenuItem::action(t!("menu.zoomIn"))
                 .icon("icons/menu/zoom-in.svg")
@@ -405,44 +404,93 @@ impl NyaTermApp {
         items
     }
 
-    fn title_panels_menu_items(
-        &self,
-        panel_multi_open: bool,
-        cx: &mut Context<Self>,
-    ) -> Vec<NyaMenuItem> {
+    fn title_panels_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
+        let floating = self.shell.panel_open_mode().is_floating();
+        let multi_open = self.shell.panel_multi_open();
         vec![
-            NyaMenuItem::action(t!("settings.panelMultiOpen"))
-                .checked(panel_multi_open)
+            NyaMenuItem::action(t!("panel.floatingMode"))
+                .checked(floating)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_panel_open_mode(
+                        if floating {
+                            PanelOpenMode::Docked
+                        } else {
+                            PanelOpenMode::Floating
+                        },
+                        cx,
+                    );
+                })),
+            NyaMenuItem::action(t!("panel.multiOpen"))
+                .checked(multi_open)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.toggle_panel_multi_open(cx);
                 })),
             NyaMenuItem::separator(),
-            NyaMenuItem::action(t!("settings.showRemoteStats"))
-                .checked(self.settings.summary().ui_show_remote_stats)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_remote_stats_panel(cx);
-                })),
-            NyaMenuItem::action(t!("settings.showGpuMonitor"))
-                .checked(self.settings.summary().ui_show_gpu_monitor)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_gpu_monitor_panel(cx);
-                })),
-            NyaMenuItem::action(t!("settings.showAscendNpuMonitor"))
-                .checked(self.settings.summary().ui_show_ascend_npu_monitor)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_ascend_npu_monitor_panel(cx);
-                })),
-            NyaMenuItem::action(t!("settings.showProcessManager"))
-                .checked(self.settings.summary().ui_show_process_manager)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_process_manager_panel(cx);
-                })),
-            NyaMenuItem::action(t!("settings.showDockerManager"))
-                .checked(self.settings.summary().ui_show_docker_manager)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.toggle_docker_manager_panel(cx);
+            NyaMenuItem::submenu(
+                t!("activityBar.leftSide"),
+                self.title_side_panel_menu_items(PanelSide::Left, cx),
+            ),
+            NyaMenuItem::submenu(
+                t!("activityBar.rightSide"),
+                self.title_side_panel_menu_items(PanelSide::Right, cx),
+            ),
+            NyaMenuItem::separator(),
+            NyaMenuItem::action(t!("activityBar.resetLayout"))
+                .danger()
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.confirm_reset_activity_bar_layout(window, cx);
                 })),
         ]
+    }
+
+    fn title_side_panel_menu_items(
+        &self,
+        side: PanelSide,
+        cx: &mut Context<Self>,
+    ) -> Vec<NyaMenuItem> {
+        let zones = match side {
+            PanelSide::Left => [ActivityBarZone::LeftTop, ActivityBarZone::LeftBottom],
+            PanelSide::Right => [ActivityBarZone::RightTop, ActivityBarZone::RightBottom],
+        };
+        let entries = zones
+            .into_iter()
+            .flat_map(|zone| self.shell.activity_bar_layout().zone(zone))
+            .filter_map(|id| ActivityBarEntry::from_persistence_id(id))
+            .filter(|entry| self.activity_entry_visible(*entry))
+            .filter(|entry| match entry {
+                ActivityBarEntry::Panel(item) => !item.opens_settings(),
+                ActivityBarEntry::Recording => true,
+                ActivityBarEntry::QuickCommands
+                | ActivityBarEntry::CommandSend
+                | ActivityBarEntry::Lock => false,
+            })
+            .map(|entry| {
+                let id = entry.persistence_id().to_string();
+                let label = entry
+                    .i18n_key()
+                    .map(|key| t!(key).to_string())
+                    .unwrap_or_else(|| entry.label().to_string());
+                let visible = !self.shell.activity_bar_layout().is_hidden(&id);
+                (id, label, visible)
+            })
+            .collect::<Vec<_>>();
+        if entries.is_empty() {
+            return vec![NyaMenuItem::action(t!("activityBar.noPanels")).disabled(true)];
+        }
+        entries
+            .into_iter()
+            .map(|(id, label, visible)| {
+                NyaMenuItem::action(label)
+                    .checked(visible)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if visible {
+                            this.hide_activity_entry(id.clone(), cx);
+                        } else {
+                            this.show_activity_entry(id.clone(), cx);
+                        }
+                    }))
+            })
+            .collect()
     }
 
     fn title_terminal_display_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
@@ -643,5 +691,48 @@ mod tests {
             vec!["Show Padding", "Line Numbers", "Show Timestamps"]
         );
         assert!(submenu.iter().all(|item| !item.test_presentation().4));
+    }
+
+    #[test]
+    fn panels_submenu_exposes_independent_modes_and_dynamic_sides() {
+        let mut cx = TestAppContext::single();
+        let app = menu_app(&mut cx);
+        let items = cx.update_entity(&app, |app, cx| {
+            app.title_menu_items_for_test(TitleMenu::View, cx)
+        });
+        let panels = items
+            .iter()
+            .find(|item| item.test_label() == "Panels")
+            .expect("panels submenu");
+        let submenu = panels.children().expect("panels submenu children");
+        let labels = submenu
+            .iter()
+            .map(NyaMenuItem::test_label)
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"Floating Panels"));
+        assert!(labels.contains(&"Multi Open"));
+        assert!(labels.contains(&"Left"));
+        assert!(labels.contains(&"Right"));
+        assert!(labels.contains(&"Reset Activity Bar Layout"));
+        let floating = submenu
+            .iter()
+            .find(|item| item.test_label() == "Floating Panels")
+            .expect("floating entry");
+        let multi = submenu
+            .iter()
+            .find(|item| item.test_label() == "Multi Open")
+            .expect("multi-open entry");
+        assert!(!floating.test_presentation().4);
+        assert!(!multi.test_presentation().4);
+
+        let left = submenu
+            .iter()
+            .find(|item| item.test_label() == "Left")
+            .and_then(NyaMenuItem::children)
+            .expect("left panel submenu");
+        assert!(left.iter().any(|item| item.test_label() == "Files"));
+        assert!(!left.iter().any(|item| item.test_label() == "Notes"));
+        assert!(left.iter().all(|item| item.test_presentation().4));
     }
 }

@@ -121,7 +121,9 @@ pub(in crate::features) struct UiLayoutSettingsUpdate {
     pub activity_bar_right_top: Vec<String>,
     pub activity_bar_right_bottom: Vec<String>,
     pub activity_bar_show_labels: bool,
+    pub activity_bar_hidden_items: Vec<String>,
     pub panel_multi_open: bool,
+    pub panel_open_mode: String,
     pub left_open_panels: Vec<String>,
     pub right_open_panels: Vec<String>,
     pub panel_stack_sizes: HashMap<String, u32>,
@@ -874,7 +876,10 @@ impl SettingsFeatureState {
         self.summary.ui_activity_bar_right_top = update.activity_bar_right_top;
         self.summary.ui_activity_bar_right_bottom = update.activity_bar_right_bottom;
         self.summary.ui_activity_bar_show_labels = update.activity_bar_show_labels;
+        self.summary.ui_activity_bar_hidden_items = update.activity_bar_hidden_items;
         self.summary.ui_panel_multi_open = update.panel_multi_open;
+        self.summary.ui_panel_open_mode =
+            nyaterm_core::normalize_panel_open_mode(&update.panel_open_mode);
         self.summary.ui_left_open_panels = update.left_open_panels;
         self.summary.ui_right_open_panels = update.right_open_panels;
         self.summary.ui_panel_stack_sizes = update.panel_stack_sizes;
@@ -1870,7 +1875,9 @@ mod tests {
             activity_bar_right_top: vec!["sftp".to_string()],
             activity_bar_right_bottom: vec!["ai".to_string()],
             activity_bar_show_labels: true,
+            activity_bar_hidden_items: vec!["aiAssistant".to_string()],
             panel_multi_open: true,
+            panel_open_mode: "floating".to_string(),
             left_open_panels: vec!["connections".to_string()],
             right_open_panels: vec!["sftp".to_string()],
             panel_stack_sizes: HashMap::from([("left:connections".to_string(), 600)]),
@@ -1888,6 +1895,9 @@ mod tests {
         assert_eq!(summary.ui_active_left_panel.as_deref(), Some("connections"));
         assert!(summary.ui_right_panel_collapsed);
         assert_eq!(summary.ui_activity_bar_right_bottom, ["ai"]);
+        assert_eq!(summary.ui_activity_bar_hidden_items, ["aiAssistant"]);
+        assert_eq!(summary.ui_panel_open_mode, "floating");
+        assert!(summary.ui_panel_multi_open);
         assert_eq!(summary.ui_panel_stack_sizes["left:connections"], 600);
     }
 

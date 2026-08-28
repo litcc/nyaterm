@@ -54,6 +54,13 @@ impl NyaTermApp {
             return;
         }
 
+        if self.shell.panel_is_floating()
+            && let Some(side) = self.panel_side_for_item(item)
+        {
+            self.toggle_floating_panel(item, side, cx);
+            return;
+        }
+
         if self.shell.panels.multi_open && self.panel_side_for_item(item).is_some() {
             self.open_or_toggle_panel(item, cx);
             if item == NavItem::Transfers
@@ -119,6 +126,12 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn ensure_panel_open(&mut self, item: NavItem) {
+        if self.shell.panel_is_floating()
+            && let Some(side) = self.panel_side_for_item(item)
+        {
+            self.shell.panels.set_floating_panel(side, Some(item));
+            return;
+        }
         if self.shell.panels.multi_open && self.panel_side_for_item(item).is_some() {
             self.ensure_panel_in_stack(item);
             return;

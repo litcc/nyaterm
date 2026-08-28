@@ -212,7 +212,9 @@ impl NyaTermApp {
             activity_bar_right_top: self.shell.chrome.activity_bar_layout.right_top.clone(),
             activity_bar_right_bottom: self.shell.chrome.activity_bar_layout.right_bottom.clone(),
             activity_bar_show_labels: self.shell.chrome.activity_bar_layout.show_labels,
+            activity_bar_hidden_items: self.shell.chrome.activity_bar_layout.hidden_items.clone(),
             panel_multi_open: self.shell.panels.multi_open,
+            panel_open_mode: self.shell.panels.open_mode.as_setting().to_string(),
             left_open_panels: self.shell.panels.left_open.clone(),
             right_open_panels: self.shell.panels.right_open.clone(),
             panel_stack_sizes: self

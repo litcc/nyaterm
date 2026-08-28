@@ -1,6 +1,53 @@
 use gpui::Pixels;
 use std::hash::Hash;
 
+/// Whether side panels are docked in the workspace flow or float above it.
+/// Docked single/multi-open behavior remains an independent preference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PanelOpenMode {
+    #[default]
+    Docked,
+    Floating,
+}
+
+impl PanelOpenMode {
+    pub(crate) fn from_setting(value: &str) -> Self {
+        if value.trim().eq_ignore_ascii_case("floating") {
+            Self::Floating
+        } else {
+            Self::Docked
+        }
+    }
+
+    pub(crate) fn as_setting(self) -> &'static str {
+        match self {
+            Self::Docked => "docked",
+            Self::Floating => "floating",
+        }
+    }
+
+    pub(crate) fn is_floating(self) -> bool {
+        self == Self::Floating
+    }
+}
+
+/// The activity-bar element a right-click context menu was opened against.
+///
+/// A menu opened on an entry can hide/move/reset that entry; a menu opened on
+/// empty rail space (`Bar`) offers only rail-wide actions (show hidden, labels,
+/// reset).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ActivityBarContextTarget {
+    Entry {
+        entry_id: String,
+        zone: ActivityBarZone,
+        index: usize,
+    },
+    Bar {
+        side: PanelSide,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum NavItem {
     Workspace,
@@ -298,6 +345,10 @@ pub(crate) struct ActivityBarLayoutState {
     pub(crate) left_bottom: Vec<String>,
     pub(crate) right_top: Vec<String>,
     pub(crate) right_bottom: Vec<String>,
+    /// Entry ids the user has hidden from the rail. Hidden entries keep their
+    /// zone position so unhiding restores their place, but they are skipped
+    /// when the rail is rendered. Mirrors Tauri `ui.activity_bar_layout.hidden_items`.
+    pub(crate) hidden_items: Vec<String>,
     pub(crate) show_labels: bool,
 }
 
@@ -306,6 +357,9 @@ impl Default for ActivityBarLayoutState {
         Self {
             left_top: vec![
                 "fileExplorer".to_string(),
+                // Keep the main/Tauri schema position even though GPUI does not
+                // yet expose a Notes panel. Unknown entries remain unavailable.
+                "notes".to_string(),
                 "network".to_string(),
                 "securityAuth".to_string(),
             ],
@@ -327,6 +381,7 @@ impl Default for ActivityBarLayoutState {
                 "recording".to_string(),
                 "lock".to_string(),
             ],
+            hidden_items: Vec::new(),
             show_labels: false,
         }
     }
@@ -375,18 +430,129 @@ impl ActivityBarLayoutState {
         zones
             .into_iter()
             .flat_map(|zone| self.zone(zone))
+            .filter(|id| !self.is_hidden(id))
             .find_map(|id| NavItem::from_persistence_id(id).filter(|item| !item.opens_settings()))
+    }
+
+    pub(crate) fn is_hidden(&self, entry_id: &str) -> bool {
+        self.hidden_items.iter().any(|id| id == entry_id)
+    }
+
+    /// Hide `entry_id` from the rail. Returns whether the hidden set changed.
+    pub(crate) fn hide_entry(&mut self, entry_id: &str) -> bool {
+        if self.find_entry(entry_id).is_none() || self.is_hidden(entry_id) {
+            return false;
+        }
+        self.hidden_items.push(entry_id.to_string());
+        true
+    }
+
+    /// Unhide `entry_id`. Returns whether the hidden set changed.
+    pub(crate) fn show_entry(&mut self, entry_id: &str) -> bool {
+        let before = self.hidden_items.len();
+        self.hidden_items.retain(|id| id != entry_id);
+        self.hidden_items.len() != before
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_hidden_entries(&self) -> bool {
+        !self.hidden_items.is_empty()
+    }
+
+    /// Hidden entry ids in rail order, so the "show hidden" menu is stable.
+    #[cfg(test)]
+    pub(crate) fn hidden_entries_ordered(&self) -> Vec<String> {
+        let mut ordered = Vec::new();
+        for zone in ActivityBarZone::all() {
+            for id in self.zone(zone) {
+                if self.is_hidden(id) {
+                    ordered.push(id.clone());
+                }
+            }
+        }
+        ordered
+    }
+
+    /// Hidden entry ids on one side in rail order.
+    pub(crate) fn hidden_entries_on_side(&self, side: PanelSide) -> Vec<String> {
+        let zones = match side {
+            PanelSide::Left => [ActivityBarZone::LeftTop, ActivityBarZone::LeftBottom],
+            PanelSide::Right => [ActivityBarZone::RightTop, ActivityBarZone::RightBottom],
+        };
+        zones
+            .into_iter()
+            .flat_map(|zone| self.zone(zone))
+            .filter(|id| self.is_hidden(id))
+            .cloned()
+            .collect()
+    }
+
+    /// Merge a reorder of visible ids back into their existing visible slots.
+    /// Hidden or unavailable ids never move.
+    pub(crate) fn merge_visible_reorder<F>(
+        &mut self,
+        zone: ActivityBarZone,
+        ordered_visible_ids: &[String],
+        mut is_visible: F,
+    ) where
+        F: FnMut(&str) -> bool,
+    {
+        let ordered = ordered_visible_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::VecDeque<_>>();
+        let ordered_set = ordered_visible_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        let mut replacements = ordered;
+        let current = self.zone(zone).to_vec();
+        let mut merged = current
+            .into_iter()
+            .map(|id| {
+                if ordered_set.contains(id.as_str()) && is_visible(&id) {
+                    replacements.pop_front().unwrap_or(id)
+                } else {
+                    id
+                }
+            })
+            .collect::<Vec<_>>();
+        for id in replacements {
+            if !merged.contains(&id) {
+                merged.push(id);
+            }
+        }
+        *self.zone_mut(zone) = merged;
+    }
+
+    /// Reset the rail to the shipped default layout, including the hidden set.
+    pub(crate) fn reset_to_default(&mut self) {
+        *self = Self::default();
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ActivityBarContextMenuState {
-    pub(crate) entry_id: String,
-    pub(crate) zone: ActivityBarZone,
-    pub(crate) index: usize,
+    pub(crate) target: ActivityBarContextTarget,
     pub(crate) x: Pixels,
     pub(crate) y: Pixels,
     pub(crate) move_submenu_open: bool,
+}
+
+impl ActivityBarContextMenuState {
+    pub(crate) fn entry_id(&self) -> Option<&str> {
+        match &self.target {
+            ActivityBarContextTarget::Entry { entry_id, .. } => Some(entry_id.as_str()),
+            ActivityBarContextTarget::Bar { .. } => None,
+        }
+    }
+
+    pub(crate) fn entry_zone(&self) -> Option<ActivityBarZone> {
+        match &self.target {
+            ActivityBarContextTarget::Entry { zone, .. } => Some(*zone),
+            ActivityBarContextTarget::Bar { .. } => None,
+        }
+    }
 }
 
 /// Top menubar dropdown (Tauri Header File/View/Terminal/Help).
@@ -443,14 +609,15 @@ pub(crate) fn panel_collapsed_from_persistence(
 #[cfg(test)]
 mod tests {
     use super::{
-        ActivityBarEntry, ActivityBarLayoutState, NavItem, PanelSide,
-        panel_collapsed_from_persistence,
+        ActivityBarEntry, ActivityBarLayoutState, ActivityBarZone, NavItem, PanelOpenMode,
+        PanelSide, panel_collapsed_from_persistence,
     };
 
     #[test]
     fn retired_migration_panel_is_ignored_when_loading_persisted_layouts() {
         assert_eq!(NavItem::from_persistence_id("migration"), None);
         assert_eq!(ActivityBarEntry::from_persistence_id("migration"), None);
+        assert_eq!(ActivityBarEntry::from_persistence_id("notes"), None);
     }
 
     #[test]
@@ -524,5 +691,97 @@ mod tests {
         assert!(!panel_collapsed_from_persistence(false, true, false, true));
         assert!(panel_collapsed_from_persistence(false, true, false, false));
         assert!(panel_collapsed_from_persistence(true, true, true, true));
+    }
+
+    #[test]
+    fn panel_open_mode_parses_tauri_docked_and_floating_values() {
+        assert_eq!(PanelOpenMode::from_setting("docked"), PanelOpenMode::Docked);
+        assert_eq!(PanelOpenMode::from_setting("multi"), PanelOpenMode::Docked);
+        assert_eq!(
+            PanelOpenMode::from_setting("floating"),
+            PanelOpenMode::Floating
+        );
+        assert_eq!(
+            PanelOpenMode::from_setting("nonsense"),
+            PanelOpenMode::Docked
+        );
+        assert_eq!(PanelOpenMode::Docked.as_setting(), "docked");
+        assert_eq!(PanelOpenMode::Floating.as_setting(), "floating");
+        assert!(!PanelOpenMode::Docked.is_floating());
+        assert!(PanelOpenMode::Floating.is_floating());
+    }
+
+    #[test]
+    fn hiding_an_entry_keeps_its_zone_slot_and_skips_it_from_first_panel() {
+        let mut layout = ActivityBarLayoutState::default();
+        assert!(!layout.is_hidden("fileExplorer"));
+        assert_eq!(
+            layout.first_panel_on_side(PanelSide::Left),
+            Some(NavItem::Transfers)
+        );
+
+        assert!(layout.hide_entry("fileExplorer"));
+        assert!(layout.is_hidden("fileExplorer"));
+        // Slot preserved in the zone even while hidden.
+        assert!(layout.left_top.iter().any(|id| id == "fileExplorer"));
+        // Hiding is idempotent.
+        assert!(!layout.hide_entry("fileExplorer"));
+        // First visible panel now skips the hidden entry.
+        assert_eq!(
+            layout.first_panel_on_side(PanelSide::Left),
+            Some(NavItem::Tunnels)
+        );
+        assert_eq!(
+            layout.hidden_entries_ordered(),
+            vec!["fileExplorer".to_string()]
+        );
+
+        // Unknown ids cannot be hidden.
+        assert!(!layout.hide_entry("does-not-exist"));
+
+        assert!(layout.show_entry("fileExplorer"));
+        assert!(!layout.is_hidden("fileExplorer"));
+        assert!(!layout.show_entry("fileExplorer"));
+        assert_eq!(
+            layout.first_panel_on_side(PanelSide::Left),
+            Some(NavItem::Transfers)
+        );
+    }
+
+    #[test]
+    fn visible_reorder_preserves_hidden_and_unavailable_slots() {
+        let mut layout = ActivityBarLayoutState {
+            left_top: ["a", "hidden", "unavailable", "c", "d"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            ..ActivityBarLayoutState::default()
+        };
+        layout.hidden_items = vec!["hidden".to_string()];
+        layout.merge_visible_reorder(
+            ActivityBarZone::LeftTop,
+            &["d".to_string(), "a".to_string(), "c".to_string()],
+            |id| id != "hidden" && id != "unavailable",
+        );
+        assert_eq!(
+            layout.left_top,
+            ["d", "hidden", "unavailable", "a", "c"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn reset_restores_default_layout_including_hidden_set() {
+        let mut layout = ActivityBarLayoutState::default();
+        layout.hide_entry("aiAssistant");
+        layout.left_top.retain(|id| id != "network");
+        layout.right_bottom.push("network".to_string());
+        assert!(layout.has_hidden_entries());
+
+        layout.reset_to_default();
+        assert_eq!(layout, ActivityBarLayoutState::default());
+        assert!(!layout.has_hidden_entries());
     }
 }

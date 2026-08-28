@@ -123,6 +123,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn toggle_remote_stats_panel(&mut self, cx: &mut Context<Self>) {
         self.settings.toggle_remote_stats_panel();
+        self.reconcile_activity_panel_availability();
         self.save_terminal_settings(cx);
     }
 
@@ -137,6 +138,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn toggle_gpu_monitor_panel(&mut self, cx: &mut Context<Self>) {
         self.settings.toggle_gpu_monitor_panel();
+        self.reconcile_activity_panel_availability();
         self.save_terminal_settings(cx);
     }
 
@@ -151,6 +153,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn toggle_ascend_npu_monitor_panel(&mut self, cx: &mut Context<Self>) {
         self.settings.toggle_ascend_npu_monitor_panel();
+        self.reconcile_activity_panel_availability();
         self.save_terminal_settings(cx);
     }
 
@@ -165,6 +168,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn toggle_process_manager_panel(&mut self, cx: &mut Context<Self>) {
         self.settings.toggle_process_manager_panel();
+        self.reconcile_activity_panel_availability();
         self.save_terminal_settings(cx);
     }
 
@@ -179,6 +183,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn toggle_docker_manager_panel(&mut self, cx: &mut Context<Self>) {
         self.settings.toggle_docker_manager_panel();
+        self.reconcile_activity_panel_availability();
         self.save_terminal_settings(cx);
     }
 

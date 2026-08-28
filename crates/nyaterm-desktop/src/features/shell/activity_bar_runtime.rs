@@ -3,11 +3,12 @@ use gpui::{
     rgb, rgba,
 };
 use nyaterm_core::truncate_preview;
+use rust_i18n::t;
 
 use crate::features::{NyaTermApp, runtime_jobs::ActivitySide, view_widgets::mono_icon};
 use crate::models::{
-    ActivityBarContextMenuState, ActivityBarEntry, ActivityBarLayoutState, ActivityBarZone,
-    BottomPanelMode, MainMode, NavItem, PanelSide,
+    ActivityBarContextMenuState, ActivityBarContextTarget, ActivityBarEntry,
+    ActivityBarLayoutState, ActivityBarZone, BottomPanelMode, MainMode, NavItem, PanelSide,
 };
 
 #[derive(Clone, Debug)]
@@ -71,7 +72,7 @@ impl NyaTermApp {
         };
         zones
             .into_iter()
-            .any(|zone| !self.shell.chrome.activity_bar_layout.zone(zone).is_empty())
+            .any(|zone| !self.activity_entries_for_zone(zone).is_empty())
     }
 
     pub(in crate::features) fn activity_entries_for_zone(
@@ -83,12 +84,13 @@ impl NyaTermApp {
             .activity_bar_layout
             .zone(zone)
             .iter()
+            .filter(|id| !self.shell.chrome.activity_bar_layout.is_hidden(id))
             .filter_map(|id| ActivityBarEntry::from_persistence_id(id))
             .filter(|entry| self.activity_entry_visible(*entry))
             .collect()
     }
 
-    fn activity_entry_visible(&self, entry: ActivityBarEntry) -> bool {
+    pub(in crate::features) fn activity_entry_visible(&self, entry: ActivityBarEntry) -> bool {
         let summary = self.settings.summary();
         match entry {
             ActivityBarEntry::Panel(NavItem::Stats) => summary.ui_show_remote_stats,
@@ -102,12 +104,31 @@ impl NyaTermApp {
         }
     }
 
+    pub(in crate::features) fn reconcile_activity_panel_availability(&mut self) {
+        for item in [
+            NavItem::Stats,
+            NavItem::GpuMonitor,
+            NavItem::AscendNpuMonitor,
+            NavItem::Processes,
+            NavItem::Docker,
+        ] {
+            let entry = ActivityBarEntry::Panel(item);
+            if self.activity_entry_visible(entry) {
+                continue;
+            }
+            if let Some(side) = self.panel_side_for_item(item) {
+                self.clear_activity_entry_from_side(item.persistence_id(), side);
+            }
+        }
+    }
+
     pub(in crate::features) fn apply_activity_layout_from_settings(&mut self) {
         self.shell.chrome.activity_bar_layout = ActivityBarLayoutState {
             left_top: self.settings.summary().ui_activity_bar_left_top.clone(),
             left_bottom: self.settings.summary().ui_activity_bar_left_bottom.clone(),
             right_top: self.settings.summary().ui_activity_bar_right_top.clone(),
             right_bottom: self.settings.summary().ui_activity_bar_right_bottom.clone(),
+            hidden_items: self.settings.summary().ui_activity_bar_hidden_items.clone(),
             show_labels: self.settings.summary().ui_activity_bar_show_labels,
         };
         self.normalize_activity_bar_layout();
@@ -117,7 +138,7 @@ impl NyaTermApp {
         let mut seen = std::collections::HashSet::new();
         for zone in ActivityBarZone::all() {
             let mut next = Vec::new();
-            for id in self
+            for raw_id in self
                 .shell
                 .chrome
                 .activity_bar_layout
@@ -125,6 +146,11 @@ impl NyaTermApp {
                 .iter()
                 .cloned()
             {
+                let id = if raw_id == "keyManagement" {
+                    "securityAuth".to_string()
+                } else {
+                    raw_id
+                };
                 if id == "fileTransfer" {
                     continue;
                 }
@@ -134,25 +160,56 @@ impl NyaTermApp {
             }
             *self.shell.chrome.activity_bar_layout.zone_mut(zone) = next;
         }
-        // Keep intentionally empty zones empty. Tauri only restores missing entries;
-        // it does not repopulate a zone after the user moves its last item away.
+        // Restore newly introduced schema ids beside their nearest default
+        // anchor without disturbing the user's existing custom order or side.
         let defaults = ActivityBarLayoutState::default();
         for zone in ActivityBarZone::all() {
-            let missing = defaults
-                .zone(zone)
-                .iter()
-                .filter(|id| !seen.contains(*id))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !missing.is_empty() {
+            for (default_index, id) in defaults.zone(zone).iter().enumerate() {
+                if seen.contains(id) {
+                    continue;
+                }
+                let target = self.shell.chrome.activity_bar_layout.zone(zone);
+                let insert_at = defaults.zone(zone)[..default_index]
+                    .iter()
+                    .rev()
+                    .find_map(|anchor| {
+                        target
+                            .iter()
+                            .position(|entry| entry == anchor)
+                            .map(|i| i + 1)
+                    })
+                    .or_else(|| {
+                        defaults.zone(zone)[default_index + 1..]
+                            .iter()
+                            .find_map(|anchor| target.iter().position(|entry| entry == anchor))
+                    })
+                    .unwrap_or(target.len());
                 self.shell
                     .chrome
                     .activity_bar_layout
                     .zone_mut(zone)
-                    .extend(missing);
-                seen.extend(defaults.zone(zone).iter().cloned());
+                    .insert(insert_at, id.clone());
+                seen.insert(id.clone());
             }
         }
+        // Hidden state is independent of zone placement, but retired, missing,
+        // aliased and duplicate ids must not accumulate across upgrades.
+        let mut hidden_seen = std::collections::HashSet::new();
+        self.shell.chrome.activity_bar_layout.hidden_items = self
+            .shell
+            .chrome
+            .activity_bar_layout
+            .hidden_items
+            .drain(..)
+            .map(|id| {
+                if id == "keyManagement" {
+                    "securityAuth".to_string()
+                } else {
+                    id
+                }
+            })
+            .filter(|id| seen.contains(id) && hidden_seen.insert(id.clone()))
+            .collect();
     }
 
     pub(in crate::features) fn toggle_activity_bar_labels(&mut self, cx: &mut Context<Self>) {
@@ -177,14 +234,112 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.shell.chrome.activity_bar_context_menu = Some(ActivityBarContextMenuState {
-            entry_id,
-            zone,
-            index,
+            target: ActivityBarContextTarget::Entry {
+                entry_id,
+                zone,
+                index,
+            },
             x: event.position.x,
             y: event.position.y,
             move_submenu_open: false,
         });
         cx.notify();
+    }
+
+    /// Open the rail-level context menu (right-click on empty activity-bar space).
+    pub(in crate::features) fn open_activity_bar_side_context_menu(
+        &mut self,
+        side: PanelSide,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.shell.chrome.activity_bar_context_menu = Some(ActivityBarContextMenuState {
+            target: ActivityBarContextTarget::Bar { side },
+            x: event.position.x,
+            y: event.position.y,
+            move_submenu_open: false,
+        });
+        cx.notify();
+    }
+
+    /// Hide an activity-bar entry from the rail, clearing any open panel it owns.
+    pub(in crate::features) fn hide_activity_entry(
+        &mut self,
+        entry_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let side = self
+            .shell
+            .chrome
+            .activity_bar_layout
+            .side_for_entry(&entry_id);
+        if !self.shell.chrome.activity_bar_layout.hide_entry(&entry_id) {
+            self.shell.chrome.activity_bar_context_menu = None;
+            cx.notify();
+            return;
+        }
+        if let Some(side) = side {
+            self.clear_activity_entry_from_side(&entry_id, side);
+        }
+        self.shell.chrome.activity_bar_context_menu = None;
+        self.shell.set_status(format!("{entry_id} hidden"));
+        self.persist_ui_layout();
+        cx.notify();
+    }
+
+    /// Unhide a previously hidden activity-bar entry.
+    pub(in crate::features) fn show_activity_entry(
+        &mut self,
+        entry_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.shell.chrome.activity_bar_layout.show_entry(&entry_id) {
+            self.shell.chrome.activity_bar_context_menu = None;
+            cx.notify();
+            return;
+        }
+        self.shell.chrome.activity_bar_context_menu = None;
+        self.shell.set_status(format!("{entry_id} shown"));
+        self.persist_ui_layout();
+        cx.notify();
+    }
+
+    /// Reset the activity bar rail to its shipped default layout.
+    pub(in crate::features) fn reset_activity_bar_layout(&mut self, cx: &mut Context<Self>) {
+        self.shell.chrome.activity_bar_layout.reset_to_default();
+        self.normalize_activity_bar_layout();
+        // Any open panel may reference an entry that just moved sides; collapse
+        // both sides to a clean state and let the user reopen from the rail.
+        self.shell.panels.left_open.clear();
+        self.shell.panels.right_open.clear();
+        self.shell.panels.active_left = None;
+        self.shell.panels.active_right = None;
+        self.shell.panels.clear_floating();
+        self.shell.panels.left_collapsed = true;
+        self.shell.panels.right_collapsed = true;
+        self.shell.chrome.activity_bar_context_menu = None;
+        self.shell.set_status("activity bar reset".to_string());
+        self.persist_ui_layout();
+        cx.notify();
+    }
+
+    /// Prompt for confirmation before resetting the activity bar layout.
+    pub(in crate::features) fn confirm_reset_activity_bar_layout(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = t!("activityBar.resetLayoutTitle").to_string();
+        let message = t!("activityBar.resetLayoutDescription").to_string();
+        let action = t!("activityBar.resetLayout").to_string();
+        self.open_confirm_dialog(
+            (title, message, action, true, |this, _window, cx| {
+                this.reset_activity_bar_layout(cx);
+                true
+            }),
+            window,
+            cx,
+        );
     }
 
     pub(in crate::features) fn open_activity_bar_move_submenu(&mut self, cx: &mut Context<Self>) {
@@ -217,61 +372,87 @@ impl NyaTermApp {
             return;
         };
 
-        // Same entry dropped on itself — no-op.
         if source_zone == target_zone {
-            let len = self
-                .shell
-                .chrome
-                .activity_bar_layout
-                .zone(target_zone)
-                .len();
-            let mut insert_at = target_index.unwrap_or(len);
-            if source_index < insert_at {
-                insert_at = insert_at.saturating_sub(1);
-            }
-            insert_at = insert_at.min(len.saturating_sub(1));
-            if insert_at == source_index {
+            let mut visible_ids = self
+                .activity_entries_for_zone(source_zone)
+                .into_iter()
+                .map(|entry| entry.persistence_id().to_string())
+                .collect::<Vec<_>>();
+            let Some(source_visible_index) = visible_ids.iter().position(|id| id == &entry_id)
+            else {
                 self.shell.chrome.activity_bar_context_menu = None;
                 cx.notify();
                 return;
+            };
+            let moved = visible_ids.remove(source_visible_index);
+            let mut insert_at = target_index.unwrap_or(visible_ids.len());
+            if source_visible_index < insert_at {
+                insert_at = insert_at.saturating_sub(1);
             }
-        }
-
-        // Remove from source.
-        let removed = self
-            .shell
-            .chrome
-            .activity_bar_layout
-            .zone_mut(source_zone)
-            .remove(source_index);
-        let mut insert_at = target_index.unwrap_or_else(|| {
+            insert_at = insert_at.min(visible_ids.len());
+            visible_ids.insert(insert_at, moved);
+            let visible_set = visible_ids
+                .iter()
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            self.shell.chrome.activity_bar_layout.merge_visible_reorder(
+                source_zone,
+                &visible_ids,
+                |id| visible_set.contains(id),
+            );
+        } else {
+            let removed = self
+                .shell
+                .chrome
+                .activity_bar_layout
+                .zone_mut(source_zone)
+                .remove(source_index);
+            let visible_target_ids = self
+                .activity_entries_for_zone(target_zone)
+                .into_iter()
+                .map(|entry| entry.persistence_id().to_string())
+                .collect::<Vec<_>>();
+            let insert_at = target_index
+                .and_then(|index| visible_target_ids.get(index))
+                .and_then(|target_id| {
+                    self.shell
+                        .chrome
+                        .activity_bar_layout
+                        .zone(target_zone)
+                        .iter()
+                        .position(|id| id == target_id)
+                })
+                .unwrap_or_else(|| {
+                    self.shell
+                        .chrome
+                        .activity_bar_layout
+                        .zone(target_zone)
+                        .len()
+                });
             self.shell
                 .chrome
                 .activity_bar_layout
-                .zone(target_zone)
-                .len()
-        });
-        if source_zone == target_zone && source_index < insert_at {
-            insert_at = insert_at.saturating_sub(1);
+                .zone_mut(target_zone)
+                .insert(insert_at, removed);
         }
-        insert_at = insert_at.min(
-            self.shell
-                .chrome
-                .activity_bar_layout
-                .zone(target_zone)
-                .len(),
-        );
-        self.shell
-            .chrome
-            .activity_bar_layout
-            .zone_mut(target_zone)
-            .insert(insert_at, removed);
 
-        // Mirror Tauri: when an open panel moves across left/right, clear that side's open state.
+        // Moving an open panel across sides closes its docked source. A
+        // transient floating selection follows the item and replaces any panel
+        // already floating on the destination side.
         let source_side = Self::activity_zone_side(source_zone);
         let target_side = Self::activity_zone_side(target_zone);
         if source_side != target_side {
+            let moved_floating = self
+                .shell
+                .panels
+                .floating_panel(source_side)
+                .filter(|item| item.persistence_id() == entry_id);
             self.clear_activity_entry_from_side(&entry_id, source_side);
+            if let Some(item) = moved_floating {
+                self.shell
+                    .panels
+                    .set_floating_panel(target_side, Some(item));
+            }
         }
 
         self.shell.chrome.activity_bar_context_menu = None;
@@ -292,6 +473,14 @@ impl NyaTermApp {
     }
 
     fn clear_activity_entry_from_side(&mut self, entry_id: &str, side: PanelSide) {
+        if self
+            .shell
+            .panels
+            .floating_panel(side)
+            .is_some_and(|item| item.persistence_id() == entry_id)
+        {
+            self.shell.panels.set_floating_panel(side, None);
+        }
         match side {
             PanelSide::Left => {
                 self.shell.panels.left_open.retain(|id| id != entry_id);
@@ -337,19 +526,25 @@ impl NyaTermApp {
             ActivityBarEntry::Panel(NavItem::Settings) => self.open_page(NavItem::Settings, cx),
             ActivityBarEntry::Panel(item) => {
                 let side = self.panel_side_for_item(item);
-                self.open_panel(item, cx);
-                if !cfg!(target_os = "macos") {
-                    match side {
-                        Some(PanelSide::Left) if self.shell.viewport.size.0 < 1024. => {
-                            self.shell.panels.mobile_left_open = true;
-                        }
-                        Some(PanelSide::Right) if self.shell.viewport.size.0 < 768. => {
-                            self.shell.panels.mobile_right_open = true;
-                        }
-                        _ => {}
+                if self.shell.panel_is_floating() {
+                    if let Some(side) = side {
+                        self.toggle_floating_panel(item, side, cx);
                     }
+                } else {
+                    self.open_panel(item, cx);
+                    if !cfg!(target_os = "macos") {
+                        match side {
+                            Some(PanelSide::Left) if self.shell.viewport.size.0 < 1024. => {
+                                self.shell.panels.mobile_left_open = true;
+                            }
+                            Some(PanelSide::Right) if self.shell.viewport.size.0 < 768. => {
+                                self.shell.panels.mobile_right_open = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    cx.notify();
                 }
-                cx.notify();
             }
             ActivityBarEntry::QuickCommands => {
                 let mode = if self.shell.bottom_panel.mode == BottomPanelMode::QuickCommands {
@@ -370,20 +565,15 @@ impl NyaTermApp {
                 cx.notify();
             }
             ActivityBarEntry::Recording => {
-                let side = self.panel_side_for_item(NavItem::Recording);
-                self.open_panel(NavItem::Recording, cx);
-                if !cfg!(target_os = "macos") {
-                    match side {
-                        Some(PanelSide::Left) if self.shell.viewport.size.0 < 1024. => {
-                            self.shell.panels.mobile_left_open = true;
-                        }
-                        Some(PanelSide::Right) if self.shell.viewport.size.0 < 768. => {
-                            self.shell.panels.mobile_right_open = true;
-                        }
-                        _ => {}
+                let item = NavItem::Recording;
+                if let Some(side) = self.panel_side_for_item(item) {
+                    if self.shell.panel_is_floating() {
+                        self.toggle_floating_panel(item, side, cx);
+                    } else {
+                        self.open_panel(item, cx);
+                        cx.notify();
                     }
                 }
-                cx.notify();
             }
             ActivityBarEntry::Lock => self.lock_app(window, cx),
         }
@@ -413,6 +603,9 @@ impl NyaTermApp {
         let Some(side) = self.panel_side_for_item(item) else {
             return false;
         };
+        if self.shell.panel_is_floating() {
+            return self.shell.floating_panel(side) == Some(item);
+        }
         if self.shell.panels.multi_open {
             let id = item.persistence_id();
             self.side_open_panel_ids(side).iter().any(|open| open == id)
@@ -427,5 +620,192 @@ impl NyaTermApp {
                 PanelSide::Right => self.current_right_panel() == Some(item),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use gpui::{AppContext as _, TestAppContext};
+    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+    use crate::models::{NavItem, PanelOpenMode, PanelSide};
+
+    fn unique_test_dir() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "nyaterm-activity-bar-{}-{}",
+            std::process::id(),
+            uuid()
+        ))
+    }
+
+    fn test_app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+        let root = unique_test_dir();
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    #[test]
+    fn hiding_an_active_panel_clears_its_side_and_removes_it_from_the_rail() {
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            // Open the left file explorer, then hide it from the rail.
+            app.open_panel(NavItem::Transfers, cx);
+            assert_eq!(app.current_left_panel(), Some(NavItem::Transfers));
+
+            app.hide_activity_entry("fileExplorer".to_string(), cx);
+
+            assert!(app.shell.activity_bar_layout().is_hidden("fileExplorer"));
+            assert_eq!(app.shell.active_left_panel(), None);
+            assert!(app.current_left_panel().is_none());
+            // The hidden entry is no longer offered on the rail.
+            assert!(
+                !app.activity_side_has_items(crate::features::runtime_jobs::ActivitySide::Left)
+                    || app
+                        .shell
+                        .activity_bar_layout()
+                        .first_panel_on_side(PanelSide::Left)
+                        != Some(NavItem::Transfers)
+            );
+
+            // Showing it again restores it to the rail.
+            app.show_activity_entry("fileExplorer".to_string(), cx);
+            assert!(!app.shell.activity_bar_layout().is_hidden("fileExplorer"));
+        });
+    }
+
+    #[test]
+    fn floating_panels_are_transient_per_side_and_independent_from_multi_open() {
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.open_panel(NavItem::Transfers, cx);
+            app.set_panel_open_mode(PanelOpenMode::Floating, cx);
+            assert_eq!(app.shell.active_left_panel(), None);
+            assert_eq!(app.shell.floating_panel(PanelSide::Left), None);
+            assert!(!app.shell.panel_multi_open());
+
+            app.open_panel(NavItem::Transfers, cx);
+            app.open_panel(NavItem::Connections, cx);
+            assert_eq!(
+                app.shell.floating_panel(PanelSide::Left),
+                Some(NavItem::Transfers)
+            );
+            assert_eq!(
+                app.shell.floating_panel(PanelSide::Right),
+                Some(NavItem::Connections)
+            );
+
+            app.toggle_floating_panel(NavItem::Tunnels, PanelSide::Left, cx);
+            assert_eq!(
+                app.shell.floating_panel(PanelSide::Left),
+                Some(NavItem::Tunnels)
+            );
+            assert_eq!(
+                app.shell.floating_panel(PanelSide::Right),
+                Some(NavItem::Connections)
+            );
+
+            app.toggle_panel_multi_open(cx);
+            assert!(app.shell.panel_multi_open());
+            assert_eq!(
+                app.shell.floating_panel(PanelSide::Left),
+                Some(NavItem::Tunnels)
+            );
+
+            app.hide_activity_entry("network".to_string(), cx);
+            assert_eq!(app.shell.floating_panel(PanelSide::Left), None);
+            app.set_panel_open_mode(PanelOpenMode::Docked, cx);
+            assert_eq!(app.shell.floating_panel(PanelSide::Right), None);
+            assert!(app.shell.panel_multi_open());
+        });
+    }
+
+    #[test]
+    fn normalization_migrates_aliases_and_inserts_notes_at_its_anchor_without_a_button() {
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx);
+        cx.update_entity(&app, |app, _cx| {
+            app.shell.chrome.activity_bar_layout.left_top = vec![
+                "fileExplorer".to_string(),
+                "fileTransfer".to_string(),
+                "keyManagement".to_string(),
+                "network".to_string(),
+            ];
+            app.shell.chrome.activity_bar_layout.hidden_items = vec![
+                "keyManagement".to_string(),
+                "securityAuth".to_string(),
+                "fileTransfer".to_string(),
+            ];
+            app.normalize_activity_bar_layout();
+
+            let left = &app.shell.activity_bar_layout().left_top;
+            let files = left.iter().position(|id| id == "fileExplorer").unwrap();
+            assert_eq!(left.get(files + 1).map(String::as_str), Some("notes"));
+            assert!(!left.iter().any(|id| id == "fileTransfer"));
+            assert!(!left.iter().any(|id| id == "keyManagement"));
+            assert_eq!(
+                app.shell.activity_bar_layout().hidden_items,
+                vec!["securityAuth".to_string()]
+            );
+            assert!(
+                app.activity_entries_for_zone(crate::models::ActivityBarZone::LeftTop)
+                    .iter()
+                    .all(|entry| entry.persistence_id() != "notes")
+            );
+        });
+    }
+
+    #[test]
+    fn disabling_an_available_panel_closes_floating_state_without_hiding_its_slot() {
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            if !app.settings.summary().ui_show_gpu_monitor {
+                app.toggle_gpu_monitor_panel(cx);
+            }
+            app.set_panel_open_mode(PanelOpenMode::Floating, cx);
+            app.open_panel(NavItem::GpuMonitor, cx);
+            assert_eq!(
+                app.shell.floating_panel(PanelSide::Right),
+                Some(NavItem::GpuMonitor)
+            );
+
+            app.toggle_gpu_monitor_panel(cx);
+            assert_eq!(app.shell.floating_panel(PanelSide::Right), None);
+            assert!(!app.shell.activity_bar_layout().is_hidden("gpuMonitor"));
+        });
+    }
+
+    #[test]
+    fn reset_activity_bar_layout_restores_defaults_and_collapses_sides() {
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.hide_activity_entry("aiAssistant".to_string(), cx);
+            app.open_panel(NavItem::Transfers, cx);
+            assert!(app.shell.activity_bar_layout().has_hidden_entries());
+
+            app.reset_activity_bar_layout(cx);
+
+            assert!(!app.shell.activity_bar_layout().has_hidden_entries());
+            assert_eq!(app.shell.active_left_panel(), None);
+            assert_eq!(app.shell.active_right_panel(), None);
+        });
     }
 }

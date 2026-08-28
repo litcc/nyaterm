@@ -15,9 +15,9 @@ use super::super::app_state::SettingsDraftSnapshot;
 use super::runtime_state::ShellRuntimeState;
 use crate::models::{
     ActivityBarContextMenuState, ActivityBarLayoutState, BottomPanelMode, BottomPanelResizeState,
-    HeaderStatusState, MainMode, NavItem, PanelResizeSide, PanelResizeState, PanelSide,
-    PanelStackResizeState, RightFocus, SettingsTab, WorkspacePaneNode, WorkspaceSplitResizeState,
-    WorkspaceSplitState,
+    HeaderStatusState, MainMode, NavItem, PanelOpenMode, PanelResizeSide, PanelResizeState,
+    PanelSide, PanelStackResizeState, RightFocus, SettingsTab, WorkspacePaneNode,
+    WorkspaceSplitResizeState, WorkspaceSplitState,
 };
 
 pub(in crate::features) const RESIZE_HANDLE_HOVER_DELAY: Duration = Duration::from_millis(250);
@@ -66,6 +66,7 @@ pub(in crate::features) struct ShellFeatureInit {
     pub left_open_panels: Vec<String>,
     pub right_open_panels: Vec<String>,
     pub panel_stack_sizes: HashMap<String, f32>,
+    pub panel_open_mode: PanelOpenMode,
     pub panel_multi_open: bool,
     pub left_sidebar_collapsed: bool,
     pub right_inspector_collapsed: bool,
@@ -135,7 +136,13 @@ pub(super) struct ShellPanelState {
     pub(super) left_open: Vec<String>,
     pub(super) right_open: Vec<String>,
     pub(super) stack_sizes: HashMap<String, f32>,
+    /// Docked versus floating presentation. Multi-open is independent.
+    pub(super) open_mode: PanelOpenMode,
     pub(super) multi_open: bool,
+    /// Floating selections are transient and deliberately never persisted.
+    pub(super) floating_left: Option<NavItem>,
+    pub(super) floating_right: Option<NavItem>,
+    pub(super) last_floating_side: Option<PanelSide>,
     pub(super) right_focus: RightFocus,
     pub(super) left_collapsed: bool,
     pub(super) right_collapsed: bool,
@@ -208,7 +215,11 @@ impl ShellFeatureState {
                 left_open: init.left_open_panels,
                 right_open: init.right_open_panels,
                 stack_sizes: init.panel_stack_sizes,
+                open_mode: init.panel_open_mode,
                 multi_open: init.panel_multi_open,
+                floating_left: None,
+                floating_right: None,
+                last_floating_side: None,
                 right_focus: RightFocus::Default,
                 left_collapsed: init.left_sidebar_collapsed,
                 right_collapsed: init.right_inspector_collapsed,
@@ -528,6 +539,18 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn panel_multi_open(&self) -> bool {
         self.panels.multi_open
+    }
+
+    pub(in crate::features) fn panel_open_mode(&self) -> PanelOpenMode {
+        self.panels.open_mode
+    }
+
+    pub(in crate::features) fn panel_is_floating(&self) -> bool {
+        self.panels.open_mode.is_floating()
+    }
+
+    pub(in crate::features) fn floating_panel(&self, side: PanelSide) -> Option<NavItem> {
+        self.panels.floating_panel(side)
     }
 
     pub(in crate::features) fn mobile_left_panel_open(&self) -> bool {
@@ -871,6 +894,39 @@ impl ShellViewportState {
 
 impl ShellPanelState {
     const LEFT_WIDTH_MIN: f32 = 160.;
+
+    pub(in crate::features) fn set_open_mode(&mut self, mode: PanelOpenMode) {
+        self.open_mode = mode;
+    }
+
+    pub(in crate::features) fn floating_panel(&self, side: PanelSide) -> Option<NavItem> {
+        match side {
+            PanelSide::Left => self.floating_left,
+            PanelSide::Right => self.floating_right,
+        }
+    }
+
+    pub(in crate::features) fn set_floating_panel(
+        &mut self,
+        side: PanelSide,
+        panel: Option<NavItem>,
+    ) {
+        match side {
+            PanelSide::Left => self.floating_left = panel,
+            PanelSide::Right => self.floating_right = panel,
+        }
+        if panel.is_some() {
+            self.last_floating_side = Some(side);
+        } else if self.floating_left.is_none() && self.floating_right.is_none() {
+            self.last_floating_side = None;
+        }
+    }
+
+    pub(in crate::features) fn clear_floating(&mut self) {
+        self.floating_left = None;
+        self.floating_right = None;
+        self.last_floating_side = None;
+    }
     const LEFT_WIDTH_MAX: f32 = 720.;
     const RIGHT_WIDTH_MIN: f32 = 200.;
     const RIGHT_WIDTH_MAX: f32 = 720.;
@@ -1072,6 +1128,7 @@ mod tests {
             left_open_panels: Vec::new(),
             right_open_panels: Vec::new(),
             panel_stack_sizes: HashMap::new(),
+            panel_open_mode: crate::models::PanelOpenMode::Docked,
             panel_multi_open: false,
             left_sidebar_collapsed: true,
             right_inspector_collapsed: true,
@@ -1383,5 +1440,25 @@ mod tests {
         assert!(!shell.workspace.pane_roots.contains_key("root"));
         assert!(shell.workspace.pane_roots.contains_key("survivor"));
         assert_eq!(shell.workspace.tab_owner["survivor"], "survivor");
+    }
+
+    #[test]
+    fn docked_floating_mode_does_not_derive_multi_open() {
+        use crate::models::PanelOpenMode;
+        let mut shell = shell(BottomPanelMode::Hidden);
+
+        assert_eq!(shell.panel_open_mode(), PanelOpenMode::Docked);
+        assert!(!shell.panel_multi_open());
+        assert!(!shell.panel_is_floating());
+
+        shell.panels.multi_open = true;
+        shell.panels.set_open_mode(PanelOpenMode::Floating);
+        assert_eq!(shell.panel_open_mode(), PanelOpenMode::Floating);
+        assert!(shell.panel_multi_open());
+        assert!(shell.panel_is_floating());
+
+        shell.panels.set_open_mode(PanelOpenMode::Docked);
+        assert!(shell.panel_multi_open());
+        assert!(!shell.panel_is_floating());
     }
 }

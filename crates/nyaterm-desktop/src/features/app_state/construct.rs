@@ -105,37 +105,38 @@ impl NyaTermApp {
             left_bottom: settings.ui_activity_bar_left_bottom.clone(),
             right_top: settings.ui_activity_bar_right_top.clone(),
             right_bottom: settings.ui_activity_bar_right_bottom.clone(),
+            hidden_items: settings.ui_activity_bar_hidden_items.clone(),
             show_labels: settings.ui_activity_bar_show_labels,
         };
-        let active_left_panel = settings
+        let mut active_left_panel = settings
             .ui_active_left_panel
             .as_deref()
             .and_then(NavItem::from_persistence_id)
             .filter(|item| {
                 activity_bar_layout.side_for_entry(item.persistence_id()) == Some(PanelSide::Left)
             });
-        let active_right_panel = settings
+        let mut active_right_panel = settings
             .ui_active_right_panel
             .as_deref()
             .and_then(NavItem::from_persistence_id)
             .filter(|item| {
                 activity_bar_layout.side_for_entry(item.persistence_id()) == Some(PanelSide::Right)
             });
-        let left_sidebar_collapsed = panel_collapsed_from_persistence(
+        let mut left_sidebar_collapsed = panel_collapsed_from_persistence(
             settings.ui_left_panel_collapsed,
             settings.ui_panel_multi_open,
             active_left_panel.is_some(),
             !settings.ui_left_open_panels.is_empty(),
         );
-        let right_inspector_collapsed = panel_collapsed_from_persistence(
+        let mut right_inspector_collapsed = panel_collapsed_from_persistence(
             settings.ui_right_panel_collapsed,
             settings.ui_panel_multi_open,
             active_right_panel.is_some(),
             !settings.ui_right_open_panels.is_empty(),
         );
         let security_secrets_unlocked = !settings.has_master_password;
-        let left_open_panels = settings.ui_left_open_panels.clone();
-        let right_open_panels = settings.ui_right_open_panels.clone();
+        let mut left_open_panels = settings.ui_left_open_panels.clone();
+        let mut right_open_panels = settings.ui_right_open_panels.clone();
         let panel_stack_sizes = settings
             .ui_panel_stack_sizes
             .iter()
@@ -143,6 +144,16 @@ impl NyaTermApp {
             .map(|(key, value)| (key.clone(), (*value as f32) / 1000.))
             .collect::<HashMap<_, _>>();
         let panel_multi_open = settings.ui_panel_multi_open;
+        let panel_open_mode =
+            crate::models::PanelOpenMode::from_setting(&settings.ui_panel_open_mode);
+        if panel_open_mode.is_floating() {
+            active_left_panel = None;
+            active_right_panel = None;
+            left_open_panels.clear();
+            right_open_panels.clear();
+            left_sidebar_collapsed = true;
+            right_inspector_collapsed = true;
+        }
         let mut terminal_output_decoder = TerminalOutputDecoder::default();
         terminal_output_decoder.set_encoding(&settings.interaction_default_encoding);
         let mut terminal_screen = initial_terminal_screen();
@@ -305,6 +316,7 @@ impl NyaTermApp {
                 left_open_panels,
                 right_open_panels,
                 panel_stack_sizes,
+                panel_open_mode,
                 panel_multi_open,
                 left_sidebar_collapsed,
                 right_inspector_collapsed,

@@ -556,6 +556,7 @@ mod tests {
             left_open_panels: Vec::new(),
             right_open_panels: Vec::new(),
             panel_stack_sizes: HashMap::new(),
+            panel_open_mode: crate::models::PanelOpenMode::Docked,
             panel_multi_open: false,
             left_sidebar_collapsed: true,
             right_inspector_collapsed: true,

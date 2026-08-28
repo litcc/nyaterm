@@ -15,8 +15,8 @@ use crate::features::{
     NyaTermApp, text_inputs::TextInputSetup, view_widgets::panel_header_with_actions,
 };
 use crate::models::{
-    ActivityBarZone, MainMode, NavItem, NetworkTab, PanelSide, RightFocus, SecurityAuthTab,
-    SettingsTab,
+    ActivityBarZone, MainMode, NavItem, NetworkTab, PanelOpenMode, PanelSide, RightFocus,
+    SecurityAuthTab, SettingsTab,
 };
 use crate::theme::ThemePalette;
 use nyaterm_ui::NyaTooltip;
@@ -58,50 +58,122 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn toggle_panel_multi_open(&mut self, cx: &mut Context<Self>) {
-        self.shell.panels.multi_open = !self.shell.panels.multi_open;
-        if self.shell.panels.multi_open {
-            if self.shell.panels.left_open.is_empty()
-                && let Some(panel) = self.shell.panels.active_left
-            {
-                let id = panel.persistence_id().to_string();
-                if Self::is_stackable_panel_id(&id) {
-                    self.shell.panels.left_open.push(id);
+        let next = !self.shell.panels.multi_open;
+        self.shell.panels.multi_open = next;
+        if !self.shell.panels.open_mode.is_floating() {
+            if next {
+                if self.shell.panels.left_open.is_empty()
+                    && let Some(panel) = self.shell.panels.active_left
+                {
+                    let id = panel.persistence_id().to_string();
+                    if Self::is_stackable_panel_id(&id) {
+                        self.shell.panels.left_open.push(id);
+                    }
                 }
-            }
-            if self.shell.panels.right_open.is_empty()
-                && let Some(panel) = self.shell.panels.active_right
-            {
-                let id = panel.persistence_id().to_string();
-                if Self::is_stackable_panel_id(&id) {
-                    self.shell.panels.right_open.push(id);
+                if self.shell.panels.right_open.is_empty()
+                    && let Some(panel) = self.shell.panels.active_right
+                {
+                    let id = panel.persistence_id().to_string();
+                    if Self::is_stackable_panel_id(&id) {
+                        self.shell.panels.right_open.push(id);
+                    }
                 }
+            } else {
+                if self.shell.panels.active_left.is_none() {
+                    self.shell.panels.active_left = self
+                        .shell
+                        .panels
+                        .left_open
+                        .first()
+                        .and_then(|id| NavItem::from_persistence_id(id));
+                }
+                if self.shell.panels.active_right.is_none() {
+                    self.shell.panels.active_right = self
+                        .shell
+                        .panels
+                        .right_open
+                        .first()
+                        .and_then(|id| NavItem::from_persistence_id(id));
+                }
+                self.shell.panels.left_open.clear();
+                self.shell.panels.right_open.clear();
             }
-            self.shell
-                .set_status("multi-open panels enabled".to_string());
-        } else {
-            // Collapse to active-only mode.
-            if self.shell.panels.active_left.is_none() {
-                self.shell.panels.active_left = self
-                    .shell
-                    .panels
-                    .left_open
-                    .first()
-                    .and_then(|id| NavItem::from_persistence_id(id));
-            }
-            if self.shell.panels.active_right.is_none() {
-                self.shell.panels.active_right = self
-                    .shell
-                    .panels
-                    .right_open
-                    .first()
-                    .and_then(|id| NavItem::from_persistence_id(id));
-            }
-            self.shell.panels.left_open.clear();
-            self.shell.panels.right_open.clear();
-            self.shell.set_status("single panel mode".to_string());
         }
+        self.shell.set_status(if next {
+            "multi-open panels enabled"
+        } else {
+            "multi-open panels disabled"
+        });
         self.persist_ui_layout();
         cx.notify();
+    }
+
+    /// Switch between persisted docked and floating presentation. Floating
+    /// selections are transient and docked open state is intentionally cleared
+    /// on the boundary, matching main's state model.
+    pub(in crate::features) fn set_panel_open_mode(
+        &mut self,
+        mode: PanelOpenMode,
+        cx: &mut Context<Self>,
+    ) {
+        if self.shell.panels.open_mode == mode {
+            return;
+        }
+        self.shell.panels.set_open_mode(mode);
+        self.shell.panels.clear_floating();
+        if mode.is_floating() {
+            self.shell.panels.left_open.clear();
+            self.shell.panels.right_open.clear();
+            self.shell.panels.active_left = None;
+            self.shell.panels.active_right = None;
+            self.shell.panels.left_collapsed = true;
+            self.shell.panels.right_collapsed = true;
+        }
+        self.shell.set_status(if mode.is_floating() {
+            "floating panels enabled"
+        } else {
+            "docked panels enabled"
+        });
+        self.persist_ui_layout();
+        cx.notify();
+    }
+
+    pub(in crate::features) fn toggle_floating_panel(
+        &mut self,
+        item: NavItem,
+        side: PanelSide,
+        cx: &mut Context<Self>,
+    ) {
+        let next = (self.shell.panels.floating_panel(side) != Some(item)).then_some(item);
+        self.shell.panels.set_floating_panel(side, next);
+        self.shell.set_status(if next.is_some() {
+            format!("{} floating panel opened", item.persistence_id())
+        } else {
+            format!("{} floating panel closed", item.persistence_id())
+        });
+        cx.notify();
+    }
+
+    pub(in crate::features) fn close_floating_panel(
+        &mut self,
+        side: PanelSide,
+        cx: &mut Context<Self>,
+    ) {
+        if self.shell.panels.floating_panel(side).is_some() {
+            self.shell.panels.set_floating_panel(side, None);
+            cx.notify();
+        }
+    }
+
+    pub(in crate::features) fn close_last_floating_panel(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(side) = self.shell.panels.last_floating_side else {
+            return false;
+        };
+        self.close_floating_panel(side, cx);
+        true
     }
 
     pub(in crate::features) fn side_open_panel_ids(&self, side: PanelSide) -> Vec<String> {
@@ -158,6 +230,9 @@ impl NyaTermApp {
         let Some(side) = self.panel_side_for_item(item) else {
             return false;
         };
+        if self.shell.panels.open_mode.is_floating() {
+            return self.shell.panels.floating_panel(side) == Some(item);
+        }
         let side_open = match side {
             PanelSide::Left => self.left_side_open(),
             PanelSide::Right => self.right_side_open(),
@@ -225,6 +300,12 @@ impl NyaTermApp {
     ) {
         if item == NavItem::Settings || item.opens_settings() {
             self.open_page(NavItem::Settings, cx);
+            return;
+        }
+        if self.shell.panel_is_floating()
+            && let Some(side) = self.panel_side_for_item(item)
+        {
+            self.toggle_floating_panel(item, side, cx);
             return;
         }
         if !self.shell.panels.multi_open {
@@ -450,7 +531,11 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn apply_panel_stack_from_settings(&mut self) {
+        let mode =
+            crate::models::PanelOpenMode::from_setting(&self.settings.summary().ui_panel_open_mode);
+        self.shell.panels.set_open_mode(mode);
         self.shell.panels.multi_open = self.settings.summary().ui_panel_multi_open;
+        self.shell.panels.clear_floating();
         self.shell.panels.left_open = self.settings.summary().ui_left_open_panels.clone();
         self.shell.panels.right_open = self.settings.summary().ui_right_open_panels.clone();
         self.shell.panels.stack_sizes = self
@@ -461,7 +546,14 @@ impl NyaTermApp {
             .filter(|(_, value)| **value > 0)
             .map(|(key, value)| (key.clone(), (*value as f32) / 1000.))
             .collect();
-        if self.shell.panels.multi_open {
+        if mode.is_floating() {
+            self.shell.panels.left_open.clear();
+            self.shell.panels.right_open.clear();
+            self.shell.panels.active_left = None;
+            self.shell.panels.active_right = None;
+            self.shell.panels.left_collapsed = true;
+            self.shell.panels.right_collapsed = true;
+        } else if self.shell.panels.multi_open {
             if self.shell.panels.left_open.is_empty()
                 && let Some(panel) = self.shell.panels.active_left
             {
@@ -479,6 +571,16 @@ impl NyaTermApp {
                 }
             }
         }
+    }
+
+    pub(in crate::features) fn floating_side_panel(
+        &mut self,
+        side: PanelSide,
+        panel: NavItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        self.single_side_panel(side, panel, window, cx)
     }
 
     pub(in crate::features) fn side_panel_stack(
