@@ -20,6 +20,32 @@ pub mod widgets;
 // expansion time; `build.rs` is what makes cargo notice edits to it.
 rust_i18n::i18n!("locales", fallback = "en");
 
+const I18N_PRELOAD_STACK_BYTES: usize = 16 * 1024 * 1024;
+static I18N_PRELOAD_RESULT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+
+/// Build rust-i18n's generated backend before the first UI render.
+///
+/// rust-i18n 4.2 expands every catalog entry into one lazy initializer. With
+/// NyaTerm's full multilingual catalog that initializer exceeds the default
+/// Windows main-thread stack. A short-lived worker gives that one-time build a
+/// bounded stack without moving GPUI off the platform main thread or increasing
+/// the executable's stack reservation permanently.
+pub fn preload_i18n() -> Result<(), String> {
+    I18N_PRELOAD_RESULT
+        .get_or_init(|| {
+            std::thread::Builder::new()
+                .name("nyaterm-i18n-preload".to_string())
+                .stack_size(I18N_PRELOAD_STACK_BYTES)
+                .spawn(|| {
+                    let _ = _rust_i18n_backend();
+                })
+                .map_err(|error| format!("failed to spawn i18n preload worker: {error}"))?
+                .join()
+                .map_err(|_| "i18n preload worker panicked".to_string())
+        })
+        .clone()
+}
+
 pub use app_shell::AppShell;
 
 pub fn init(cx: &mut gpui::App) {

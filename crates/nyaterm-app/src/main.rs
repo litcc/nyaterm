@@ -29,6 +29,9 @@ fn main() -> anyhow::Result<()> {
     let activation_tx = instance_owner.activation_sender();
     let activation_rx = instance_owner.take_activation_receiver();
     let _log_guard = init_tracing(&runtime);
+    nyaterm_desktop::preload_i18n()
+        .map_err(anyhow::Error::msg)
+        .context("preload translation catalogs")?;
 
     let application = gpui_platform::application().with_assets(assets::NyaTermAssets);
     let open_url_tx = activation_tx.clone();
