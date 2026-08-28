@@ -11,10 +11,19 @@
     "searchPlaceholder": "按名称、类型或会话 ID 搜索..."
   },
   "activityBar": {
+    "hiddenItems": "隐藏的项目",
+    "hideItem": "隐藏“%{name}”",
     "leftBottom": "左侧底部",
+    "leftSide": "左侧",
     "leftTop": "左侧顶部",
     "moveTo": "移动至",
+    "noHiddenItems": "没有隐藏的项目",
+    "noPanels": "没有面板",
+    "resetLayout": "重置活动栏布局",
+    "resetLayoutDescription": "这将恢复所有隐藏的图标，并重置活动栏图标的位置和顺序。",
+    "resetLayoutTitle": "重置活动栏布局？",
     "rightBottom": "右侧底部",
+    "rightSide": "右侧",
     "rightTop": "右侧顶部",
     "showLabel": "显示工具名称"
   },
@@ -1095,6 +1104,8 @@
   },
   "panel": {
     "activeSessions": "活动会话",
+    "floatingMode": "悬浮面板",
+    "multiOpen": "多开",
     "commandHistory": "命令历史",
     "dockerManager": "Docker",
     "fileExplorer": "文件浏览器",
@@ -1957,6 +1968,9 @@
     "optionalField": "可选",
     "panelMultiOpen": "侧边面板多开",
     "panelMultiOpenDesc": "开启后，点击两侧活动栏图标可同时打开多个面板。",
+    "panelModeFloating": "浮动面板",
+    "panelModeMulti": "多开面板",
+    "panelModeSingle": "单面板",
     "passphrase": "密码短语（可选）",
     "payloadHashLabel": "快照哈希",
     "policyAccept": "接受 (自动添加)",

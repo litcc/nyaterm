@@ -11,10 +11,19 @@
     "searchPlaceholder": "Search by name, type, or session ID..."
   },
   "activityBar": {
+    "hiddenItems": "Hidden Items",
+    "hideItem": "Hide \"%{name}\"",
     "leftBottom": "Left Bottom",
+    "leftSide": "Left",
     "leftTop": "Left Top",
     "moveTo": "Move to",
+    "noHiddenItems": "No hidden items",
+    "noPanels": "No panels",
+    "resetLayout": "Reset Activity Bar Layout",
+    "resetLayoutDescription": "This will restore all hidden icons and reset Activity Bar icon positions and order.",
+    "resetLayoutTitle": "Reset Activity Bar Layout?",
     "rightBottom": "Right Bottom",
+    "rightSide": "Right",
     "rightTop": "Right Top",
     "showLabel": "Show Labels"
   },
@@ -1095,6 +1104,8 @@
   },
   "panel": {
     "activeSessions": "Sessions",
+    "floatingMode": "Floating Panels",
+    "multiOpen": "Multi Open",
     "commandHistory": "History",
     "dockerManager": "Docker",
     "fileExplorer": "Files",
@@ -1957,6 +1968,9 @@
     "optionalField": "Optional",
     "panelMultiOpen": "Multi-open Side Panels",
     "panelMultiOpenDesc": "When enabled, clicking activity bar icons on either side can open multiple panels at once.",
+    "panelModeFloating": "Floating Panels",
+    "panelModeMulti": "Multi-open Panels",
+    "panelModeSingle": "Single Panel",
     "passphrase": "Passphrase (optional)",
     "payloadHashLabel": "Payload Hash",
     "policyAccept": "Accept (Auto-add)",
