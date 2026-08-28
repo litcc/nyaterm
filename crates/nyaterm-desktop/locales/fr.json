@@ -2289,7 +2289,9 @@
     "x11DisplayPlaceholder": "Windows : localhost:0 / Linux/macOS : :0"
   },
   "sshAuth": {
-    "agentPromptTitle": "L'agent SSH requiert votre attention",
+    "agentWaitingTitle": "En attente de l'autorisation de l'agent SSH",
+    "agentFailedTitle": "Échec de l'authentification de l'agent SSH",
+    "agentApprovalWaiting": "Approuvez la clé matérielle, le code PIN ou la demande de l'agent SSH.",
     "agentConnectFailed": "Impossible de se connecter à l'agent SSH configuré. Vérifiez qu'il est en cours d'exécution, puis réessayez.",
     "agentIdentitiesFailed": "L'agent SSH n'a fourni aucune identité utilisable. Déverrouillez ou chargez une clé, puis réessayez.",
     "agentApprovalRequired": "Approuvez la clé matérielle, le code PIN ou la demande de l'agent SSH, puis réessayez.",

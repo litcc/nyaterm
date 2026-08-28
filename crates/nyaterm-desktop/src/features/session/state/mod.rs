@@ -406,6 +406,16 @@ impl SessionFeatureState {
         self.prompts.active_agent()
     }
 
+    /// 消费 Agent 请求的后台状态变更通知。
+    pub(in crate::features) fn prompt_take_agent_changed(&self) -> bool {
+        self.prompts.take_agent_changed()
+    }
+
+    /// 清理 transport 已完成的 Agent 请求，并释放当前 UI 槽位。
+    pub(in crate::features) fn prompt_reconcile_agent(&mut self) -> bool {
+        self.prompts.reconcile_agent()
+    }
+
     pub(in crate::features) fn prompt_has_active_credential(&self) -> bool {
         self.prompts.has_active_credential()
     }
@@ -1766,10 +1776,37 @@ impl SessionPromptState {
         Some(state)
     }
 
-    pub(in crate::features) fn take_agent(&mut self) -> Option<AgentPromptRequest> {
-        let request = self.active_agent_prompt.take()?;
+    pub(in crate::features) fn take_agent_resolution(
+        &mut self,
+        request_id: &str,
+    ) -> PromptResolution<AgentPromptRequest> {
+        let Some(request) = self.active_agent_prompt.take() else {
+            return PromptResolution::Inactive;
+        };
+        if request.id != request_id || request.is_resolved() {
+            self.active_agent_prompt = Some(request);
+            return PromptResolution::Changed;
+        }
         self.signal_wake();
-        Some(request)
+        PromptResolution::Ready(request)
+    }
+
+    pub(in crate::features) fn take_agent_changed(&self) -> bool {
+        self.agent_prompts.take_changed()
+    }
+
+    /// Agent 成功或取消后由 transport 调用 `finish`，此处把已解决请求从
+    /// UI 活动槽位移除，再允许队列中的下一个请求展示。
+    pub(in crate::features) fn reconcile_agent(&mut self) -> bool {
+        if self
+            .active_agent_prompt
+            .as_ref()
+            .is_some_and(AgentPromptRequest::is_resolved)
+        {
+            self.active_agent_prompt = None;
+            return true;
+        }
+        false
     }
 
     pub(in crate::features) fn keyboard_interactive_otp_id(&self) -> Option<String> {
@@ -1937,10 +1974,7 @@ impl SessionPromptState {
             return None;
         }
         let request = self.agent_prompts.pop_pending()?;
-        let target = format!(
-            "{}@{}:{}",
-            request.prompt.username, request.prompt.host, request.prompt.port
-        );
+        let target = request.target();
         self.active_agent_prompt = Some(request);
         Some(target)
     }
