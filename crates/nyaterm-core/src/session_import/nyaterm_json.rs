@@ -6,7 +6,7 @@ use crate::{AiExecutionProfile, ConnectionAuth, ConnectionType, SavedPassword, S
 
 use super::{
     AppError, AppResult, PreparedSessionConnection, PreparedSessionImport,
-    normalize_optional_string,
+    normalize_optional_secret, normalize_optional_string,
 };
 
 #[derive(Deserialize)]
@@ -32,7 +32,7 @@ struct NyatermJsonPassword {
     #[serde(rename = "ref")]
     ref_name: String,
     name: String,
-    password: String,
+    password: crate::SecretString,
 }
 
 #[derive(Deserialize)]
@@ -40,11 +40,11 @@ struct NyatermJsonSshKey {
     #[serde(rename = "ref")]
     ref_name: String,
     name: String,
-    private_key: String,
+    private_key: crate::SecretString,
     #[serde(default)]
-    certificate: Option<String>,
+    certificate: Option<crate::SecretString>,
     #[serde(default)]
-    passphrase: Option<String>,
+    passphrase: Option<crate::SecretString>,
 }
 
 #[derive(Deserialize)]
@@ -56,7 +56,7 @@ struct NyatermJsonGroup {
 struct NyatermJsonSshAuth {
     mode: String,
     #[serde(default)]
-    password: Option<String>,
+    password: Option<crate::SecretString>,
     #[serde(default)]
     password_ref: Option<String>,
     #[serde(default)]
@@ -239,8 +239,8 @@ fn prepare_nyaterm_json_import(file: NyatermJsonImportFile) -> AppResult<Prepare
             id,
             name: required_string(entry.name, "ssh key name", "ssh_keys")?,
             key: Some(entry.private_key),
-            cert: normalize_optional_string(entry.certificate),
-            passphrase: normalize_optional_string(entry.passphrase),
+            cert: normalize_optional_secret(entry.certificate),
+            passphrase: normalize_optional_secret(entry.passphrase),
             key_file_path: None,
             cert_file_path: None,
             has_key_data: false,

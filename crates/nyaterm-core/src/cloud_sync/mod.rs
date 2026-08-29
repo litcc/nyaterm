@@ -245,11 +245,14 @@ pub fn decide_cloud_remote_check(
     }
 }
 
-fn required_secret(value: Option<&str>, message: &str) -> Result<String, CloudSyncError> {
+fn required_secret(
+    value: Option<&str>,
+    message: &str,
+) -> Result<crate::SecretString, CloudSyncError> {
     value
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
+        .map(crate::SecretString::from)
         .ok_or_else(|| CloudSyncError::Remote(message.to_string()))
 }
 

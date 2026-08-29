@@ -2,20 +2,20 @@
 
 pub(super) struct SettingsMasterPasswordState {
     pub(super) enabled: bool,
-    pub(super) draft: String,
+    pub(super) draft: nyaterm_core::SecretString,
 }
 
 impl SettingsMasterPasswordState {
     pub fn new(has_stored_password: bool) -> Self {
         Self {
             enabled: has_stored_password,
-            draft: String::new(),
+            draft: nyaterm_core::SecretString::default(),
         }
     }
 
     pub fn reset(&mut self, has_stored_password: bool) {
         self.enabled = has_stored_password;
-        self.draft.clear();
+        self.draft.expose_secret_mut().clear();
     }
 
     pub fn toggle(&mut self, cloud_sync_enabled: bool) -> Result<bool, &'static str> {
@@ -23,7 +23,7 @@ impl SettingsMasterPasswordState {
             return Err("disable cloud sync before removing the master password");
         }
         self.enabled = !self.enabled;
-        self.draft.clear();
+        self.draft.expose_secret_mut().clear();
         Ok(self.enabled)
     }
 
@@ -31,7 +31,7 @@ impl SettingsMasterPasswordState {
         if !self.enabled {
             return false;
         }
-        self.draft = text;
+        self.draft = text.into();
         true
     }
 }
@@ -51,7 +51,7 @@ mod tests {
     fn master_password_reset_rebases_enabled_state_and_clears_secret_draft() {
         let mut state = SettingsMasterPasswordState::new(false);
         state.enabled = true;
-        state.draft = "staged secret".to_string();
+        state.draft = "staged secret".to_string().into();
 
         state.reset(false);
 
@@ -62,14 +62,14 @@ mod tests {
     #[test]
     fn master_password_toggle_preserves_cloud_sync_requirement() {
         let mut state = SettingsMasterPasswordState::new(true);
-        state.draft = "staged secret".to_string();
+        state.draft = "staged secret".to_string().into();
 
         assert_eq!(
             state.toggle(true),
             Err("disable cloud sync before removing the master password")
         );
         assert!(state.enabled);
-        assert_eq!(state.draft, "staged secret");
+        assert_eq!(state.draft.expose_secret(), "staged secret");
 
         assert_eq!(state.toggle(false), Ok(false));
         assert!(state.draft.is_empty());
@@ -83,6 +83,6 @@ mod tests {
 
         assert_eq!(state.toggle(false), Ok(true));
         assert!(state.edit_draft("replacement".to_string()));
-        assert_eq!(state.draft, "replacement");
+        assert_eq!(state.draft.expose_secret(), "replacement");
     }
 }

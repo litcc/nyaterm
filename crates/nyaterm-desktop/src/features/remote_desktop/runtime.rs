@@ -2133,7 +2133,9 @@ pub(super) fn format_rdp_error(error: &RdpError) -> String {
     format!("{category}: {}", error.message)
 }
 
-fn inline_remote_desktop_password(auth: Option<&nyaterm_core::ConnectionAuth>) -> Option<String> {
+fn inline_remote_desktop_password(
+    auth: Option<&nyaterm_core::ConnectionAuth>,
+) -> Option<nyaterm_core::SecretString> {
     let auth = auth?;
     if auth.mode == "none" {
         return None;
@@ -2143,7 +2145,7 @@ fn inline_remote_desktop_password(auth: Option<&nyaterm_core::ConnectionAuth>) -
         .as_deref()
         .filter(|password| !password.trim().is_empty())
     {
-        return (!auth.has_password).then(|| password.to_string());
+        return (!auth.has_password).then(|| password.to_owned().into());
     }
     None
 }
@@ -2217,7 +2219,7 @@ mod tests {
     fn reconnect_password_selection_resolves_locked_values_by_id() {
         let auth = ConnectionAuth {
             mode: "password".to_string(),
-            password: Some("masked-or-encrypted".to_string()),
+            password: Some("masked-or-encrypted".to_string().into()),
             password_id: Some("pw-rdp".to_string()),
             has_password: true,
             ..ConnectionAuth::default()

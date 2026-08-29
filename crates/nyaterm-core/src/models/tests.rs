@@ -19,7 +19,7 @@ fn secret_bearing_model_debug_output_is_redacted() {
         format!(
             "{:?}",
             ConnectionAuth {
-                password: Some(secret.to_string()),
+                password: Some(secret.to_string().into()),
                 ..ConnectionAuth::default()
             }
         ),
@@ -28,9 +28,9 @@ fn secret_bearing_model_debug_output_is_redacted() {
             SshKey {
                 id: "key-1".to_string(),
                 name: "Test key".to_string(),
-                key: Some(secret.to_string()),
-                cert: Some(secret.to_string()),
-                passphrase: Some(secret.to_string()),
+                key: Some(secret.to_string().into()),
+                cert: Some(secret.to_string().into()),
+                passphrase: Some(secret.to_string().into()),
                 key_file_path: None,
                 cert_file_path: None,
                 has_key_data: true,
@@ -44,7 +44,7 @@ fn secret_bearing_model_debug_output_is_redacted() {
                 sort_order: 0,
                 name: "Test credential".to_string(),
                 username: "tester".to_string(),
-                password: Some(secret.to_string()),
+                password: Some(secret.to_string().into()),
                 username_prompt_regex: None,
                 password_prompt_regex: None,
                 enabled: true,
@@ -57,7 +57,7 @@ fn secret_bearing_model_debug_output_is_redacted() {
                 otp_type: "totp".to_string(),
                 issuer: "NyaTerm".to_string(),
                 username: "tester".to_string(),
-                secret: Some(secret.to_string()),
+                secret: Some(secret.to_string().into()),
                 algorithm: "SHA1".to_string(),
                 digits: 6,
                 period: 30,
@@ -68,7 +68,7 @@ fn secret_bearing_model_debug_output_is_redacted() {
             "{:?}",
             ProxyConfig {
                 command: Some(secret.to_string()),
-                password: Some(secret.to_string()),
+                password: Some(secret.to_string().into()),
                 ..ProxyConfig::default()
             }
         ),

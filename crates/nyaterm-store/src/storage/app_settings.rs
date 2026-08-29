@@ -521,7 +521,8 @@ impl ConnectionStore {
         let current_password = self
             .load_encrypted_master_password()?
             .map(|token| bootstrap.decrypt_settings_secret(&token))
-            .transpose()?;
+            .transpose()?
+            .map(Into::into);
         let rewrapped_master_key = self
             .load_master_key_token()?
             .map(|token| {

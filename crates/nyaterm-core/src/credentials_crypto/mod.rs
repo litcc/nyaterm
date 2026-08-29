@@ -35,7 +35,7 @@ pub enum CredentialCryptoError {
 #[derive(Clone, Default)]
 pub struct CredentialCrypto {
     portable_key_path: Option<PathBuf>,
-    master_password: Option<String>,
+    master_password: Option<crate::SecretString>,
 }
 
 impl std::fmt::Debug for CredentialCrypto {
@@ -52,7 +52,10 @@ impl std::fmt::Debug for CredentialCrypto {
 }
 
 impl CredentialCrypto {
-    pub fn new(portable_key_path: Option<PathBuf>, master_password: Option<String>) -> Self {
+    pub fn new(
+        portable_key_path: Option<PathBuf>,
+        master_password: Option<crate::SecretString>,
+    ) -> Self {
         Self {
             portable_key_path,
             master_password: master_password.filter(|value| !value.is_empty()),

@@ -579,13 +579,13 @@ mod tests {
             };
             app.ai.replace_settings_config(ai, true);
             app.translation = TranslationFeatureState::new(TranslationSettings {
-                deepl_api_key: "configured".to_string(),
+                deepl_api_key: "configured".to_string().into(),
                 baidu_app_id: "id".to_string(),
-                baidu_app_key: "key".to_string(),
+                baidu_app_key: "key".to_string().into(),
                 ali_app_id: "id".to_string(),
-                ali_app_key: "key".to_string(),
+                ali_app_key: "key".to_string().into(),
                 youdao_app_id: "id".to_string(),
-                youdao_app_key: "key".to_string(),
+                youdao_app_key: "key".to_string().into(),
                 ..TranslationSettings::default()
             });
             app.terminal_context_menu_items("clicked-pane".to_string(), "selection".to_string(), cx)

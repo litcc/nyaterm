@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::SecretString;
+
 use super::{
     default_proxy_host, default_proxy_port, default_proxy_protocol, default_true,
     default_tunnel_target_host, default_tunnel_type, uuid_v4,
@@ -94,7 +96,7 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub username: Option<String>,
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[serde(default)]
     pub password_id: Option<String>,
     #[serde(default)]

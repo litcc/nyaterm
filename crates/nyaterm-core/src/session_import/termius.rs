@@ -9,7 +9,8 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::{AiExecutionProfile, ConnectionAuth, ConnectionType, SavedPassword, SshKey};
 
 use super::{
-    AppError, AppResult, PreparedJsonConnection, PreparedJsonImport, normalize_optional_string,
+    AppError, AppResult, PreparedJsonConnection, PreparedJsonImport, normalize_optional_secret,
+    normalize_optional_string,
 };
 
 #[derive(Clone, Default)]
@@ -28,7 +29,7 @@ struct TermiusRawHost {
     label: Option<String>,
     address: Option<String>,
     username: Option<String>,
-    password: Option<String>,
+    password: Option<crate::SecretString>,
     ssh_config_id: Option<String>,
     identity_id: Option<String>,
     group_id: Option<String>,
@@ -51,7 +52,7 @@ struct TermiusRawIdentity {
     local_id: Option<String>,
     label: Option<String>,
     username: Option<String>,
-    password: Option<String>,
+    password: Option<crate::SecretString>,
     ssh_key_id: Option<String>,
     updated_at: Option<String>,
 }
@@ -61,8 +62,8 @@ struct TermiusRawSshKey {
     id: String,
     local_id: Option<String>,
     label: Option<String>,
-    passphrase: Option<String>,
-    private_key: Option<String>,
+    passphrase: Option<crate::SecretString>,
+    private_key: Option<crate::SecretString>,
     updated_at: Option<String>,
 }
 
@@ -507,7 +508,7 @@ fn collect_host_record(strings: &[TermiusTaggedValue], index: usize) -> Option<T
         label,
         address,
         username: record.get("username").cloned(),
-        password: record.get("password").cloned(),
+        password: record.get("password").cloned().map(Into::into),
         ssh_config_id: nested_record_id(strings, index, "ssh_config"),
         identity_id: first_non_empty_field(&record, &["identity", "identity_id", "ssh_key"]),
         group_id: first_non_empty_field(&record, &["group", "group_id"]),
@@ -550,7 +551,7 @@ fn collect_identity_record(
         local_id: record.get("local_id").cloned(),
         label: record.get("label").cloned(),
         username: record.get("username").cloned(),
-        password: record.get("password").cloned(),
+        password: record.get("password").cloned().map(Into::into),
         ssh_key_id: nested_record_id(strings, index, "ssh_key")
             .or_else(|| first_non_empty_field(&record, &["ssh_key", "ssh_key_id", "key"])),
         updated_at: record.get("updated_at").cloned(),
@@ -570,8 +571,8 @@ fn collect_ssh_key_record(
         id: record_id(strings, index),
         local_id: record.get("local_id").cloned(),
         label: record.get("label").cloned(),
-        passphrase: record.get("passphrase").cloned(),
-        private_key: record.get("private_key").cloned(),
+        passphrase: record.get("passphrase").cloned().map(Into::into),
+        private_key: record.get("private_key").cloned().map(Into::into),
         updated_at: record.get("updated_at").cloned(),
     })
 }
@@ -905,7 +906,7 @@ fn prepare_termius_keys(keys: &[TermiusRawSshKey]) -> AppResult<PreparedTermiusK
     let mut ids = HashMap::new();
 
     for key in keys {
-        let Some(private_key) = normalize_optional_string(key.private_key.clone()) else {
+        let Some(private_key) = normalize_optional_secret(key.private_key.clone()) else {
             continue;
         };
         let id = uuid::Uuid::new_v4().to_string();
@@ -919,7 +920,7 @@ fn prepare_termius_keys(keys: &[TermiusRawSshKey]) -> AppResult<PreparedTermiusK
                 .unwrap_or_else(|| "Termius SSH Key".to_string()),
             key: Some(private_key),
             cert: None,
-            passphrase: normalize_optional_string(key.passphrase.clone()),
+            passphrase: normalize_optional_secret(key.passphrase.clone()),
             key_file_path: None,
             cert_file_path: None,
             has_key_data: false,
@@ -946,7 +947,7 @@ fn prepare_termius_passwords(
     let mut ids = HashMap::new();
 
     for host in hosts {
-        if let Some(password) = normalize_optional_string(host.password.clone()) {
+        if let Some(password) = normalize_optional_secret(host.password.clone()) {
             let id = uuid::Uuid::new_v4().to_string();
             ids.insert(format!("host:{}", termius_host_key(host)), id.clone());
             for alias in termius_record_aliases(&host.id, host.local_id.as_deref()) {
@@ -967,7 +968,7 @@ fn prepare_termius_passwords(
     }
 
     for identity in identities {
-        if let Some(password) = normalize_optional_string(identity.password.clone()) {
+        if let Some(password) = normalize_optional_secret(identity.password.clone()) {
             let id = uuid::Uuid::new_v4().to_string();
             ids.insert(
                 format!("identity:{}", termius_identity_key(identity)),
@@ -1160,8 +1161,8 @@ mod tests {
                 id: "key-id".to_string(),
                 local_id: None,
                 label: Some("Deploy key".to_string()),
-                passphrase: Some("key-pass".to_string()),
-                private_key: Some("PRIVATE KEY".to_string()),
+                passphrase: Some("key-pass".to_string().into()),
+                private_key: Some("PRIVATE KEY".to_string().into()),
                 updated_at: Some("2024-01-01".to_string()),
             }],
             identities: vec![TermiusRawIdentity {
@@ -1169,7 +1170,7 @@ mod tests {
                 local_id: None,
                 label: Some("Deploy identity".to_string()),
                 username: Some("deploy".to_string()),
-                password: Some("identity-pass".to_string()),
+                password: Some("identity-pass".to_string().into()),
                 ssh_key_id: Some("key-id".to_string()),
                 updated_at: Some("2024-01-01".to_string()),
             }],

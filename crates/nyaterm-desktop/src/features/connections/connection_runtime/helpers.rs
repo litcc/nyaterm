@@ -95,7 +95,7 @@ pub(super) fn connection_editor_from_saved(
         vnc_view_only: false,
         password_source,
         password_id: auth.password_id,
-        password: String::new(),
+        password: nyaterm_core::SecretString::default(),
         existing_password: auth.password.filter(|value| !value.is_empty()),
         key_id: auth.key_id,
         otp_id: auth.otp_id,
@@ -597,7 +597,7 @@ pub(super) fn build_saved_connection_from_editor(
                     && editor.password_source == ConnectionEditorPasswordSource::Direct
                 {
                     if !password.is_empty() {
-                        Some(password)
+                        Some(password.into())
                     } else {
                         existing
                     }
@@ -1390,7 +1390,7 @@ mod tests {
             icon_auto_detect: None,
             auth: Some(ConnectionAuth {
                 mode: "password".to_string(),
-                password: Some("secret".to_string()),
+                password: Some("secret".to_string().into()),
                 ..ConnectionAuth::default()
             }),
             recording: None,

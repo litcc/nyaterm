@@ -6,7 +6,7 @@ use super::{Aes256Gcm, B64, CredentialCrypto, Key};
 #[test]
 fn debug_output_redacts_master_password() {
     let secret = "nya-master-password-never-log";
-    let crypto = CredentialCrypto::new(None, Some(secret.to_string()));
+    let crypto = CredentialCrypto::new(None, Some(secret.to_string().into()));
     let output = format!("{crypto:?}");
 
     assert!(!output.contains(secret));
@@ -40,7 +40,7 @@ fn decrypts_secret_with_home_wrapped_master_key() {
 
 #[test]
 fn decrypts_legacy_dragonfly_wrapped_master_key() {
-    let crypto = CredentialCrypto::new(None, Some("secret".to_string()));
+    let crypto = CredentialCrypto::new(None, Some("secret".to_string().into()));
     let wrapping_key = crypto
         .derive_legacy_wrapping_key(Some("secret"))
         .expect("legacy key");
@@ -88,7 +88,7 @@ fn rewraps_master_key_between_fallback_and_password_keys() {
     let password_token = fallback
         .rewrap_master_key_token(&original_token, Some("swordfish"))
         .expect("wrap with password");
-    let password_crypto = CredentialCrypto::new(None, Some("swordfish".to_string()));
+    let password_crypto = CredentialCrypto::new(None, Some("swordfish".to_string().into()));
     assert_eq!(
         password_crypto
             .decrypt_secret(&password_token, &secret)

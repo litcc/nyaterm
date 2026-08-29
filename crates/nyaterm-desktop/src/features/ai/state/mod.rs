@@ -62,7 +62,7 @@ struct AiSettingsState {
     config: AiSettings,
     model_draft: String,
     base_url_draft: String,
-    secret_draft: String,
+    secret_draft: nyaterm_core::SecretString,
     model_collapsed_groups: HashSet<String>,
     model_query: String,
     manual_model_drafts: HashMap<String, String>,
@@ -213,7 +213,7 @@ impl AiFeatureState {
                 config: settings,
                 model_draft,
                 base_url_draft,
-                secret_draft: String::new(),
+                secret_draft: nyaterm_core::SecretString::default(),
                 model_collapsed_groups: HashSet::new(),
                 model_query: String::new(),
                 manual_model_drafts: HashMap::new(),
@@ -1629,7 +1629,7 @@ impl AiFeatureState {
         match field {
             AiInputField::Model => self.settings.model_draft = text,
             AiInputField::BaseUrl => self.settings.base_url_draft = text,
-            AiInputField::ApiKey => self.settings.secret_draft = text,
+            AiInputField::ApiKey => self.settings.secret_draft = text.into(),
             AiInputField::RequestUserAgent => self.settings.config.request_user_agent = text,
         }
         self.panel.status = "AI settings edited".to_string();

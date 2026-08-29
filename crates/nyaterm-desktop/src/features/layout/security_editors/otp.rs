@@ -104,7 +104,7 @@ impl NyaTermApp {
                 self,
                 "otp-secret",
                 t!("otpManager.secretLabel"),
-                editor.secret.clone(),
+                editor.secret.expose_secret().to_owned(),
                 TextInputSetup {
                     placeholder: secret_placeholder.into(),
                     masked: true,

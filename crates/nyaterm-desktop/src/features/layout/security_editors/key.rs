@@ -154,7 +154,7 @@ impl NyaTermApp {
                             self,
                             "key-data",
                             t!("settings.keyInputContentMode"),
-                            editor.key_data.clone(),
+                            editor.key_data.expose_secret().to_owned(),
                             TextInputSetup {
                                 placeholder: t!("settings.keyContentPlaceholder").into(),
                                 masked: false,
@@ -241,7 +241,7 @@ impl NyaTermApp {
                                 self,
                                 "key-cert-data",
                                 t!("settings.keyInputContentMode"),
-                                editor.cert_data.clone(),
+                                editor.cert_data.expose_secret().to_owned(),
                                 TextInputSetup {
                                     placeholder: t!("settings.certContentPlaceholder").into(),
                                     masked: false,
@@ -288,7 +288,7 @@ impl NyaTermApp {
                         self,
                         "key-passphrase",
                         t!("securityAuth.passphrase"),
-                        editor.passphrase.clone(),
+                        editor.passphrase.expose_secret().to_owned(),
                         TextInputSetup {
                             placeholder: "".into(),
                             masked: !editor.show_passphrase,

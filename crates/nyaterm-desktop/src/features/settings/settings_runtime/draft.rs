@@ -31,7 +31,7 @@ impl NyaTermApp {
                 translation_secret_draft,
                 keyword_highlights: self.settings.keyword_config().clone(),
                 master_password_enabled: master_password.enabled,
-                master_password_draft: master_password.draft.to_string(),
+                master_password_draft: master_password.draft.to_owned().into(),
             });
         self.request_settings_panel_refresh(cx);
     }
@@ -58,7 +58,7 @@ impl NyaTermApp {
             )
             || snapshot.keyword_highlights != *self.settings.keyword_config()
             || snapshot.master_password_enabled != master_password.enabled
-            || snapshot.master_password_draft != master_password.draft
+            || snapshot.master_password_draft.expose_secret() != master_password.draft
     }
 
     /// Returns true when a settings save should stay in the in-memory draft.

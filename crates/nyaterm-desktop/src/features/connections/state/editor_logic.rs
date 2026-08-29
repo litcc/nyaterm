@@ -256,7 +256,7 @@ pub(super) fn set_connection_editor_password_source(
         ConnectionEditorPasswordSource::Ask => clear_connection_editor_password_secret(editor),
         ConnectionEditorPasswordSource::Direct => editor.password_id = None,
         ConnectionEditorPasswordSource::Saved => {
-            editor.password.clear();
+            editor.password.expose_secret_mut().clear();
             editor.existing_password = None;
         }
     }
@@ -819,7 +819,7 @@ pub(super) fn advance_connection_editor_focus(draft: &mut Option<ConnectionEdito
 fn clear_connection_editor_password_secret(editor: &mut ConnectionEditorState) {
     editor.password_source = ConnectionEditorPasswordSource::Ask;
     editor.password_id = None;
-    editor.password.clear();
+    editor.password.expose_secret_mut().clear();
     editor.existing_password = None;
 }
 
@@ -965,7 +965,7 @@ pub(super) fn editor_field_seeds(
         ),
         (
             ConnectionEditorField::Password,
-            draft.password.clone(),
+            draft.password.expose_secret().to_owned(),
             true,
             I18n("dialog.passwordPlaceholder"),
         ),
@@ -1205,7 +1205,7 @@ pub(super) fn set_connection_editor_field_text(
             }
         }
         ConnectionEditorField::Domain => draft.domain = text,
-        ConnectionEditorField::Password => draft.password = text,
+        ConnectionEditorField::Password => draft.password = text.into(),
         ConnectionEditorField::ShellPath => draft.shell_path = text,
         ConnectionEditorField::ShellArgs => draft.shell_args = text,
         ConnectionEditorField::WorkingDir => draft.working_dir = text,

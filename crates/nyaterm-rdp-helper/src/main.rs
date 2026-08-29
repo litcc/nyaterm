@@ -567,7 +567,13 @@ fn build_config(
         .with_destination(destination)
         .with_username(config.username.clone())
         .with_domain(config.domain.clone())
-        .with_password(config.password.clone().unwrap_or_default())
+        .with_password(
+            config
+                .password
+                .as_ref()
+                .map(|password| password.expose_secret().to_owned())
+                .unwrap_or_default(),
+        )
         .with_client_build(10_001)
         .with_client_dir("C:\\Windows\\System32\\mstscax.dll")
         .with_client_name("NYATERM")

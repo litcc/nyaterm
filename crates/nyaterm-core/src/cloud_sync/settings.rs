@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::SecretString;
+
 pub const MASKED_SECRET_VALUE: &str = "__SET__";
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -13,7 +15,7 @@ pub struct WebdavSyncSettings {
     #[serde(default)]
     pub username: String,
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -27,11 +29,11 @@ pub struct S3SyncSettings {
     #[serde(default)]
     pub root: String,
     #[serde(default)]
-    pub access_key_id: Option<String>,
+    pub access_key_id: Option<SecretString>,
     #[serde(default)]
-    pub secret_access_key: Option<String>,
+    pub secret_access_key: Option<SecretString>,
     #[serde(default)]
-    pub session_token: Option<String>,
+    pub session_token: Option<SecretString>,
     #[serde(default)]
     pub virtual_host_style: bool,
 }
@@ -43,7 +45,7 @@ pub struct GiteeSnippetSyncSettings {
     #[serde(default)]
     pub gist_id: String,
     #[serde(default)]
-    pub access_token: Option<String>,
+    pub access_token: Option<SecretString>,
 }
 
 impl Default for GiteeSnippetSyncSettings {
@@ -61,13 +63,13 @@ pub struct OAuthDriveSyncSettings {
     #[serde(default)]
     pub root: String,
     #[serde(default)]
-    pub access_token: Option<String>,
+    pub access_token: Option<SecretString>,
     #[serde(default)]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<SecretString>,
     #[serde(default)]
     pub client_id: Option<String>,
     #[serde(default)]
-    pub client_secret: Option<String>,
+    pub client_secret: Option<SecretString>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,13 +77,13 @@ pub struct AliyunDriveSyncSettings {
     #[serde(default)]
     pub root: String,
     #[serde(default)]
-    pub access_token: Option<String>,
+    pub access_token: Option<SecretString>,
     #[serde(default)]
-    pub refresh_token: Option<String>,
+    pub refresh_token: Option<SecretString>,
     #[serde(default)]
     pub client_id: Option<String>,
     #[serde(default)]
-    pub client_secret: Option<String>,
+    pub client_secret: Option<SecretString>,
     #[serde(default = "default_aliyun_drive_type")]
     pub drive_type: String,
 }
@@ -104,7 +106,7 @@ pub struct GithubGistSyncSettings {
     #[serde(default)]
     pub gist_id: String,
     #[serde(default)]
-    pub access_token: Option<String>,
+    pub access_token: Option<SecretString>,
 }
 
 macro_rules! impl_redacted_sync_debug {
@@ -294,7 +296,7 @@ pub struct LocalCloudSyncOptions {
     pub remote_root: String,
     pub device_id: String,
     pub app_version: String,
-    pub master_password: String,
+    pub master_password: SecretString,
     pub enabled: bool,
 }
 
@@ -371,20 +373,23 @@ fn merge_aliyun_drive_settings(
     next.client_secret = merge_secret(current.client_secret.as_ref(), next.client_secret.as_ref());
 }
 
-fn mask_secret(value: Option<String>) -> Option<String> {
+fn mask_secret(value: Option<SecretString>) -> Option<SecretString> {
     value.and_then(|secret| {
         if secret.is_empty() {
             None
         } else {
-            Some(MASKED_SECRET_VALUE.to_string())
+            Some(MASKED_SECRET_VALUE.into())
         }
     })
 }
 
-fn merge_secret(current: Option<&String>, incoming: Option<&String>) -> Option<String> {
-    match incoming.map(String::as_str) {
+fn merge_secret(
+    current: Option<&SecretString>,
+    incoming: Option<&SecretString>,
+) -> Option<SecretString> {
+    match incoming.map(SecretString::expose_secret) {
         Some(MASKED_SECRET_VALUE) | None => current.cloned(),
         Some("") => None,
-        Some(value) => Some(value.to_string()),
+        Some(value) => Some(value.into()),
     }
 }

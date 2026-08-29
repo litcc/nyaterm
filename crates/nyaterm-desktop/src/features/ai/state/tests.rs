@@ -50,7 +50,7 @@ fn settings_draft_restore_and_replacement_keep_related_values_together() {
     state.restore_settings_draft(snapshot.0, snapshot.1, snapshot.2, snapshot.3);
     let restored = state.settings_draft_snapshot();
     assert_eq!(restored.1, "model-a");
-    assert_eq!(restored.3, "secret");
+    assert_eq!(restored.3.expose_secret(), "secret");
 
     state.replace_settings_config(AiSettings::default(), true);
     assert!(state.settings_draft_snapshot().3.is_empty());
@@ -60,8 +60,8 @@ fn settings_draft_restore_and_replacement_keep_related_values_together() {
 fn pending_settings_preserve_masked_secret_until_a_new_draft_exists() {
     let cx = TestAppContext::single();
     let mut state = state(&cx);
-    state.settings.config.provider_profiles[0].api_key = Some("__SET__".to_string());
-    state.settings.config.provider_credentials[0].api_key = Some("__SET__".to_string());
+    state.settings.config.provider_profiles[0].api_key = Some("__SET__".to_string().into());
+    state.settings.config.provider_credentials[0].api_key = Some("__SET__".to_string().into());
 
     let pending = state.pending_settings();
     assert_eq!(

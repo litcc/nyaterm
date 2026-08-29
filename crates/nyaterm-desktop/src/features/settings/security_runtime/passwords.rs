@@ -43,7 +43,7 @@ impl NyaTermApp {
             SecurityPasswordEditorState {
                 id: Some(entry.id),
                 name: entry.name,
-                password: String::new(),
+                password: nyaterm_core::SecretString::default(),
                 has_password: entry.has_password,
                 show_password: false,
                 error: None,
@@ -52,7 +52,7 @@ impl NyaTermApp {
             SecurityPasswordEditorState {
                 id: None,
                 name: String::new(),
-                password: String::new(),
+                password: nyaterm_core::SecretString::default(),
                 has_password: false,
                 show_password: false,
                 error: None,
@@ -339,7 +339,7 @@ impl NyaTermApp {
                 }
                 match result {
                     Ok(Some(entry)) => {
-                        let value = entry.password.unwrap_or_default();
+                        let value = entry.password.unwrap_or_default().into_secret();
                         if value.is_empty() {
                             this.security.set_status("password has no secret");
                         } else {

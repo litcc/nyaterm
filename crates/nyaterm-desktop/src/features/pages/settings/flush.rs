@@ -67,7 +67,7 @@ impl NyaTermApp {
                     let master_password = self.settings.master_password();
                     MasterPasswordPresentation {
                         enabled: master_password.enabled,
-                        draft: master_password.draft.to_string(),
+                        draft: master_password.draft.to_owned().into(),
                     }
                 },
                 font_catalog: FontCatalogPresentation::new(

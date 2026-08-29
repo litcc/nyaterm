@@ -74,11 +74,17 @@ pub fn build_s3_signed_request_with_query(
     timestamp: SystemTime,
 ) -> Result<S3SignedRequest, CloudSyncError> {
     let access_key_id = required_secret(
-        settings.access_key_id.as_deref(),
+        settings
+            .access_key_id
+            .as_ref()
+            .map(crate::SecretString::expose_secret),
         "S3 access key ID is required",
     )?;
     let secret_access_key = required_secret(
-        settings.secret_access_key.as_deref(),
+        settings
+            .secret_access_key
+            .as_ref()
+            .map(crate::SecretString::expose_secret),
         "S3 secret access key is required",
     )?;
     let region = s3_region(settings);
@@ -106,7 +112,8 @@ pub fn build_s3_signed_request_with_query(
     ]);
     if let Some(session_token) = settings
         .session_token
-        .as_deref()
+        .as_ref()
+        .map(crate::SecretString::expose_secret)
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
@@ -135,12 +142,13 @@ pub fn build_s3_signed_request_with_query(
         "AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{}",
         s3_payload_sha256(canonical_request.as_bytes())
     );
-    let signing_key = s3_signing_key(&secret_access_key, &short_date, &region)?;
+    let signing_key = s3_signing_key(secret_access_key.expose_secret(), &short_date, &region)?;
     let signature = hex::encode(s3_hmac(&signing_key, &string_to_sign)?);
     headers.insert(
         "authorization".to_string(),
         format!(
-            "AWS4-HMAC-SHA256 Credential={access_key_id}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+            "AWS4-HMAC-SHA256 Credential={}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}",
+            access_key_id.expose_secret()
         ),
     );
 

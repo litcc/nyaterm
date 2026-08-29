@@ -158,7 +158,7 @@ impl NyaTermApp {
         let Some(state) = self.settings.take_snapshot_password_prompt() else {
             return true;
         };
-        let password = state.value.trim().to_string();
+        let password: nyaterm_core::SecretString = state.value.trim().to_owned().into();
         if password.is_empty() {
             self.settings.restore_snapshot_password_prompt(state.kind);
             self.reset_text_input("snapshot-password.value", "", cx);
@@ -262,7 +262,7 @@ impl NyaTermApp {
         let Some(state) = self.settings.take_snapshot_password_prompt() else {
             return;
         };
-        let password = state.value.trim().to_string();
+        let password: nyaterm_core::SecretString = state.value.trim().to_owned().into();
         if password.is_empty() {
             self.settings.restore_snapshot_password_prompt(state.kind);
             self.reset_text_input("snapshot-password.value", "", cx);
@@ -380,7 +380,7 @@ impl NyaTermApp {
 
     fn prompt_encrypted_portable_snapshot_export_path(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         cx: &mut Context<Self>,
     ) {
         if !self
@@ -410,7 +410,7 @@ impl NyaTermApp {
                             &path,
                             "native-local",
                             env!("CARGO_PKG_VERSION"),
-                            &master_password,
+                            master_password.expose_secret(),
                         ) {
                             Ok(info) => ConfigPathPromptResult::Exported(info),
                             Err(error) => ConfigPathPromptResult::Failed(error.to_string()),
@@ -437,7 +437,7 @@ impl NyaTermApp {
 
     fn prompt_encrypted_portable_snapshot_import_path(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         cx: &mut Context<Self>,
     ) {
         if !self
@@ -471,7 +471,7 @@ impl NyaTermApp {
                                 &config_dir,
                                 portable_key_path,
                                 &path,
-                                &master_password,
+                                master_password.expose_secret(),
                             ) {
                                 Ok(info) => ConfigPathPromptResult::Imported(info),
                                 Err(error) => ConfigPathPromptResult::Failed(error.to_string()),

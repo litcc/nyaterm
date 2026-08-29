@@ -433,26 +433,29 @@ fn model_from_profile(profile: &AiProviderProfile) -> Option<AiModelConfigItem> 
     })
 }
 
-fn mask_secret(value: Option<String>) -> Option<String> {
+fn mask_secret(value: Option<crate::SecretString>) -> Option<crate::SecretString> {
     value.and_then(|secret| {
         if secret.is_empty() {
             None
         } else {
-            Some(MASKED_SECRET_VALUE.to_string())
+            Some(MASKED_SECRET_VALUE.into())
         }
     })
 }
 
-fn merge_secret(current: Option<&String>, incoming: Option<&String>) -> Option<String> {
-    match incoming.map(String::as_str) {
+fn merge_secret(
+    current: Option<&crate::SecretString>,
+    incoming: Option<&crate::SecretString>,
+) -> Option<crate::SecretString> {
+    match incoming.map(crate::SecretString::expose_secret) {
         Some(MASKED_SECRET_VALUE) | None => current.cloned(),
         Some("") => None,
-        Some(value) => Some(value.to_string()),
+        Some(value) => Some(value.into()),
     }
 }
 
-fn optional_secret_present(value: &Option<String>) -> bool {
-    value.as_deref().is_some_and(|value| !value.is_empty())
+fn optional_secret_present(value: &Option<crate::SecretString>) -> bool {
+    value.as_ref().is_some_and(|value| !value.is_empty())
 }
 
 #[cfg(test)]
@@ -465,11 +468,11 @@ mod tests {
     #[test]
     fn merge_preserves_masked_api_key() {
         let mut current = AiSettings::default();
-        current.provider_profiles[0].api_key = Some("real-key".to_string());
-        current.provider_credentials[0].api_key = Some("credential-key".to_string());
+        current.provider_profiles[0].api_key = Some("real-key".to_string().into());
+        current.provider_credentials[0].api_key = Some("credential-key".to_string().into());
         let mut next = current.clone();
-        next.provider_profiles[0].api_key = Some(MASKED_SECRET_VALUE.to_string());
-        next.provider_credentials[0].api_key = Some(MASKED_SECRET_VALUE.to_string());
+        next.provider_profiles[0].api_key = Some(MASKED_SECRET_VALUE.to_string().into());
+        next.provider_credentials[0].api_key = Some(MASKED_SECRET_VALUE.to_string().into());
 
         let merged = merge_masked_ai_settings(&current, next);
         assert_eq!(
@@ -485,8 +488,8 @@ mod tests {
     #[test]
     fn mask_replaces_configured_api_key() {
         let mut settings = AiSettings::default();
-        settings.provider_profiles[0].api_key = Some("real-key".to_string());
-        settings.provider_credentials[0].api_key = Some("credential-key".to_string());
+        settings.provider_profiles[0].api_key = Some("real-key".to_string().into());
+        settings.provider_credentials[0].api_key = Some("credential-key".to_string().into());
 
         let masked = mask_ai_settings(settings);
         assert_eq!(

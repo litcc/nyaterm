@@ -17,7 +17,7 @@ fn provider_debug_output_redacts_api_keys() {
         name: "Test".to_string(),
         provider_kind: AiProviderKind::Openai,
         base_url: None,
-        api_key: Some(secret.to_string()),
+        api_key: Some(secret.to_string().into()),
         enabled: true,
     };
     let output = format!("{credential:?}");
@@ -201,7 +201,7 @@ fn resolves_requested_ai_model_with_credential() {
     let mut settings = AiSettings::default();
     settings.provider_profiles[0].enabled = true;
     settings.provider_credentials[0].enabled = true;
-    settings.provider_credentials[0].api_key = Some("key".to_string());
+    settings.provider_credentials[0].api_key = Some("key".to_string().into());
     normalize_ai_settings(&mut settings);
     let model_id = "openai:gpt-4o-mini".to_string();
     settings.default_model_id = Some(model_id.clone());

@@ -31,7 +31,7 @@ struct DeviceCodeResponse {
 #[derive(Deserialize)]
 struct AccessTokenResponse {
     #[serde(default)]
-    access_token: Option<String>,
+    access_token: Option<nyaterm_core::SecretString>,
     #[serde(default)]
     scope: Option<String>,
     #[serde(default)]
@@ -158,8 +158,9 @@ fn run_device_flow(
             return Ok(());
         }
 
-        let login = fetch_github_login(&client, &access_token)?;
-        let gist_id = resolve_github_gist_id(&client, &access_token, existing_gist_id)?;
+        let login = fetch_github_login(&client, access_token.expose_secret())?;
+        let gist_id =
+            resolve_github_gist_id(&client, access_token.expose_secret(), existing_gist_id)?;
         tx.unbounded_send(GithubGistAuthJobEvent {
             job_id,
             event: GithubGistAuthEvent::Succeeded {

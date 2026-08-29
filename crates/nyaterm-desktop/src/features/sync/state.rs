@@ -411,7 +411,7 @@ impl CloudSyncFeatureState {
 
     pub(super) fn apply_github_auth_succeeded(
         &mut self,
-        access_token: String,
+        access_token: nyaterm_core::SecretString,
         gist_id: String,
         login: String,
         message: String,
@@ -454,65 +454,97 @@ impl CloudSyncFeatureState {
             CloudSyncInputField::WebdavEndpoint => self.settings.webdav.endpoint.clone(),
             CloudSyncInputField::WebdavRoot => self.settings.webdav.root.clone(),
             CloudSyncInputField::WebdavUsername => self.settings.webdav.username.clone(),
-            CloudSyncInputField::WebdavPassword => self.secret_draft.webdav_password.clone(),
+            CloudSyncInputField::WebdavPassword => {
+                self.secret_draft.webdav_password.expose_secret().to_owned()
+            }
             CloudSyncInputField::S3Endpoint => self.settings.s3.endpoint.clone(),
             CloudSyncInputField::S3Bucket => self.settings.s3.bucket.clone(),
             CloudSyncInputField::S3Region => self.settings.s3.region.clone(),
             CloudSyncInputField::S3Root => self.settings.s3.root.clone(),
-            CloudSyncInputField::S3AccessKeyId => self.secret_draft.s3_access_key_id.clone(),
-            CloudSyncInputField::S3SecretAccessKey => {
-                self.secret_draft.s3_secret_access_key.clone()
-            }
-            CloudSyncInputField::S3SessionToken => self.secret_draft.s3_session_token.clone(),
+            CloudSyncInputField::S3AccessKeyId => self
+                .secret_draft
+                .s3_access_key_id
+                .expose_secret()
+                .to_owned(),
+            CloudSyncInputField::S3SecretAccessKey => self
+                .secret_draft
+                .s3_secret_access_key
+                .expose_secret()
+                .to_owned(),
+            CloudSyncInputField::S3SessionToken => self
+                .secret_draft
+                .s3_session_token
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::GoogleDriveRoot => self.settings.google_drive.root.clone(),
-            CloudSyncInputField::GoogleDriveAccessToken => {
-                self.secret_draft.google_drive_access_token.clone()
-            }
-            CloudSyncInputField::GoogleDriveRefreshToken => {
-                self.secret_draft.google_drive_refresh_token.clone()
-            }
+            CloudSyncInputField::GoogleDriveAccessToken => self
+                .secret_draft
+                .google_drive_access_token
+                .expose_secret()
+                .to_owned(),
+            CloudSyncInputField::GoogleDriveRefreshToken => self
+                .secret_draft
+                .google_drive_refresh_token
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::GoogleDriveClientId => self
                 .settings
                 .google_drive
                 .client_id
                 .clone()
                 .unwrap_or_default(),
-            CloudSyncInputField::GoogleDriveClientSecret => {
-                self.secret_draft.google_drive_client_secret.clone()
-            }
+            CloudSyncInputField::GoogleDriveClientSecret => self
+                .secret_draft
+                .google_drive_client_secret
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::OneDriveRoot => self.settings.onedrive.root.clone(),
-            CloudSyncInputField::OneDriveAccessToken => {
-                self.secret_draft.onedrive_access_token.clone()
-            }
-            CloudSyncInputField::OneDriveRefreshToken => {
-                self.secret_draft.onedrive_refresh_token.clone()
-            }
+            CloudSyncInputField::OneDriveAccessToken => self
+                .secret_draft
+                .onedrive_access_token
+                .expose_secret()
+                .to_owned(),
+            CloudSyncInputField::OneDriveRefreshToken => self
+                .secret_draft
+                .onedrive_refresh_token
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::OneDriveClientId => {
                 self.settings.onedrive.client_id.clone().unwrap_or_default()
             }
-            CloudSyncInputField::OneDriveClientSecret => {
-                self.secret_draft.onedrive_client_secret.clone()
-            }
+            CloudSyncInputField::OneDriveClientSecret => self
+                .secret_draft
+                .onedrive_client_secret
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::AliyunDriveRoot => self.settings.aliyun_drive.root.clone(),
             CloudSyncInputField::AliyunDriveType => self.settings.aliyun_drive.drive_type.clone(),
-            CloudSyncInputField::AliyunDriveAccessToken => {
-                self.secret_draft.aliyun_drive_access_token.clone()
-            }
-            CloudSyncInputField::AliyunDriveRefreshToken => {
-                self.secret_draft.aliyun_drive_refresh_token.clone()
-            }
+            CloudSyncInputField::AliyunDriveAccessToken => self
+                .secret_draft
+                .aliyun_drive_access_token
+                .expose_secret()
+                .to_owned(),
+            CloudSyncInputField::AliyunDriveRefreshToken => self
+                .secret_draft
+                .aliyun_drive_refresh_token
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::AliyunDriveClientId => self
                 .settings
                 .aliyun_drive
                 .client_id
                 .clone()
                 .unwrap_or_default(),
-            CloudSyncInputField::AliyunDriveClientSecret => {
-                self.secret_draft.aliyun_drive_client_secret.clone()
-            }
+            CloudSyncInputField::AliyunDriveClientSecret => self
+                .secret_draft
+                .aliyun_drive_client_secret
+                .expose_secret()
+                .to_owned(),
             CloudSyncInputField::GiteeEndpoint => self.settings.gitee_snippet.api_endpoint.clone(),
             CloudSyncInputField::GiteeGistId => self.settings.gitee_snippet.gist_id.clone(),
-            CloudSyncInputField::GiteeToken => self.secret_draft.gitee_token.clone(),
+            CloudSyncInputField::GiteeToken => {
+                self.secret_draft.gitee_token.expose_secret().to_owned()
+            }
             CloudSyncInputField::GithubGistId => self.settings.github_gist.gist_id.clone(),
         }
     }
@@ -524,35 +556,46 @@ impl CloudSyncFeatureState {
             CloudSyncInputField::WebdavEndpoint => &mut self.settings.webdav.endpoint,
             CloudSyncInputField::WebdavRoot => &mut self.settings.webdav.root,
             CloudSyncInputField::WebdavUsername => &mut self.settings.webdav.username,
-            CloudSyncInputField::WebdavPassword => &mut self.secret_draft.webdav_password,
+            CloudSyncInputField::WebdavPassword => {
+                self.secret_draft.webdav_password.expose_secret_mut()
+            }
             CloudSyncInputField::S3Endpoint => &mut self.settings.s3.endpoint,
             CloudSyncInputField::S3Bucket => &mut self.settings.s3.bucket,
             CloudSyncInputField::S3Region => &mut self.settings.s3.region,
             CloudSyncInputField::S3Root => &mut self.settings.s3.root,
-            CloudSyncInputField::S3AccessKeyId => &mut self.secret_draft.s3_access_key_id,
-            CloudSyncInputField::S3SecretAccessKey => &mut self.secret_draft.s3_secret_access_key,
-            CloudSyncInputField::S3SessionToken => &mut self.secret_draft.s3_session_token,
+            CloudSyncInputField::S3AccessKeyId => {
+                self.secret_draft.s3_access_key_id.expose_secret_mut()
+            }
+            CloudSyncInputField::S3SecretAccessKey => {
+                self.secret_draft.s3_secret_access_key.expose_secret_mut()
+            }
+            CloudSyncInputField::S3SessionToken => {
+                self.secret_draft.s3_session_token.expose_secret_mut()
+            }
             CloudSyncInputField::GoogleDriveRoot => &mut self.settings.google_drive.root,
-            CloudSyncInputField::GoogleDriveAccessToken => {
-                &mut self.secret_draft.google_drive_access_token
-            }
-            CloudSyncInputField::GoogleDriveRefreshToken => {
-                &mut self.secret_draft.google_drive_refresh_token
-            }
+            CloudSyncInputField::GoogleDriveAccessToken => self
+                .secret_draft
+                .google_drive_access_token
+                .expose_secret_mut(),
+            CloudSyncInputField::GoogleDriveRefreshToken => self
+                .secret_draft
+                .google_drive_refresh_token
+                .expose_secret_mut(),
             CloudSyncInputField::GoogleDriveClientId => self
                 .settings
                 .google_drive
                 .client_id
                 .get_or_insert_with(String::new),
-            CloudSyncInputField::GoogleDriveClientSecret => {
-                &mut self.secret_draft.google_drive_client_secret
-            }
+            CloudSyncInputField::GoogleDriveClientSecret => self
+                .secret_draft
+                .google_drive_client_secret
+                .expose_secret_mut(),
             CloudSyncInputField::OneDriveRoot => &mut self.settings.onedrive.root,
             CloudSyncInputField::OneDriveAccessToken => {
-                &mut self.secret_draft.onedrive_access_token
+                self.secret_draft.onedrive_access_token.expose_secret_mut()
             }
             CloudSyncInputField::OneDriveRefreshToken => {
-                &mut self.secret_draft.onedrive_refresh_token
+                self.secret_draft.onedrive_refresh_token.expose_secret_mut()
             }
             CloudSyncInputField::OneDriveClientId => self
                 .settings
@@ -560,27 +603,30 @@ impl CloudSyncFeatureState {
                 .client_id
                 .get_or_insert_with(String::new),
             CloudSyncInputField::OneDriveClientSecret => {
-                &mut self.secret_draft.onedrive_client_secret
+                self.secret_draft.onedrive_client_secret.expose_secret_mut()
             }
             CloudSyncInputField::AliyunDriveRoot => &mut self.settings.aliyun_drive.root,
             CloudSyncInputField::AliyunDriveType => &mut self.settings.aliyun_drive.drive_type,
-            CloudSyncInputField::AliyunDriveAccessToken => {
-                &mut self.secret_draft.aliyun_drive_access_token
-            }
-            CloudSyncInputField::AliyunDriveRefreshToken => {
-                &mut self.secret_draft.aliyun_drive_refresh_token
-            }
+            CloudSyncInputField::AliyunDriveAccessToken => self
+                .secret_draft
+                .aliyun_drive_access_token
+                .expose_secret_mut(),
+            CloudSyncInputField::AliyunDriveRefreshToken => self
+                .secret_draft
+                .aliyun_drive_refresh_token
+                .expose_secret_mut(),
             CloudSyncInputField::AliyunDriveClientId => self
                 .settings
                 .aliyun_drive
                 .client_id
                 .get_or_insert_with(String::new),
-            CloudSyncInputField::AliyunDriveClientSecret => {
-                &mut self.secret_draft.aliyun_drive_client_secret
-            }
+            CloudSyncInputField::AliyunDriveClientSecret => self
+                .secret_draft
+                .aliyun_drive_client_secret
+                .expose_secret_mut(),
             CloudSyncInputField::GiteeEndpoint => &mut self.settings.gitee_snippet.api_endpoint,
             CloudSyncInputField::GiteeGistId => &mut self.settings.gitee_snippet.gist_id,
-            CloudSyncInputField::GiteeToken => &mut self.secret_draft.gitee_token,
+            CloudSyncInputField::GiteeToken => self.secret_draft.gitee_token.expose_secret_mut(),
             CloudSyncInputField::GithubGistId => &mut self.settings.github_gist.gist_id,
         }
     }
@@ -634,25 +680,28 @@ mod tests {
         assert!(cloud_sync.conflict().is_none());
 
         let mut settings = cloud_sync.settings().clone();
-        settings.webdav.password = Some("stored".to_string());
+        settings.webdav.password = Some("stored".to_string().into());
         cloud_sync.replace_settings(settings, CloudSyncSecretDraft::default());
         assert!(cloud_sync.apply_input(CloudSyncInputField::WebdavPassword, "draft".to_string(),));
         assert_eq!(
             cloud_sync.settings().webdav.password.as_deref(),
             Some("stored")
         );
-        assert_eq!(cloud_sync.secret_draft().webdav_password, "draft");
+        assert_eq!(
+            cloud_sync.secret_draft().webdav_password.expose_secret(),
+            "draft"
+        );
     }
 
     #[test]
     fn pending_settings_merge_only_non_empty_secret_drafts() {
         let mut settings = CloudSyncSettings::default();
-        settings.webdav.password = Some("stored-webdav".to_string());
-        settings.s3.session_token = Some("stored-session".to_string());
+        settings.webdav.password = Some("stored-webdav".to_string().into());
+        settings.s3.session_token = Some("stored-session".to_string().into());
         let mut cloud_sync =
             CloudSyncFeatureState::new(settings, CloudSyncState::default(), Vec::new());
-        cloud_sync.secret_draft.webdav_password = "edited-webdav".to_string();
-        cloud_sync.secret_draft.github_token = "new-github-token".to_string();
+        cloud_sync.secret_draft.webdav_password = "edited-webdav".to_string().into();
+        cloud_sync.secret_draft.github_token = "new-github-token".to_string().into();
 
         let pending = cloud_sync.pending_settings();
 

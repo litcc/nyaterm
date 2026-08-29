@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::SecretString;
+
 use super::{
     default_auth_mode, default_otp_algorithm, default_otp_digits, default_otp_period,
     default_otp_type, default_true, uuid_v4,
@@ -12,7 +14,7 @@ pub struct ConnectionAuth {
     #[serde(default)]
     pub password_id: Option<String>,
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[serde(default)]
     pub key_id: Option<String>,
     #[serde(default)]
@@ -29,11 +31,11 @@ pub struct SshKey {
     pub id: String,
     pub name: String,
     #[serde(default)]
-    pub key: Option<String>,
+    pub key: Option<SecretString>,
     #[serde(default)]
-    pub cert: Option<String>,
+    pub cert: Option<SecretString>,
     #[serde(default)]
-    pub passphrase: Option<String>,
+    pub passphrase: Option<SecretString>,
     #[serde(default, skip_serializing)]
     pub key_file_path: Option<String>,
     #[serde(default, skip_serializing)]
@@ -48,9 +50,9 @@ pub struct SshKey {
 pub struct DecryptedSshKey {
     pub id: String,
     pub name: String,
-    pub key_data: Option<String>,
-    pub cert_data: Option<String>,
-    pub passphrase: Option<String>,
+    pub key_data: Option<SecretString>,
+    pub cert_data: Option<SecretString>,
+    pub passphrase: Option<SecretString>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,7 +61,7 @@ pub struct SavedPassword {
     pub id: String,
     pub name: String,
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[serde(default, skip_serializing)]
     pub has_password: bool,
 }
@@ -68,7 +70,7 @@ pub struct SavedPassword {
 pub struct DecryptedSavedPassword {
     pub id: String,
     pub name: String,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,7 +82,7 @@ pub struct SavedCredential {
     pub name: String,
     pub username: String,
     #[serde(default)]
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     #[serde(default)]
     pub username_prompt_regex: Option<String>,
     #[serde(default)]
@@ -97,7 +99,7 @@ pub struct DecryptedSavedCredential {
     pub sort_order: i32,
     pub name: String,
     pub username: String,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     pub username_prompt_regex: Option<String>,
     pub password_prompt_regex: Option<String>,
     pub enabled: bool,
@@ -114,7 +116,7 @@ pub struct OtpEntry {
     #[serde(default)]
     pub username: String,
     #[serde(default)]
-    pub secret: Option<String>,
+    pub secret: Option<SecretString>,
     #[serde(default = "default_otp_algorithm")]
     pub algorithm: String,
     #[serde(default = "default_otp_digits")]
@@ -133,7 +135,7 @@ pub struct DecryptedOtpEntry {
     pub otp_type: String,
     pub issuer: String,
     pub username: String,
-    pub secret: Option<String>,
+    pub secret: Option<SecretString>,
     pub algorithm: String,
     pub digits: u8,
     pub period: u64,

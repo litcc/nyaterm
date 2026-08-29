@@ -20,7 +20,7 @@ pub(crate) enum GithubGistAuthEvent {
         slow_down: bool,
     },
     Succeeded {
-        access_token: String,
+        access_token: nyaterm_core::SecretString,
         gist_id: String,
         login: String,
     },
@@ -364,29 +364,29 @@ impl TranslateInputField {
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct CloudSyncSecretDraft {
-    pub(crate) webdav_password: String,
-    pub(crate) s3_access_key_id: String,
-    pub(crate) s3_secret_access_key: String,
-    pub(crate) s3_session_token: String,
-    pub(crate) google_drive_access_token: String,
-    pub(crate) google_drive_refresh_token: String,
-    pub(crate) google_drive_client_secret: String,
-    pub(crate) onedrive_access_token: String,
-    pub(crate) onedrive_refresh_token: String,
-    pub(crate) onedrive_client_secret: String,
-    pub(crate) aliyun_drive_access_token: String,
-    pub(crate) aliyun_drive_refresh_token: String,
-    pub(crate) aliyun_drive_client_secret: String,
-    pub(crate) gitee_token: String,
-    pub(crate) github_token: String,
+    pub(crate) webdav_password: nyaterm_core::SecretString,
+    pub(crate) s3_access_key_id: nyaterm_core::SecretString,
+    pub(crate) s3_secret_access_key: nyaterm_core::SecretString,
+    pub(crate) s3_session_token: nyaterm_core::SecretString,
+    pub(crate) google_drive_access_token: nyaterm_core::SecretString,
+    pub(crate) google_drive_refresh_token: nyaterm_core::SecretString,
+    pub(crate) google_drive_client_secret: nyaterm_core::SecretString,
+    pub(crate) onedrive_access_token: nyaterm_core::SecretString,
+    pub(crate) onedrive_refresh_token: nyaterm_core::SecretString,
+    pub(crate) onedrive_client_secret: nyaterm_core::SecretString,
+    pub(crate) aliyun_drive_access_token: nyaterm_core::SecretString,
+    pub(crate) aliyun_drive_refresh_token: nyaterm_core::SecretString,
+    pub(crate) aliyun_drive_client_secret: nyaterm_core::SecretString,
+    pub(crate) gitee_token: nyaterm_core::SecretString,
+    pub(crate) github_token: nyaterm_core::SecretString,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct TranslationSecretDraft {
-    pub(crate) deepl_api_key: String,
-    pub(crate) baidu_app_key: String,
-    pub(crate) ali_app_key: String,
-    pub(crate) youdao_app_key: String,
+    pub(crate) deepl_api_key: nyaterm_core::SecretString,
+    pub(crate) baidu_app_key: nyaterm_core::SecretString,
+    pub(crate) ali_app_key: nyaterm_core::SecretString,
+    pub(crate) youdao_app_key: nyaterm_core::SecretString,
 }
 
 impl std::fmt::Debug for CloudSyncSecretDraft {
@@ -462,7 +462,7 @@ pub(crate) enum SnapshotPasswordPromptKind {
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct SnapshotPasswordPromptState {
     pub(crate) kind: SnapshotPasswordPromptKind,
-    pub(crate) value: String,
+    pub(crate) value: nyaterm_core::SecretString,
 }
 
 impl std::fmt::Debug for SnapshotPasswordPromptState {
@@ -556,7 +556,7 @@ mod snapshot_password_prompt_tests {
     fn snapshot_password_prompt_debug_redacts_the_password() {
         let state = SnapshotPasswordPromptState {
             kind: SnapshotPasswordPromptKind::CloudProviderPush,
-            value: "snapshot-secret".to_string(),
+            value: "snapshot-secret".to_string().into(),
         };
 
         let debug = format!("{state:?}");
@@ -568,15 +568,15 @@ mod snapshot_password_prompt_tests {
     fn cloud_and_oauth_debug_output_redacts_secrets() {
         let secret = "nya-desktop-secret-never-log";
         let cloud = CloudSyncSecretDraft {
-            github_token: secret.to_string(),
+            github_token: secret.to_string().into(),
             ..CloudSyncSecretDraft::default()
         };
         let translation = TranslationSecretDraft {
-            deepl_api_key: secret.to_string(),
+            deepl_api_key: secret.to_string().into(),
             ..TranslationSecretDraft::default()
         };
         let oauth = GithubGistAuthEvent::Succeeded {
-            access_token: secret.to_string(),
+            access_token: secret.to_string().into(),
             gist_id: "gist".to_string(),
             login: "user".to_string(),
         };

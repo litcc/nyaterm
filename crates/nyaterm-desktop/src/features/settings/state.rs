@@ -790,14 +790,14 @@ impl SettingsFeatureState {
     pub(in crate::features) fn master_password(&self) -> MasterPasswordView<'_> {
         MasterPasswordView {
             enabled: self.master_password.enabled,
-            draft: &self.master_password.draft,
+            draft: self.master_password.draft.expose_secret(),
         }
     }
 
     pub(in crate::features) fn restore_master_password_draft(
         &mut self,
         enabled: bool,
-        draft: String,
+        draft: nyaterm_core::SecretString,
     ) {
         self.master_password.enabled = enabled;
         self.master_password.draft = draft;
@@ -1482,7 +1482,7 @@ impl SettingsFeatureState {
         }
         self.prompts.snapshot_password = Some(SnapshotPasswordPromptState {
             kind,
-            value: String::new(),
+            value: nyaterm_core::SecretString::default(),
         });
         true
     }
@@ -1499,7 +1499,7 @@ impl SettingsFeatureState {
     ) {
         self.prompts.snapshot_password = Some(SnapshotPasswordPromptState {
             kind,
-            value: String::new(),
+            value: nyaterm_core::SecretString::default(),
         });
     }
 
@@ -1507,7 +1507,7 @@ impl SettingsFeatureState {
         let Some(state) = self.prompts.snapshot_password.as_mut() else {
             return false;
         };
-        state.value = text;
+        state.value = text.into();
         true
     }
 }
@@ -1818,7 +1818,7 @@ mod tests {
         assert!(state.apply_snapshot_password_input("secret".to_string()));
         let prompt = state.take_snapshot_password_prompt().expect("prompt");
         assert_eq!(prompt.kind, SnapshotPasswordPromptKind::CloudForcePush);
-        assert_eq!(prompt.value, "secret");
+        assert_eq!(prompt.value.expose_secret(), "secret");
         assert!(!state.snapshot_password_prompt_active());
     }
 

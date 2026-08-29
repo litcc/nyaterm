@@ -174,7 +174,7 @@ pub struct ConnectionStore {
 struct ConnectionPasswordRecord {
     id: String,
     connection_id: String,
-    password: String,
+    password: nyaterm_core::SecretString,
     created_at_ms: u64,
     updated_at_ms: u64,
 }
@@ -779,11 +779,14 @@ impl ConnectionStore {
             let Some(auth) = connection.auth.as_mut() else {
                 continue;
             };
-            if let (Some(master_key_token), Some(password)) =
-                (master_key_token.as_deref(), auth.password.as_deref())
-                && let Ok(plaintext) = crypto.decrypt_secret(master_key_token, password)
+            if let (Some(master_key_token), Some(password)) = (
+                master_key_token.as_deref(),
+                auth.password
+                    .as_ref()
+                    .map(nyaterm_core::SecretString::expose_secret),
+            ) && let Ok(plaintext) = crypto.decrypt_secret(master_key_token, password)
             {
-                auth.password = Some(plaintext);
+                auth.password = Some(plaintext.into());
                 auth.has_password = false;
                 continue;
             }
@@ -791,9 +794,9 @@ impl ConnectionStore {
             if let Some(raw) = table.get(key.as_str())? {
                 let record: ConnectionPasswordRecord = deserialize_json(raw.value())?;
                 if let Some(master_key_token) = master_key_token.as_deref() {
-                    match crypto.decrypt_secret(master_key_token, &record.password) {
+                    match crypto.decrypt_secret(master_key_token, record.password.expose_secret()) {
                         Ok(plaintext) => {
-                            auth.password = Some(plaintext);
+                            auth.password = Some(plaintext.into());
                             auth.has_password = false;
                         }
                         Err(_) => {
@@ -814,7 +817,8 @@ impl ConnectionStore {
         let bootstrap = CredentialCrypto::new(self.portable_key_path.clone(), None);
         let master_password = self
             .load_encrypted_master_password()?
-            .and_then(|token| bootstrap.decrypt_settings_secret(&token).ok());
+            .and_then(|token| bootstrap.decrypt_settings_secret(&token).ok())
+            .map(Into::into);
         Ok(CredentialCrypto::new(
             self.portable_key_path.clone(),
             master_password,
@@ -1294,9 +1298,13 @@ fn clear_string_table(
 fn decrypt_optional_secret(
     crypto: &CredentialCrypto,
     master_key_token: Option<&str>,
-    value: &Option<String>,
-) -> Result<Option<String>, StorageError> {
-    let Some(value) = value.as_deref().filter(|value| !value.is_empty()) else {
+    value: &Option<nyaterm_core::SecretString>,
+) -> Result<Option<nyaterm_core::SecretString>, StorageError> {
+    let Some(value) = value
+        .as_ref()
+        .map(nyaterm_core::SecretString::expose_secret)
+        .filter(|value| !value.is_empty())
+    else {
         return Ok(None);
     };
     let Some(master_key_token) = master_key_token else {
@@ -1304,6 +1312,7 @@ fn decrypt_optional_secret(
     };
     crypto
         .decrypt_secret(master_key_token, value)
+        .map(Into::into)
         .map(Some)
         .map_err(StorageError::from)
 }
@@ -1311,9 +1320,13 @@ fn decrypt_optional_secret(
 fn encrypt_optional_secret(
     crypto: &CredentialCrypto,
     master_key_token: Option<&str>,
-    value: &Option<String>,
-) -> Result<Option<String>, StorageError> {
-    let Some(value) = value.as_deref().filter(|value| !value.is_empty()) else {
+    value: &Option<nyaterm_core::SecretString>,
+) -> Result<Option<nyaterm_core::SecretString>, StorageError> {
+    let Some(value) = value
+        .as_ref()
+        .map(nyaterm_core::SecretString::expose_secret)
+        .filter(|value| !value.is_empty())
+    else {
         return Ok(None);
     };
     let Some(master_key_token) = master_key_token else {
@@ -1321,6 +1334,7 @@ fn encrypt_optional_secret(
     };
     crypto
         .encrypt_secret(master_key_token, value)
+        .map(Into::into)
         .map(Some)
         .map_err(StorageError::from)
 }
@@ -1328,39 +1342,41 @@ fn encrypt_optional_secret(
 fn decrypt_legacy_plaintext_secret(
     crypto: &CredentialCrypto,
     master_key_token: Option<&str>,
-    value: &str,
-) -> Result<String, StorageError> {
-    let value = value.trim();
+    value: &nyaterm_core::SecretString,
+) -> Result<nyaterm_core::SecretString, StorageError> {
+    let value = value.expose_secret().trim();
     if value.is_empty() {
-        return Ok(String::new());
+        return Ok(nyaterm_core::SecretString::default());
     }
     let Some(master_key_token) = master_key_token else {
-        return Ok(value.to_string());
+        return Ok(value.into());
     };
     Ok(crypto
         .decrypt_secret(master_key_token, value)
-        .unwrap_or_else(|_| value.to_string()))
+        .unwrap_or_else(|_| value.to_string())
+        .into())
 }
 
 fn encrypt_string_secret(
     crypto: &CredentialCrypto,
     master_key_token: Option<&str>,
-    value: &str,
-) -> Result<String, StorageError> {
-    let value = value.trim();
+    value: &nyaterm_core::SecretString,
+) -> Result<nyaterm_core::SecretString, StorageError> {
+    let value = value.expose_secret().trim();
     if value.is_empty() {
-        return Ok(String::new());
+        return Ok(nyaterm_core::SecretString::default());
     }
     let Some(master_key_token) = master_key_token else {
         return Err(StorageError::MissingMasterKey);
     };
     crypto
         .encrypt_secret(master_key_token, value)
+        .map(Into::into)
         .map_err(StorageError::from)
 }
 
-fn optional_secret_present(value: &Option<String>) -> bool {
-    value.as_deref().is_some_and(|value| !value.is_empty())
+fn optional_secret_present(value: &Option<nyaterm_core::SecretString>) -> bool {
+    value.as_ref().is_some_and(|value| !value.is_empty())
 }
 
 fn write_json_in_txn<T>(

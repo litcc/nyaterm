@@ -1062,7 +1062,7 @@ mod tests {
             Ok(SshAgentStoredKeySnapshot {
                 revision: 1,
                 keys: vec![SshAgentStoredKey {
-                    key_data: "not a private key".to_string(),
+                    key_data: "not a private key".to_string().into(),
                     cert_data: None,
                     passphrase: None,
                     comment: "invalid test key".to_string(),

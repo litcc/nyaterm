@@ -508,9 +508,9 @@ impl NyaTermApp {
                                     cx.notify();
                                     return;
                                 };
-                                password.push('\r');
+                                password.expose_secret_mut().push('\r');
                                 this.send_terminal_input_without_suggestion_track(
-                                    password.into_bytes(),
+                                    password.into_secret().into_bytes(),
                                     cx,
                                 );
                                 this.shell.set_status(format!(

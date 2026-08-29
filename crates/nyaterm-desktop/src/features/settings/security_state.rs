@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use gpui::FocusHandle;
-use nyaterm_core::{OtpEntry, SavedCredential, SavedPassword, SshKey};
+use nyaterm_core::{OtpEntry, SavedCredential, SavedPassword, SecretString, SshKey};
 
 use crate::models::{
     SecurityAuthTab, SecurityCredentialDropTarget, SecurityCredentialEditorState,
@@ -83,16 +83,16 @@ struct SecurityEditorState {
 
 /// Values the user has explicitly revealed, plus generated OTP codes.
 struct SecurityRevealedState {
-    otp_codes: HashMap<String, String>,
-    passwords: HashMap<String, String>,
-    credentials: HashMap<String, String>,
+    otp_codes: HashMap<String, SecretString>,
+    passwords: HashMap<String, SecretString>,
+    credentials: HashMap<String, SecretString>,
     private_key: Option<SecurityPrivateKeyViewState>,
     private_key_request_id: u64,
 }
 
 struct SecurityPrivateKeyViewState {
     name: String,
-    value: String,
+    value: SecretString,
     error: Option<String>,
     request_id: u64,
 }
@@ -125,7 +125,7 @@ struct SecurityUnlockState {
     secrets_unlocked: bool,
     prompt_open: bool,
     master_required_prompt_open: bool,
-    draft: String,
+    draft: SecretString,
     error: Option<String>,
     pending_action: Option<SecurityUnlockAction>,
     request_id: u64,
@@ -139,7 +139,7 @@ struct SecurityUnlockState {
 /// secrets while the rest of the application remains usable.
 struct SecurityScreenLockState {
     locked: bool,
-    password_draft: String,
+    password_draft: SecretString,
     status: String,
     focus: FocusHandle,
     last_user_activity_at: Instant,
@@ -188,7 +188,7 @@ impl SecurityFeatureState {
                 secrets_unlocked,
                 prompt_open: false,
                 master_required_prompt_open: false,
-                draft: String::new(),
+                draft: SecretString::default(),
                 error: None,
                 pending_action: None,
                 request_id: 0,
@@ -197,7 +197,7 @@ impl SecurityFeatureState {
             },
             screen_lock: SecurityScreenLockState {
                 locked: false,
-                password_draft: String::new(),
+                password_draft: SecretString::default(),
                 status: String::new(),
                 focus: focus.screen_lock,
                 last_user_activity_at: Instant::now(),
@@ -270,7 +270,7 @@ impl SecurityFeatureState {
     }
 
     pub(in crate::features) fn unlock_draft(&self) -> &str {
-        &self.unlock.draft
+        self.unlock.draft.expose_secret()
     }
 
     pub(in crate::features) fn unlock_error(&self) -> Option<&str> {
@@ -292,7 +292,7 @@ impl SecurityFeatureState {
         self.unlock.pending_action = None;
         self.unlock.prompt_open = false;
         self.unlock.master_required_prompt_open = true;
-        self.unlock.draft.clear();
+        self.unlock.draft.expose_secret_mut().clear();
         self.unlock.error = None;
         self.status = "master password required".to_string();
     }
@@ -300,7 +300,7 @@ impl SecurityFeatureState {
     pub(in crate::features) fn show_unlock_prompt(&mut self) {
         self.unlock.master_required_prompt_open = false;
         self.unlock.prompt_open = true;
-        self.unlock.draft.clear();
+        self.unlock.draft.expose_secret_mut().clear();
         self.unlock.error = None;
         self.status = "enter master password to unlock secrets".to_string();
     }
@@ -324,7 +324,7 @@ impl SecurityFeatureState {
     }
 
     pub(in crate::features) fn reject_unlock(&mut self, error: String, status: &'static str) {
-        self.unlock.draft.clear();
+        self.unlock.draft.expose_secret_mut().clear();
         self.unlock.error = Some(error);
         self.status = status.to_string();
     }
@@ -333,7 +333,7 @@ impl SecurityFeatureState {
         if self.unlock.busy {
             return;
         }
-        self.unlock.draft = text;
+        self.unlock.draft = text.into();
         self.unlock.error = None;
     }
 
@@ -341,7 +341,7 @@ impl SecurityFeatureState {
         self.unlock.secrets_unlocked = true;
     }
 
-    pub(in crate::features) fn begin_unlock_request(&mut self) -> Option<(u64, String)> {
+    pub(in crate::features) fn begin_unlock_request(&mut self) -> Option<(u64, SecretString)> {
         if self.unlock.busy || !self.unlock.prompt_open {
             return None;
         }
@@ -364,7 +364,7 @@ impl SecurityFeatureState {
     }
 
     pub(in crate::features) fn screen_lock_password_draft(&self) -> &str {
-        &self.screen_lock.password_draft
+        self.screen_lock.password_draft.expose_secret()
     }
 
     pub(in crate::features) fn screen_lock_status(&self) -> &str {
@@ -381,13 +381,13 @@ impl SecurityFeatureState {
 
     pub(in crate::features) fn activate_screen_lock(&mut self, status: String) {
         self.screen_lock.locked = true;
-        self.screen_lock.password_draft.clear();
+        self.screen_lock.password_draft.expose_secret_mut().clear();
         self.screen_lock.status = status;
     }
 
     pub(in crate::features) fn deactivate_screen_lock(&mut self) {
         self.screen_lock.locked = false;
-        self.screen_lock.password_draft.clear();
+        self.screen_lock.password_draft.expose_secret_mut().clear();
         self.screen_lock.status.clear();
         self.screen_lock.last_user_activity_at = Instant::now();
     }
@@ -407,17 +407,20 @@ impl SecurityFeatureState {
         text: String,
         status: String,
     ) {
-        self.screen_lock.password_draft = text;
+        self.screen_lock.password_draft = text.into();
         self.screen_lock.status = status;
     }
 
     pub(in crate::features) fn clear_screen_lock_password_with_status(&mut self, status: String) {
-        self.screen_lock.password_draft.clear();
+        self.screen_lock.password_draft.expose_secret_mut().clear();
         self.screen_lock.status = status;
     }
 
     pub(in crate::features) fn revealed_password(&self, id: &str) -> Option<&str> {
-        self.revealed.passwords.get(id).map(String::as_str)
+        self.revealed
+            .passwords
+            .get(id)
+            .map(SecretString::expose_secret)
     }
 
     pub(in crate::features) fn hide_revealed_password(&mut self, id: &str) -> bool {
@@ -425,11 +428,14 @@ impl SecurityFeatureState {
     }
 
     pub(in crate::features) fn reveal_password(&mut self, id: String, value: String) {
-        self.revealed.passwords.insert(id, value);
+        self.revealed.passwords.insert(id, value.into());
     }
 
     pub(in crate::features) fn revealed_credential(&self, id: &str) -> Option<&str> {
-        self.revealed.credentials.get(id).map(String::as_str)
+        self.revealed
+            .credentials
+            .get(id)
+            .map(SecretString::expose_secret)
     }
 
     pub(in crate::features) fn hide_revealed_credential(&mut self, id: &str) -> bool {
@@ -437,11 +443,14 @@ impl SecurityFeatureState {
     }
 
     pub(in crate::features) fn reveal_credential(&mut self, id: String, value: String) {
-        self.revealed.credentials.insert(id, value);
+        self.revealed.credentials.insert(id, value.into());
     }
 
     pub(in crate::features) fn revealed_otp_code(&self, id: &str) -> Option<&str> {
-        self.revealed.otp_codes.get(id).map(String::as_str)
+        self.revealed
+            .otp_codes
+            .get(id)
+            .map(SecretString::expose_secret)
     }
 
     pub(in crate::features) fn clear_revealed_otp_code(&mut self, id: &str) {
@@ -449,7 +458,7 @@ impl SecurityFeatureState {
     }
 
     pub(in crate::features) fn reveal_otp_code(&mut self, id: String, code: String) {
-        self.revealed.otp_codes.insert(id, code);
+        self.revealed.otp_codes.insert(id, code.into());
     }
 
     pub(in crate::features) fn otp_code_visible(&self, id: &str) -> bool {
@@ -493,7 +502,7 @@ impl SecurityFeatureState {
         self.revealed.private_key.as_ref().map(|view| {
             (
                 view.name.as_str(),
-                view.value.as_str(),
+                view.value.expose_secret(),
                 view.error.as_deref(),
             )
         })
@@ -505,7 +514,7 @@ impl SecurityFeatureState {
         let request_id = self.revealed.private_key_request_id;
         self.revealed.private_key = Some(SecurityPrivateKeyViewState {
             name,
-            value: String::new(),
+            value: SecretString::default(),
             error: None,
             request_id,
         });
@@ -525,11 +534,11 @@ impl SecurityFeatureState {
         }
         match value {
             Ok(value) => {
-                view.value = value;
+                view.value = value.into();
                 view.error = None;
             }
             Err(error) => {
-                view.value.clear();
+                view.value.expose_secret_mut().clear();
                 view.error = Some(error);
             }
         }
@@ -854,7 +863,7 @@ impl SecurityFeatureState {
                 match id {
                     "key-name" => editor.name = text,
                     "key-data" => {
-                        editor.key_data = text;
+                        editor.key_data = text.into();
                         if !editor.key_data.trim().is_empty() {
                             editor.key_file_path.clear();
                         }
@@ -862,11 +871,11 @@ impl SecurityFeatureState {
                     "key-path" => {
                         editor.key_file_path = text;
                         if !editor.key_file_path.trim().is_empty() {
-                            editor.key_data.clear();
+                            editor.key_data.expose_secret_mut().clear();
                         }
                     }
                     "key-cert-data" => {
-                        editor.cert_data = text;
+                        editor.cert_data = text.into();
                         if !editor.cert_data.trim().is_empty() {
                             editor.cert_file_path.clear();
                         }
@@ -874,10 +883,10 @@ impl SecurityFeatureState {
                     "key-cert-path" => {
                         editor.cert_file_path = text;
                         if !editor.cert_file_path.trim().is_empty() {
-                            editor.cert_data.clear();
+                            editor.cert_data.expose_secret_mut().clear();
                         }
                     }
-                    _ => editor.passphrase = text,
+                    _ => editor.passphrase = text.into(),
                 }
             }
             "pw-name" | "pw-value" => {
@@ -886,7 +895,7 @@ impl SecurityFeatureState {
                 };
                 match id {
                     "pw-name" => editor.name = text,
-                    _ => editor.password = text,
+                    _ => editor.password = text.into(),
                 }
             }
             "otp-issuer" | "otp-username" | "otp-secret" | "otp-digits" | "otp-period"
@@ -897,7 +906,7 @@ impl SecurityFeatureState {
                 match id {
                     "otp-issuer" => editor.issuer = text,
                     "otp-username" => editor.username = text,
-                    "otp-secret" => editor.secret = text,
+                    "otp-secret" => editor.secret = text.into(),
                     "otp-digits" => editor.digits = digits_only(&text),
                     "otp-period" => editor.period = digits_only(&text),
                     _ => editor.counter = digits_only(&text),
@@ -910,7 +919,7 @@ impl SecurityFeatureState {
                 match id {
                     "cred-name" => editor.name = text,
                     "cred-user" => editor.username = text,
-                    "cred-pass" => editor.password = text,
+                    "cred-pass" => editor.password = text.into(),
                     "cred-user-re" => editor.username_prompt_regex = text,
                     _ => editor.password_prompt_regex = text,
                 }
@@ -972,7 +981,7 @@ impl SecurityFeatureState {
 
     pub(in crate::features) fn close_unlock_prompt(&mut self) {
         self.unlock.prompt_open = false;
-        self.unlock.draft.clear();
+        self.unlock.draft.expose_secret_mut().clear();
         self.unlock.error = None;
         self.unlock.busy = false;
     }
@@ -1102,7 +1111,7 @@ mod tests {
             SecurityPasswordEditorState {
                 id: None,
                 name: String::new(),
-                password: String::new(),
+                password: nyaterm_core::SecretString::default(),
                 has_password: false,
                 show_password: false,
                 error: None,
@@ -1116,10 +1125,10 @@ mod tests {
                 id: None,
                 name: String::new(),
                 key_file_path: String::new(),
-                key_data: String::new(),
+                key_data: nyaterm_core::SecretString::default(),
                 cert_file_path: String::new(),
-                cert_data: String::new(),
-                passphrase: String::new(),
+                cert_data: nyaterm_core::SecretString::default(),
+                passphrase: nyaterm_core::SecretString::default(),
                 key_content_mode: true,
                 cert_content_mode: false,
                 cert_expanded: false,
@@ -1255,7 +1264,7 @@ mod tests {
             SecurityPasswordEditorState {
                 id: None,
                 name: "draft".to_string(),
-                password: "secret".to_string(),
+                password: "secret".to_string().into(),
                 has_password: false,
                 show_password: true,
                 error: None,

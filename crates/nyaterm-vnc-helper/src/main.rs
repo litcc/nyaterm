@@ -554,10 +554,15 @@ async fn run_generation(
         )
     })?;
     output.state(VncSessionState::Authenticating, None)?;
-    let password = Zeroizing::new(config.password.clone().unwrap_or_default());
-    let auth_password = password.to_string();
+    let auth_password = Zeroizing::new(
+        config
+            .password
+            .as_ref()
+            .map(|password| password.expose_secret().to_owned())
+            .unwrap_or_default(),
+    );
     let connector = VncConnector::new(stream)
-        .set_auth_method(async move { Ok(auth_password) })
+        .set_auth_method(async move { Ok(auth_password.to_string()) })
         .set_security_policy(security_policy(
             config.security.mode,
             config.password.is_some(),

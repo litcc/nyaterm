@@ -36,10 +36,10 @@ impl NyaTermApp {
                 id: Some(key.id),
                 name: key.name,
                 key_file_path: String::new(),
-                key_data: String::new(),
+                key_data: nyaterm_core::SecretString::default(),
                 cert_file_path: String::new(),
-                cert_data: String::new(),
-                passphrase: String::new(),
+                cert_data: nyaterm_core::SecretString::default(),
+                passphrase: nyaterm_core::SecretString::default(),
                 key_content_mode: false,
                 cert_content_mode: false,
                 cert_expanded: key.has_cert_data,
@@ -53,10 +53,10 @@ impl NyaTermApp {
                 id: None,
                 name: String::new(),
                 key_file_path: String::new(),
-                key_data: String::new(),
+                key_data: nyaterm_core::SecretString::default(),
                 cert_file_path: String::new(),
-                cert_data: String::new(),
-                passphrase: String::new(),
+                cert_data: nyaterm_core::SecretString::default(),
+                passphrase: nyaterm_core::SecretString::default(),
                 key_content_mode: true,
                 cert_content_mode: false,
                 cert_expanded: false,
@@ -137,7 +137,7 @@ impl NyaTermApp {
                     editor.cert_file_path.clear();
                     "security.editor.key-cert-path"
                 } else {
-                    editor.cert_data.clear();
+                    editor.cert_data.expose_secret_mut().clear();
                     "security.editor.key-cert-data"
                 }
             } else {
@@ -146,7 +146,7 @@ impl NyaTermApp {
                     editor.key_file_path.clear();
                     "security.editor.key-path"
                 } else {
-                    editor.key_data.clear();
+                    editor.key_data.expose_secret_mut().clear();
                     "security.editor.key-data"
                 }
             };
@@ -355,12 +355,12 @@ impl NyaTermApp {
                     if let Some(editor) = this.security.key_editor_mut() {
                         if is_cert {
                             editor.cert_file_path = path.clone();
-                            editor.cert_data.clear();
+                            editor.cert_data.expose_secret_mut().clear();
                             editor.has_cert_data = true;
                             input_id = "security.editor.key-cert-path";
                         } else {
                             editor.key_file_path = path.clone();
-                            editor.key_data.clear();
+                            editor.key_data.expose_secret_mut().clear();
                             editor.has_key_data = true;
                             input_id = "security.editor.key-path";
                         }
@@ -429,6 +429,7 @@ impl NyaTermApp {
                     Ok(Some(key)) => key
                         .key_data
                         .filter(|value| !value.is_empty())
+                        .map(nyaterm_core::SecretString::into_secret)
                         .ok_or_else(|| t!("settings.privateKeyEmpty").to_string()),
                     Ok(None) => Err(t!("settings.privateKeyEmpty").to_string()),
                     Err(error) => Err(format!("{}: {error}", t!("settings.privateKeyLoadFailed"))),

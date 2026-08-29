@@ -453,7 +453,7 @@ fn telnet_prompt_detection_handles_credentials_and_avoids_last_login() {
 fn telnet_auto_login_sends_username_and_password_prompts() {
     let config = TelnetSessionConfig {
         username: "operator".to_string(),
-        password: Some("secret".to_string()),
+        password: Some("secret".to_string().into()),
         ..Default::default()
     };
     let mut state = super::TelnetAutoLoginState::new(&config).expect("auto login state");
@@ -498,7 +498,7 @@ fn telnet_send_payloads(actions: Vec<super::TelnetAutoLoginAction>) -> Vec<Vec<u
 fn telnet_auto_login_handles_split_and_chinese_prompts() {
     let config = TelnetSessionConfig {
         username: "admin".to_string(),
-        password: Some("sekret".to_string()),
+        password: Some("sekret".to_string().into()),
         ..Default::default()
     };
     let mut state = super::TelnetAutoLoginState::new(&config).expect("auto login state");
@@ -518,7 +518,7 @@ fn telnet_auto_login_handles_split_and_chinese_prompts() {
 fn telnet_auto_login_wakes_prompt_and_ignores_last_login() {
     let config = TelnetSessionConfig {
         username: "admin".to_string(),
-        password: Some("sekret".to_string()),
+        password: Some("sekret".to_string().into()),
         ..Default::default()
     };
     let mut state = super::TelnetAutoLoginState::new(&config).expect("auto login state");
@@ -543,7 +543,7 @@ fn telnet_auto_login_wakes_prompt_and_ignores_last_login() {
 fn telnet_auto_login_retries_failure_and_disables_after_manual_input() {
     let config = TelnetSessionConfig {
         username: "admin".to_string(),
-        password: Some("wrong".to_string()),
+        password: Some("wrong".to_string().into()),
         auto_login: super::TelnetAutoLoginConfig {
             max_retries: 1,
             ..Default::default()
@@ -745,7 +745,7 @@ fn ssh_refused_connection_reports_create_error() {
             host: "127.0.0.1".to_string(),
             port,
             username: "tester".to_string(),
-            password: Some("secret".to_string()),
+            password: Some("secret".to_string().into()),
             ..Default::default()
         })
         .expect_err("closed port should not open");
@@ -1346,7 +1346,7 @@ fn process_signal_normalization_matches_legacy_allowlist() {
 #[test]
 fn ssh_config_debug_redacts_password() {
     let config = SshSessionConfig {
-        password: Some("super-secret".to_string()),
+        password: Some("super-secret".to_string().into()),
         ..Default::default()
     };
     let debug = format!("{config:?}");
@@ -1358,9 +1358,13 @@ fn ssh_config_debug_redacts_password() {
 fn ssh_config_debug_redacts_key_material() {
     let config = SshSessionConfig {
         key_auth: Some(SshKeyAuthConfig {
-            key_data: "-----BEGIN PRIVATE KEY-----secret-key".to_string(),
-            cert_data: Some("ssh-ed25519-cert-v01@openssh.com secret-cert".to_string()),
-            passphrase: Some("key-passphrase".to_string()),
+            key_data: "-----BEGIN PRIVATE KEY-----secret-key".to_string().into(),
+            cert_data: Some(
+                "ssh-ed25519-cert-v01@openssh.com secret-cert"
+                    .to_string()
+                    .into(),
+            ),
+            passphrase: Some("key-passphrase".to_string().into()),
         }),
         ..Default::default()
     };
@@ -1374,9 +1378,9 @@ fn ssh_config_debug_redacts_key_material() {
 #[test]
 fn ssh_key_auth_debug_redacts_material_when_formatted_directly() {
     let key_auth = SshKeyAuthConfig {
-        key_data: "private-key-material".to_string(),
-        cert_data: Some("certificate-material".to_string()),
-        passphrase: Some("passphrase-material".to_string()),
+        key_data: "private-key-material".to_string().into(),
+        cert_data: Some("certificate-material".to_string().into()),
+        passphrase: Some("passphrase-material".to_string().into()),
     };
 
     let debug = format!("{key_auth:?}");
@@ -1395,7 +1399,7 @@ fn ssh_config_debug_redacts_proxy_password() {
             port: 1080,
             command: None,
             username: Some("proxy-user".to_string()),
-            password: Some("proxy-secret".to_string()),
+            password: Some("proxy-secret".to_string().into()),
         }),
         ..Default::default()
     };

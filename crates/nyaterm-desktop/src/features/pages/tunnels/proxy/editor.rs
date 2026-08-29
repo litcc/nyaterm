@@ -104,7 +104,7 @@ pub(in crate::features::pages::tunnels) fn network_proxy_editor_content(
             app,
             NetworkProxyEditorField::Password,
             t!("network.proxyPassword"),
-            editor.password.clone(),
+            editor.password.expose_secret().to_owned(),
             TextInputSetup {
                 placeholder: password_placeholder.into(),
                 masked: true,

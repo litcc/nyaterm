@@ -50,7 +50,7 @@ impl NyaTermApp {
                         self,
                         "pw-value",
                         t!("passwordManager.passwordLabel"),
-                        editor.password.clone(),
+                        editor.password.expose_secret().to_owned(),
                         TextInputSetup {
                             placeholder: password_placeholder.into(),
                             masked: password_masked,

@@ -22,10 +22,10 @@ const GOOGLE_DRIVE_FOLDER_MIME: &str = "application/vnd.google-apps.folder";
 pub struct NativeGoogleDriveRemote {
     client: zed_reqwest::blocking::Client,
     root: String,
-    access_token: Mutex<String>,
-    refresh_token: Option<String>,
+    access_token: Mutex<nyaterm_core::SecretString>,
+    refresh_token: Option<nyaterm_core::SecretString>,
     client_id: Option<String>,
-    client_secret: Option<String>,
+    client_secret: Option<nyaterm_core::SecretString>,
 }
 
 impl NativeGoogleDriveRemote {
@@ -38,10 +38,10 @@ impl NativeGoogleDriveRemote {
         let remote = Self {
             client,
             root: trim_remote_path(&settings.root),
-            access_token: Mutex::new(trim_optional_secret(settings.access_token.as_deref())),
-            refresh_token: trim_optional(settings.refresh_token.as_deref()),
+            access_token: Mutex::new(trim_optional_secret(settings.access_token.as_deref()).into()),
+            refresh_token: trim_optional(settings.refresh_token.as_deref()).map(Into::into),
             client_id: trim_optional(settings.client_id.as_deref()),
-            client_secret: trim_optional(settings.client_secret.as_deref()),
+            client_secret: trim_optional(settings.client_secret.as_deref()).map(Into::into),
         };
 
         if remote.bearer_token().is_empty() {
@@ -61,7 +61,8 @@ impl NativeGoogleDriveRemote {
         self.access_token
             .lock()
             .expect("google drive access token lock")
-            .clone()
+            .expose_secret()
+            .to_owned()
     }
 
     fn can_refresh_access_token(&self) -> bool {
@@ -135,7 +136,7 @@ impl NativeGoogleDriveRemote {
         *self
             .access_token
             .lock()
-            .expect("google drive access token lock") = access_token.to_string();
+            .expect("google drive access token lock") = access_token.to_string().into();
         Ok(())
     }
 

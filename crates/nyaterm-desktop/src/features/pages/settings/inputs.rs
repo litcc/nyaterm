@@ -96,7 +96,7 @@ impl NyaTermApp {
         for (field, value) in [
             (
                 TranslateInputField::DeeplApiKey,
-                secret_draft.deepl_api_key.clone(),
+                secret_draft.deepl_api_key.expose_secret().to_owned(),
             ),
             (
                 TranslateInputField::BaiduAppId,
@@ -104,12 +104,12 @@ impl NyaTermApp {
             ),
             (
                 TranslateInputField::BaiduAppKey,
-                secret_draft.baidu_app_key.clone(),
+                secret_draft.baidu_app_key.expose_secret().to_owned(),
             ),
             (TranslateInputField::AliAppId, settings.ali_app_id.clone()),
             (
                 TranslateInputField::AliAppKey,
-                secret_draft.ali_app_key.clone(),
+                secret_draft.ali_app_key.expose_secret().to_owned(),
             ),
             (
                 TranslateInputField::YoudaoAppId,
@@ -117,7 +117,7 @@ impl NyaTermApp {
             ),
             (
                 TranslateInputField::YoudaoAppKey,
-                secret_draft.youdao_app_key.clone(),
+                secret_draft.youdao_app_key.expose_secret().to_owned(),
             ),
         ] {
             self.ensure_text_input(
@@ -412,7 +412,7 @@ impl NyaTermApp {
     }
 
     fn ensure_security_inputs(&mut self, cx: &mut Context<Self>) {
-        let master_password_draft = self.settings.master_password().draft.to_string();
+        let master_password_draft = self.settings.master_password().draft.to_owned();
         self.ensure_text_input(
             "settings.security.master-password",
             &master_password_draft,

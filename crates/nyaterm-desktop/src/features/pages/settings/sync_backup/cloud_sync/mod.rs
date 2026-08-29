@@ -268,53 +268,90 @@ impl SettingsPanel {
             .last_synced_at_ms
             .map(format_history_timestamp_ms)
             .unwrap_or_else(|| t!("settings.never").to_string());
-        let webdav_password_value = self.cloud_sync.secret_draft().webdav_password.clone();
-        let s3_access_key_value = self.cloud_sync.secret_draft().s3_access_key_id.clone();
-        let s3_secret_key_value = self.cloud_sync.secret_draft().s3_secret_access_key.clone();
-        let s3_session_token_value = self.cloud_sync.secret_draft().s3_session_token.clone();
+        let webdav_password_value = self
+            .cloud_sync
+            .secret_draft()
+            .webdav_password
+            .expose_secret()
+            .to_owned();
+        let s3_access_key_value = self
+            .cloud_sync
+            .secret_draft()
+            .s3_access_key_id
+            .expose_secret()
+            .to_owned();
+        let s3_secret_key_value = self
+            .cloud_sync
+            .secret_draft()
+            .s3_secret_access_key
+            .expose_secret()
+            .to_owned();
+        let s3_session_token_value = self
+            .cloud_sync
+            .secret_draft()
+            .s3_session_token
+            .expose_secret()
+            .to_owned();
         let google_drive_access_token_value = self
             .cloud_sync
             .secret_draft()
             .google_drive_access_token
-            .clone();
+            .expose_secret()
+            .to_owned();
         let google_drive_refresh_token_value = self
             .cloud_sync
             .secret_draft()
             .google_drive_refresh_token
-            .clone();
+            .expose_secret()
+            .to_owned();
         let google_drive_client_secret_value = self
             .cloud_sync
             .secret_draft()
             .google_drive_client_secret
-            .clone();
-        let onedrive_access_token_value =
-            self.cloud_sync.secret_draft().onedrive_access_token.clone();
+            .expose_secret()
+            .to_owned();
+        let onedrive_access_token_value = self
+            .cloud_sync
+            .secret_draft()
+            .onedrive_access_token
+            .expose_secret()
+            .to_owned();
         let onedrive_refresh_token_value = self
             .cloud_sync
             .secret_draft()
             .onedrive_refresh_token
-            .clone();
+            .expose_secret()
+            .to_owned();
         let onedrive_client_secret_value = self
             .cloud_sync
             .secret_draft()
             .onedrive_client_secret
-            .clone();
+            .expose_secret()
+            .to_owned();
         let aliyun_drive_access_token_value = self
             .cloud_sync
             .secret_draft()
             .aliyun_drive_access_token
-            .clone();
+            .expose_secret()
+            .to_owned();
         let aliyun_drive_refresh_token_value = self
             .cloud_sync
             .secret_draft()
             .aliyun_drive_refresh_token
-            .clone();
+            .expose_secret()
+            .to_owned();
         let aliyun_drive_client_secret_value = self
             .cloud_sync
             .secret_draft()
             .aliyun_drive_client_secret
-            .clone();
-        let gitee_token_value = self.cloud_sync.secret_draft().gitee_token.clone();
+            .expose_secret()
+            .to_owned();
+        let gitee_token_value = self
+            .cloud_sync
+            .secret_draft()
+            .gitee_token
+            .expose_secret()
+            .to_owned();
         let provider_fields = match active_cloud_provider.as_str() {
             "webdav" => self.cloud_sync_webdav_provider_fields(webdav_password_value, cx),
             "s3" => self.cloud_sync_s3_provider_fields(

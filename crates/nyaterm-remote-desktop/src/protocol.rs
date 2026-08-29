@@ -1,8 +1,8 @@
 use std::fmt;
 use std::sync::Arc;
 
+use nyaterm_core::SecretString;
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
 
 pub const PROTOCOL_VERSION: u32 = 3;
 
@@ -63,7 +63,7 @@ pub struct RdpSessionConfig {
     pub port: u16,
     pub username: String,
     pub domain: String,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     pub use_nla: bool,
     pub certificate_policy: RdpCertificatePolicy,
     pub display: RdpDisplayConfig,
@@ -87,14 +87,6 @@ impl fmt::Debug for RdpSessionConfig {
             .field("clipboard", &self.clipboard)
             .field("reconnect", &self.reconnect)
             .finish()
-    }
-}
-
-impl Drop for RdpSessionConfig {
-    fn drop(&mut self) {
-        if let Some(password) = self.password.as_mut() {
-            password.zeroize();
-        }
     }
 }
 
@@ -381,7 +373,7 @@ pub struct VncSessionConfig {
     pub name: String,
     pub host: String,
     pub port: u16,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     pub security: VncSecurityConfig,
     pub display: VncDisplayConfig,
     pub clipboard: VncClipboardConfig,
@@ -405,14 +397,6 @@ impl fmt::Debug for VncSessionConfig {
             .field("shared", &self.shared)
             .field("view_only", &self.view_only)
             .finish()
-    }
-}
-
-impl Drop for VncSessionConfig {
-    fn drop(&mut self) {
-        if let Some(password) = self.password.as_mut() {
-            password.zeroize();
-        }
     }
 }
 

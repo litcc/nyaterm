@@ -267,20 +267,20 @@ impl TranslationFeatureState {
     pub(super) fn clear_secret(&mut self, provider: &str) {
         match provider {
             "deepl" => {
-                self.settings.deepl_api_key.clear();
-                self.secret_draft.deepl_api_key.clear();
+                self.settings.deepl_api_key.expose_secret_mut().clear();
+                self.secret_draft.deepl_api_key.expose_secret_mut().clear();
             }
             "baidu" => {
-                self.settings.baidu_app_key.clear();
-                self.secret_draft.baidu_app_key.clear();
+                self.settings.baidu_app_key.expose_secret_mut().clear();
+                self.secret_draft.baidu_app_key.expose_secret_mut().clear();
             }
             "ali" => {
-                self.settings.ali_app_key.clear();
-                self.secret_draft.ali_app_key.clear();
+                self.settings.ali_app_key.expose_secret_mut().clear();
+                self.secret_draft.ali_app_key.expose_secret_mut().clear();
             }
             "youdao" => {
-                self.settings.youdao_app_key.clear();
-                self.secret_draft.youdao_app_key.clear();
+                self.settings.youdao_app_key.expose_secret_mut().clear();
+                self.secret_draft.youdao_app_key.expose_secret_mut().clear();
             }
             _ => {}
         }
@@ -301,13 +301,15 @@ impl TranslationFeatureState {
         match self.focused_field {
             TranslateInputField::TargetLanguage => &mut self.settings.target_language,
             TranslateInputField::Text => &mut self.input,
-            TranslateInputField::DeeplApiKey => &mut self.secret_draft.deepl_api_key,
+            TranslateInputField::DeeplApiKey => self.secret_draft.deepl_api_key.expose_secret_mut(),
             TranslateInputField::BaiduAppId => &mut self.settings.baidu_app_id,
-            TranslateInputField::BaiduAppKey => &mut self.secret_draft.baidu_app_key,
+            TranslateInputField::BaiduAppKey => self.secret_draft.baidu_app_key.expose_secret_mut(),
             TranslateInputField::AliAppId => &mut self.settings.ali_app_id,
-            TranslateInputField::AliAppKey => &mut self.secret_draft.ali_app_key,
+            TranslateInputField::AliAppKey => self.secret_draft.ali_app_key.expose_secret_mut(),
             TranslateInputField::YoudaoAppId => &mut self.settings.youdao_app_id,
-            TranslateInputField::YoudaoAppKey => &mut self.secret_draft.youdao_app_key,
+            TranslateInputField::YoudaoAppKey => {
+                self.secret_draft.youdao_app_key.expose_secret_mut()
+            }
         }
     }
 
@@ -428,11 +430,11 @@ mod tests {
 
         state.replace_settings(
             TranslationSettings {
-                baidu_app_key: "stored".to_string(),
+                baidu_app_key: "stored".to_string().into(),
                 ..TranslationSettings::default()
             },
             TranslationSecretDraft {
-                baidu_app_key: "draft".to_string(),
+                baidu_app_key: "draft".to_string().into(),
                 ..TranslationSecretDraft::default()
             },
         );
@@ -448,7 +450,7 @@ mod tests {
         assert_eq!(state.settings().target_language, "ko");
 
         let restored_draft = TranslationSecretDraft {
-            deepl_api_key: "restored".to_string(),
+            deepl_api_key: "restored".to_string().into(),
             ..TranslationSecretDraft::default()
         };
         state.replace_settings(
@@ -460,20 +462,20 @@ mod tests {
         );
         let (settings, secret_draft) = state.settings_draft_snapshot();
         assert_eq!(settings.target_language, "fr");
-        assert_eq!(secret_draft.deepl_api_key, "restored");
+        assert_eq!(secret_draft.deepl_api_key.expose_secret(), "restored");
     }
 
     #[test]
     fn translation_pending_settings_overlay_only_non_empty_secret_drafts() {
         let settings = TranslationSettings {
-            deepl_api_key: "stored-deepl".to_string(),
-            baidu_app_key: "stored-baidu".to_string(),
-            ali_app_key: "stored-ali".to_string(),
+            deepl_api_key: "stored-deepl".to_string().into(),
+            baidu_app_key: "stored-baidu".to_string().into(),
+            ali_app_key: "stored-ali".to_string().into(),
             ..TranslationSettings::default()
         };
         let secret_draft = TranslationSecretDraft {
-            baidu_app_key: "draft-baidu".to_string(),
-            youdao_app_key: "draft-youdao".to_string(),
+            baidu_app_key: "draft-baidu".to_string().into(),
+            youdao_app_key: "draft-youdao".to_string().into(),
             ..TranslationSecretDraft::default()
         };
         let mut state = TranslationFeatureState::new(TranslationSettings::default());
@@ -481,10 +483,10 @@ mod tests {
 
         assert!(state.settings_draft_matches(&settings, &secret_draft));
         let pending = state.pending_settings();
-        assert_eq!(pending.deepl_api_key, "stored-deepl");
-        assert_eq!(pending.baidu_app_key, "draft-baidu");
-        assert_eq!(pending.ali_app_key, "stored-ali");
-        assert_eq!(pending.youdao_app_key, "draft-youdao");
+        assert_eq!(pending.deepl_api_key.expose_secret(), "stored-deepl");
+        assert_eq!(pending.baidu_app_key.expose_secret(), "draft-baidu");
+        assert_eq!(pending.ali_app_key.expose_secret(), "stored-ali");
+        assert_eq!(pending.youdao_app_key.expose_secret(), "draft-youdao");
 
         state.select_target_language("ja");
         assert!(!state.settings_draft_matches(&settings, &secret_draft));

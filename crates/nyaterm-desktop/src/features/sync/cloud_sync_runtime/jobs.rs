@@ -53,7 +53,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn run_local_cloud_sync_push(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         force: bool,
         cx: &mut Context<Self>,
     ) {
@@ -142,7 +142,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn run_local_cloud_sync_pull(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         force: bool,
         cx: &mut Context<Self>,
     ) {
@@ -232,7 +232,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn run_provider_cloud_sync_push(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         force: bool,
         cx: &mut Context<Self>,
     ) {
@@ -326,7 +326,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn run_provider_cloud_sync_pull(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         force: bool,
         cx: &mut Context<Self>,
     ) {
@@ -421,7 +421,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn local_cloud_sync_options(
         &self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
     ) -> LocalCloudSyncOptions {
         LocalCloudSyncOptions {
             config_dir: self.runtime.config_dir().to_path_buf(),
@@ -437,7 +437,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn run_cloud_sync_recovery(
         &mut self,
-        master_password: String,
+        master_password: nyaterm_core::SecretString,
         provider_action: bool,
         cx: &mut Context<Self>,
     ) {

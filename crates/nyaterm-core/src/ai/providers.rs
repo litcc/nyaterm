@@ -941,7 +941,7 @@ mod tests {
                 name: "DeepSeek".to_string(),
                 provider_kind: AiProviderKind::Deepseek,
                 base_url: Some("https://api.deepseek.com/v1".to_string()),
-                api_key: Some("key".to_string()),
+                api_key: Some("key".to_string().into()),
                 enabled: true,
             }),
         };
@@ -1109,7 +1109,7 @@ mod tests {
                 name: "Anthropic".to_string(),
                 provider_kind: AiProviderKind::Anthropic,
                 base_url: None,
-                api_key: Some("key".to_string()),
+                api_key: Some("key".to_string().into()),
                 enabled: true,
             }),
         };

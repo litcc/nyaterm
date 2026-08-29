@@ -40,16 +40,16 @@ struct ConnectionStore {
 fn cloud_sync_debug_output_redacts_all_secret_values() {
     let secret = "nya-cloud-secret-never-log";
     let mut settings = CloudSyncSettings::default();
-    settings.webdav.password = Some(secret.to_string());
-    settings.s3.access_key_id = Some(secret.to_string());
-    settings.s3.secret_access_key = Some(secret.to_string());
-    settings.s3.session_token = Some(secret.to_string());
-    settings.gitee_snippet.access_token = Some(secret.to_string());
-    settings.google_drive.access_token = Some(secret.to_string());
-    settings.google_drive.refresh_token = Some(secret.to_string());
-    settings.google_drive.client_secret = Some(secret.to_string());
-    settings.aliyun_drive.access_token = Some(secret.to_string());
-    settings.github_gist.access_token = Some(secret.to_string());
+    settings.webdav.password = Some(secret.to_string().into());
+    settings.s3.access_key_id = Some(secret.to_string().into());
+    settings.s3.secret_access_key = Some(secret.to_string().into());
+    settings.s3.session_token = Some(secret.to_string().into());
+    settings.gitee_snippet.access_token = Some(secret.to_string().into());
+    settings.google_drive.access_token = Some(secret.to_string().into());
+    settings.google_drive.refresh_token = Some(secret.to_string().into());
+    settings.google_drive.client_secret = Some(secret.to_string().into());
+    settings.aliyun_drive.access_token = Some(secret.to_string().into());
+    settings.github_gist.access_token = Some(secret.to_string().into());
     let settings_output = format!("{settings:?}");
 
     let options = LocalCloudSyncOptions {
@@ -59,7 +59,7 @@ fn cloud_sync_debug_output_redacts_all_secret_values() {
         remote_root: "nyaterm".to_string(),
         device_id: "device".to_string(),
         app_version: "test".to_string(),
-        master_password: secret.to_string(),
+        master_password: secret.to_string().into(),
         enabled: true,
     };
     let options_output = format!("{options:?}");
@@ -616,9 +616,9 @@ fn s3_signed_request_uses_path_style_url_and_headers() {
         bucket: "nyaterm-sync".to_string(),
         region: "ap-east-1".to_string(),
         root: "/profiles/default/".to_string(),
-        access_key_id: Some("AKIDEXAMPLE".to_string()),
-        secret_access_key: Some("SECRET".to_string()),
-        session_token: Some("SESSION".to_string()),
+        access_key_id: Some("AKIDEXAMPLE".to_string().into()),
+        secret_access_key: Some("SECRET".to_string().into()),
+        session_token: Some("SESSION".to_string().into()),
         virtual_host_style: false,
     };
     let request = build_s3_signed_request(
@@ -660,8 +660,8 @@ fn s3_signed_request_supports_virtual_host_style() {
         bucket: "nyaterm".to_string(),
         region: String::new(),
         root: String::new(),
-        access_key_id: Some("key".to_string()),
-        secret_access_key: Some("secret".to_string()),
+        access_key_id: Some("key".to_string().into()),
+        secret_access_key: Some("secret".to_string().into()),
         session_token: None,
         virtual_host_style: true,
     };
@@ -691,8 +691,8 @@ fn s3_signed_list_request_sorts_and_encodes_query_parameters() {
         endpoint: "https://s3.example.com".to_string(),
         bucket: "bucket".to_string(),
         region: "us-east-1".to_string(),
-        access_key_id: Some("key".to_string()),
-        secret_access_key: Some("secret".to_string()),
+        access_key_id: Some("key".to_string().into()),
+        secret_access_key: Some("secret".to_string().into()),
         ..S3SyncSettings::default()
     };
     let query = BTreeMap::from([
@@ -725,8 +725,8 @@ fn s3_signed_list_request_sorts_and_encodes_query_parameters() {
 fn s3_signed_request_requires_bucket_and_credentials() {
     let settings = S3SyncSettings {
         endpoint: "https://s3.example.com".to_string(),
-        access_key_id: Some("key".to_string()),
-        secret_access_key: Some("secret".to_string()),
+        access_key_id: Some("key".to_string().into()),
+        secret_access_key: Some("secret".to_string().into()),
         ..S3SyncSettings::default()
     };
     let error = build_s3_signed_request(
@@ -1356,7 +1356,7 @@ fn gitee_http_backend_fetches_raw_filename_with_access_token() {
     let settings = GiteeSnippetSyncSettings {
         api_endpoint: "https://gitee.example/api/v5/".to_string(),
         gist_id: "gist-1".to_string(),
-        access_token: Some("token-1".to_string()),
+        access_token: Some("token-1".to_string().into()),
     };
     let client = RecordingSnippetHttpClient::new(vec![SnippetHttpResponse {
         status: 200,
@@ -1385,7 +1385,7 @@ fn github_gist_http_backend_fetches_raw_url_for_truncated_file() {
     let filename = snippet_remote_filename("nyaterm/sync/current.redb.enc");
     let settings = GithubGistSyncSettings {
         gist_id: "gist-2".to_string(),
-        access_token: Some("gh-token".to_string()),
+        access_token: Some("gh-token".to_string().into()),
     };
     let document = serde_json::json!({
         "files": {
@@ -1428,7 +1428,7 @@ fn github_gist_http_backend_fetches_raw_url_for_truncated_file() {
 fn github_gist_http_backend_retries_retryable_update_conflict() {
     let settings = GithubGistSyncSettings {
         gist_id: "gist-3".to_string(),
-        access_token: Some("gh-token".to_string()),
+        access_token: Some("gh-token".to_string().into()),
     };
     let client = RecordingSnippetHttpClient::new(vec![
         SnippetHttpResponse {
@@ -1578,7 +1578,7 @@ fn local_cloud_sync_wrong_password_does_not_replace_target() {
     let remote_dir = unique_temp_dir("cloud-password-remote");
     let source_options = options(&source_dir, &remote_dir, "source-device");
     let mut wrong_options = options(&target_dir, &remote_dir, "target-device");
-    wrong_options.master_password = "wrong".to_string();
+    wrong_options.master_password = "wrong".to_string().into();
 
     ConnectionStore::open(&source_dir)
         .expect("source")
@@ -1618,24 +1618,24 @@ fn local_cloud_sync_wrong_password_does_not_replace_target() {
 #[test]
 fn masked_cloud_sync_merge_preserves_provider_secrets() {
     let mut current = CloudSyncSettings::default();
-    current.webdav.password = Some("webdav-password".to_string());
-    current.s3.secret_access_key = Some("s3-secret".to_string());
-    current.google_drive.access_token = Some("google-access".to_string());
-    current.google_drive.refresh_token = Some("google-refresh".to_string());
-    current.google_drive.client_secret = Some("google-secret".to_string());
-    current.onedrive.access_token = Some("onedrive-access".to_string());
-    current.aliyun_drive.refresh_token = Some("aliyun-refresh".to_string());
-    current.github_gist.access_token = Some("github-token".to_string());
+    current.webdav.password = Some("webdav-password".to_string().into());
+    current.s3.secret_access_key = Some("s3-secret".to_string().into());
+    current.google_drive.access_token = Some("google-access".to_string().into());
+    current.google_drive.refresh_token = Some("google-refresh".to_string().into());
+    current.google_drive.client_secret = Some("google-secret".to_string().into());
+    current.onedrive.access_token = Some("onedrive-access".to_string().into());
+    current.aliyun_drive.refresh_token = Some("aliyun-refresh".to_string().into());
+    current.github_gist.access_token = Some("github-token".to_string().into());
 
     let mut next = CloudSyncSettings::default();
-    next.webdav.password = Some(MASKED_SECRET_VALUE.to_string());
-    next.s3.secret_access_key = Some(String::new());
-    next.google_drive.access_token = Some(MASKED_SECRET_VALUE.to_string());
-    next.google_drive.refresh_token = Some(MASKED_SECRET_VALUE.to_string());
-    next.google_drive.client_secret = Some(MASKED_SECRET_VALUE.to_string());
-    next.onedrive.access_token = Some(MASKED_SECRET_VALUE.to_string());
-    next.aliyun_drive.refresh_token = Some(MASKED_SECRET_VALUE.to_string());
-    next.github_gist.access_token = Some("replacement".to_string());
+    next.webdav.password = Some(MASKED_SECRET_VALUE.to_string().into());
+    next.s3.secret_access_key = Some(String::new().into());
+    next.google_drive.access_token = Some(MASKED_SECRET_VALUE.to_string().into());
+    next.google_drive.refresh_token = Some(MASKED_SECRET_VALUE.to_string().into());
+    next.google_drive.client_secret = Some(MASKED_SECRET_VALUE.to_string().into());
+    next.onedrive.access_token = Some(MASKED_SECRET_VALUE.to_string().into());
+    next.aliyun_drive.refresh_token = Some(MASKED_SECRET_VALUE.to_string().into());
+    next.github_gist.access_token = Some("replacement".to_string().into());
 
     let merged = merge_masked_cloud_sync_settings(&current, next);
 
@@ -1760,7 +1760,7 @@ fn options(config_dir: &Path, remote_dir: &Path, device_id: &str) -> LocalCloudS
         remote_root: "nyaterm".to_string(),
         device_id: device_id.to_string(),
         app_version: "test".to_string(),
-        master_password: "secret".to_string(),
+        master_password: "secret".to_string().into(),
         enabled: true,
     }
 }

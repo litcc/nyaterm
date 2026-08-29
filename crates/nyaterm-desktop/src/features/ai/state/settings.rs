@@ -104,7 +104,7 @@ impl AiFeatureState {
     ) {
         self.settings.model_draft = model;
         self.settings.base_url_draft = base_url;
-        self.settings.secret_draft.clear();
+        self.settings.secret_draft.expose_secret_mut().clear();
     }
 
     pub(in crate::features) fn pending_settings(&self) -> AiSettings {
@@ -207,7 +207,7 @@ impl AiFeatureState {
 
     pub(in crate::features) fn settings_draft_snapshot(
         &self,
-    ) -> (AiSettings, String, String, String) {
+    ) -> (AiSettings, String, String, nyaterm_core::SecretString) {
         (
             self.settings.config.clone(),
             self.settings.model_draft.clone(),
@@ -221,12 +221,12 @@ impl AiFeatureState {
         config: &AiSettings,
         model: &str,
         base_url: &str,
-        secret: &str,
+        secret: &nyaterm_core::SecretString,
     ) -> bool {
         &self.settings.config == config
             && self.settings.model_draft == model
             && self.settings.base_url_draft == base_url
-            && self.settings.secret_draft == secret
+            && self.settings.secret_draft == *secret
     }
 
     pub(in crate::features) fn replace_settings_config(
@@ -236,7 +236,7 @@ impl AiFeatureState {
     ) {
         self.settings.config = config;
         if clear_secret_draft {
-            self.settings.secret_draft.clear();
+            self.settings.secret_draft.expose_secret_mut().clear();
         }
     }
 
@@ -245,7 +245,7 @@ impl AiFeatureState {
         config: AiSettings,
         model: String,
         base_url: String,
-        secret: String,
+        secret: nyaterm_core::SecretString,
     ) {
         self.settings.config = config;
         self.settings.model_draft = model;
@@ -754,7 +754,7 @@ impl AiFeatureState {
             .find(|credential| credential.id == credential_id)
         {
             if !secret_draft.is_empty() {
-                credential.api_key = Some(secret_draft.clone());
+                credential.api_key = Some(secret_draft.clone().into());
             }
             let name = credential.name.clone();
             let base_url = credential.base_url.clone();
@@ -770,7 +770,7 @@ impl AiFeatureState {
                 profile.name = name;
                 profile.base_url = base_url;
                 if !secret_draft.is_empty() {
-                    profile.api_key = Some(secret_draft);
+                    profile.api_key = Some(secret_draft.into());
                 } else if api_key.is_some() {
                     // Preserve the stored masked/encrypted key through merge_masked.
                 }

@@ -17,7 +17,7 @@ pub struct NativeWebdavRemote {
     endpoint: String,
     root: String,
     username: String,
-    password: Option<String>,
+    password: Option<nyaterm_core::SecretString>,
 }
 
 impl NativeWebdavRemote {

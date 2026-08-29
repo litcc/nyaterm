@@ -45,27 +45,37 @@ impl NyaTermApp {
             return;
         }
 
-        let password = self.security.screen_lock_password_draft().to_string();
+        let password: nyaterm_core::SecretString =
+            self.security.screen_lock_password_draft().to_owned().into();
         let request_password = password.clone();
         self.submit_store_request(
             0,
             store_request(StoreDomain::Security, move |store| {
-                store.verify_master_password(&request_password)
+                store.verify_master_password(request_password.expose_secret())
             }),
             move |this, event, cx| {
                 match event.outcome {
-                    Ok(true) if this.security.screen_lock_password_draft() == password => {
+                    Ok(true)
+                        if this.security.screen_lock_password_draft()
+                            == password.expose_secret() =>
+                    {
                         this.unlock_app(cx);
                     }
                     Ok(true) => {}
-                    Ok(false) if this.security.screen_lock_password_draft() == password => {
+                    Ok(false)
+                        if this.security.screen_lock_password_draft()
+                            == password.expose_secret() =>
+                    {
                         let status = t!("lockScreen.wrongPassword").to_string();
                         this.security.clear_screen_lock_password_with_status(status);
                         this.reset_text_input("lock-screen.password", "", cx);
                         this.shell.set_status("screen unlock rejected".to_string());
                     }
                     Ok(false) => {}
-                    Err(error) if this.security.screen_lock_password_draft() == password => {
+                    Err(error)
+                        if this.security.screen_lock_password_draft()
+                            == password.expose_secret() =>
+                    {
                         let status = format!("{}: {error}", t!("lockScreen.unlockFailed"));
                         this.security.clear_screen_lock_password_with_status(status);
                         this.reset_text_input("lock-screen.password", "", cx);

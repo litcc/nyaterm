@@ -33,7 +33,8 @@ pub(super) fn upload_sync_snapshot(
     options: &LocalCloudSyncOptions,
     snapshot: &RawPortableSnapshot,
 ) -> Result<(), CloudSyncError> {
-    let bytes = local_store.encode_sync_snapshot(snapshot, &options.master_password)?;
+    let bytes =
+        local_store.encode_sync_snapshot(snapshot, options.master_password.expose_secret())?;
     remote.write(
         &remote_path(
             &options.remote_root,
@@ -61,7 +62,7 @@ pub(super) fn read_snapshot_for_pointer(
     let snapshot = decode_remote_snapshot(
         local_store,
         &bytes,
-        &options.master_password,
+        options.master_password.expose_secret(),
         &pointer.revision_id,
     )?;
     validate_snapshot_against_pointer(pointer, &snapshot)?;
@@ -74,7 +75,8 @@ pub(super) fn write_current_sync_snapshot_compat(
     options: &LocalCloudSyncOptions,
     snapshot: &RawPortableSnapshot,
 ) -> Result<(), CloudSyncError> {
-    let bytes = local_store.encode_sync_snapshot(snapshot, &options.master_password)?;
+    let bytes =
+        local_store.encode_sync_snapshot(snapshot, options.master_password.expose_secret())?;
     remote.write(
         &remote_path(&options.remote_root, SYNC_CURRENT_FILE),
         &bytes,
@@ -91,7 +93,13 @@ fn read_current_sync_snapshot_compat(
     else {
         return Ok(None);
     };
-    decode_remote_snapshot(local_store, &bytes, &options.master_password, "current").map(Some)
+    decode_remote_snapshot(
+        local_store,
+        &bytes,
+        options.master_password.expose_secret(),
+        "current",
+    )
+    .map(Some)
 }
 
 pub(super) fn ensure_remote_head_unchanged(

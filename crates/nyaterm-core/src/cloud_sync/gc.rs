@@ -31,7 +31,9 @@ pub fn cleanup_sync_snapshots_with_remote(
         };
         let entry = match remote.read_if_exists(&path) {
             Ok(Some(bytes)) => {
-                match local_store.decode_sync_snapshot(&bytes, &options.master_password) {
+                match local_store
+                    .decode_sync_snapshot(&bytes, options.master_password.expose_secret())
+                {
                     Ok(snapshot) if snapshot.meta.revision_id == revision_id => SnapshotGcEntry {
                         path,
                         revision_id,

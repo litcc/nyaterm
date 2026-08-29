@@ -1021,7 +1021,7 @@ mod tests {
     fn validates_password_length_for_classic_vnc_auth() {
         let mut config = config();
         config.security.mode = VncSecurityMode::VncAuth;
-        config.password = Some("123456789".to_string());
+        config.password = Some("123456789".to_string().into());
         let error = validate_vnc_config(&config).expect_err("long password should fail");
         assert_eq!(error.kind, VncErrorKind::Authentication);
     }

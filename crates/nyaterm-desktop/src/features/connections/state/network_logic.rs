@@ -243,7 +243,7 @@ fn network_proxy_editor_field_mut(editor: &mut NetworkProxyEditorState) -> &mut 
         NetworkProxyEditorField::Port => &mut editor.port,
         NetworkProxyEditorField::Command => &mut editor.command,
         NetworkProxyEditorField::Username => &mut editor.username,
-        NetworkProxyEditorField::Password => &mut editor.password,
+        NetworkProxyEditorField::Password => editor.password.expose_secret_mut(),
     }
 }
 

@@ -181,7 +181,7 @@ impl SettingsPresentation {
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(in crate::features) struct MasterPasswordPresentation {
     pub enabled: bool,
-    pub draft: String,
+    pub draft: nyaterm_core::SecretString,
 }
 
 impl SettingsPresentation {

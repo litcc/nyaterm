@@ -1402,8 +1402,8 @@ fn network_proxy_editor_field_filters_port_and_preserves_password_draft() {
     let mut proxy_editor = Some(NetworkProxyEditorState {
         focused_field: NetworkProxyEditorField::Port,
         port: String::new(),
-        password: "draft-password".to_string(),
-        existing_password: Some("existing-password".to_string()),
+        password: "draft-password".to_string().into(),
+        existing_password: Some("existing-password".to_string().into()),
         error: Some("stale validation".to_string()),
         ..network_proxy_editor("proxy-a")
     });
@@ -1416,7 +1416,7 @@ fn network_proxy_editor_field_filters_port_and_preserves_password_draft() {
 
     let editor = proxy_editor.expect("proxy editor remains open");
     assert_eq!(editor.port, "12");
-    assert_eq!(editor.password, "draft-password");
+    assert_eq!(editor.password.expose_secret(), "draft-password");
     assert_eq!(
         editor.existing_password.as_deref(),
         Some("existing-password")
@@ -1726,8 +1726,8 @@ fn connection_editor_state_with_secret_draft() -> ConnectionEditorState {
         vnc_view_only: false,
         password_source: ConnectionEditorPasswordSource::Direct,
         password_id: None,
-        password: "draft-secret".to_string(),
-        existing_password: Some("existing-secret".to_string()),
+        password: "draft-secret".to_string().into(),
+        existing_password: Some("existing-secret".to_string().into()),
         key_id: None,
         otp_id: None,
         auto_fill_otp: false,
@@ -1818,8 +1818,8 @@ fn network_proxy_editor(id: &str) -> NetworkProxyEditorState {
         port: "1080".to_string(),
         command: String::new(),
         username: String::new(),
-        password: "draft-password".to_string(),
-        existing_password: Some("existing-password".to_string()),
+        password: "draft-password".to_string().into(),
+        existing_password: Some("existing-password".to_string().into()),
         password_id: None,
         group_id: None,
         focused_field: NetworkProxyEditorField::Name,

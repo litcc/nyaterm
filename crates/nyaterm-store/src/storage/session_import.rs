@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use nyaterm_core::{Group, PreparedSessionImport, SavedConnection, SavedPassword, SshKey};
+use nyaterm_core::{
+    Group, PreparedSessionImport, SavedConnection, SavedPassword, SecretString, SshKey,
+};
 
 use super::vault::bump_ssh_key_revision;
 use super::{
@@ -66,7 +68,8 @@ impl ConnectionStore {
         let needs_master_key = prepared.passwords.iter().any(|entry| {
             entry
                 .password
-                .as_deref()
+                .as_ref()
+                .map(SecretString::expose_secret)
                 .is_some_and(|value| !value.is_empty())
         }) || prepared.ssh_keys.iter().any(ssh_key_has_secret);
         let existing_master_key = self.load_master_key_token()?;
@@ -130,7 +133,8 @@ fn ssh_key_has_secret(key: &SshKey) -> bool {
         .into_iter()
         .any(|value| {
             value
-                .as_deref()
+                .as_ref()
+                .map(SecretString::expose_secret)
                 .is_some_and(|value| !value.trim().is_empty())
         })
 }
@@ -140,10 +144,12 @@ fn prepare_password(
     crypto: &nyaterm_core::CredentialCrypto,
     master_key: Option<&str>,
 ) -> Result<SavedPassword, StorageError> {
-    entry.password = match entry.password.as_deref() {
-        Some(value) if !value.is_empty() => {
-            Some(crypto.encrypt_secret(master_key.ok_or(StorageError::MissingMasterKey)?, value)?)
-        }
+    entry.password = match entry.password.as_ref().map(SecretString::expose_secret) {
+        Some(value) if !value.is_empty() => Some(
+            crypto
+                .encrypt_secret(master_key.ok_or(StorageError::MissingMasterKey)?, value)?
+                .into(),
+        ),
         _ => None,
     };
     entry.has_password = entry.password.is_some();
@@ -166,17 +172,21 @@ fn prepare_ssh_key(
 }
 
 fn encrypt_import_secret(
-    value: Option<String>,
+    value: Option<SecretString>,
     crypto: &nyaterm_core::CredentialCrypto,
     master_key: Option<&str>,
-) -> Result<Option<String>, StorageError> {
-    let Some(value) = value.filter(|value| !value.trim().is_empty()) else {
+) -> Result<Option<SecretString>, StorageError> {
+    let Some(value) = value.filter(|value| !value.expose_secret().trim().is_empty()) else {
         return Ok(None);
     };
-    Ok(Some(crypto.encrypt_secret(
-        master_key.ok_or(StorageError::MissingMasterKey)?,
-        &value,
-    )?))
+    Ok(Some(
+        crypto
+            .encrypt_secret(
+                master_key.ok_or(StorageError::MissingMasterKey)?,
+                value.expose_secret(),
+            )?
+            .into(),
+    ))
 }
 
 fn build_group_path(groups: &[Group], id: &str) -> Vec<String> {
@@ -294,7 +304,7 @@ mod tests {
             passwords: vec![SavedPassword {
                 id: "password-1".to_string(),
                 name: "Imported password".to_string(),
-                password: Some("secret-value".to_string()),
+                password: Some("secret-value".to_string().into()),
                 has_password: false,
             }],
             ssh_keys: Vec::new(),

@@ -28,7 +28,7 @@ fn test_config() -> SshSessionConfig {
             .parse()
             .expect("NYATERM_TEST_SFTP_PORT must be a valid port"),
         username: required_env("NYATERM_TEST_SFTP_USERNAME"),
-        password: Some(required_env("NYATERM_TEST_SFTP_PASSWORD")),
+        password: Some(required_env("NYATERM_TEST_SFTP_PASSWORD").into()),
         key_auth: None,
         agent_auth: false,
         agent_endpoint: Default::default(),

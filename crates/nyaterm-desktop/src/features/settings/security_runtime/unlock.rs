@@ -99,7 +99,7 @@ impl NyaTermApp {
                 .background_spawn(async move {
                     let store = location.open()?;
                     store
-                        .verify_master_password(&password)
+                        .verify_master_password(password.expose_secret())
                         .map_err(|error| error.to_string())
                 })
                 .await;

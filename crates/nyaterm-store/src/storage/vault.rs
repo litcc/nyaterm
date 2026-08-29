@@ -14,7 +14,7 @@ use super::{
 };
 use nyaterm_core::{
     DecryptedOtpEntry, DecryptedSavedCredential, DecryptedSavedPassword, DecryptedSshKey, OtpEntry,
-    SavedCredential, SavedPassword, SshKey,
+    SavedCredential, SavedPassword, SecretString, SshKey,
 };
 
 static SSH_KEY_REVISION: AtomicU64 = AtomicU64::new(0);
@@ -153,16 +153,17 @@ impl ConnectionStore {
         {
             let content = read_limited_ssh_key_file(path, "key material")?;
             let token = self.get_or_create_master_key_token(&crypto)?;
-            Some(crypto.encrypt_secret(&token, &content)?)
+            Some(crypto.encrypt_secret(&token, &content)?.into())
         } else if let Some(plain) = key
             .key
-            .as_deref()
+            .as_ref()
+            .map(SecretString::expose_secret)
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
             // Treat non-empty draft key material as plaintext replacement.
             let token = self.get_or_create_master_key_token(&crypto)?;
-            Some(crypto.encrypt_secret(&token, plain)?)
+            Some(crypto.encrypt_secret(&token, plain)?.into())
         } else {
             existing.as_ref().and_then(|entry| entry.key.clone())
         };
@@ -175,24 +176,30 @@ impl ConnectionStore {
         {
             let content = read_limited_ssh_key_file(path, "certificate")?;
             let token = self.get_or_create_master_key_token(&crypto)?;
-            Some(crypto.encrypt_secret(&token, &content)?)
+            Some(crypto.encrypt_secret(&token, &content)?.into())
         } else if let Some(plain) = key
             .cert
-            .as_deref()
+            .as_ref()
+            .map(SecretString::expose_secret)
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
             let token = self.get_or_create_master_key_token(&crypto)?;
-            Some(crypto.encrypt_secret(&token, plain)?)
+            Some(crypto.encrypt_secret(&token, plain)?.into())
         } else {
             existing.as_ref().and_then(|entry| entry.cert.clone())
         };
 
-        key.passphrase = match key.passphrase.as_deref().map(str::trim) {
+        key.passphrase = match key
+            .passphrase
+            .as_ref()
+            .map(SecretString::expose_secret)
+            .map(str::trim)
+        {
             Some("") => None,
             Some(plain) if !plain.is_empty() => {
                 let token = self.get_or_create_master_key_token(&crypto)?;
-                Some(crypto.encrypt_secret(&token, plain)?)
+                Some(crypto.encrypt_secret(&token, plain)?.into())
             }
             _ => existing.as_ref().and_then(|entry| entry.passphrase.clone()),
         };
@@ -230,10 +237,15 @@ impl ConnectionStore {
         let existing = self.load_otp_entry_by_id(&target_id)?;
         let crypto = self.credential_crypto()?;
 
-        entry.secret = match entry.secret.as_deref().map(str::trim) {
+        entry.secret = match entry
+            .secret
+            .as_ref()
+            .map(SecretString::expose_secret)
+            .map(str::trim)
+        {
             Some(plain) if !plain.is_empty() => {
                 let token = self.get_or_create_master_key_token(&crypto)?;
-                Some(crypto.encrypt_secret(&token, plain)?)
+                Some(crypto.encrypt_secret(&token, plain)?.into())
             }
             _ => existing.as_ref().and_then(|entry| entry.secret.clone()),
         };
@@ -321,10 +333,15 @@ impl ConnectionStore {
         let target_id = entry.id.clone();
         let existing = self.load_password_by_id(&target_id)?;
         let crypto = self.credential_crypto()?;
-        entry.password = match entry.password.as_deref().map(str::trim) {
+        entry.password = match entry
+            .password
+            .as_ref()
+            .map(SecretString::expose_secret)
+            .map(str::trim)
+        {
             Some(plain) if !plain.is_empty() => {
                 let token = self.get_or_create_master_key_token(&crypto)?;
-                Some(crypto.encrypt_secret(&token, plain)?)
+                Some(crypto.encrypt_secret(&token, plain)?.into())
             }
             _ => existing.as_ref().and_then(|entry| entry.password.clone()),
         };
@@ -421,10 +438,15 @@ impl ConnectionStore {
             entry.sort_order
         };
         let crypto = self.credential_crypto()?;
-        entry.password = match entry.password.as_deref().map(str::trim) {
+        entry.password = match entry
+            .password
+            .as_ref()
+            .map(SecretString::expose_secret)
+            .map(str::trim)
+        {
             Some(plain) if !plain.is_empty() => {
                 let token = self.get_or_create_master_key_token(&crypto)?;
-                Some(crypto.encrypt_secret(&token, plain)?)
+                Some(crypto.encrypt_secret(&token, plain)?.into())
             }
             _ => existing.as_ref().and_then(|entry| entry.password.clone()),
         };

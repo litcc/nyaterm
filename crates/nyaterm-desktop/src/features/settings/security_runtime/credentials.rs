@@ -43,7 +43,7 @@ impl NyaTermApp {
                 id: Some(entry.id),
                 name: entry.name,
                 username: entry.username,
-                password: String::new(),
+                password: nyaterm_core::SecretString::default(),
                 username_prompt_regex: entry.username_prompt_regex.unwrap_or_default(),
                 password_prompt_regex: entry.password_prompt_regex.unwrap_or_default(),
                 enabled: entry.enabled,
@@ -56,7 +56,7 @@ impl NyaTermApp {
                 id: None,
                 name: String::new(),
                 username: String::new(),
-                password: String::new(),
+                password: nyaterm_core::SecretString::default(),
                 username_prompt_regex: String::new(),
                 password_prompt_regex: String::new(),
                 enabled: true,
@@ -415,7 +415,7 @@ impl NyaTermApp {
                 }
                 match result {
                     Ok(Some(entry)) => {
-                        let value = entry.password.unwrap_or_default();
+                        let value = entry.password.unwrap_or_default().into_secret();
                         if value.is_empty() {
                             this.security.set_status("credential has no password");
                         } else {

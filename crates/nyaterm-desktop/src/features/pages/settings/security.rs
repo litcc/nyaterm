@@ -17,7 +17,7 @@ impl SettingsPanel {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let master_password = self.settings.master_password();
-        let master_password_draft = master_password.draft.to_string();
+        let master_password_draft = master_password.draft.expose_secret().to_owned();
         let master_password_enabled = master_password.enabled;
         let master_password_input = self
             .existing_text_input_box("settings.security.master-password", false)

@@ -1496,7 +1496,7 @@ enum TelnetAutoLoginAction {
 
 struct TelnetAutoLoginState {
     username: String,
-    password: Option<String>,
+    password: Option<nyaterm_core::SecretString>,
     started_at: Instant,
     tail: String,
     sent_wake: bool,

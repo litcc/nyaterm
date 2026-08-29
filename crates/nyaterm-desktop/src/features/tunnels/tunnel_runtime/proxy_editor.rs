@@ -52,7 +52,7 @@ impl NyaTermApp {
                 },
                 command: proxy.command.unwrap_or_default(),
                 username: proxy.username.unwrap_or_default(),
-                password: String::new(),
+                password: nyaterm_core::SecretString::default(),
                 existing_password: proxy.password,
                 password_id: proxy.password_id,
                 group_id: proxy.group_id,

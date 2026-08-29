@@ -14,6 +14,7 @@ pub mod natural_order;
 pub mod portable_snapshot;
 pub mod remote_preview;
 pub mod runtime;
+pub mod secret;
 pub mod session_import;
 pub mod terminal;
 pub mod terminal_file_drop {
@@ -149,6 +150,7 @@ pub use remote_preview::{
     PreviewCategory, classify_preview, is_known_text_file, preview_within_limit,
 };
 pub use runtime::{AppRuntime, RuntimeMode};
+pub use secret::{SecretBytes, SecretString};
 pub use session_import::{
     PreparedSessionConnection, PreparedSessionImport, SessionImportError, prepare_session_import,
     prepare_termius_session_import,

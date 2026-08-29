@@ -13,10 +13,10 @@ use super::{
 fn settings_debug_output_redacts_provider_keys() {
     let secret = "nya-translation-key-never-log";
     let settings = TranslationSettings {
-        deepl_api_key: secret.to_string(),
-        baidu_app_key: secret.to_string(),
-        ali_app_key: secret.to_string(),
-        youdao_app_key: secret.to_string(),
+        deepl_api_key: secret.to_string().into(),
+        baidu_app_key: secret.to_string().into(),
+        ali_app_key: secret.to_string().into(),
+        youdao_app_key: secret.to_string().into(),
         ..TranslationSettings::default()
     };
     let output = format!("{settings:?}");
@@ -134,14 +134,14 @@ fn builds_legacy_provider_signatures() {
 fn merges_masked_translation_secrets() {
     let current = TranslationSettings {
         target_language: "ja".to_string(),
-        deepl_api_key: "deepl-secret".to_string(),
+        deepl_api_key: "deepl-secret".to_string().into(),
         baidu_app_id: "baidu-id".to_string(),
-        baidu_app_key: "baidu-secret".to_string(),
+        baidu_app_key: "baidu-secret".to_string().into(),
         ..TranslationSettings::default()
     };
     let next = TranslationSettings {
-        deepl_api_key: MASKED_SECRET_VALUE.to_string(),
-        baidu_app_key: String::new(),
+        deepl_api_key: MASKED_SECRET_VALUE.to_string().into(),
+        baidu_app_key: String::new().into(),
         ..current.clone()
     };
     let merged = merge_masked_translation_settings(&current, next);

@@ -16,10 +16,10 @@ pub struct NativeAliyunDriveRemote {
     pub(super) client: zed_reqwest::blocking::Client,
     pub(super) root: String,
     pub(super) drive_type: AliyunDriveType,
-    pub(super) access_token: Mutex<String>,
-    pub(super) refresh_token: Mutex<String>,
+    pub(super) access_token: Mutex<nyaterm_core::SecretString>,
+    pub(super) refresh_token: Mutex<nyaterm_core::SecretString>,
     pub(super) client_id: Option<String>,
-    pub(super) client_secret: Option<String>,
+    pub(super) client_secret: Option<nyaterm_core::SecretString>,
     pub(super) drive_id: Mutex<Option<String>>,
 }
 
@@ -34,10 +34,12 @@ impl NativeAliyunDriveRemote {
             client,
             root: trim_remote_path(&settings.root),
             drive_type: AliyunDriveType::parse(&settings.drive_type)?,
-            access_token: Mutex::new(trim_optional_secret(settings.access_token.as_deref())),
-            refresh_token: Mutex::new(trim_optional_secret(settings.refresh_token.as_deref())),
+            access_token: Mutex::new(trim_optional_secret(settings.access_token.as_deref()).into()),
+            refresh_token: Mutex::new(
+                trim_optional_secret(settings.refresh_token.as_deref()).into(),
+            ),
             client_id: trim_optional(settings.client_id.as_deref()),
-            client_secret: trim_optional(settings.client_secret.as_deref()),
+            client_secret: trim_optional(settings.client_secret.as_deref()).map(Into::into),
             drive_id: Mutex::new(None),
         };
 
@@ -58,7 +60,8 @@ impl NativeAliyunDriveRemote {
         self.access_token
             .lock()
             .expect("aliyun drive access token lock")
-            .clone()
+            .expose_secret()
+            .to_owned()
     }
 
     fn can_refresh_access_token(&self) -> bool {
@@ -129,7 +132,7 @@ impl NativeAliyunDriveRemote {
         *self
             .access_token
             .lock()
-            .expect("aliyun drive access token lock") = access_token;
+            .expect("aliyun drive access token lock") = access_token.into();
         if let Some(refresh_token) = value
             .get("refresh_token")
             .and_then(serde_json::Value::as_str)
@@ -139,7 +142,7 @@ impl NativeAliyunDriveRemote {
             *self
                 .refresh_token
                 .lock()
-                .expect("aliyun drive refresh token lock") = refresh_token.to_string();
+                .expect("aliyun drive refresh token lock") = refresh_token.to_string().into();
         }
         *self.drive_id.lock().expect("aliyun drive id lock") = None;
         Ok(())

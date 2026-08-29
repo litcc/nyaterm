@@ -1,6 +1,6 @@
+use nyaterm_core::SecretString;
 use std::path::PathBuf;
 use std::sync::Arc;
-use zeroize::Zeroize;
 
 use crate::ssh_auth::format_keyboard_interactive_prompt;
 
@@ -66,9 +66,9 @@ pub struct SshAgentForwardingConfig {
 /// buffers after the broker finishes parsing them.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SshAgentStoredKey {
-    pub key_data: String,
-    pub cert_data: Option<String>,
-    pub passphrase: Option<String>,
+    pub key_data: SecretString,
+    pub cert_data: Option<SecretString>,
+    pub passphrase: Option<SecretString>,
     pub comment: String,
 }
 
@@ -84,14 +84,6 @@ impl std::fmt::Debug for SshAgentStoredKey {
             )
             .field("comment", &self.comment)
             .finish()
-    }
-}
-
-impl Drop for SshAgentStoredKey {
-    fn drop(&mut self) {
-        self.key_data.zeroize();
-        self.cert_data.zeroize();
-        self.passphrase.zeroize();
     }
 }
 
@@ -135,7 +127,7 @@ pub struct TelnetSessionConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     pub backspace_mode: String,
     pub raw_tcp: bool,
     pub enter_mode: TelnetEnterMode,
@@ -271,7 +263,7 @@ pub struct SshSessionConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
     pub key_auth: Option<SshKeyAuthConfig>,
     pub agent_auth: bool,
     pub agent_endpoint: SshAgentEndpoint,
@@ -357,7 +349,7 @@ pub struct SshProxyConfig {
     pub port: u16,
     pub command: Option<String>,
     pub username: Option<String>,
-    pub password: Option<String>,
+    pub password: Option<SecretString>,
 }
 
 impl std::fmt::Debug for SshProxyConfig {
@@ -375,9 +367,9 @@ impl std::fmt::Debug for SshProxyConfig {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct SshKeyAuthConfig {
-    pub key_data: String,
-    pub cert_data: Option<String>,
-    pub passphrase: Option<String>,
+    pub key_data: SecretString,
+    pub cert_data: Option<SecretString>,
+    pub passphrase: Option<SecretString>,
 }
 
 impl std::fmt::Debug for SshKeyAuthConfig {
@@ -688,7 +680,7 @@ mod tests {
     fn telnet_debug_output_redacts_password() {
         let secret = "nya-telnet-password-never-log";
         let config = TelnetSessionConfig {
-            password: Some(secret.to_string()),
+            password: Some(secret.to_string().into()),
             ..TelnetSessionConfig::default()
         };
         let output = format!("{config:?}");

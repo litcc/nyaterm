@@ -33,13 +33,13 @@ impl SettingsPanel {
     ) -> impl IntoElement {
         let palette = self.theme_palette();
         let (translation_settings, secret_draft) = self.translation.settings_draft_snapshot();
-        let deepl_key_value = secret_draft.deepl_api_key.clone();
+        let deepl_key_value = secret_draft.deepl_api_key.expose_secret().to_owned();
         let baidu_app_id_value = translation_settings.baidu_app_id.clone();
-        let baidu_key_value = secret_draft.baidu_app_key.clone();
+        let baidu_key_value = secret_draft.baidu_app_key.expose_secret().to_owned();
         let ali_app_id_value = translation_settings.ali_app_id.clone();
-        let ali_key_value = secret_draft.ali_app_key.clone();
+        let ali_key_value = secret_draft.ali_app_key.expose_secret().to_owned();
         let youdao_app_id_value = translation_settings.youdao_app_id.clone();
-        let youdao_key_value = secret_draft.youdao_app_key.clone();
+        let youdao_key_value = secret_draft.youdao_app_key.expose_secret().to_owned();
 
         let deepl_configured = !translation_settings.deepl_api_key.trim().is_empty()
             || !secret_draft.deepl_api_key.is_empty();

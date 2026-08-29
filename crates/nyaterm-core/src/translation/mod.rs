@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::MASKED_SECRET_VALUE;
+use crate::{MASKED_SECRET_VALUE, SecretString};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -20,32 +20,32 @@ pub struct TranslationSettings {
     #[serde(default = "default_translation_target_language")]
     pub target_language: String,
     #[serde(default)]
-    pub deepl_api_key: String,
+    pub deepl_api_key: SecretString,
     #[serde(default)]
     pub baidu_app_id: String,
     #[serde(default)]
-    pub baidu_app_key: String,
+    pub baidu_app_key: SecretString,
     #[serde(default)]
     pub ali_app_id: String,
     #[serde(default)]
-    pub ali_app_key: String,
+    pub ali_app_key: SecretString,
     #[serde(default)]
     pub youdao_app_id: String,
     #[serde(default)]
-    pub youdao_app_key: String,
+    pub youdao_app_key: SecretString,
 }
 
 impl Default for TranslationSettings {
     fn default() -> Self {
         Self {
             target_language: default_translation_target_language(),
-            deepl_api_key: String::new(),
+            deepl_api_key: SecretString::default(),
             baidu_app_id: String::new(),
-            baidu_app_key: String::new(),
+            baidu_app_key: SecretString::default(),
             ali_app_id: String::new(),
-            ali_app_key: String::new(),
+            ali_app_key: SecretString::default(),
             youdao_app_id: String::new(),
-            youdao_app_key: String::new(),
+            youdao_app_key: SecretString::default(),
         }
     }
 }
@@ -525,7 +525,10 @@ pub fn translation_settings_has_secret(settings: &TranslationSettings) -> bool {
         &settings.youdao_app_key,
     ]
     .iter()
-    .any(|value| !value.trim().is_empty() && value.trim() != MASKED_SECRET_VALUE)
+    .any(|value| {
+        let value = value.expose_secret().trim();
+        !value.is_empty() && value != MASKED_SECRET_VALUE
+    })
 }
 
 pub fn merge_masked_translation_settings(
@@ -539,9 +542,9 @@ pub fn merge_masked_translation_settings(
     next
 }
 
-fn merge_masked_secret(current: &str, next: String) -> String {
-    if next.trim() == MASKED_SECRET_VALUE {
-        current.to_string()
+fn merge_masked_secret(current: &SecretString, next: SecretString) -> SecretString {
+    if next.expose_secret().trim() == MASKED_SECRET_VALUE {
+        current.clone()
     } else {
         next
     }

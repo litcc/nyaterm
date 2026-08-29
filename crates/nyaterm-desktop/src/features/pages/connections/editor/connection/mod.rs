@@ -2443,7 +2443,7 @@ mod tests {
             vnc_view_only: false,
             password_source: ConnectionEditorPasswordSource::Ask,
             password_id: None,
-            password: String::new(),
+            password: nyaterm_core::SecretString::default(),
             existing_password: None,
             key_id: None,
             otp_id: None,

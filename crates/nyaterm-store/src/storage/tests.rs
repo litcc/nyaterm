@@ -108,7 +108,7 @@ fn round_trips_sessions_in_redb_compatible_tables() {
             icon_auto_detect: None,
             auth: Some(ConnectionAuth {
                 mode: "password".to_string(),
-                password: Some("secret".to_string()),
+                password: Some("secret".to_string().into()),
                 ..Default::default()
             }),
             ssh_algorithms: None,
@@ -266,7 +266,7 @@ fn exports_and_imports_portable_snapshot() {
                 icon_auto_detect: None,
                 auth: Some(ConnectionAuth {
                     mode: "password".to_string(),
-                    password: Some("session-secret".to_string()),
+                    password: Some("session-secret".to_string().into()),
                     ..Default::default()
                 }),
                 ssh_algorithms: None,
@@ -340,7 +340,7 @@ fn exports_and_imports_portable_snapshot() {
             sort_order: 7,
             name: "Production login".to_string(),
             username: "deploy".to_string(),
-            password: Some("credential-secret".to_string()),
+            password: Some("credential-secret".to_string().into()),
             username_prompt_regex: Some("(?i)login:".to_string()),
             password_prompt_regex: Some("(?i)password:".to_string()),
             enabled: true,
@@ -356,7 +356,7 @@ fn exports_and_imports_portable_snapshot() {
             &SshKey {
                 id: "key-1".to_string(),
                 name: "Deploy".to_string(),
-                key: Some("encrypted-key".to_string()),
+                key: Some("encrypted-key".to_string().into()),
                 cert: None,
                 passphrase: None,
                 key_file_path: None,
@@ -887,7 +887,7 @@ fn load_sessions_decrypts_legacy_connection_password_record() {
     let record = ConnectionPasswordRecord {
         id: "ssh-1".to_string(),
         connection_id: "ssh-1".to_string(),
-        password: encrypted_password.clone(),
+        password: encrypted_password.clone().into(),
         created_at_ms: now,
         updated_at_ms: now,
     };
@@ -936,15 +936,9 @@ fn load_decrypted_ssh_key_reads_legacy_key_store() {
     let key = SshKey {
         id: "key-1".to_string(),
         name: "Deploy Key".to_string(),
-        key: Some(encrypt_for_test(
-            b"-----BEGIN PRIVATE KEY-----",
-            &master_key,
-        )),
-        cert: Some(encrypt_for_test(
-            b"ssh-ed25519-cert-v01@openssh.com AAAA",
-            &master_key,
-        )),
-        passphrase: Some(encrypt_for_test(b"passphrase", &master_key)),
+        key: Some(encrypt_for_test(b"-----BEGIN PRIVATE KEY-----", &master_key).into()),
+        cert: Some(encrypt_for_test(b"ssh-ed25519-cert-v01@openssh.com AAAA", &master_key).into()),
+        passphrase: Some(encrypt_for_test(b"passphrase", &master_key).into()),
         key_file_path: None,
         cert_file_path: None,
         has_key_data: false,
@@ -1031,7 +1025,7 @@ fn save_ssh_key_rejects_oversized_cert_file_import() {
         .save_ssh_key(SshKey {
             id: "key-1".to_string(),
             name: "Large Cert".to_string(),
-            key: Some("-----BEGIN PRIVATE KEY-----\nsmall\n".to_string()),
+            key: Some("-----BEGIN PRIVATE KEY-----\nsmall\n".to_string().into()),
             cert: None,
             passphrase: None,
             key_file_path: None,
@@ -1056,7 +1050,7 @@ fn load_decrypted_otp_entry_reads_legacy_otp_store() {
         otp_type: "totp".to_string(),
         issuer: "Example".to_string(),
         username: "deploy".to_string(),
-        secret: Some(encrypt_for_test(b"JBSWY3DPEHPK3PXP", &master_key)),
+        secret: Some(encrypt_for_test(b"JBSWY3DPEHPK3PXP", &master_key).into()),
         algorithm: "SHA1".to_string(),
         digits: 6,
         period: 30,
@@ -1122,7 +1116,7 @@ fn credential_order_appends_and_reorders_without_exposing_passwords() {
                 sort_order,
                 name: name.to_string(),
                 username: format!("{name}-user"),
-                password: Some(format!("{name}-secret")),
+                password: Some(format!("{name}-secret").into()),
                 username_prompt_regex: None,
                 password_prompt_regex: None,
                 enabled: true,
@@ -2595,7 +2589,7 @@ fn changing_master_password_preserves_encrypted_cloud_secrets() {
     let dir = unique_temp_dir("change-master-password");
     let store = ConnectionStore::open(&dir).expect("store");
     let mut cloud = CloudSyncSettings::default();
-    cloud.webdav.password = Some("cloud-secret".to_string());
+    cloud.webdav.password = Some("cloud-secret".to_string().into());
     store
         .save_cloud_sync_settings(cloud)
         .expect("save cloud secret");
@@ -2860,9 +2854,9 @@ fn translation_settings_read_legacy_plaintext_and_encrypt_on_save() {
     assert_eq!(loaded.youdao_app_key, "youdao-secret");
 
     let mut update = loaded.clone();
-    update.deepl_api_key = nyaterm_core::MASKED_SECRET_VALUE.to_string();
-    update.baidu_app_key.clear();
-    update.ali_app_key = "ali-replacement".to_string();
+    update.deepl_api_key = nyaterm_core::MASKED_SECRET_VALUE.to_string().into();
+    update.baidu_app_key.expose_secret_mut().clear();
+    update.ali_app_key = "ali-replacement".to_string().into();
     let saved = store
         .save_translation_settings(update)
         .expect("save translation settings");
@@ -2913,10 +2907,10 @@ fn cloud_sync_settings_encrypt_and_merge_masked_provider_secrets() {
         provider: "github_gist".to_string(),
         ..CloudSyncSettings::default()
     };
-    settings.webdav.password = Some("webdav-secret".to_string());
-    settings.s3.secret_access_key = Some("s3-secret".to_string());
-    settings.google_drive.access_token = Some("google-access".to_string());
-    settings.github_gist.access_token = Some("github-token".to_string());
+    settings.webdav.password = Some("webdav-secret".to_string().into());
+    settings.s3.secret_access_key = Some("s3-secret".to_string().into());
+    settings.google_drive.access_token = Some("google-access".to_string().into());
+    settings.github_gist.access_token = Some("github-token".to_string().into());
 
     let saved = store
         .save_cloud_sync_settings(settings.clone())
@@ -2945,9 +2939,9 @@ fn cloud_sync_settings_encrypt_and_merge_masked_provider_secrets() {
     assert_eq!(loaded, settings);
 
     let mut masked_update = loaded.clone();
-    masked_update.webdav.password = Some(nyaterm_core::MASKED_SECRET_VALUE.to_string());
-    masked_update.s3.secret_access_key = Some(String::new());
-    masked_update.github_gist.access_token = Some("replacement-token".to_string());
+    masked_update.webdav.password = Some(nyaterm_core::MASKED_SECRET_VALUE.to_string().into());
+    masked_update.s3.secret_access_key = Some(String::new().into());
+    masked_update.github_gist.access_token = Some("replacement-token".to_string().into());
     let merged = store
         .save_cloud_sync_settings(masked_update)
         .expect("save masked cloud settings");
@@ -2976,9 +2970,9 @@ fn ai_settings_encrypt_and_merge_masked_provider_secrets() {
         ..AiSettings::default()
     };
     settings.provider_profiles[0].enabled = true;
-    settings.provider_profiles[0].api_key = Some("profile-key".to_string());
+    settings.provider_profiles[0].api_key = Some("profile-key".to_string().into());
     settings.provider_credentials[0].enabled = true;
-    settings.provider_credentials[0].api_key = Some("credential-key".to_string());
+    settings.provider_credentials[0].api_key = Some("credential-key".to_string().into());
 
     let saved = store.save_ai_settings(settings.clone()).expect("save ai");
     assert_eq!(saved.default_mode, nyaterm_core::AiMode::Agent);
@@ -3016,8 +3010,8 @@ fn ai_settings_encrypt_and_merge_masked_provider_secrets() {
 
     let mut masked_update = loaded.clone();
     masked_update.provider_profiles[0].api_key =
-        Some(nyaterm_core::MASKED_SECRET_VALUE.to_string());
-    masked_update.provider_credentials[0].api_key = Some("replacement-key".to_string());
+        Some(nyaterm_core::MASKED_SECRET_VALUE.to_string().into());
+    masked_update.provider_credentials[0].api_key = Some("replacement-key".to_string().into());
     let merged = store
         .save_ai_settings(masked_update)
         .expect("save masked ai");
@@ -3883,7 +3877,7 @@ fn merge_connection_asset_preserves_inline_password() {
     let mut connection = ssh_connection_for_asset("asset-secret");
     connection.auth = Some(ConnectionAuth {
         mode: "password".to_string(),
-        password: Some("hunter2".to_string()),
+        password: Some("hunter2".to_string().into()),
         ..Default::default()
     });
     store

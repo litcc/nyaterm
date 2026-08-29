@@ -908,7 +908,7 @@ pub(in crate::features) fn build_ssh_session_config_with_context(
 fn load_ssh_connection_password_with_context(
     context: &SshSessionConfigBuildContext,
     auth: &ConnectionAuth,
-) -> Result<Option<String>, String> {
+) -> Result<Option<nyaterm_core::SecretString>, String> {
     if let Some(password) = auth
         .password
         .as_deref()
@@ -917,7 +917,7 @@ fn load_ssh_connection_password_with_context(
         if auth.has_password {
             return Err("saved SSH password is locked or could not be decrypted".to_string());
         }
-        return Ok(Some(password.to_string()));
+        return Ok(Some(password.to_owned().into()));
     }
 
     let Some(password_id) = auth
@@ -987,7 +987,7 @@ fn map_runtime_agent_endpoint(
     }
 }
 
-fn inline_connection_password(auth: Option<&ConnectionAuth>) -> Option<String> {
+fn inline_connection_password(auth: Option<&ConnectionAuth>) -> Option<nyaterm_core::SecretString> {
     let auth = auth?;
     if auth.mode == "none" {
         return None;
@@ -997,7 +997,7 @@ fn inline_connection_password(auth: Option<&ConnectionAuth>) -> Option<String> {
         .as_deref()
         .filter(|value| !value.trim().is_empty())
     {
-        return (!auth.has_password).then(|| password.to_string());
+        return (!auth.has_password).then(|| password.to_owned().into());
     }
     None
 }
@@ -1245,7 +1245,7 @@ mod tests {
         let context = test_ssh_build_context(dir.clone());
         let auth = ConnectionAuth {
             mode: "password".to_string(),
-            password: Some("secret".to_string()),
+            password: Some("secret".to_string().into()),
             has_password: false,
             ..ConnectionAuth::default()
         };
@@ -1266,7 +1266,7 @@ mod tests {
                 store.save_password(nyaterm_core::SavedPassword {
                     id: "pw-1".to_string(),
                     name: "Primary".to_string(),
-                    password: Some("stored-secret".to_string()),
+                    password: Some("stored-secret".to_string().into()),
                     has_password: false,
                 })
             })
@@ -1287,7 +1287,7 @@ mod tests {
     fn non_ssh_password_selection_never_treats_locked_values_as_plaintext() {
         let inline = ConnectionAuth {
             mode: "password".to_string(),
-            password: Some("plain-secret".to_string()),
+            password: Some("plain-secret".to_string().into()),
             password_id: Some("pw-inline".to_string()),
             has_password: false,
             ..ConnectionAuth::default()
@@ -1300,7 +1300,7 @@ mod tests {
 
         let locked = ConnectionAuth {
             mode: "password".to_string(),
-            password: Some("masked-or-encrypted".to_string()),
+            password: Some("masked-or-encrypted".to_string().into()),
             password_id: Some("pw-stored".to_string()),
             has_password: true,
             ..ConnectionAuth::default()
@@ -1318,7 +1318,7 @@ mod tests {
         let context = test_ssh_build_context(dir.clone());
         let auth = ConnectionAuth {
             mode: "password".to_string(),
-            password: Some("encrypted".to_string()),
+            password: Some("encrypted".to_string().into()),
             has_password: true,
             ..ConnectionAuth::default()
         };

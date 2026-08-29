@@ -5,7 +5,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::cloud_sync::MASKED_SECRET_VALUE;
+use crate::{SecretString, cloud_sync::MASKED_SECRET_VALUE};
 
 mod agent;
 mod providers;
@@ -91,7 +91,7 @@ pub struct AiProviderProfile {
     #[serde(default)]
     pub base_url: Option<String>,
     #[serde(default)]
-    pub api_key: Option<String>,
+    pub api_key: Option<SecretString>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -120,7 +120,7 @@ pub struct AiProviderCredential {
     #[serde(default)]
     pub base_url: Option<String>,
     #[serde(default)]
-    pub api_key: Option<String>,
+    pub api_key: Option<SecretString>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -744,7 +744,8 @@ pub fn validate_model_credential(
             })?;
             if credential
                 .api_key
-                .as_deref()
+                .as_ref()
+                .map(SecretString::expose_secret)
                 .is_none_or(|value| value.trim().is_empty())
             {
                 return Err(AiModelError::MissingApiKey {

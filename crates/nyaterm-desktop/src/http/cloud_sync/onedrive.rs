@@ -20,10 +20,10 @@ const MICROSOFT_OAUTH_TOKEN_URL: &str =
 pub struct NativeOneDriveRemote {
     pub(super) client: zed_reqwest::blocking::Client,
     pub(super) root: String,
-    pub(super) access_token: Mutex<String>,
-    pub(super) refresh_token: Option<String>,
+    pub(super) access_token: Mutex<nyaterm_core::SecretString>,
+    pub(super) refresh_token: Option<nyaterm_core::SecretString>,
     pub(super) client_id: Option<String>,
-    pub(super) client_secret: Option<String>,
+    pub(super) client_secret: Option<nyaterm_core::SecretString>,
 }
 
 impl NativeOneDriveRemote {
@@ -36,10 +36,10 @@ impl NativeOneDriveRemote {
         let remote = Self {
             client,
             root: trim_remote_path(&settings.root),
-            access_token: Mutex::new(trim_optional_secret(settings.access_token.as_deref())),
-            refresh_token: trim_optional(settings.refresh_token.as_deref()),
+            access_token: Mutex::new(trim_optional_secret(settings.access_token.as_deref()).into()),
+            refresh_token: trim_optional(settings.refresh_token.as_deref()).map(Into::into),
             client_id: trim_optional(settings.client_id.as_deref()),
-            client_secret: trim_optional(settings.client_secret.as_deref()),
+            client_secret: trim_optional(settings.client_secret.as_deref()).map(Into::into),
         };
 
         if remote.bearer_token().is_empty() {
@@ -59,7 +59,8 @@ impl NativeOneDriveRemote {
         self.access_token
             .lock()
             .expect("onedrive access token lock")
-            .clone()
+            .expose_secret()
+            .to_owned()
     }
 
     fn can_refresh_access_token(&self) -> bool {
@@ -126,7 +127,7 @@ impl NativeOneDriveRemote {
         *self
             .access_token
             .lock()
-            .expect("onedrive access token lock") = access_token.to_string();
+            .expect("onedrive access token lock") = access_token.to_string().into();
         Ok(())
     }
 

@@ -103,7 +103,7 @@ fn decode_security_otp_qr(path: &std::path::Path) -> Result<SecurityOtpEditorSta
             otp_type: "totp".to_string(),
             issuer: totp.issuer().to_string(),
             username: totp.label().to_string(),
-            secret: totp.secret().into_base32(),
+            secret: totp.secret().into_base32().into(),
             algorithm: totp.alg().to_string(),
             digits: totp.digits().to_string(),
             period: totp.period().to_string(),
@@ -119,7 +119,7 @@ fn decode_security_otp_qr(path: &std::path::Path) -> Result<SecurityOtpEditorSta
             otp_type: "hotp".to_string(),
             issuer: hotp.issuer().to_string(),
             username: hotp.label().to_string(),
-            secret: hotp.secret().into_base32(),
+            secret: hotp.secret().into_base32().into(),
             algorithm: hotp.alg().to_string(),
             digits: hotp.digits().to_string(),
             period: "30".to_string(),
@@ -170,7 +170,7 @@ impl NyaTermApp {
                 otp_type: entry.otp_type,
                 issuer: entry.issuer,
                 username: entry.username,
-                secret: String::new(),
+                secret: nyaterm_core::SecretString::default(),
                 algorithm: entry.algorithm,
                 digits: entry.digits.to_string(),
                 period: entry.period.to_string(),
@@ -184,7 +184,7 @@ impl NyaTermApp {
                 otp_type: "totp".to_string(),
                 issuer: String::new(),
                 username: String::new(),
-                secret: String::new(),
+                secret: nyaterm_core::SecretString::default(),
                 algorithm: "SHA1".to_string(),
                 digits: "6".to_string(),
                 period: "30".to_string(),
@@ -330,7 +330,7 @@ impl NyaTermApp {
             secret: if editor.secret.trim().is_empty() {
                 None
             } else {
-                Some(editor.secret.trim().to_string())
+                Some(editor.secret.trim().into())
             },
             algorithm: editor.algorithm.clone(),
             digits,

@@ -65,7 +65,7 @@ pub struct GiteeSnippetHttpBackend<C> {
     client: C,
     api_endpoint: String,
     gist_id: String,
-    access_token: String,
+    access_token: crate::SecretString,
 }
 
 impl<C> GiteeSnippetHttpBackend<C> {
@@ -77,7 +77,10 @@ impl<C> GiteeSnippetHttpBackend<C> {
             .to_string();
         let gist_id = settings.gist_id.trim().to_string();
         let access_token = required_secret(
-            settings.access_token.as_deref(),
+            settings
+                .access_token
+                .as_ref()
+                .map(crate::SecretString::expose_secret),
             "Gitee snippet access token is required",
         )?;
         if api_endpoint.is_empty() {
@@ -173,7 +176,10 @@ where
 
     fn gitee_get_request(&self, url: String) -> SnippetHttpRequest {
         let mut query = BTreeMap::new();
-        query.insert("access_token".to_string(), self.access_token.clone());
+        query.insert(
+            "access_token".to_string(),
+            self.access_token.expose_secret().to_owned(),
+        );
         SnippetHttpRequest {
             method: SnippetHttpMethod::Get,
             url,
@@ -187,14 +193,17 @@ where
 pub struct GithubGistHttpBackend<C> {
     client: C,
     gist_id: String,
-    access_token: String,
+    access_token: crate::SecretString,
 }
 
 impl<C> GithubGistHttpBackend<C> {
     pub fn new(settings: &GithubGistSyncSettings, client: C) -> Result<Self, CloudSyncError> {
         let gist_id = settings.gist_id.trim().to_string();
         let access_token = required_secret(
-            settings.access_token.as_deref(),
+            settings
+                .access_token
+                .as_ref()
+                .map(crate::SecretString::expose_secret),
             "GitHub Gist access token is required",
         )?;
         if gist_id.is_empty() {
@@ -288,7 +297,7 @@ where
         BTreeMap::from([
             (
                 "Authorization".to_string(),
-                format!("Bearer {}", self.access_token),
+                format!("Bearer {}", self.access_token.expose_secret()),
             ),
             (
                 "Accept".to_string(),
