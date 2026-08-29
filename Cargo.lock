@@ -5847,7 +5847,6 @@ dependencies = [
  "flate2",
  "futures",
  "md5",
- "nyaterm-remote-desktop",
  "portable-pty",
  "regex",
  "russh",

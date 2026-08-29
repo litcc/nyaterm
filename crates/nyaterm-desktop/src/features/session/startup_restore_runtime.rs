@@ -2,13 +2,14 @@ use gpui::{Context, Window};
 use nyaterm_core::{
     AiExecutionProfile, RestorableOpenTab, RestorablePaneNode, RestorableWorkspacePaneNode,
 };
-use nyaterm_store::{StoreDomain, store_request};
-use nyaterm_transport::{
-    LocalSessionConfig, RdpClipboardConfig, RdpDisplayConfig, RdpReconnectConfig, RdpSessionConfig,
-    SessionInfo, VncClipboardConfig, VncDisplayConfig, VncReconnectConfig, VncSecurityConfig,
-    VncSessionConfig, parse_rdp_certificate_policy, parse_rdp_clipboard_mode,
-    parse_rdp_display_mode, parse_vnc_scale_mode, parse_vnc_security_mode,
+use nyaterm_remote_desktop::{
+    RdpClipboardConfig, RdpDisplayConfig, RdpReconnectConfig, RdpSessionConfig, VncClipboardConfig,
+    VncDisplayConfig, VncReconnectConfig, VncSecurityConfig, VncSessionConfig,
+    parse_rdp_certificate_policy, parse_rdp_clipboard_mode, parse_rdp_display_mode,
+    parse_vnc_scale_mode, parse_vnc_security_mode,
 };
+use nyaterm_store::{StoreDomain, store_request};
+use nyaterm_transport::{LocalSessionConfig, SessionInfo};
 
 use crate::features::{NyaTermApp, session::SavedConnectionStartOptions};
 use crate::models::{SessionLaunchConfig, WorkspacePaneNode, WorkspaceSplitDirection};

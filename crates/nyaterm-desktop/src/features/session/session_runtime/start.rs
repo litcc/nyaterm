@@ -9,15 +9,18 @@ use nyaterm_core::{
     SshAlgorithmPreferences, SshProfile, normalize_ssh_agent_endpoint, resolve_ssh_terminal_type,
     uuid,
 };
+use nyaterm_remote_desktop::{
+    RdpClipboardConfig, RdpDisplayConfig, RdpReconnectConfig, RdpSessionConfig, VncClipboardConfig,
+    VncDisplayConfig, VncReconnectConfig, VncSecurityConfig, VncSessionConfig,
+    parse_rdp_certificate_policy, parse_rdp_clipboard_mode, parse_rdp_display_mode,
+    parse_vnc_scale_mode, parse_vnc_security_mode,
+};
 use nyaterm_store::{StoreBlockingClient, StoreDomain, store_request};
 use nyaterm_transport::{
-    LocalSessionConfig, RdpClipboardConfig, RdpDisplayConfig, RdpReconnectConfig, RdpSessionConfig,
-    SerialSessionConfig, SessionKind, SshAgentStoredKey, SshAgentStoredKeyProvider,
-    SshAgentStoredKeySnapshot, SshKeyAuthConfig, SshProxyConfig, SshSessionConfig,
-    SshSessionProfile, TelnetAutoLoginConfig, TelnetSessionConfig, VncClipboardConfig,
-    VncDisplayConfig, VncReconnectConfig, VncSecurityConfig, VncSessionConfig,
-    open_ssh_multiplex_handle, parse_rdp_certificate_policy, parse_rdp_clipboard_mode,
-    parse_rdp_display_mode, parse_vnc_scale_mode, parse_vnc_security_mode,
+    LocalSessionConfig, SerialSessionConfig, SessionKind, SshAgentStoredKey,
+    SshAgentStoredKeyProvider, SshAgentStoredKeySnapshot, SshKeyAuthConfig, SshProxyConfig,
+    SshSessionConfig, SshSessionProfile, TelnetAutoLoginConfig, TelnetSessionConfig,
+    open_ssh_multiplex_handle,
 };
 
 use super::super::NativeHostKeyVerifier;

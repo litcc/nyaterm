@@ -25,7 +25,6 @@ use tokio::sync::mpsc as tokio_mpsc;
 mod ascend_npu;
 mod gpu;
 mod local_fs;
-mod rdp;
 mod recording;
 mod remote_file;
 mod remote_process;
@@ -144,16 +143,6 @@ pub use gpu::{
     parse_gpu_overview_output,
 };
 pub use local_fs::{LocalDirectoryChild, LocalFileService};
-pub use rdp::{
-    RdpCapability, RdpCertificatePolicy, RdpCertificateRequest, RdpCertificateResponse,
-    RdpClipboardConfig, RdpClipboardMode, RdpDisplayConfig, RdpDisplayMode, RdpError, RdpErrorKind,
-    RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpReconnectConfig, RdpRuntimeEvent,
-    RdpSessionConfig, RdpSessionDrain, RdpSessionManager, RdpSessionState, VncClipboardConfig,
-    VncDisplayConfig, VncError, VncErrorKind, VncInputEvent, VncReconnectConfig, VncRuntimeEvent,
-    VncScaleMode, VncSecurityConfig, VncSecurityMode, VncSessionConfig, VncSessionDrain,
-    VncSessionManager, VncSessionState, parse_rdp_certificate_policy, parse_rdp_clipboard_mode,
-    parse_rdp_display_mode, parse_vnc_scale_mode, parse_vnc_security_mode, validate_vnc_config,
-};
 pub use recording::{
     DEFAULT_HISTORY_SEARCH_LIMIT, DEFAULT_HISTORY_SEARCH_LINES, DEFAULT_MEMORY_LIMIT_BYTES,
     ExistingFileBehavior, MAX_HISTORY_SEARCH_LINES, RecordingContext, RecordingError,

@@ -1,7 +1,7 @@
 use nyaterm_core::{AiExecutionProfile, SavedConnection};
+use nyaterm_remote_desktop::{RdpSessionConfig, VncSessionConfig};
 use nyaterm_transport::{
-    LocalSessionConfig, RdpSessionConfig, SerialSessionConfig, SshSessionConfig,
-    TelnetSessionConfig, VncSessionConfig,
+    LocalSessionConfig, SerialSessionConfig, SshSessionConfig, TelnetSessionConfig,
 };
 
 #[derive(Clone)]
