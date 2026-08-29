@@ -88,8 +88,7 @@ impl NyaTermApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        cx.stop_propagation();
+    ) -> bool {
         self.ai.begin_settings_manual_model_edit(group_key);
         match event.keystroke.key.as_str() {
             "escape" => {
@@ -105,8 +104,9 @@ impl NyaTermApp {
                     self.clear_ai_manual_model_draft(group_key, cx);
                 }
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn apply_ai_manual_model_input(

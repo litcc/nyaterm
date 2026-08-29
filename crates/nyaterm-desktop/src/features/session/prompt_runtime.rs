@@ -215,14 +215,14 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         if !self.session.prompts.has_active_credential() {
-            return;
+            return false;
         }
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         match keystroke.key.as_str() {
@@ -232,8 +232,9 @@ impl NyaTermApp {
             "escape" => {
                 self.cancel_credential_prompt(cx);
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn handle_keyboard_interactive_key_down(
@@ -241,14 +242,14 @@ impl NyaTermApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         if !self.session.prompts.has_active_keyboard_interactive() {
-            return;
+            return false;
         }
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         match keystroke.key.as_str() {
@@ -260,7 +261,7 @@ impl NyaTermApp {
                     .prompts
                     .advance_keyboard_interactive_focus(keystroke.modifiers.shift)
                 else {
-                    return;
+                    return false;
                 };
                 let setup = if target.echo {
                     TextInputSetup::default()
@@ -271,8 +272,9 @@ impl NyaTermApp {
                 window.focus(&field.read(cx).focus_handle(), cx);
                 cx.notify();
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn apply_ssh_credential_input(

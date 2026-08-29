@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use futures::channel::mpsc::UnboundedReceiver;
+use gpui::Subscription;
 
 use crate::models::event_wake::{ANY_INTEREST, EventWake};
 
@@ -9,6 +10,9 @@ use super::state::ShellFeatureState;
 
 /// GPUI event-pump, repaint and shell-persistence scheduling state.
 pub(super) struct ShellRuntimeState {
+    /// Application shortcut dispatch must not depend on the focused element's
+    /// action ancestry. This subscription owns the single main-window interceptor.
+    pub(super) shortcut_interceptor: Option<Subscription>,
     pub(super) session_event_backlog_active: bool,
     pub(super) session_event_queued_events: usize,
     pub(super) session_event_queued_output_bytes: usize,
@@ -112,6 +116,7 @@ impl Default for ShellRuntimeState {
     fn default() -> Self {
         let (persist_wake, persist_wake_rx) = EventWake::new();
         Self {
+            shortcut_interceptor: None,
             session_event_backlog_active: false,
             session_event_queued_events: 0,
             session_event_queued_output_bytes: 0,

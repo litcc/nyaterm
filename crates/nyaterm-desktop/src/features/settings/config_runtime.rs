@@ -139,8 +139,9 @@ impl NyaTermApp {
             .flex_col()
             .gap_3()
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                cx.stop_propagation();
-                this.handle_snapshot_password_key_down(event, cx);
+                if this.handle_snapshot_password_key_down(event, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .child(
                 div()
@@ -347,21 +348,22 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         if !self.settings.snapshot_password_prompt_active() {
-            return;
+            return false;
         }
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         match keystroke.key.as_str() {
             "enter" => self.submit_snapshot_password_prompt(cx),
             "escape" => self.cancel_snapshot_password_prompt(cx),
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn apply_snapshot_password_input(

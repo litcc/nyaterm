@@ -536,9 +536,13 @@ impl SettingsPanel {
                                                          event: &KeyDownEvent,
                                                          window,
                                                          cx| {
-                                                            this.handle_keyword_highlight_key_down(
-                                                                event, window, cx,
-                                                            );
+                                                            if this
+                                                                .handle_keyword_highlight_key_down(
+                                                                    event, window, cx,
+                                                                )
+                                                            {
+                                                                cx.stop_propagation();
+                                                            }
                                                         },
                                                     ))
                                                 })

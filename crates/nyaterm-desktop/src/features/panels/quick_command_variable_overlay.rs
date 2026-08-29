@@ -101,8 +101,9 @@ impl NyaTermApp {
             .justify_center()
             .track_focus(self.commands.quick_variable_focus())
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                cx.stop_propagation();
-                this.handle_quick_command_variable_key_down(event, cx);
+                if this.handle_quick_command_variable_key_down(event, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .child(
                 div()

@@ -155,10 +155,9 @@ impl NyaTermApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        cx.stop_propagation();
+    ) -> bool {
         let Some((kind, action_id, field)) = self.ai.settings_action_edit() else {
-            return;
+            return false;
         };
         match event.keystroke.key.as_str() {
             "escape" => {
@@ -178,8 +177,9 @@ impl NyaTermApp {
                     cx,
                 );
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn apply_ai_action_input(

@@ -8,12 +8,13 @@ repository.workspace = true
 
 [dependencies]
 gpui.workspace = true
+gpui-base.workspace = true
 gpui-component.workspace = true
 
 [dev-dependencies]
 # Tests assert the Base scrollbar projection, which is the global the
-# `Scrollbar` element reads. Production code goes through gpui-component.
-gpui-base.workspace = true
+# `Scrollbar` element reads. Production UI integration goes through the
+# nyaterm-ui facade.
 gpui = { workspace = true, features = ["test-support"] }
 # Only to assert that gpui-component reads the same process-wide locale that
 # nyaterm-desktop sets. Production code here never translates.

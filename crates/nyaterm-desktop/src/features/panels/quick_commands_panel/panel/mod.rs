@@ -636,10 +636,11 @@ fn quick_command_ai_popover_button(
                                         .id(SharedString::from("quick-command-ai-input"))
                                         .on_key_down(cx.listener(
                                             |this, event: &KeyDownEvent, window, cx| {
-                                                cx.stop_propagation();
-                                                this.handle_quick_command_ai_prompt_key_down(
+                                                if this.handle_quick_command_ai_prompt_key_down(
                                                     event, window, cx,
-                                                );
+                                                ) {
+                                                    cx.stop_propagation();
+                                                }
                                             },
                                         ))
                                         .child(prompt_input),

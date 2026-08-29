@@ -613,9 +613,39 @@ pub type NyaTextArea = NyaInput;
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use std::{cell::Cell, rc::Rc};
+
+    use gpui::{
+        AppContext as _, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+        TestAppContext, div,
+    };
 
     use super::{NyaInputState, component_placeholder};
+
+    struct AncestorKeyListenerFixture {
+        plain: gpui::Entity<NyaInputState>,
+        masked: gpui::Entity<NyaInputState>,
+        handled: Rc<Cell<usize>>,
+    }
+
+    impl Render for AncestorKeyListenerFixture {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let handled = Rc::clone(&self.handled);
+            div()
+                .on_key_down(move |event, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "escape") {
+                        handled.set(handled.get() + 1);
+                        cx.stop_propagation();
+                    }
+                })
+                .child(self.plain.clone())
+                .child(self.masked.clone())
+        }
+    }
 
     #[test]
     fn value_tracks_seed_reset_and_clear_before_component_renders() {
@@ -629,6 +659,37 @@ mod tests {
 
         field.update(&mut cx, |field, cx| field.clear(cx));
         assert_eq!(cx.read_entity(&field, |field, cx| field.value(cx)), "");
+    }
+
+    #[gpui::test]
+    fn ancestor_key_listener_does_not_block_plain_or_masked_ascii_input(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let handled = Rc::new(Cell::new(0));
+        let (fixture, cx) = cx.add_window_view({
+            let handled = Rc::clone(&handled);
+            move |_, cx| AncestorKeyListenerFixture {
+                plain: cx.new(|cx| NyaInputState::new(cx, "")),
+                masked: cx.new(|cx| NyaInputState::new(cx, "").masked(true)),
+                handled,
+            }
+        });
+        let (plain, masked) = fixture.read_with(cx, |fixture, _| {
+            (fixture.plain.clone(), fixture.masked.clone())
+        });
+
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+            window.focus(&plain.read(cx).focus_handle(), cx);
+        });
+        cx.simulate_keystrokes("a");
+        cx.run_until_parked();
+        assert_eq!(plain.read_with(cx, |state, cx| state.value(cx)), "a");
+
+        cx.update(|window, cx| window.focus(&masked.read(cx).focus_handle(), cx));
+        cx.simulate_keystrokes("b enter escape");
+        cx.run_until_parked();
+        assert_eq!(masked.read_with(cx, |state, cx| state.value(cx)), "b");
+        assert_eq!(handled.get(), 2);
     }
 
     #[test]

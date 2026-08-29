@@ -182,7 +182,9 @@ impl NyaTermApp {
                             .min_w_0()
                             .font_family(crate::features::shell::gpui_code_font_family())
                             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                                this.handle_send_command_key_down(event, cx);
+                                if this.handle_send_command_key_down(event, cx) {
+                                    cx.stop_propagation();
+                                }
                             }))
                             .child(send_input),
                     ),

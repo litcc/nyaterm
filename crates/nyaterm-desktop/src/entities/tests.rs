@@ -1,4 +1,5 @@
 use super::{OverlayStore, StartupRestoreStore};
+use gpui::AppContext as _;
 
 #[test]
 fn startup_restore_store_starts_after_window_open_once() {
@@ -32,25 +33,37 @@ fn startup_restore_store_tracks_queue_admission() {
     assert!(!store.can_pump_queue(false));
 }
 
-#[test]
-fn overlay_store_owns_quick_switch_state() {
-    let mut store = OverlayStore::default();
+struct OverlayTestView;
 
-    assert!(!store.quick_switch().is_open());
-    assert!(store.open_quick_switch());
-    assert!(!store.open_quick_switch());
-    assert!(store.quick_switch().is_open());
-    assert!(store.set_quick_switch_query("ssh".to_string()));
-    assert_eq!(store.quick_switch().query(), "ssh");
-    assert!(!store.set_quick_switch_selected_index(0));
-    assert!(store.set_quick_switch_selected_index(3));
-    assert!(store.clamp_quick_switch_selected_index(2));
-    assert_eq!(store.quick_switch().selected_index(), 1);
-    assert!(store.set_quick_switch_query("host".to_string()));
-    assert_eq!(store.quick_switch().query(), "host");
-    assert!(store.close_quick_switch());
-    assert_eq!(
-        store.quick_switch(),
-        &crate::entities::QuickSwitchState::default()
-    );
+impl gpui::Render for OverlayTestView {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
+    ) -> impl gpui::IntoElement {
+        gpui::div()
+    }
+}
+
+#[gpui::test]
+fn overlay_store_owns_quick_switch_state(cx: &mut gpui::TestAppContext) {
+    let (_, cx) = cx.add_window_view(|_, _| OverlayTestView);
+
+    cx.update(|window, cx| {
+        let command_state = cx.new(|cx| nyaterm_ui::NyaCommandState::new(window, cx));
+        let mut store = OverlayStore::default();
+
+        assert!(!store.quick_switch().is_open());
+        assert!(store.open_quick_switch(command_state.clone()));
+        assert!(store.quick_switch().is_open());
+        assert_eq!(
+            store.quick_switch().command_state(),
+            Some(command_state.clone())
+        );
+        assert_eq!(command_state.read(cx).query(cx), "");
+        assert!(store.close_quick_switch());
+        assert!(!store.close_quick_switch());
+        assert!(!store.quick_switch().is_open());
+        assert!(store.quick_switch().command_state().is_none());
+    });
 }

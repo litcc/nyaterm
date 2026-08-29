@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use gpui::{App, Global, KeyBinding, KeyDownEvent, Keystroke, Modifiers};
+use gpui::{App, Global, KeyBinding, KeyContext, KeyDownEvent, Keystroke, Modifiers};
 
 mod actions;
 pub(crate) use actions::*;
@@ -144,9 +144,7 @@ impl ShortcutScope {
     fn context(self) -> Option<&'static str> {
         match self {
             Self::Global => None,
-            Self::Workspace => {
-                Some("NyaWorkspace && !Input && !Dialog && !NyaModal && !ScreenLocked")
-            }
+            Self::Workspace => Some("NyaWorkspace && !Dialog && !NyaModal && !ScreenLocked"),
             Self::Terminal => Some("Terminal"),
             Self::TextInput => Some("Input"),
             Self::FileExplorer => Some(FILE_EXPLORER_KEY_CONTEXT),
@@ -159,8 +157,8 @@ impl ShortcutScope {
         use ShortcutScope::*;
         match (self, other) {
             (Global, _) | (_, Global) => true,
-            (Workspace, Workspace | Terminal | FileExplorer | SavedConnections)
-            | (Terminal | FileExplorer | SavedConnections, Workspace) => true,
+            (Workspace, Workspace | Terminal | TextInput | FileExplorer | SavedConnections)
+            | (Terminal | TextInput | FileExplorer | SavedConnections, Workspace) => true,
             _ => self == other,
         }
     }
@@ -730,6 +728,12 @@ pub(crate) struct ResolvedShortcut {
     pub(crate) binding: ShortcutBinding,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ShortcutInvocation {
+    pub(crate) id: ShortcutId,
+    pub(crate) tab_index: Option<usize>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ResolvedKeymap {
     pub(crate) shortcuts: Vec<ResolvedShortcut>,
@@ -824,6 +828,82 @@ pub(crate) fn rebuild_keymap(overrides: &HashMap<String, String>, cx: &mut App) 
     cx.bind_keys(bindings);
     crate::features::init_protection_key_bindings(cx);
     cx.set_global(ShortcutKeymapGlobal { baseline, resolved });
+}
+
+pub(crate) fn resolve_shortcut_invocation(
+    keystroke: &Keystroke,
+    context_stack: &[KeyContext],
+    cx: &App,
+) -> Option<ShortcutInvocation> {
+    let keymap = cx.try_global::<ShortcutKeymapGlobal>()?;
+    resolve_invocation(&keymap.resolved, keystroke, context_stack)
+}
+
+fn resolve_invocation(
+    resolved: &ResolvedKeymap,
+    keystroke: &Keystroke,
+    context_stack: &[KeyContext],
+) -> Option<ShortcutInvocation> {
+    for shortcut in &resolved.shortcuts {
+        let definition = SHORTCUT_REGISTRY
+            .iter()
+            .find(|definition| definition.id == shortcut.id)
+            .expect("resolved shortcut must have a definition");
+        if !scope_allows(definition.scope, context_stack) {
+            continue;
+        }
+        match definition.kind {
+            ShortcutKind::Direct => {
+                if shortcut
+                    .binding
+                    .chords()
+                    .iter()
+                    .any(|chord| keystroke_matches(keystroke, chord.keystroke()))
+                {
+                    return Some(ShortcutInvocation {
+                        id: shortcut.id,
+                        tab_index: None,
+                    });
+                }
+            }
+            ShortcutKind::IndexedTab { first, last } => {
+                for template in shortcut.binding.chords() {
+                    for index in first..=last {
+                        let chord = template.with_key(index.to_string());
+                        if keystroke_matches(keystroke, chord.keystroke()) {
+                            return Some(ShortcutInvocation {
+                                id: shortcut.id,
+                                tab_index: Some(usize::from(index)),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn scope_allows(scope: ShortcutScope, context_stack: &[KeyContext]) -> bool {
+    let has_context = |name: &str| context_stack.iter().any(|context| context.contains(name));
+    if has_context("Dialog")
+        || has_context(MODAL_KEY_CONTEXT)
+        || has_context(SCREEN_LOCKED_KEY_CONTEXT)
+    {
+        return false;
+    }
+    match scope {
+        ShortcutScope::Global | ShortcutScope::Workspace => true,
+        ShortcutScope::Terminal => has_context("Terminal"),
+        ShortcutScope::TextInput => has_context("Input"),
+        ShortcutScope::FileExplorer => has_context(FILE_EXPLORER_KEY_CONTEXT),
+        ShortcutScope::SavedConnections => has_context(SAVED_CONNECTIONS_KEY_CONTEXT),
+        ShortcutScope::Modal => has_context(MODAL_KEY_CONTEXT),
+    }
+}
+
+fn keystroke_matches(event: &Keystroke, binding: &Keystroke) -> bool {
+    event.modifiers == binding.modifiers && normalize_key_name(&event.key) == binding.key
 }
 
 fn gpui_bindings(resolved: &ResolvedKeymap) -> Vec<KeyBinding> {
@@ -1271,7 +1351,7 @@ mod tests {
     fn scope_overlap_keeps_mutually_exclusive_contexts_separate() {
         assert!(ShortcutScope::Global.overlaps(ShortcutScope::Modal));
         assert!(ShortcutScope::Workspace.overlaps(ShortcutScope::Terminal));
-        assert!(!ShortcutScope::Workspace.overlaps(ShortcutScope::TextInput));
+        assert!(ShortcutScope::Workspace.overlaps(ShortcutScope::TextInput));
         assert!(!ShortcutScope::Terminal.overlaps(ShortcutScope::FileExplorer));
         assert!(!ShortcutScope::Modal.overlaps(ShortcutScope::Workspace));
     }
@@ -1325,7 +1405,7 @@ mod tests {
     }
 
     #[test]
-    fn gpui_contexts_dispatch_local_actions_and_suppress_workspace_in_inputs() {
+    fn gpui_contexts_dispatch_local_actions_and_allow_workspace_in_inputs() {
         let resolved = ResolvedKeymap::resolve(&HashMap::new());
         let mut keymap = Keymap::new(gpui_bindings(&resolved));
 
@@ -1366,10 +1446,9 @@ mod tests {
             KeyContext::parse("Input").unwrap(),
         ];
         assert!(
-            keymap
-                .bindings_for_input(&[open_settings], &input)
-                .0
-                .is_empty()
+            keymap.bindings_for_input(&[open_settings], &input).0[0]
+                .action()
+                .partial_eq(&OpenSettings)
         );
 
         let rename = SHORTCUT_REGISTRY
@@ -1394,5 +1473,104 @@ mod tests {
         // complete replacement remains possible without appending stale entries.
         keymap.clear();
         assert_eq!(keymap.bindings().len(), 0);
+    }
+
+    #[test]
+    fn invocation_resolution_uses_resolved_overrides_and_runtime_scope() {
+        let mut overrides = HashMap::new();
+        overrides.insert("tab.quickSwitch".to_string(), "ctrl+alt+k".to_string());
+        let resolved = ResolvedKeymap::resolve(&overrides);
+        let quick_switch = ShortcutBinding::parse("ctrl+alt+k").unwrap().chords()[0]
+            .keystroke()
+            .clone();
+        let input = [KeyContext::parse("Input").unwrap()];
+        assert_eq!(
+            resolve_invocation(&resolved, &quick_switch, &input),
+            Some(ShortcutInvocation {
+                id: ShortcutId::QuickSwitch,
+                tab_index: None,
+            })
+        );
+
+        for blocked in ["Dialog", MODAL_KEY_CONTEXT, SCREEN_LOCKED_KEY_CONTEXT] {
+            let contexts = [KeyContext::parse(blocked).unwrap()];
+            assert_eq!(
+                resolve_invocation(&resolved, &quick_switch, &contexts),
+                None
+            );
+        }
+
+        let old_default = SHORTCUT_REGISTRY
+            .iter()
+            .find(|item| item.id == ShortcutId::QuickSwitch)
+            .unwrap()
+            .default_binding()
+            .chords()[0]
+            .keystroke()
+            .clone();
+        assert_eq!(resolve_invocation(&resolved, &old_default, &input), None);
+    }
+
+    #[test]
+    fn invocation_resolution_expands_tab_indices_and_keeps_local_scopes_local() {
+        let resolved = ResolvedKeymap::resolve(&HashMap::new());
+        let switch_template = resolved
+            .shortcuts
+            .iter()
+            .find(|item| item.id == ShortcutId::SwitchToTab)
+            .unwrap()
+            .binding
+            .chords()[0]
+            .with_key("9")
+            .0;
+        assert_eq!(
+            resolve_invocation(&resolved, &switch_template, &[]),
+            Some(ShortcutInvocation {
+                id: ShortcutId::SwitchToTab,
+                tab_index: Some(9),
+            })
+        );
+
+        let terminal_copy = SHORTCUT_REGISTRY
+            .iter()
+            .find(|item| item.id == ShortcutId::TerminalCopy)
+            .unwrap()
+            .default_binding()
+            .chords()[0]
+            .keystroke()
+            .clone();
+        assert_eq!(resolve_invocation(&resolved, &terminal_copy, &[]), None);
+        assert_eq!(
+            resolve_invocation(
+                &resolved,
+                &terminal_copy,
+                &[KeyContext::parse("Terminal").unwrap()],
+            ),
+            Some(ShortcutInvocation {
+                id: ShortcutId::TerminalCopy,
+                tab_index: None,
+            })
+        );
+
+        let rename = SHORTCUT_REGISTRY
+            .iter()
+            .find(|item| item.id == ShortcutId::RenameFile)
+            .unwrap()
+            .default_binding()
+            .chords()[0]
+            .keystroke()
+            .clone();
+        assert_eq!(resolve_invocation(&resolved, &rename, &[]), None);
+        assert_eq!(
+            resolve_invocation(
+                &resolved,
+                &rename,
+                &[KeyContext::parse(FILE_EXPLORER_KEY_CONTEXT).unwrap()],
+            ),
+            Some(ShortcutInvocation {
+                id: ShortcutId::RenameFile,
+                tab_index: None,
+            })
+        );
     }
 }

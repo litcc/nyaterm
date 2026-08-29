@@ -1510,10 +1510,10 @@ impl SettingsPanel {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.with_app(cx, |app, cx| {
             app.handle_keyword_highlight_key_down(event, window, cx)
-        });
+        })
     }
 
     pub(in crate::features) fn set_keyword_highlight_rule_color(
@@ -1595,10 +1595,10 @@ impl SettingsPanel {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.with_app(cx, |app, cx| {
-            app.handle_ai_manual_model_key_down(group_key, event, window, cx);
-        });
+            app.handle_ai_manual_model_key_down(group_key, event, window, cx)
+        })
     }
 
     pub(in crate::features) fn clear_ai_manual_model_draft(
@@ -1692,10 +1692,10 @@ impl SettingsPanel {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.with_app(cx, |app, cx| {
             app.handle_ai_action_key_down(event, window, cx)
-        });
+        })
     }
 
     pub(in crate::features) fn ai_action_text_input_id(

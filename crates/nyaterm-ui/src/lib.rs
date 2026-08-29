@@ -3,6 +3,7 @@
 mod app_menu_bar;
 mod button;
 mod child_window;
+mod command;
 mod dialog;
 mod input;
 mod input_focus;
@@ -23,6 +24,7 @@ mod widgets;
 pub use app_menu_bar::{NyaAppMenu, NyaAppMenuBar};
 pub use button::{NyaButton, NyaButtonVariant, NyaIconButton};
 pub use child_window::{ChildWindowSlot, activate_child_window};
+pub use command::{NyaCommand, NyaCommandIndex, NyaCommandItem, NyaCommandState};
 pub use dialog::{NyaConfirmDialog, NyaDialog, NyaDialogFooter, NyaDialogWindowExt};
 pub use gpui_component::input::{
     Copy as NyaCopy, Cut as NyaCut, Paste as NyaPaste, Redo as NyaRedo, SelectAll as NyaSelectAll,
