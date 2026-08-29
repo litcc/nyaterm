@@ -2162,6 +2162,11 @@ fn app_settings_summary_reads_and_updates_host_key_policy() {
 
     let mut next_keybindings = summary.keybindings.clone();
     next_keybindings.insert("view.openSettings".to_string(), "ctrl+.".to_string());
+    next_keybindings.insert(
+        "terminal.copy".to_string(),
+        "ctrl+shift+c,meta+shift+c".to_string(),
+    );
+    next_keybindings.insert("plugin.futureAction".to_string(), " Win+Q ".to_string());
     next_keybindings.insert("blank".to_string(), " ".to_string());
     let updated = store
         .save_keybindings(&next_keybindings)
@@ -2173,7 +2178,21 @@ fn app_settings_summary_reads_and_updates_host_key_policy() {
             .map(String::as_str),
         Some("ctrl+.")
     );
-    assert!(!updated.keybindings.contains_key("blank"));
+    assert_eq!(
+        updated.keybindings.get("blank").map(String::as_str),
+        Some(" ")
+    );
+    assert_eq!(
+        updated.keybindings.get("terminal.copy").map(String::as_str),
+        Some("ctrl+shift+c,meta+shift+c")
+    );
+    assert_eq!(
+        updated
+            .keybindings
+            .get("plugin.futureAction")
+            .map(String::as_str),
+        Some(" Win+Q ")
+    );
 
     let mut terminal_update = updated.clone();
     terminal_update.terminal_scrollback_lines = 12_000;

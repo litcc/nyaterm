@@ -313,6 +313,7 @@ pub(in crate::features) fn panel_header_with_actions(
 pub(in crate::features) fn full_window_input_layer(id: impl Into<String>) -> Stateful<gpui::Div> {
     div()
         .id(SharedString::from(id.into()))
+        .key_context(crate::shortcuts::MODAL_KEY_CONTEXT)
         .absolute()
         .inset_0()
         .occlude()

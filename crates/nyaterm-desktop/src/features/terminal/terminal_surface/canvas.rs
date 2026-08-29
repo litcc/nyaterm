@@ -121,15 +121,6 @@ impl NyaTermApp {
             }
             return;
         }
-        if event.keystroke.modifiers.alt
-            && !event.keystroke.modifiers.control
-            && !event.keystroke.modifiers.platform
-            && event.keystroke.key.eq_ignore_ascii_case("r")
-        {
-            cx.stop_propagation();
-            self.show_manual_command_suggestions(cx);
-            return;
-        }
         if self.handle_global_shortcut(event, window, cx) {
             cx.stop_propagation();
             return;

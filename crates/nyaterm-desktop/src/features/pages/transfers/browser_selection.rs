@@ -451,9 +451,7 @@ impl NyaTermApp {
 
     /// Takes `&mut self` now: it reads the memoised listing, and populating a memo
     /// is a mutation even though nothing observable changes.
-    pub(in crate::features::pages::transfers) fn selected_transfer_entries(
-        &mut self,
-    ) -> Vec<SftpFileEntry> {
+    pub(in crate::features) fn selected_transfer_entries(&mut self) -> Vec<SftpFileEntry> {
         if self
             .transfer
             .browser_view()

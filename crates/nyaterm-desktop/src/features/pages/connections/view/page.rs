@@ -253,6 +253,8 @@ pub(in crate::features::pages::connections) fn connections_panel(
     // Count is shown in the shared panel header via meta; strip hosts search + icons.
     div()
         .relative()
+        .key_context(crate::shortcuts::SAVED_CONNECTIONS_KEY_CONTEXT)
+        .track_focus(panel.focus_handle())
         .flex()
         .flex_col()
         .size_full()

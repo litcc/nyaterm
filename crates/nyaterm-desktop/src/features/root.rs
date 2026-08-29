@@ -146,8 +146,9 @@ impl NyaTermApp {
         let wallpaper_opacity =
             (self.settings.summary().background_image_opacity.min(100) as f32) / 100.0;
         let wallpaper_fit = self.settings.summary().background_image_fit.clone();
-        div()
+        let root = div()
             .id(SharedString::from("nyaterm-root"))
+            .key_context(crate::shortcuts::WORKSPACE_KEY_CONTEXT)
             .size_full()
             .relative()
             .bg(self.shell_transparent_color(palette.bg))
@@ -323,7 +324,8 @@ impl NyaTermApp {
                     .size_full()
                     .child(self.title_bar(window, cx))
                     .child(self.workspace_surface(palette, window, cx)),
-            )
+            );
+        self.with_shortcut_action_handlers(root, cx)
     }
 
     fn workspace_surface(

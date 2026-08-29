@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use gpui::{Context, Entity, IntoElement, Render, Rgba, WeakEntity, Window};
+use gpui::{Context, Entity, FocusHandle, IntoElement, Render, Rgba, WeakEntity, Window};
 use nyaterm_core::{ProxyConfig, SavedConnection};
 use nyaterm_ui::NyaInputState;
 
@@ -185,6 +185,7 @@ pub(in crate::features) struct ConnectionPanel {
     /// the app's strong handle to the panel is a cycle neither side can break.
     app: WeakEntity<NyaTermApp>,
     snapshot: Option<ConnectionListSnapshot>,
+    focus: FocusHandle,
     #[cfg(test)]
     paint_count: usize,
     #[cfg(test)]
@@ -192,15 +193,20 @@ pub(in crate::features) struct ConnectionPanel {
 }
 
 impl ConnectionPanel {
-    pub(in crate::features) fn new(app: WeakEntity<NyaTermApp>) -> Self {
+    pub(in crate::features) fn new(app: WeakEntity<NyaTermApp>, focus: FocusHandle) -> Self {
         Self {
             app,
             snapshot: None,
+            focus,
             #[cfg(test)]
             paint_count: 0,
             #[cfg(test)]
             rows_built: std::cell::Cell::new(0),
         }
+    }
+
+    pub(in crate::features::pages::connections) fn focus_handle(&self) -> &FocusHandle {
+        &self.focus
     }
 
     #[cfg(test)]

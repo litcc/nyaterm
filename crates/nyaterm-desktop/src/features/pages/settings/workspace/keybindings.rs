@@ -6,8 +6,8 @@ use nyaterm_ui::{NyaKbd, NyaSearchInput};
 use crate::features::pages::settings::panel::SettingsPanel;
 use crate::shortcuts::{
     SHORTCUT_CATEGORIES, SHORTCUT_REGISTRY, ShortcutCategory, ShortcutDefinition,
-    ShortcutNativeStatus, compact_indexed_hotkey_keystrokes_for_display, format_hotkey_for_display,
-    hotkey_keystrokes_for_display, shortcut_keys_for,
+    ShortcutDiagnosticKind, ShortcutNativeStatus, compact_indexed_hotkey_keystrokes_for_display,
+    format_hotkey_for_display, hotkey_keystrokes_for_display, shortcut_keys_for,
 };
 use crate::widgets::small_button;
 
@@ -19,7 +19,15 @@ impl SettingsPanel {
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let palette = self.theme_palette();
-        let overrides = self.settings.summary().keybindings.len();
+        let overrides = self
+            .settings
+            .summary()
+            .keybindings
+            .keys()
+            .filter(|id| crate::shortcuts::ShortcutId::parse(id).is_some())
+            .count();
+        let resolved =
+            crate::shortcuts::ResolvedKeymap::resolve(&self.settings.summary().keybindings);
         let search = self.settings.keybinding_presentation().search_draft;
         let Some(search_field) = self.existing_text_input("settings.keybindings.search") else {
             debug_assert!(false, "the keybindings search input was never built");
@@ -27,7 +35,7 @@ impl SettingsPanel {
         };
         let mut groups = div().flex().flex_col().gap_3();
         for category in SHORTCUT_CATEGORIES {
-            groups = groups.child(self.shortcut_category_group(category, &search, cx));
+            groups = groups.child(self.shortcut_category_group(category, &search, &resolved, cx));
         }
 
         div()
@@ -74,6 +82,7 @@ impl SettingsPanel {
         &mut self,
         category: ShortcutCategory,
         search: &str,
+        resolved: &crate::shortcuts::ResolvedKeymap,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
@@ -85,13 +94,14 @@ impl SettingsPanel {
                 if needle.is_empty() {
                     return true;
                 }
-                let keys = shortcut_keys_for(shortcut.id, &self.settings.summary().keybindings)
-                    .unwrap_or_else(|| shortcut.default_keys.to_string());
+                let keys =
+                    shortcut_keys_for(shortcut.id.as_str(), &self.settings.summary().keybindings)
+                        .unwrap_or_else(|| shortcut.default_keys());
                 let display = format_hotkey_for_display(&keys).to_ascii_lowercase();
                 t!(shortcut.label_key)
                     .to_ascii_lowercase()
                     .contains(&needle)
-                    || shortcut.id.to_ascii_lowercase().contains(&needle)
+                    || shortcut.id.as_str().to_ascii_lowercase().contains(&needle)
                     || display.contains(&needle)
                     || keys.to_ascii_lowercase().contains(&needle)
             })
@@ -101,7 +111,7 @@ impl SettingsPanel {
         }
         let mut rows = div().flex().flex_col().gap_1();
         for shortcut in shortcuts {
-            rows = rows.child(self.shortcut_registry_row(shortcut, cx));
+            rows = rows.child(self.shortcut_registry_row(shortcut, resolved, cx));
         }
 
         settings_form_section(palette, Some(t!(category.label_key())), None, rows)
@@ -111,6 +121,7 @@ impl SettingsPanel {
     pub(in crate::features) fn shortcut_registry_row(
         &mut self,
         shortcut: &'static ShortcutDefinition,
+        resolved: &crate::shortcuts::ResolvedKeymap,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
@@ -126,25 +137,39 @@ impl SettingsPanel {
             .settings
             .summary()
             .keybindings
-            .contains_key(shortcut.id);
+            .contains_key(shortcut.id.as_str());
         let interaction = self.settings.keybinding_presentation();
-        let is_recording = interaction.recording_id.as_deref() == Some(shortcut.id);
-        let effective_keys = shortcut_keys_for(shortcut.id, &self.settings.summary().keybindings)
-            .unwrap_or_else(|| shortcut.default_keys.to_string());
-        let conflict = if is_recording {
+        let is_recording = interaction.recording_id.as_deref() == Some(shortcut.id.as_str());
+        let effective_keys =
+            shortcut_keys_for(shortcut.id.as_str(), &self.settings.summary().keybindings)
+                .unwrap_or_else(|| shortcut.default_keys());
+        let issue = if is_recording {
             interaction
                 .pending_keys
                 .as_deref()
-                .and_then(|keys| self.keybinding_conflict_label(keys, shortcut.id))
+                .and_then(|keys| self.keybinding_conflict_label(keys, shortcut.id.as_str()))
+                .map(|name| t!("settings.keybindingsConflict", name = name).into_owned())
         } else {
-            None
+            resolved
+                .diagnostic(shortcut.id)
+                .map(|diagnostic| match diagnostic {
+                    ShortcutDiagnosticKind::Invalid(error) => format!("Invalid shortcut: {error}"),
+                    ShortcutDiagnosticKind::Conflict(id) => {
+                        let name = SHORTCUT_REGISTRY
+                            .iter()
+                            .find(|item| item.id == *id)
+                            .map(|item| t!(item.label_key).into_owned())
+                            .unwrap_or_else(|| id.as_str().to_string());
+                        t!("settings.keybindingsConflict", name = name).into_owned()
+                    }
+                })
         };
         let custom_label = t!("settings.keybindingsCustom");
         let recording_label = t!("settings.keybindingsRecording");
         let reset_label = t!("settings.keybindingsReset");
         let indexed_hint = t!("settings.keybindingsIndexedHint");
         let shortcut_label = t!(shortcut.label_key);
-        let is_switch_to = shortcut.id == "tab.switchTo";
+        let is_switch_to = shortcut.id == crate::shortcuts::ShortcutId::SwitchToTab;
         let displayed_keys = if is_recording {
             interaction.pending_keys.as_deref()
         } else {
@@ -159,14 +184,14 @@ impl SettingsPanel {
                     strokes
                 }
             });
-        let key_color = if conflict.is_some() {
+        let key_color = if issue.is_some() {
             rgb(palette.danger)
         } else if is_recording {
             rgb(palette.link)
         } else {
             rgb(palette.text_muted)
         };
-        let key_border = if conflict.is_some() {
+        let key_border = if issue.is_some() {
             rgb(palette.danger)
         } else if is_recording {
             rgb(0x388bfd)
@@ -213,8 +238,8 @@ impl SettingsPanel {
                     .child(recording_label),
             );
         }
-        let shortcut_id = shortcut.id.to_string();
-        let reset_shortcut_id = shortcut.id.to_string();
+        let shortcut_id = shortcut.id.as_str().to_string();
+        let reset_shortcut_id = shortcut.id.as_str().to_string();
 
         div()
             .rounded_md()
@@ -267,12 +292,12 @@ impl SettingsPanel {
                     .items_center()
                     .gap_1()
                     .child(key_display)
-                    .when_some(conflict.clone(), |this, name| {
+                    .when_some(issue.clone(), |this, message| {
                         this.child(
                             div()
                                 .text_size(px(10.))
                                 .text_color(rgb(palette.danger))
-                                .child(t!("settings.keybindingsConflict", name = name)),
+                                .child(message),
                         )
                     }),
             )
@@ -284,7 +309,7 @@ impl SettingsPanel {
                     .when(is_recording, |this| {
                         this.child(small_button(
                             palette,
-                            format!("keybinding-save-{}", shortcut.id),
+                            format!("keybinding-save-{}", shortcut.id.as_str()),
                             t!("common.confirm"),
                             cx.listener(|this, _, _, cx| {
                                 this.confirm_keybinding_recording(cx);
@@ -292,7 +317,7 @@ impl SettingsPanel {
                         ))
                         .child(small_button(
                             palette,
-                            format!("keybinding-cancel-{}", shortcut.id),
+                            format!("keybinding-cancel-{}", shortcut.id.as_str()),
                             t!("common.cancel"),
                             cx.listener(|this, _, _, cx| {
                                 this.cancel_keybinding_recording(cx);
@@ -302,7 +327,7 @@ impl SettingsPanel {
                     .when(!is_recording, |this| {
                         this.child(small_button(
                             palette,
-                            format!("keybinding-record-{}", shortcut.id),
+                            format!("keybinding-record-{}", shortcut.id.as_str()),
                             t!("common.edit"),
                             cx.listener(move |this, _, window, cx| {
                                 this.start_keybinding_recording(shortcut_id.clone(), window, cx);
@@ -312,7 +337,7 @@ impl SettingsPanel {
                     .when(is_custom && !is_recording, |this| {
                         this.child(small_button(
                             palette,
-                            format!("keybinding-reset-{}", shortcut.id),
+                            format!("keybinding-reset-{}", shortcut.id.as_str()),
                             reset_label,
                             cx.listener(move |this, _, _, cx| {
                                 this.reset_keybinding(reset_shortcut_id.clone(), cx);

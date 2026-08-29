@@ -2,7 +2,6 @@ use super::browser_filter::transfer_browser_search_text_for_key;
 use gpui::{Context, KeyDownEvent, Window};
 
 use crate::features::NyaTermApp;
-use crate::shortcuts::shortcut_matches;
 
 impl NyaTermApp {
     pub(in crate::features::pages::transfers) fn handle_transfer_browser_key_down(
@@ -70,19 +69,6 @@ impl NyaTermApp {
         if unmodified && keystroke.key.eq_ignore_ascii_case("f5") {
             cx.stop_propagation();
             self.refresh_transfer_browser(window, cx);
-            return;
-        }
-
-        if shortcut_matches(
-            event,
-            "fileExplorer.rename",
-            &self.settings.summary().keybindings,
-        ) && self.selected_transfer_entries().len() == 1
-            && self.session.active_ssh_file_browser_config().is_some()
-            && !self.transfer.rename_dialog_is_open()
-        {
-            cx.stop_propagation();
-            self.open_transfer_rename_dialog(window, cx);
             return;
         }
 

@@ -44,6 +44,7 @@ impl NyaTermApp {
 
         div()
             .id(SharedString::from("lock-screen-overlay"))
+            .key_context(crate::shortcuts::SCREEN_LOCKED_KEY_CONTEXT)
             .absolute()
             .top_0()
             .bottom_0()

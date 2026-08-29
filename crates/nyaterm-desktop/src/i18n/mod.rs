@@ -425,7 +425,7 @@ mod tests {
     fn simplified_chinese_shortcut_labels_and_conflicts_are_localized() {
         let switch_tab = SHORTCUT_REGISTRY
             .iter()
-            .find(|shortcut| shortcut.id == "tab.switchTo")
+            .find(|shortcut| shortcut.id == crate::shortcuts::ShortcutId::SwitchToTab)
             .expect("switch-tab shortcut should exist");
         let switch_tab_label = text("zh-CN", switch_tab.label_key);
 

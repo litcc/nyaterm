@@ -581,13 +581,16 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
         )
         // Aims the list's one context menu at this row. Capture, so it runs
         // before the menu is built and regardless of who stops the bubble.
-        .capture_any_mouse_down(cx.listener(move |panel, event: &MouseDownEvent, _, cx| {
-            panel.with_app(cx, |this, cx| {
-                if event.button == MouseButton::Right {
-                    this.prepare_connection_context_menu(menu_id.clone(), cx);
-                }
-            })
-        }))
+        .capture_any_mouse_down(
+            cx.listener(move |panel, event: &MouseDownEvent, window, cx| {
+                window.focus(panel.focus_handle(), cx);
+                panel.with_app(cx, |this, cx| {
+                    if event.button == MouseButton::Right {
+                        this.prepare_connection_context_menu(menu_id.clone(), cx);
+                    }
+                })
+            }),
+        )
         .on_click(
             cx.listener(move |panel, event: &gpui::ClickEvent, window, cx| {
                 panel.with_app(cx, |this, cx| {

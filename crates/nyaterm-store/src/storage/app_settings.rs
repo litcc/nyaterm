@@ -1459,11 +1459,11 @@ impl ConnectionStore {
         let mut value = self.load_settings_value()?;
         let mut object = serde_json::Map::new();
         for (id, keys) in keybindings {
-            let id = id.trim();
-            let keys = keys.trim();
-            if !id.is_empty() && !keys.is_empty() {
-                object.insert(id.to_string(), serde_json::Value::String(keys.to_string()));
-            }
+            // This map is an extensibility/compatibility boundary. Validation
+            // belongs to the desktop registry; the store must retain unknown
+            // IDs and invalid legacy values verbatim so a newer version can
+            // diagnose or recover them.
+            object.insert(id.clone(), serde_json::Value::String(keys.clone()));
         }
         set_nested_json_value(
             &mut value,
@@ -1531,10 +1531,7 @@ fn json_string_map(value: &serde_json::Value, path: &[&str]) -> HashMap<String, 
             object
                 .iter()
                 .filter_map(|(key, value)| {
-                    value
-                        .as_str()
-                        .filter(|value| !value.trim().is_empty())
-                        .map(|value| (key.clone(), value.to_string()))
+                    value.as_str().map(|value| (key.clone(), value.to_string()))
                 })
                 .collect()
         })

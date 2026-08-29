@@ -26,6 +26,11 @@ impl NyaTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(shortcut_id) = crate::shortcuts::ShortcutId::parse(&shortcut_id) else {
+            self.shell.set_status("unknown shortcut".to_string());
+            cx.notify();
+            return;
+        };
         self.settings.begin_keybinding_recording(shortcut_id);
         self.shell.set_status("recording shortcut".to_string());
         window.focus(self.settings.keybinding_focus(), cx);
@@ -40,13 +45,13 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn confirm_keybinding_recording(&mut self, cx: &mut Context<Self>) {
-        let Some(shortcut_id) = self.settings.keybinding_recording_id().map(str::to_owned) else {
+        let Some(shortcut_id) = self.settings.keybinding_recording_id() else {
             self.shell
                 .set_status("no shortcut recording is active".to_string());
             cx.notify();
             return;
         };
-        let Some(keys) = self.settings.pending_keybinding().map(str::to_owned) else {
+        let Some(binding) = self.settings.pending_keybinding().cloned() else {
             self.shell
                 .set_status("press a shortcut before saving".to_string());
             cx.notify();
@@ -54,25 +59,26 @@ impl NyaTermApp {
         };
 
         self.settings.finish_keybinding_recording();
-        if let Some(conflict) = self.keybinding_conflict_label(&keys, &shortcut_id) {
+        let keys = binding.canonical();
+        if let Some(conflict) = self.keybinding_conflict_label(&keys, shortcut_id.as_str()) {
             self.settings.begin_keybinding_recording(shortcut_id);
-            self.settings.set_pending_keybinding(Some(keys));
+            self.settings.set_pending_keybinding(Some(binding));
             self.shell
                 .set_status(format!("shortcut conflicts with {conflict}"));
             cx.notify();
             return;
         }
         let mut keybindings = self.settings.summary().keybindings.clone();
-        let is_default = crate::shortcuts::SHORTCUT_REGISTRY
-            .iter()
-            .find(|s| s.id == shortcut_id)
-            .is_some_and(|def| keys == def.default_keys);
-        if is_default {
-            keybindings.remove(&shortcut_id);
+        if crate::shortcuts::is_default_binding(shortcut_id, &binding) {
+            keybindings.remove(shortcut_id.as_str());
         } else {
-            keybindings.insert(shortcut_id.clone(), keys);
+            keybindings.insert(shortcut_id.as_str().to_string(), keys);
         }
-        self.save_keybindings(keybindings, format!("shortcut {shortcut_id} saved"), cx);
+        self.save_keybindings(
+            keybindings,
+            format!("shortcut {} saved", shortcut_id.as_str()),
+            cx,
+        );
     }
 
     pub(in crate::features) fn reset_keybinding(
@@ -86,7 +92,9 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn reset_all_keybindings(&mut self, cx: &mut Context<Self>) {
-        self.save_keybindings(HashMap::new(), "all shortcuts reset".to_string(), cx);
+        let mut keybindings = self.settings.summary().keybindings.clone();
+        crate::shortcuts::reset_known_overrides(&mut keybindings);
+        self.save_keybindings(keybindings, "all shortcuts reset".to_string(), cx);
     }
 
     fn save_keybindings(
@@ -95,6 +103,7 @@ impl NyaTermApp {
         success_message: String,
         cx: &mut Context<Self>,
     ) {
+        crate::shortcuts::rebuild_keymap(&keybindings, cx);
         self.settings.set_keybindings(keybindings.clone());
         if self.defer_settings_persistence(cx) {
             self.settings.finish_keybinding_recording();
@@ -114,7 +123,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         cx.stop_propagation();
-        let Some(recording_id) = self.settings.keybinding_recording_id().map(str::to_owned) else {
+        let Some(recording_id) = self.settings.keybinding_recording_id() else {
             return;
         };
         match event.keystroke.key.as_str() {
@@ -132,7 +141,11 @@ impl NyaTermApp {
         let Some(keys) = event_to_hotkey_string(event) else {
             return;
         };
-        if recording_id == "tab.switchTo" && !crate::shortcuts::is_indexed_shortcut_template(&keys)
+        let Ok(binding) = crate::shortcuts::ShortcutBinding::parse(&keys) else {
+            return;
+        };
+        if recording_id == crate::shortcuts::ShortcutId::SwitchToTab
+            && !crate::shortcuts::is_indexed_shortcut_template(&keys)
         {
             self.settings.set_pending_keybinding(None);
             self.shell
@@ -140,7 +153,7 @@ impl NyaTermApp {
             cx.notify();
             return;
         }
-        self.settings.set_pending_keybinding(Some(keys));
+        self.settings.set_pending_keybinding(Some(binding));
         self.shell
             .set_status("shortcut captured; press Enter or Save".to_string());
         cx.notify();
@@ -151,38 +164,17 @@ impl NyaTermApp {
         pending_keys: &str,
         exclude_id: &str,
     ) -> Option<String> {
-        let normalized_new = pending_keys
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_ascii_lowercase())
-            .collect::<Vec<_>>();
-        if normalized_new.is_empty() {
-            return None;
-        }
-        for shortcut in crate::shortcuts::SHORTCUT_REGISTRY.iter() {
-            if shortcut.id == exclude_id {
-                continue;
-            }
-            let existing = crate::shortcuts::shortcut_keys_for(
-                shortcut.id,
-                &self.settings.summary().keybindings,
-            )
-            .unwrap_or_else(|| shortcut.default_keys.to_string());
-            let normalized_existing = existing
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_ascii_lowercase())
-                .collect::<Vec<_>>();
-            if normalized_new
-                .iter()
-                .any(|n| normalized_existing.iter().any(|e| e == n))
-            {
-                return Some(rust_i18n::t!(shortcut.label_key).into_owned());
-            }
-        }
-        None
+        let pending = crate::shortcuts::ShortcutBinding::parse(pending_keys).ok()?;
+        let exclude = crate::shortcuts::ShortcutId::parse(exclude_id)?;
+        let conflict = crate::shortcuts::conflicting_shortcut(
+            &pending,
+            exclude,
+            &self.settings.summary().keybindings,
+        )?;
+        let definition = crate::shortcuts::SHORTCUT_REGISTRY
+            .iter()
+            .find(|item| item.id == conflict)?;
+        Some(rust_i18n::t!(definition.label_key).into_owned())
     }
 
     pub(in crate::features) fn apply_keybinding_search(

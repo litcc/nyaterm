@@ -1848,38 +1848,17 @@ impl SettingsPanel {
         pending_keys: &str,
         exclude_id: &str,
     ) -> Option<String> {
-        let normalized_new = pending_keys
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_ascii_lowercase())
-            .collect::<Vec<_>>();
-        if normalized_new.is_empty() {
-            return None;
-        }
-        for shortcut in crate::shortcuts::SHORTCUT_REGISTRY.iter() {
-            if shortcut.id == exclude_id {
-                continue;
-            }
-            let existing = crate::shortcuts::shortcut_keys_for(
-                shortcut.id,
-                &self.settings.summary().keybindings,
-            )
-            .unwrap_or_else(|| shortcut.default_keys.to_string());
-            let normalized_existing = existing
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_ascii_lowercase())
-                .collect::<Vec<_>>();
-            if normalized_new
-                .iter()
-                .any(|n| normalized_existing.iter().any(|e| e == n))
-            {
-                return Some(t!(shortcut.label_key).into_owned());
-            }
-        }
-        None
+        let pending = crate::shortcuts::ShortcutBinding::parse(pending_keys).ok()?;
+        let exclude = crate::shortcuts::ShortcutId::parse(exclude_id)?;
+        let conflict = crate::shortcuts::conflicting_shortcut(
+            &pending,
+            exclude,
+            &self.settings.summary().keybindings,
+        )?;
+        let definition = crate::shortcuts::SHORTCUT_REGISTRY
+            .iter()
+            .find(|item| item.id == conflict)?;
+        Some(t!(definition.label_key).into_owned())
     }
 
     pub(in crate::features) fn start_keybinding_recording(

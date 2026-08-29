@@ -151,8 +151,8 @@ struct AppearanceSettingsState {
 }
 
 struct KeybindingSettingsState {
-    recording_id: Option<String>,
-    pending_keys: Option<String>,
+    recording_id: Option<crate::shortcuts::ShortcutId>,
+    pending_binding: Option<crate::shortcuts::ShortcutBinding>,
     search_draft: String,
     focus: FocusHandle,
 }
@@ -223,7 +223,7 @@ impl SettingsFeatureState {
             },
             keybindings: KeybindingSettingsState {
                 recording_id: None,
-                pending_keys: None,
+                pending_binding: None,
                 search_draft: String::new(),
                 focus: focus.keybindings,
             },
@@ -1262,8 +1262,15 @@ impl SettingsFeatureState {
 
     pub(in crate::features) fn keybinding_presentation(&self) -> KeybindingPresentationState {
         KeybindingPresentationState {
-            recording_id: self.keybindings.recording_id.clone(),
-            pending_keys: self.keybindings.pending_keys.clone(),
+            recording_id: self
+                .keybindings
+                .recording_id
+                .map(|id| id.as_str().to_string()),
+            pending_keys: self
+                .keybindings
+                .pending_binding
+                .as_ref()
+                .map(crate::shortcuts::ShortcutBinding::canonical),
             search_draft: self.keybindings.search_draft.clone(),
         }
     }
@@ -1272,26 +1279,36 @@ impl SettingsFeatureState {
         &self.keybindings.focus
     }
 
-    pub(in crate::features) fn begin_keybinding_recording(&mut self, shortcut_id: String) {
+    pub(in crate::features) fn begin_keybinding_recording(
+        &mut self,
+        shortcut_id: crate::shortcuts::ShortcutId,
+    ) {
         self.keybindings.recording_id = Some(shortcut_id);
-        self.keybindings.pending_keys = None;
+        self.keybindings.pending_binding = None;
     }
 
     pub(in crate::features) fn cancel_keybinding_recording(&mut self) {
         self.keybindings.recording_id = None;
-        self.keybindings.pending_keys = None;
+        self.keybindings.pending_binding = None;
     }
 
-    pub(in crate::features) fn keybinding_recording_id(&self) -> Option<&str> {
-        self.keybindings.recording_id.as_deref()
+    pub(in crate::features) fn keybinding_recording_id(
+        &self,
+    ) -> Option<crate::shortcuts::ShortcutId> {
+        self.keybindings.recording_id
     }
 
-    pub(in crate::features) fn pending_keybinding(&self) -> Option<&str> {
-        self.keybindings.pending_keys.as_deref()
+    pub(in crate::features) fn pending_keybinding(
+        &self,
+    ) -> Option<&crate::shortcuts::ShortcutBinding> {
+        self.keybindings.pending_binding.as_ref()
     }
 
-    pub(in crate::features) fn set_pending_keybinding(&mut self, keys: Option<String>) {
-        self.keybindings.pending_keys = keys;
+    pub(in crate::features) fn set_pending_keybinding(
+        &mut self,
+        binding: Option<crate::shortcuts::ShortcutBinding>,
+    ) {
+        self.keybindings.pending_binding = binding;
     }
 
     pub(in crate::features) fn finish_keybinding_recording(&mut self) {
@@ -1821,12 +1838,14 @@ mod tests {
     #[test]
     fn settings_owner_keeps_keybinding_recording_and_search_atomic() {
         let mut state = settings_state();
-        state.begin_keybinding_recording("terminal.copy".to_string());
-        state.set_pending_keybinding(Some("ctrl-shift-c".to_string()));
+        state.begin_keybinding_recording(crate::shortcuts::ShortcutId::TerminalCopy);
+        state.set_pending_keybinding(Some(
+            crate::shortcuts::ShortcutBinding::parse("ctrl+shift+c").unwrap(),
+        ));
         state.set_keybinding_search("copy".to_string());
         let interaction = state.keybinding_presentation();
         assert_eq!(interaction.recording_id.as_deref(), Some("terminal.copy"));
-        assert_eq!(interaction.pending_keys.as_deref(), Some("ctrl-shift-c"));
+        assert_eq!(interaction.pending_keys.as_deref(), Some("ctrl+shift+c"));
         assert_eq!(interaction.search_draft, "copy");
 
         state.cancel_keybinding_recording();

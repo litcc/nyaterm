@@ -539,7 +539,7 @@ mod tests {
             vec![
                 (
                     Some("icons/file/description.svg".to_string()),
-                    Some("Ctrl+Shift+R".to_string())
+                    Some("Ctrl+Alt+R".to_string())
                 ),
                 (Some("icons/session/record.svg".to_string()), None),
                 (None, None),
