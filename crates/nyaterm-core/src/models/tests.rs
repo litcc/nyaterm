@@ -1,5 +1,6 @@
 use super::{
-    AiExecutionProfile, ConnectionAuth, ConnectionType, DecryptedOtpEntry,
+    AiExecutionProfile, AssetAccelerator, AssetAcceleratorType, AssetDeviceType, AssetDiskKind,
+    AssetDiskPurpose, AssetMetadata, ConnectionAuth, ConnectionType, DecryptedOtpEntry,
     DecryptedSavedCredential, MAX_SFTP_SHELL_DETECTION_TIMEOUT_MS,
     MIN_SFTP_SHELL_DETECTION_TIMEOUT_MS, ProxyConfig, QuickCommand, QuickCommandCategory,
     QuickCommandCategoryPosition, QuickCommandRelativePosition, QuickCommandsConfig, RecordingMode,
@@ -438,6 +439,7 @@ fn local_terminal_endpoint_uses_shell_and_working_dir() {
         network: None,
         post_login: None,
         recording: None,
+        asset: None,
         created_at_ms: None,
         updated_at_ms: None,
         last_used_at_ms: None,
@@ -908,5 +910,279 @@ fn category_move_rejects_descendant_cycles_and_normalizes_siblings() {
             .find(|item| item.id == "peer")
             .map(|item| item.sort_order),
         Some(2)
+    );
+}
+
+#[test]
+fn saved_connection_defaults_missing_asset_to_none() {
+    let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+        "id": "conn-1",
+        "name": "Test",
+        "type": "ssh",
+        "host": "example.com",
+        "port": 22,
+        "username": "root"
+    }))
+    .expect("connection");
+
+    assert!(connection.asset.is_none());
+}
+
+#[test]
+fn saved_connection_without_asset_does_not_serialize_the_field() {
+    // Connections written by builds predating the field must round-trip without
+    // ever gaining an `asset` key.
+    let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+        "id": "conn-1",
+        "name": "Test",
+        "type": "ssh",
+        "host": "example.com",
+        "port": 22,
+        "username": "root"
+    }))
+    .expect("connection");
+
+    let json = serde_json::to_string(&connection).expect("serializes");
+    assert!(!json.contains("\"asset\""), "{json}");
+}
+
+#[test]
+fn saved_connection_roundtrips_complete_asset_metadata() {
+    let raw = serde_json::json!({
+        "id": "conn-1",
+        "name": "Asset Host",
+        "type": "ssh",
+        "host": "10.0.0.2",
+        "port": 22,
+        "username": "root",
+        "asset": {
+            "device_type": "physical",
+            "os_name": "Ubuntu",
+            "os_version": "24.04",
+            "architecture": "x86_64",
+            "kernel_version": "6.8.0",
+            "hostname": "gpu-node-01",
+            "cpu_model": "AMD EPYC 9654",
+            "cpu_sockets": 2,
+            "cpu_cores": 192,
+            "cpu_threads": 384,
+            "memory_bytes": 1099511627776u64,
+            "accelerators": [
+                {
+                    "type": "gpu",
+                    "vendor": "NVIDIA",
+                    "model": "H100",
+                    "count": 8,
+                    "memory_bytes": 85899345920u64
+                }
+            ],
+            "disks": [
+                {
+                    "kind": "nvme",
+                    "model": "PM9A3",
+                    "capacity_bytes": 7680000000000u64,
+                    "count": 4,
+                    "purpose": "data"
+                }
+            ],
+            "tags": ["training", "production"],
+            "notes": "Static asset metadata",
+            "updated_at": "2026-08-03T12:00:00.000Z"
+        }
+    });
+
+    let connection: SavedConnection = serde_json::from_value(raw).expect("connection");
+    let encoded = serde_json::to_value(&connection).expect("asset json");
+    let asset = connection.asset.expect("asset");
+
+    assert_eq!(asset.device_type, Some(AssetDeviceType::Physical));
+    assert_eq!(asset.os_name.as_deref(), Some("Ubuntu"));
+    assert_eq!(asset.cpu_sockets, Some(2));
+    assert_eq!(asset.cpu_threads, Some(384));
+    assert_eq!(asset.memory_bytes, Some(1_099_511_627_776));
+    assert_eq!(
+        asset.updated_at.as_deref(),
+        Some("2026-08-03T12:00:00.000Z")
+    );
+    let accelerator = asset
+        .accelerators
+        .as_ref()
+        .and_then(|items| items.first())
+        .expect("accelerator");
+    assert_eq!(accelerator.r#type, AssetAcceleratorType::Gpu);
+    assert_eq!(accelerator.count, Some(8));
+    let disk = asset
+        .disks
+        .as_ref()
+        .and_then(|items| items.first())
+        .expect("disk");
+    assert_eq!(disk.kind, Some(AssetDiskKind::Nvme));
+    assert_eq!(disk.purpose, Some(AssetDiskPurpose::Data));
+    // Enum snake_case renamings must match the Tauri wire contract.
+    assert_eq!(encoded["asset"]["device_type"], "physical");
+    assert_eq!(encoded["asset"]["accelerators"][0]["type"], "gpu");
+    assert_eq!(encoded["asset"]["disks"][0]["kind"], "nvme");
+    assert_eq!(encoded["asset"]["disks"][0]["purpose"], "data");
+}
+
+#[test]
+fn asset_accelerators_distinguish_missing_null_and_empty() {
+    let load = |accelerators: serde_json::Value| -> Option<Vec<AssetAccelerator>> {
+        let connection: SavedConnection = serde_json::from_value(serde_json::json!({
+            "id": "conn",
+            "name": "Box",
+            "type": "ssh",
+            "host": "example.com",
+            "port": 22,
+            "username": "root",
+            "asset": { "accelerators": accelerators }
+        }))
+        .expect("connection");
+        connection.asset.expect("asset").accelerators
+    };
+
+    let missing: SavedConnection = serde_json::from_value(serde_json::json!({
+        "id": "conn",
+        "name": "Box",
+        "type": "ssh",
+        "host": "example.com",
+        "port": 22,
+        "username": "root",
+        "asset": {}
+    }))
+    .expect("connection");
+
+    assert!(missing.asset.expect("asset").accelerators.is_none());
+    assert!(load(serde_json::Value::Null).is_none());
+    assert_eq!(load(serde_json::json!([])), Some(Vec::new()));
+}
+
+#[test]
+fn asset_metadata_skips_absent_optional_fields_on_serialize() {
+    let asset = AssetMetadata {
+        hostname: Some("node".to_string()),
+        ..AssetMetadata::default()
+    };
+    let encoded = serde_json::to_value(&asset).expect("asset json");
+    let object = encoded.as_object().expect("object");
+    // Only the populated field is present; everything else is skipped.
+    assert_eq!(object.len(), 1);
+    assert_eq!(object.get("hostname"), Some(&serde_json::json!("node")));
+}
+
+#[test]
+fn merge_monitoring_patch_only_overwrites_present_fields() {
+    let mut asset = AssetMetadata {
+        device_type: Some(AssetDeviceType::Physical),
+        hostname: Some("old-host".to_string()),
+        cpu_model: Some("old-cpu".to_string()),
+        tags: Some(vec!["operator".to_string()]),
+        notes: Some("keep me".to_string()),
+        ..AssetMetadata::default()
+    };
+
+    asset.merge_monitoring_patch(AssetMetadata {
+        hostname: Some("new-host".to_string()),
+        memory_bytes: Some(4096),
+        ..AssetMetadata::default()
+    });
+
+    // Monitoring updated the hostname and added memory, but never reports device
+    // type, tags, or notes, so operator-entered facts survive the merge.
+    assert_eq!(asset.hostname.as_deref(), Some("new-host"));
+    assert_eq!(asset.memory_bytes, Some(4096));
+    assert_eq!(asset.cpu_model.as_deref(), Some("old-cpu"));
+    assert_eq!(asset.device_type, Some(AssetDeviceType::Physical));
+    assert_eq!(asset.tags, Some(vec!["operator".to_string()]));
+    assert_eq!(asset.notes.as_deref(), Some("keep me"));
+}
+
+#[test]
+fn merge_monitoring_patch_replaces_accelerators_per_type() {
+    let gpu = |model: &str| AssetAccelerator {
+        r#type: AssetAcceleratorType::Gpu,
+        vendor: Some("NVIDIA".to_string()),
+        model: Some(model.to_string()),
+        count: Some(1),
+        memory_bytes: None,
+    };
+    let npu = |model: &str| AssetAccelerator {
+        r#type: AssetAcceleratorType::Npu,
+        vendor: Some("Huawei".to_string()),
+        model: Some(model.to_string()),
+        count: Some(1),
+        memory_bytes: None,
+    };
+
+    let mut asset = AssetMetadata {
+        accelerators: Some(vec![gpu("A100"), npu("910B")]),
+        ..AssetMetadata::default()
+    };
+
+    // A GPU-only patch replaces GPU entries but leaves the NPU untouched.
+    asset.merge_monitoring_patch(AssetMetadata {
+        accelerators: Some(vec![gpu("H100")]),
+        ..AssetMetadata::default()
+    });
+
+    let accelerators = asset.accelerators.expect("accelerators");
+    assert_eq!(accelerators.len(), 2);
+    assert!(
+        accelerators
+            .iter()
+            .any(|a| a.r#type == AssetAcceleratorType::Npu && a.model.as_deref() == Some("910B"))
+    );
+    let gpus: Vec<_> = accelerators
+        .iter()
+        .filter(|a| a.r#type == AssetAcceleratorType::Gpu)
+        .collect();
+    assert_eq!(gpus.len(), 1);
+    assert_eq!(gpus[0].model.as_deref(), Some("H100"));
+}
+
+#[test]
+fn merge_monitoring_patch_with_empty_accelerators_keeps_current() {
+    let mut asset = AssetMetadata {
+        accelerators: Some(vec![AssetAccelerator {
+            r#type: AssetAcceleratorType::Gpu,
+            vendor: None,
+            model: Some("A100".to_string()),
+            count: Some(1),
+            memory_bytes: None,
+        }]),
+        ..AssetMetadata::default()
+    };
+
+    // An empty (but present) accelerator list must not wipe existing entries.
+    asset.merge_monitoring_patch(AssetMetadata {
+        accelerators: Some(Vec::new()),
+        ..AssetMetadata::default()
+    });
+
+    assert_eq!(asset.accelerators.expect("accelerators").len(), 1);
+}
+
+#[test]
+fn asset_survives_full_sessions_config_roundtrip() {
+    let raw = serde_json::json!({
+        "groups": [],
+        "connections": [{
+            "id": "conn-asset",
+            "name": "Asset",
+            "type": "ssh",
+            "host": "h",
+            "port": 22,
+            "username": "root",
+            "asset": { "hostname": "node-1", "cpu_cores": 8 }
+        }]
+    });
+    let config: SessionsConfig = serde_json::from_value(raw).expect("sessions");
+    let encoded = serde_json::to_value(&config).expect("sessions json");
+    assert_eq!(encoded["connections"][0]["asset"]["hostname"], "node-1");
+    assert_eq!(encoded["connections"][0]["asset"]["cpu_cores"], 8);
+    let reloaded: SessionsConfig = serde_json::from_value(encoded).expect("reload");
+    assert_eq!(
+        reloaded.connections[0].asset.as_ref().unwrap().cpu_cores,
+        Some(8)
     );
 }

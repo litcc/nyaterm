@@ -74,7 +74,7 @@ impl NyaTermApp {
             self.recording.finish_path_prompt();
             self.shell
                 .set_status("session no longer exists".to_string());
-            self.remove_session_state(&session_id);
+            self.remove_session_state(&session_id, cx);
             cx.notify();
             return;
         }

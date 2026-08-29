@@ -322,6 +322,7 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
 
         div()
             .id(SharedString::from("transfer-browser-panel"))
+            .key_context(crate::shortcuts::FILE_EXPLORER_KEY_CONTEXT)
             .size_full()
             .flex()
             .flex_col()

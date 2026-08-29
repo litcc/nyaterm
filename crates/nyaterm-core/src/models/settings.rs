@@ -186,6 +186,18 @@ pub struct AppSettingsSummary {
     pub ui_saved_connections_sort_mode: String,
     #[serde(default)]
     pub ui_saved_connections_expanded_group_ids: Vec<String>,
+    /// Which surface opens on launch: `workbench` or `assets` (Tauri
+    /// `ui.start_workspace_mode`). Normalized on read/write.
+    #[serde(default = "default_start_workspace_mode")]
+    pub ui_start_workspace_mode: String,
+    /// Asset workspace sort column key (Tauri `ui.asset_sort_key`); `None`
+    /// leaves the column unset so older data round-trips unchanged.
+    #[serde(default)]
+    pub ui_asset_sort_key: Option<String>,
+    /// Asset workspace sort direction (`asc` / `desc`, Tauri
+    /// `ui.asset_sort_direction`); `None` leaves it unset.
+    #[serde(default)]
+    pub ui_asset_sort_direction: Option<String>,
     /// Which reading the title bar's centre shows: `session`, `resources`,
     /// `host` or `datetime`.
     #[serde(default = "default_header_status_mode")]
@@ -412,6 +424,9 @@ impl Default for AppSettingsSummary {
             ui_quick_cmd_sort_mode: default_quick_cmd_sort_mode(),
             ui_saved_connections_sort_mode: default_saved_connections_sort_mode(),
             ui_saved_connections_expanded_group_ids: Vec::new(),
+            ui_start_workspace_mode: default_start_workspace_mode(),
+            ui_asset_sort_key: None,
+            ui_asset_sort_direction: None,
             ui_header_status_mode: default_header_status_mode(),
             ui_header_status_visible: true,
             ui_file_explorer_show_hidden_files: true,
@@ -602,6 +617,10 @@ fn default_saved_connections_sort_mode() -> String {
     "default".to_string()
 }
 
+fn default_start_workspace_mode() -> String {
+    "workbench".to_string()
+}
+
 fn default_background_image_fit() -> String {
     "cover".to_string()
 }
@@ -752,5 +771,34 @@ mod tests {
         assert!(summary.ui_activity_bar_hidden_items.is_empty());
         assert_eq!(summary.ui_panel_open_mode, "docked");
         assert!(!summary.ui_panel_multi_open);
+        // Legacy documents lack the asset/start-workspace UI settings; they must
+        // fall back to their serde defaults instead of failing to load.
+        assert_eq!(summary.ui_start_workspace_mode, "workbench");
+        assert!(summary.ui_asset_sort_key.is_none());
+        assert!(summary.ui_asset_sort_direction.is_none());
+    }
+
+    #[test]
+    fn summary_default_start_workspace_and_asset_sort() {
+        let summary = AppSettingsSummary::default();
+        assert_eq!(summary.ui_start_workspace_mode, "workbench");
+        assert!(summary.ui_asset_sort_key.is_none());
+        assert!(summary.ui_asset_sort_direction.is_none());
+    }
+
+    #[test]
+    fn summary_roundtrips_asset_and_start_workspace_settings() {
+        let summary = AppSettingsSummary {
+            ui_start_workspace_mode: "assets".to_string(),
+            ui_asset_sort_key: Some("hostname".to_string()),
+            ui_asset_sort_direction: Some("desc".to_string()),
+            ..AppSettingsSummary::default()
+        };
+
+        let encoded = serde_json::to_string(&summary).expect("serializes");
+        let decoded: AppSettingsSummary = serde_json::from_str(&encoded).expect("round-trips");
+        assert_eq!(decoded.ui_start_workspace_mode, "assets");
+        assert_eq!(decoded.ui_asset_sort_key.as_deref(), Some("hostname"));
+        assert_eq!(decoded.ui_asset_sort_direction.as_deref(), Some("desc"));
     }
 }

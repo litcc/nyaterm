@@ -17,9 +17,9 @@ use super::super::list::{
     ConnectionListRow, connection_tree_indent_px, icon_action_button, icon_action_button_styled,
 };
 use super::super::panel::ConnectionPanel;
+use super::CONNECTION_LIST_ROW_HEIGHT_PX;
+use super::actions::ConnectionRowActionsDecoration;
 use super::rows::{connection_inline_group_editor_row, connection_section, saved_connection_row};
-
-const CONNECTION_LIST_ROW_HEIGHT_PX: f32 = 34.;
 
 /// The panel body.
 ///
@@ -62,6 +62,7 @@ pub(in crate::features::pages::connections) fn connections_panel(
 
     let mut list = div()
         .id(SharedString::from("connections-list-scroll"))
+        .debug_selector(|| "connections-list-scroll".to_string())
         .relative()
         .flex_1()
         .min_h_0()
@@ -129,6 +130,8 @@ pub(in crate::features::pages::connections) fn connections_panel(
         );
     } else {
         let row_count = flat_rows.len();
+        let row_actions =
+            ConnectionRowActionsDecoration::new(flat_rows.clone(), cx.weak_entity(), palette);
         // `uniform_list` derives its scrollable width from one measured row, so
         // point it at the row most likely to be the widest or long names would
         // still be unreachable.
@@ -202,6 +205,8 @@ pub(in crate::features::pages::connections) fn connections_panel(
                     items
                 }),
             )
+            .debug_selector(|| "connections-list-rows".to_string())
+            .with_decoration(row_actions)
             .with_horizontal_sizing_behavior(ListHorizontalSizingBehavior::Unconstrained)
             .with_width_from_item(widest_row)
             .flex_1()
@@ -248,6 +253,8 @@ pub(in crate::features::pages::connections) fn connections_panel(
     // Count is shown in the shared panel header via meta; strip hosts search + icons.
     div()
         .relative()
+        .key_context(crate::shortcuts::SAVED_CONNECTIONS_KEY_CONTEXT)
+        .track_focus(panel.focus_handle())
         .flex()
         .flex_col()
         .size_full()

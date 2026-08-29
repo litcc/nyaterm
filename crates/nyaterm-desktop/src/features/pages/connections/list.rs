@@ -537,7 +537,9 @@ mod tests {
 
     use crate::models::{ConnectionGroupEditorMode, ConnectionGroupEditorState};
 
-    use super::{ConnectionListRow, connection_sections, flatten_connection_rows};
+    use super::{
+        ConnectionListRow, connection_sections, flatten_connection_rows, widest_connection_row,
+    };
 
     #[test]
     fn nested_groups_render_children_before_connections_and_root_last() {
@@ -765,6 +767,56 @@ mod tests {
         assert_eq!(rows.len(), 2);
     }
 
+    #[test]
+    fn widest_row_accounts_for_full_cjk_name_and_deep_tree_indent() {
+        let connections = vec![
+            connection("latin", "connection-name-0123", None, 0),
+            connection("cjk", "生产环境数据库", None, 0),
+        ];
+        let rows = vec![
+            ConnectionListRow::Connection {
+                connection_id: "latin".to_string(),
+                depth: 0,
+            },
+            ConnectionListRow::InlineGroupEditor {
+                parent_id: None,
+                depth: 0,
+            },
+            ConnectionListRow::Connection {
+                connection_id: "cjk".to_string(),
+                depth: 4,
+            },
+        ];
+
+        assert_eq!(widest_connection_row(&rows, &connections), Some(2));
+    }
+
+    #[test]
+    fn widest_row_ignores_group_headers_and_missing_connection_records() {
+        let connections = vec![connection("real", "reachable full name", None, 0)];
+        let rows = vec![
+            ConnectionListRow::GroupHeader(super::ConnectionSectionHeader {
+                group_id: Some("group".to_string()),
+                label: "a folder label remains truncated".to_string(),
+                is_root: false,
+                depth: 0,
+                total_count: 1,
+                has_child_groups: false,
+                is_empty: false,
+            }),
+            ConnectionListRow::Connection {
+                connection_id: "missing".to_string(),
+                depth: 9,
+            },
+            ConnectionListRow::Connection {
+                connection_id: "real".to_string(),
+                depth: 0,
+            },
+        ];
+
+        assert_eq!(widest_connection_row(&rows, &connections), Some(2));
+    }
+
     fn group(id: &str, name: &str, parent_id: Option<&str>, sort_order: i32) -> Group {
         Group {
             id: id.to_string(),
@@ -805,6 +857,7 @@ mod tests {
             sftp: Default::default(),
             network: None,
             post_login: None,
+            asset: None,
             created_at_ms: None,
             updated_at_ms: None,
             last_used_at_ms: None,

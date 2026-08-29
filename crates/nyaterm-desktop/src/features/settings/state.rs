@@ -116,6 +116,9 @@ pub(in crate::features) struct UiLayoutSettingsUpdate {
     pub right_panel_collapsed: bool,
     pub saved_connections_sort_mode: String,
     pub saved_connections_expanded_group_ids: Vec<String>,
+    pub start_workspace_mode: String,
+    pub asset_sort_key: Option<String>,
+    pub asset_sort_direction: Option<String>,
     pub activity_bar_left_top: Vec<String>,
     pub activity_bar_left_bottom: Vec<String>,
     pub activity_bar_right_top: Vec<String>,
@@ -148,8 +151,8 @@ struct AppearanceSettingsState {
 }
 
 struct KeybindingSettingsState {
-    recording_id: Option<String>,
-    pending_keys: Option<String>,
+    recording_id: Option<crate::shortcuts::ShortcutId>,
+    pending_binding: Option<crate::shortcuts::ShortcutBinding>,
     search_draft: String,
     focus: FocusHandle,
 }
@@ -220,7 +223,7 @@ impl SettingsFeatureState {
             },
             keybindings: KeybindingSettingsState {
                 recording_id: None,
-                pending_keys: None,
+                pending_binding: None,
                 search_draft: String::new(),
                 focus: focus.keybindings,
             },
@@ -871,6 +874,9 @@ impl SettingsFeatureState {
         self.summary.ui_saved_connections_sort_mode = update.saved_connections_sort_mode;
         self.summary.ui_saved_connections_expanded_group_ids =
             update.saved_connections_expanded_group_ids;
+        self.summary.ui_start_workspace_mode = update.start_workspace_mode;
+        self.summary.ui_asset_sort_key = update.asset_sort_key;
+        self.summary.ui_asset_sort_direction = update.asset_sort_direction;
         self.summary.ui_activity_bar_left_top = update.activity_bar_left_top;
         self.summary.ui_activity_bar_left_bottom = update.activity_bar_left_bottom;
         self.summary.ui_activity_bar_right_top = update.activity_bar_right_top;
@@ -1256,8 +1262,15 @@ impl SettingsFeatureState {
 
     pub(in crate::features) fn keybinding_presentation(&self) -> KeybindingPresentationState {
         KeybindingPresentationState {
-            recording_id: self.keybindings.recording_id.clone(),
-            pending_keys: self.keybindings.pending_keys.clone(),
+            recording_id: self
+                .keybindings
+                .recording_id
+                .map(|id| id.as_str().to_string()),
+            pending_keys: self
+                .keybindings
+                .pending_binding
+                .as_ref()
+                .map(crate::shortcuts::ShortcutBinding::canonical),
             search_draft: self.keybindings.search_draft.clone(),
         }
     }
@@ -1266,26 +1279,36 @@ impl SettingsFeatureState {
         &self.keybindings.focus
     }
 
-    pub(in crate::features) fn begin_keybinding_recording(&mut self, shortcut_id: String) {
+    pub(in crate::features) fn begin_keybinding_recording(
+        &mut self,
+        shortcut_id: crate::shortcuts::ShortcutId,
+    ) {
         self.keybindings.recording_id = Some(shortcut_id);
-        self.keybindings.pending_keys = None;
+        self.keybindings.pending_binding = None;
     }
 
     pub(in crate::features) fn cancel_keybinding_recording(&mut self) {
         self.keybindings.recording_id = None;
-        self.keybindings.pending_keys = None;
+        self.keybindings.pending_binding = None;
     }
 
-    pub(in crate::features) fn keybinding_recording_id(&self) -> Option<&str> {
-        self.keybindings.recording_id.as_deref()
+    pub(in crate::features) fn keybinding_recording_id(
+        &self,
+    ) -> Option<crate::shortcuts::ShortcutId> {
+        self.keybindings.recording_id
     }
 
-    pub(in crate::features) fn pending_keybinding(&self) -> Option<&str> {
-        self.keybindings.pending_keys.as_deref()
+    pub(in crate::features) fn pending_keybinding(
+        &self,
+    ) -> Option<&crate::shortcuts::ShortcutBinding> {
+        self.keybindings.pending_binding.as_ref()
     }
 
-    pub(in crate::features) fn set_pending_keybinding(&mut self, keys: Option<String>) {
-        self.keybindings.pending_keys = keys;
+    pub(in crate::features) fn set_pending_keybinding(
+        &mut self,
+        binding: Option<crate::shortcuts::ShortcutBinding>,
+    ) {
+        self.keybindings.pending_binding = binding;
     }
 
     pub(in crate::features) fn finish_keybinding_recording(&mut self) {
@@ -1815,12 +1838,14 @@ mod tests {
     #[test]
     fn settings_owner_keeps_keybinding_recording_and_search_atomic() {
         let mut state = settings_state();
-        state.begin_keybinding_recording("terminal.copy".to_string());
-        state.set_pending_keybinding(Some("ctrl-shift-c".to_string()));
+        state.begin_keybinding_recording(crate::shortcuts::ShortcutId::TerminalCopy);
+        state.set_pending_keybinding(Some(
+            crate::shortcuts::ShortcutBinding::parse("ctrl+shift+c").unwrap(),
+        ));
         state.set_keybinding_search("copy".to_string());
         let interaction = state.keybinding_presentation();
         assert_eq!(interaction.recording_id.as_deref(), Some("terminal.copy"));
-        assert_eq!(interaction.pending_keys.as_deref(), Some("ctrl-shift-c"));
+        assert_eq!(interaction.pending_keys.as_deref(), Some("ctrl+shift+c"));
         assert_eq!(interaction.search_draft, "copy");
 
         state.cancel_keybinding_recording();
@@ -1878,6 +1903,9 @@ mod tests {
             activity_bar_hidden_items: vec!["aiAssistant".to_string()],
             panel_multi_open: true,
             panel_open_mode: "floating".to_string(),
+            start_workspace_mode: "assets".to_string(),
+            asset_sort_key: Some("memory".to_string()),
+            asset_sort_direction: Some("desc".to_string()),
             left_open_panels: vec!["connections".to_string()],
             right_open_panels: vec!["sftp".to_string()],
             panel_stack_sizes: HashMap::from([("left:connections".to_string(), 600)]),
@@ -1897,6 +1925,9 @@ mod tests {
         assert_eq!(summary.ui_activity_bar_right_bottom, ["ai"]);
         assert_eq!(summary.ui_activity_bar_hidden_items, ["aiAssistant"]);
         assert_eq!(summary.ui_panel_open_mode, "floating");
+        assert_eq!(summary.ui_start_workspace_mode, "assets");
+        assert_eq!(summary.ui_asset_sort_key.as_deref(), Some("memory"));
+        assert_eq!(summary.ui_asset_sort_direction.as_deref(), Some("desc"));
         assert!(summary.ui_panel_multi_open);
         assert_eq!(summary.ui_panel_stack_sizes["left:connections"], 600);
     }

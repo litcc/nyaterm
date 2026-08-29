@@ -146,8 +146,9 @@ impl NyaTermApp {
         let wallpaper_opacity =
             (self.settings.summary().background_image_opacity.min(100) as f32) / 100.0;
         let wallpaper_fit = self.settings.summary().background_image_fit.clone();
-        div()
+        let root = div()
             .id(SharedString::from("nyaterm-root"))
+            .key_context(crate::shortcuts::WORKSPACE_KEY_CONTEXT)
             .size_full()
             .relative()
             .bg(self.shell_transparent_color(palette.bg))
@@ -187,6 +188,7 @@ impl NyaTermApp {
                 this.reconcile_root_pointer_interactions(event, cx);
                 if event.dragging() {
                     this.update_transfer_browser_column_resize(event, cx);
+                    this.update_asset_column_resize(f32::from(event.position.x), cx);
                     this.update_panel_resize(event, cx);
                     this.update_transfer_height_resize(event, cx);
                     this.update_bottom_panel_resize(event, cx);
@@ -206,6 +208,7 @@ impl NyaTermApp {
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseUpEvent, _, cx| {
                     this.finish_transfer_browser_column_resize(cx);
+                    this.finish_asset_column_resize(cx);
                     this.finish_panel_resize(cx);
                     this.finish_transfer_height_resize(cx);
                     this.finish_bottom_panel_resize(cx);
@@ -321,7 +324,8 @@ impl NyaTermApp {
                     .size_full()
                     .child(self.title_bar(window, cx))
                     .child(self.workspace_surface(palette, window, cx)),
-            )
+            );
+        self.with_shortcut_action_handlers(root, cx)
     }
 
     fn workspace_surface(

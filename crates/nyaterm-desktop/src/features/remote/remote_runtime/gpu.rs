@@ -132,6 +132,7 @@ impl NyaTermApp {
                     .set_gpu_status(gpu_overview_status(&overview));
                 self.shell
                     .set_status(self.remote_ops.gpu_status().to_string());
+                self.cache_asset_gpu_snapshot(&event.session_id, &overview);
                 self.remote_ops.apply_gpu(&event.session_id, overview);
             }
             Err(error) => {
@@ -244,6 +245,7 @@ impl NyaTermApp {
                     .set_npu_status(npu_overview_status(&overview));
                 self.shell
                     .set_status(self.remote_ops.npu_status().to_string());
+                self.cache_asset_npu_snapshot(&event.session_id, &overview);
                 self.remote_ops.apply_npu(&event.session_id, overview);
             }
             Err(error) => {

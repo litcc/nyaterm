@@ -35,6 +35,7 @@ impl NyaTermApp {
                 || current.terminal_font_weight != settings.terminal_font_weight
                 || current.terminal_font_weight_bold != settings.terminal_font_weight_bold
         };
+        crate::shortcuts::rebuild_keymap(&settings.keybindings, cx);
         self.settings.replace_summary(settings);
         if terminal_font_changed {
             // External loading or settings-save completion may replace font settings;

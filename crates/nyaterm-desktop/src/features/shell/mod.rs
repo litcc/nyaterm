@@ -16,6 +16,7 @@ mod persistence_debounce;
 mod post_start_work;
 mod quick_switch_runtime;
 mod runtime_state;
+mod shortcut_action_runtime;
 mod state;
 mod status_clocks;
 mod tab_mouse;

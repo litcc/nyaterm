@@ -530,6 +530,11 @@ mod tests {
                 "Settings...",
             ]
         );
+        let recording_shortcut = if cfg!(target_os = "macos") {
+            "Cmd+Alt+R"
+        } else {
+            "Ctrl+Alt+R"
+        };
         assert_eq!(
             recording
                 .iter()
@@ -539,7 +544,7 @@ mod tests {
             vec![
                 (
                     Some("icons/file/description.svg".to_string()),
-                    Some("Ctrl+Shift+R".to_string())
+                    Some(recording_shortcut.to_string())
                 ),
                 (Some("icons/session/record.svg".to_string()), None),
                 (None, None),

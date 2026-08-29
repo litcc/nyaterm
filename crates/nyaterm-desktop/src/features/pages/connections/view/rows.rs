@@ -1,5 +1,3 @@
-use rust_i18n::t;
-
 use std::sync::Arc;
 
 use gpui::{
@@ -22,9 +20,10 @@ use crate::features::{
 };
 
 use super::super::list::{
-    ConnectionSectionHeader, connection_detail_rows, connection_tree_indent_px, icon_action_button,
+    ConnectionSectionHeader, connection_detail_rows, connection_tree_indent_px,
 };
 use super::super::panel::{ConnectionListSnapshot, ConnectionPanel};
+use super::CONNECTION_ACTION_CLEARANCE_PX;
 
 /// The label/value card shown after hovering a saved connection.
 ///
@@ -447,16 +446,13 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
     // The arrow keys walk filtered results without disturbing the selection,
     // so the active row gets its own fainter wash plus a ring.
     let keyboard_active = snapshot.is_keyboard_active(&connection.id);
-    let connect_connection = connection.clone();
     let connect_connection_dbl = connection.clone();
-    let edit_id = connection.id.clone();
     let select_id = connection.id.clone();
     let menu_id = connection.id.clone();
     let kind = connection.kind_label();
     let icon_def = resolve_connection_icon(connection.icon.as_deref(), kind);
     let details_rows: Arc<[(&'static str, String)]> =
         connection_detail_rows(&connection, &snapshot.connections_by_id, &snapshot.proxies).into();
-    let row_group = SharedString::from(format!("connection-row-group-{}", connection.id));
     let drop_position = snapshot
         .drop_position_for_kind_target(ConnectionDragKind::Connection, Some(&connection.id));
     let show_before = drop_position == Some(ConnectionDropPosition::Before);
@@ -465,12 +461,11 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
     let row_id = connection.id.clone();
     // Tauri ConnectionItem: py-1.5 single-line row (~34px) with hover actions.
     let palette = snapshot.chrome.palette;
+    let row_selector = format!("connection-row-{}", connection.id);
+    let name_selector = format!("connection-row-name-{}", connection.id);
     div()
-        .id(SharedString::from(format!(
-            "connection-row-{}",
-            connection.id
-        )))
-        .group(row_group.clone())
+        .id(SharedString::from(row_selector.clone()))
+        .debug_selector(move || row_selector.clone())
         .relative()
         .h(px(34.))
         // The list scrolls sideways, so a row is at least the panel width and
@@ -586,13 +581,16 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
         )
         // Aims the list's one context menu at this row. Capture, so it runs
         // before the menu is built and regardless of who stops the bubble.
-        .capture_any_mouse_down(cx.listener(move |panel, event: &MouseDownEvent, _, cx| {
-            panel.with_app(cx, |this, cx| {
-                if event.button == MouseButton::Right {
-                    this.prepare_connection_context_menu(menu_id.clone(), cx);
-                }
-            })
-        }))
+        .capture_any_mouse_down(
+            cx.listener(move |panel, event: &MouseDownEvent, window, cx| {
+                window.focus(panel.focus_handle(), cx);
+                panel.with_app(cx, |this, cx| {
+                    if event.button == MouseButton::Right {
+                        this.prepare_connection_context_menu(menu_id.clone(), cx);
+                    }
+                })
+            }),
+        )
         .on_click(
             cx.listener(move |panel, event: &gpui::ClickEvent, window, cx| {
                 panel.with_app(cx, |this, cx| {
@@ -613,11 +611,12 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
         .child(connection_type_icon(palette, icon_def, selected, 16.))
         .child(
             div()
-                .id(SharedString::from(format!(
-                    "connection-row-name-{}",
-                    connection.id
-                )))
+                .id(SharedString::from(name_selector.clone()))
+                .debug_selector(move || name_selector.clone())
                 .flex_none()
+                // Match Tauri's `pr-14`: at maximum horizontal scroll the
+                // final glyph can move clear of the viewport-fixed actions.
+                .pr(px(CONNECTION_ACTION_CLEARANCE_PX))
                 .text_size(px(12.))
                 .font_weight(FontWeight(500.))
                 .text_color(if selected {
@@ -634,46 +633,6 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
                 }),
         )
         .child(div().flex_1().min_w_0())
-        .child(
-            div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap_0()
-                .rounded_sm()
-                .opacity(0.)
-                .group_hover(row_group.clone(), |this| {
-                    this.bg(rgb(palette.hover)).opacity(1.)
-                })
-                .child(icon_action_button(
-                    palette,
-                    format!("connection-connect-{}", connection.id),
-                    "icons/conn/connect.svg",
-                    t!("savedConnections.connect"),
-                    cx.listener(move |panel, _, window, cx| {
-                        panel.with_app(cx, |this, cx| {
-                            this.start_saved_connection(connect_connection.clone(), window, cx);
-                        })
-                    }),
-                ))
-                .child(icon_action_button(
-                    palette,
-                    format!("connection-edit-{}", connection.id),
-                    "icons/net/edit.svg",
-                    t!("savedConnections.edit"),
-                    cx.listener(move |panel, _, window, cx| {
-                        panel.with_app(cx, |this, cx| {
-                            this.open_connection_editor(
-                                Some(edit_id.clone()),
-                                None,
-                                false,
-                                window,
-                                cx,
-                            );
-                        })
-                    }),
-                )),
-        )
         .when(show_before, |this| {
             this.child(
                 div()

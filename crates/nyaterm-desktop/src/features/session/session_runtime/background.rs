@@ -679,7 +679,7 @@ impl NyaTermApp {
                     && stale_id != session_id
                 {
                     self.migrate_reconnected_session_state(&stale_id, &session_id, cx);
-                    self.remove_session_state(&stale_id);
+                    self.remove_session_state(&stale_id, cx);
                     self.persist_workspace_pane_layout();
                     self.persist_terminal_window_layout();
                 }

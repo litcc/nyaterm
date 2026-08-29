@@ -55,6 +55,7 @@ impl ConnectionStore {
                 ssh_profile: Default::default(),
                 terminal_type: None,
                 sftp: Default::default(),
+                asset: None,
                 created_at_ms: None,
                 updated_at_ms: None,
                 last_used_at_ms: None,

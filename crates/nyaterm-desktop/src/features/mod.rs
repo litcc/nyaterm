@@ -1,6 +1,7 @@
 mod activation;
 mod ai;
 mod app_state;
+mod assets;
 mod commands;
 mod connections;
 mod font_catalog;
@@ -31,6 +32,13 @@ mod update;
 mod view_widgets;
 
 pub(crate) fn init(cx: &mut gpui::App) {
+    // gpui-component has already installed its bindings. Capture that immutable
+    // baseline before adding NyaTerm's rebuildable bindings and protections.
+    crate::shortcuts::init(cx);
+    init_protection_key_bindings(cx);
+}
+
+pub(crate) fn init_protection_key_bindings(cx: &mut gpui::App) {
     terminal::init_key_bindings(cx);
     view_widgets::init_child_window_key_bindings(cx);
 }

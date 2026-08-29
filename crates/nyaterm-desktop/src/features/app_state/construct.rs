@@ -19,6 +19,7 @@ use super::NyaTermApp;
 use crate::features::ai::{
     AiFeatureFocus, AiFeatureInit, AiFeatureState, AiPanel, ai_active_profile_drafts,
 };
+use crate::features::assets::StartWorkspaceFeatureState;
 use crate::features::commands::{
     CommandFeatureInit, CommandFeatureState, QuickCommandFeatureFocus,
     quick_command_sort_mode_from_setting, quick_command_view_mode_from_setting,
@@ -191,10 +192,16 @@ impl NyaTermApp {
         let app_entity = cx.entity();
         let remote_panels =
             crate::features::pages::remote::RemotePanels::new(app_entity.downgrade(), cx);
-        let connection_panel = cx.new(|_| ConnectionPanel::new(app_entity.downgrade()));
+        let connection_panel =
+            cx.new(|cx| ConnectionPanel::new(app_entity.downgrade(), cx.focus_handle()));
         let settings_panel = cx.new(|cx| SettingsPanel::new(app_entity.downgrade(), cx));
         let transfer_panel = cx.new(|_| TransferPanel::new(app_entity.downgrade()));
         let ai_panel = cx.new(|_| AiPanel::new(app_entity.downgrade()));
+        let start_workspace = StartWorkspaceFeatureState::new(&connection_groups, &settings, cx);
+
+        // Settings are loaded after gpui-component initialization, so this is the
+        // first point at which the persisted shortcut map can replace the defaults.
+        crate::shortcuts::rebuild_keymap(&settings.keybindings, cx);
 
         Self {
             stores,
@@ -211,6 +218,7 @@ impl NyaTermApp {
                 },
                 cx,
             ),
+            start_workspace,
             connection_panel,
             settings_panel,
             native_settings_panel: None,

@@ -207,6 +207,15 @@ impl NyaTermApp {
                 .iter()
                 .cloned()
                 .collect(),
+            start_workspace_mode: self.start_workspace.mode().as_str().to_string(),
+            asset_sort_key: self
+                .start_workspace
+                .sort()
+                .map(|sort| sort.key.as_str().to_string()),
+            asset_sort_direction: self
+                .start_workspace
+                .sort()
+                .map(|sort| sort.direction.as_str().to_string()),
             activity_bar_left_top: self.shell.chrome.activity_bar_layout.left_top.clone(),
             activity_bar_left_bottom: self.shell.chrome.activity_bar_layout.left_bottom.clone(),
             activity_bar_right_top: self.shell.chrome.activity_bar_layout.right_top.clone(),

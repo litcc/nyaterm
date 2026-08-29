@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, aead::Aead};
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use nyaterm_core::{
-    AiExecutionProfile, CloudSyncSettings, CloudSyncState, CommandHistoryEntry, ConnectionAuth,
-    ConnectionType, ExistingFileBehavior, OtpEntry, RecordingMode, RecordingRotationPolicy,
-    SavedCredential, SearchEngineConfig, SshKey, export_quick_commands_json,
+    AiExecutionProfile, AssetAccelerator, AssetAcceleratorType, AssetDeviceType, AssetMetadata,
+    CloudSyncSettings, CloudSyncState, CommandHistoryEntry, ConnectionAuth, ConnectionType,
+    ExistingFileBehavior, OtpEntry, RecordingMode, RecordingRotationPolicy, SavedCredential,
+    SearchEngineConfig, SshKey, export_quick_commands_json,
 };
 use redb::{Database, ReadableDatabase};
 use sha2::{Digest, Sha256};
@@ -117,6 +118,7 @@ fn round_trips_sessions_in_redb_compatible_tables() {
             network: None,
             post_login: None,
             recording: None,
+            asset: None,
             created_at_ms: None,
             updated_at_ms: None,
             last_used_at_ms: None,
@@ -184,6 +186,7 @@ fn exports_and_imports_native_redb_backup() {
             network: None,
             post_login: None,
             recording: None,
+            asset: None,
             created_at_ms: None,
             updated_at_ms: None,
             last_used_at_ms: None,
@@ -273,6 +276,7 @@ fn exports_and_imports_portable_snapshot() {
                 network: None,
                 post_login: None,
                 recording: None,
+                asset: None,
                 created_at_ms: None,
                 updated_at_ms: None,
                 last_used_at_ms: None,
@@ -478,6 +482,7 @@ fn encrypted_portable_snapshot_requires_master_password() {
                 network: None,
                 post_login: None,
                 recording: None,
+                asset: None,
                 created_at_ms: None,
                 updated_at_ms: None,
                 last_used_at_ms: None,
@@ -541,6 +546,7 @@ fn encrypted_portable_snapshot_requires_master_password() {
                 network: None,
                 post_login: None,
                 recording: None,
+                asset: None,
                 created_at_ms: None,
                 updated_at_ms: None,
                 last_used_at_ms: None,
@@ -618,6 +624,7 @@ fn rejects_invalid_backup_without_replacing_current_database() {
                 network: None,
                 post_login: None,
                 recording: None,
+                asset: None,
                 created_at_ms: None,
                 updated_at_ms: None,
                 last_used_at_ms: None,
@@ -692,6 +699,7 @@ fn save_and_delete_connection_updates_store() {
         network: None,
         post_login: None,
         recording: None,
+        asset: None,
         created_at_ms: None,
         updated_at_ms: None,
         last_used_at_ms: None,
@@ -740,6 +748,7 @@ fn save_group_and_connection_persists_both_records() {
         network: None,
         post_login: None,
         recording: None,
+        asset: None,
         created_at_ms: None,
         updated_at_ms: None,
         last_used_at_ms: None,
@@ -814,6 +823,7 @@ fn deleting_group_removes_descendants_and_grouped_connections() {
                 network: None,
                 post_login: None,
                 recording: None,
+                asset: None,
                 created_at_ms: None,
                 updated_at_ms: None,
                 last_used_at_ms: None,
@@ -863,6 +873,7 @@ fn load_sessions_decrypts_legacy_connection_password_record() {
         network: None,
         post_login: None,
         recording: None,
+        asset: None,
         created_at_ms: None,
         updated_at_ms: None,
         last_used_at_ms: None,
@@ -2151,6 +2162,11 @@ fn app_settings_summary_reads_and_updates_host_key_policy() {
 
     let mut next_keybindings = summary.keybindings.clone();
     next_keybindings.insert("view.openSettings".to_string(), "ctrl+.".to_string());
+    next_keybindings.insert(
+        "terminal.copy".to_string(),
+        "ctrl+shift+c,meta+shift+c".to_string(),
+    );
+    next_keybindings.insert("plugin.futureAction".to_string(), " Win+Q ".to_string());
     next_keybindings.insert("blank".to_string(), " ".to_string());
     let updated = store
         .save_keybindings(&next_keybindings)
@@ -2162,7 +2178,21 @@ fn app_settings_summary_reads_and_updates_host_key_policy() {
             .map(String::as_str),
         Some("ctrl+.")
     );
-    assert!(!updated.keybindings.contains_key("blank"));
+    assert_eq!(
+        updated.keybindings.get("blank").map(String::as_str),
+        Some(" ")
+    );
+    assert_eq!(
+        updated.keybindings.get("terminal.copy").map(String::as_str),
+        Some("ctrl+shift+c,meta+shift+c")
+    );
+    assert_eq!(
+        updated
+            .keybindings
+            .get("plugin.futureAction")
+            .map(String::as_str),
+        Some(" Win+Q ")
+    );
 
     let mut terminal_update = updated.clone();
     terminal_update.terminal_scrollback_lines = 12_000;
@@ -3241,6 +3271,7 @@ fn sync_snapshot_strips_device_local_ssh_agent_settings() {
             ssh_profile: Default::default(),
             terminal_type: None,
             sftp: Default::default(),
+            asset: None,
             created_at_ms: None,
             updated_at_ms: None,
             last_used_at_ms: None,
@@ -3662,6 +3693,318 @@ fn dedicated_rdp_records_win_conflicts_and_do_not_break_ssh_replacement() {
             .expect("ssh replacement"),
         KnownHostCheck::Match
     );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+fn ssh_connection_for_asset(id: &str) -> SavedConnection {
+    SavedConnection {
+        id: id.to_string(),
+        name: "Asset Host".to_string(),
+        config: ConnectionType::Ssh {
+            host: "10.0.0.2".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            backspace_mode: "del".to_string(),
+            ai_execution_profile: AiExecutionProfile::Auto,
+            x11_forwarding: false,
+            auth_agent_endpoint: None,
+            agent_forwarding_config: None,
+            legacy_agent_forwarding: None,
+            encoding: String::new(),
+        },
+        group_id: None,
+        description: None,
+        sort_order: 0,
+        icon: None,
+        icon_auto_detect: None,
+        auth: None,
+        network: None,
+        post_login: None,
+        recording: None,
+        ssh_algorithms: None,
+        ssh_profile: Default::default(),
+        terminal_type: None,
+        sftp: Default::default(),
+        asset: None,
+        created_at_ms: None,
+        updated_at_ms: None,
+        last_used_at_ms: None,
+    }
+}
+
+#[test]
+fn merge_connection_asset_from_monitoring_creates_and_merges_atomically() {
+    let dir = unique_temp_dir("asset-merge");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut connection = ssh_connection_for_asset("asset-1");
+    connection.asset = Some(AssetMetadata {
+        device_type: Some(AssetDeviceType::Cloud),
+        cpu_threads: Some(16),
+        tags: Some(vec!["production".to_string()]),
+        notes: Some("maintained by operator".to_string()),
+        ..AssetMetadata::default()
+    });
+    store.save_connection(&connection).expect("save connection");
+
+    // First patch establishes monitoring fields without replacing operator-maintained facts.
+    let created = store
+        .merge_connection_asset_from_monitoring(
+            "asset-1",
+            AssetMetadata {
+                hostname: Some("node-1".to_string()),
+                cpu_cores: Some(8),
+                accelerators: Some(vec![AssetAccelerator {
+                    r#type: AssetAcceleratorType::Gpu,
+                    vendor: Some("NVIDIA".to_string()),
+                    model: Some("A100".to_string()),
+                    count: Some(1),
+                    memory_bytes: None,
+                }]),
+                ..AssetMetadata::default()
+            },
+        )
+        .expect("merge asset");
+    assert!(created, "first merge changes the asset");
+
+    let asset = store
+        .get_connection("asset-1")
+        .expect("get")
+        .expect("connection")
+        .asset
+        .expect("asset");
+    assert_eq!(asset.hostname.as_deref(), Some("node-1"));
+    assert_eq!(asset.cpu_cores, Some(8));
+    assert_eq!(asset.device_type, Some(AssetDeviceType::Cloud));
+    assert_eq!(asset.cpu_threads, Some(16));
+    assert_eq!(
+        asset.tags.as_deref(),
+        Some(["production".to_string()].as_slice())
+    );
+    assert_eq!(asset.notes.as_deref(), Some("maintained by operator"));
+
+    // Second patch updates memory and replaces GPU entries, keeping hostname.
+    let changed = store
+        .merge_connection_asset_from_monitoring(
+            "asset-1",
+            AssetMetadata {
+                memory_bytes: Some(1024),
+                accelerators: Some(vec![AssetAccelerator {
+                    r#type: AssetAcceleratorType::Gpu,
+                    vendor: Some("NVIDIA".to_string()),
+                    model: Some("H100".to_string()),
+                    count: Some(2),
+                    memory_bytes: None,
+                }]),
+                ..AssetMetadata::default()
+            },
+        )
+        .expect("merge asset again");
+    assert!(changed);
+
+    let asset = store
+        .get_connection("asset-1")
+        .expect("get")
+        .expect("connection")
+        .asset
+        .expect("asset");
+    assert_eq!(asset.hostname.as_deref(), Some("node-1"));
+    assert_eq!(asset.cpu_cores, Some(8));
+    assert_eq!(asset.memory_bytes, Some(1024));
+    let accelerators = asset.accelerators.expect("accelerators");
+    assert_eq!(accelerators.len(), 1);
+    assert_eq!(accelerators[0].model.as_deref(), Some("H100"));
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn merge_connection_asset_returns_false_when_unchanged_or_missing() {
+    let dir = unique_temp_dir("asset-merge-noop");
+    let store = ConnectionStore::open(&dir).expect("store");
+    store
+        .save_connection(&ssh_connection_for_asset("asset-1"))
+        .expect("save connection");
+
+    // Missing connection is a no-op, not an error (background monitoring).
+    assert!(
+        !store
+            .merge_connection_asset_from_monitoring(
+                "missing",
+                AssetMetadata {
+                    hostname: Some("x".to_string()),
+                    ..AssetMetadata::default()
+                },
+            )
+            .expect("missing connection is Ok(false)")
+    );
+
+    store
+        .merge_connection_asset_from_monitoring(
+            "asset-1",
+            AssetMetadata {
+                hostname: Some("node-1".to_string()),
+                ..AssetMetadata::default()
+            },
+        )
+        .expect("first merge");
+
+    // An identical patch does not report a change.
+    assert!(
+        !store
+            .merge_connection_asset_from_monitoring(
+                "asset-1",
+                AssetMetadata {
+                    hostname: Some("node-1".to_string()),
+                    ..AssetMetadata::default()
+                },
+            )
+            .expect("idempotent merge")
+    );
+
+    // An empty patch never changes anything.
+    assert!(
+        !store
+            .merge_connection_asset_from_monitoring("asset-1", AssetMetadata::default())
+            .expect("empty patch")
+    );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn merge_connection_asset_preserves_inline_password() {
+    let dir = unique_temp_dir("asset-merge-password");
+    let store = ConnectionStore::open(&dir).expect("store");
+
+    let mut connection = ssh_connection_for_asset("asset-secret");
+    connection.auth = Some(ConnectionAuth {
+        mode: "password".to_string(),
+        password: Some("hunter2".to_string()),
+        ..Default::default()
+    });
+    store
+        .save_connection(&connection)
+        .expect("save with password");
+
+    store
+        .merge_connection_asset_from_monitoring(
+            "asset-secret",
+            AssetMetadata {
+                hostname: Some("node-1".to_string()),
+                ..AssetMetadata::default()
+            },
+        )
+        .expect("merge asset");
+
+    // The stored inline password must survive an asset-only update.
+    let reloaded = store
+        .get_connection("asset-secret")
+        .expect("get")
+        .expect("connection");
+    let auth = reloaded.auth.expect("auth");
+    assert_eq!(auth.password.as_deref(), Some("hunter2"));
+    assert_eq!(
+        reloaded.asset.expect("asset").hostname.as_deref(),
+        Some("node-1")
+    );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn save_ui_layout_settings_roundtrips_start_workspace_and_asset_sort() {
+    let dir = unique_temp_dir("ui-asset-sort");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut summary = store.load_app_settings_summary().expect("load");
+
+    summary.ui_start_workspace_mode = "assets".to_string();
+    summary.ui_asset_sort_key = Some("hostname".to_string());
+    summary.ui_asset_sort_direction = Some("desc".to_string());
+    let saved = store.save_ui_layout_settings(&summary).expect("save ui");
+    assert_eq!(saved.ui_start_workspace_mode, "assets");
+    assert_eq!(saved.ui_asset_sort_key.as_deref(), Some("hostname"));
+    assert_eq!(saved.ui_asset_sort_direction.as_deref(), Some("desc"));
+
+    let raw = store.load_settings_value().expect("raw");
+    assert_eq!(raw["ui"]["start_workspace_mode"], "assets");
+    assert_eq!(raw["ui"]["asset_sort_key"], "hostname");
+    assert_eq!(raw["ui"]["asset_sort_direction"], "desc");
+
+    let reloaded = store.load_app_settings_summary().expect("reload");
+    assert_eq!(reloaded.ui_start_workspace_mode, "assets");
+    assert_eq!(reloaded.ui_asset_sort_key.as_deref(), Some("hostname"));
+    assert_eq!(reloaded.ui_asset_sort_direction.as_deref(), Some("desc"));
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn ui_settings_normalize_and_default_for_legacy_and_invalid_values() {
+    let dir = unique_temp_dir("ui-asset-sort-legacy");
+    let store = ConnectionStore::open(&dir).expect("store");
+
+    // Legacy document without the new keys falls back to defaults.
+    let legacy = store.load_app_settings_summary().expect("load legacy");
+    assert_eq!(legacy.ui_start_workspace_mode, "workbench");
+    assert!(legacy.ui_asset_sort_key.is_none());
+    assert!(legacy.ui_asset_sort_direction.is_none());
+
+    // Invalid values normalize: unknown workspace mode -> workbench, unknown
+    // direction -> None (serialized as JSON null).
+    let mut summary = legacy;
+    summary.ui_start_workspace_mode = "not-a-mode".to_string();
+    summary.ui_asset_sort_direction = Some("sideways".to_string());
+    summary.ui_asset_sort_key = Some("   ".to_string());
+    let saved = store
+        .save_ui_layout_settings(&summary)
+        .expect("save invalid");
+    assert_eq!(saved.ui_start_workspace_mode, "workbench");
+    assert!(saved.ui_asset_sort_direction.is_none());
+    assert!(saved.ui_asset_sort_key.is_none());
+
+    let raw = store.load_settings_value().expect("raw");
+    assert_eq!(raw["ui"]["start_workspace_mode"], "workbench");
+    assert_eq!(raw["ui"]["asset_sort_direction"], serde_json::Value::Null);
+    assert_eq!(raw["ui"]["asset_sort_key"], serde_json::Value::Null);
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn connection_asset_survives_redb_replace_sessions_roundtrip() {
+    let dir = unique_temp_dir("asset-redb-roundtrip");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut connection = ssh_connection_for_asset("asset-rt");
+    connection.asset = Some(AssetMetadata {
+        hostname: Some("gpu-node".to_string()),
+        cpu_cores: Some(64),
+        accelerators: Some(vec![AssetAccelerator {
+            r#type: AssetAcceleratorType::Npu,
+            vendor: Some("Huawei".to_string()),
+            model: Some("910B".to_string()),
+            count: Some(4),
+            memory_bytes: None,
+        }]),
+        ..AssetMetadata::default()
+    });
+    let config = SessionsConfig {
+        groups: Vec::new(),
+        connections: vec![connection],
+    };
+    store.replace_sessions(&config).expect("replace");
+
+    let loaded = store
+        .get_connection("asset-rt")
+        .expect("get")
+        .expect("connection")
+        .asset
+        .expect("asset");
+    assert_eq!(loaded.hostname.as_deref(), Some("gpu-node"));
+    assert_eq!(loaded.cpu_cores, Some(64));
+    let accelerators = loaded.accelerators.expect("accelerators");
+    assert_eq!(accelerators[0].r#type, AssetAcceleratorType::Npu);
+    assert_eq!(accelerators[0].model.as_deref(), Some("910B"));
 
     std::fs::remove_dir_all(dir).ok();
 }

@@ -11,7 +11,7 @@ use crate::models::BottomPanelMode;
 use crate::models::NavItem;
 
 impl NyaTermApp {
-    pub(in crate::features) fn empty_workspace_state(
+    pub(in crate::features) fn workbench_workspace_state(
         &mut self,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {

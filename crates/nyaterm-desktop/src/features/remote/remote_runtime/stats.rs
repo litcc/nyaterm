@@ -119,6 +119,7 @@ impl NyaTermApp {
                 // The snapshot is the only place the remote OS is reported,
                 // so this is where a connection's icon can be filled in.
                 self.apply_auto_detected_connection_icon(&event.session_id, &stats.system, cx);
+                self.cache_asset_stats_snapshot(&event.session_id, &stats);
                 self.remote_ops.apply_stats(stats);
             }
             Err(error) => {

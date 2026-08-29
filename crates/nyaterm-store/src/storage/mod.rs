@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use nyaterm_core::{
-    AiSettings, ConnectionType, CredentialCrypto, CredentialCryptoError, Group,
+    AiSettings, AssetMetadata, ConnectionType, CredentialCrypto, CredentialCryptoError, Group,
     KeywordHighlightConfig, KeywordHighlightImportResult, KeywordHighlightRule,
     PortableSnapshotError, ProxyConfig, ProxyGroup, ProxyGroupsConfig, QuickCommand,
     QuickCommandCategory, QuickCommandsConfig, SavedConnection, SessionsConfig,
@@ -444,6 +444,47 @@ impl ConnectionStore {
         insert_connection_indexes(&txn, &connection)?;
         txn.commit()?;
         Ok(())
+    }
+
+    /// Merges a monitoring-derived asset patch into one connection atomically.
+    ///
+    /// Reads the stored connection, applies [`AssetMetadata::merge_monitoring_patch`],
+    /// and writes it back inside a single write transaction so concurrent
+    /// monitoring updates cannot interleave a lost update. Returns `Ok(true)`
+    /// only when the merge actually changed the persisted asset, so callers can
+    /// skip redundant change notifications; a missing connection yields
+    /// `Ok(false)` rather than an error, matching the "best effort" nature of
+    /// background monitoring. The connection's own inline password lives in a
+    /// separate table and is untouched here.
+    pub fn merge_connection_asset_from_monitoring(
+        &self,
+        connection_id: &str,
+        patch: AssetMetadata,
+    ) -> Result<bool, StorageError> {
+        let txn = self.db.begin_write()?;
+        let key = entity_key(CONNECTION_PREFIX, connection_id);
+        let mut connection = {
+            let table = txn.open_table(CONNECTIONS_TABLE)?;
+            let Some(raw) = table.get(key.as_str())? else {
+                return Ok(false);
+            };
+            deserialize_json::<SavedConnection>(raw.value())?
+        };
+        migrate_legacy_ssh_agent_settings(&mut connection);
+
+        let mut next_asset = connection.asset.clone().unwrap_or_default();
+        next_asset.merge_monitoring_patch(patch);
+        if connection.asset.as_ref() == Some(&next_asset) {
+            return Ok(false);
+        }
+        connection.asset = Some(next_asset);
+        connection.updated_at_ms = Some(current_time_ms());
+
+        write_json_in_txn(&txn, CONNECTIONS_TABLE, &key, &connection)?;
+        remove_connection_index_entries(&txn, connection_id)?;
+        insert_connection_indexes(&txn, &connection)?;
+        txn.commit()?;
+        Ok(true)
     }
 
     pub fn load_translation_settings(&self) -> Result<TranslationSettings, StorageError> {
