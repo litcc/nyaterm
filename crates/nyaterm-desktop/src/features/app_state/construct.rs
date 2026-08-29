@@ -160,21 +160,6 @@ impl NyaTermApp {
         let mut terminal_screen = initial_terminal_screen();
         terminal_screen.set_encoding(&settings.interaction_default_encoding);
         let session_manager = Arc::new(SessionManager::new());
-        let shell_environment = session_manager.shell_environment();
-        cx.background_executor()
-            .spawn(async move {
-                // Load the complete shell environment once during application
-                // startup so local terminals and other features can share the
-                // snapshot without paying another shell startup cost on first use.
-                if let Err(error) = shell_environment.initialize().await {
-                    // Warm-up failure must not block local terminals: transport
-                    // retains an inherited-environment fallback snapshot. Record
-                    // only the error type here; never output shell stderr or
-                    // environment values.
-                    tracing::error!(%error, "shell environment preload failed");
-                }
-            })
-            .detach();
         let terminal_frame_pipeline = TerminalFramePipeline::spawn(recording_writer);
         let session_event_bridge = SessionEventBridge::spawn(
             Arc::clone(&session_manager),
@@ -373,6 +358,21 @@ impl NyaTermApp {
                 proxy_groups,
             )),
         }
+    }
+
+    pub(crate) fn start_shell_environment_preload(&self, cx: &mut Context<Self>) {
+        let shell_environment = self.session.manager().shell_environment();
+        cx.background_executor()
+            .spawn(async move {
+                // Preload the complete shell environment after the production window
+                // starts so features can share it without affecting test construction.
+                if let Err(error) = shell_environment.initialize().await {
+                    // Preload failure must not block local terminals; transport keeps an
+                    // inherited fallback. Never log shell stderr or environment values.
+                    tracing::error!(%error, "shell environment preload failed");
+                }
+            })
+            .detach();
     }
 
     #[cfg(test)]
