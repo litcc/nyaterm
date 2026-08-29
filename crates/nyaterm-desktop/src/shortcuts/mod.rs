@@ -1242,9 +1242,14 @@ mod tests {
 
     #[test]
     fn invalid_override_disables_and_conflicts_keep_registry_first() {
+        let new_session_binding = SHORTCUT_REGISTRY
+            .iter()
+            .find(|definition| definition.id == ShortcutId::NewSession)
+            .expect("new session shortcut must be registered")
+            .default_keys();
         let mut overrides = HashMap::new();
         overrides.insert("terminal.copy".to_string(), "ctrl".to_string());
-        overrides.insert("tab.close".to_string(), "ctrl+shift+n".to_string());
+        overrides.insert("tab.close".to_string(), new_session_binding);
         let resolved = ResolvedKeymap::resolve(&overrides);
         assert!(matches!(
             resolved.diagnostic(ShortcutId::TerminalCopy),
