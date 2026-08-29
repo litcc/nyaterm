@@ -11,7 +11,7 @@ pub(super) type DynamicAgentStream = Box<dyn AgentStream + Send + Unpin + 'stati
 pub(super) type DynamicAgentClient = AgentClient<DynamicAgentStream>;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
-// 覆盖一次登录 Shell 查询、失效 Socket 刷新以及 Socket 重试。
+// Covers one login-shell query, stale-socket refresh, and socket retry.
 pub(crate) const AGENT_CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(windows)]
 const WINDOWS_OPENSSH_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
@@ -125,8 +125,9 @@ async fn resolve_environment_path(
         if !missing_cached {
             return Err(anyhow::anyhow!("SSH Agent environment variable is not set"));
         }
-        // Agent 可能在应用启动后才设置变量；不要让 Shell 缓存的缺失标记
-        // 永久阻止后续连接发现新路径。
+        // The agent may be configured after application startup. Do not let a
+        // shell cache's missing marker permanently prevent later connections
+        // from discovering the new path.
         return environment
             .refresh_until(variable, deadline)
             .await
@@ -297,7 +298,7 @@ mod tests {
                 .expect("accept test agent connection")
                 .0
         });
-        let environment = ShellEnvironmentCache::with_shell_path(shell.clone());
+        let environment = ShellEnvironmentCache::with_shell_path_for_test(shell.clone());
 
         let stream = connect_agent_stream_with_environment(&endpoint, Some(environment))
             .await

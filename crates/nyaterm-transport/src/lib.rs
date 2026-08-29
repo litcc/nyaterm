@@ -2,6 +2,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
+use std::path::Path;
 use std::pin::Pin;
 use std::process::Stdio;
 use std::sync::{
@@ -66,7 +67,7 @@ mod trzsz;
 mod zmodem;
 
 pub use environment::{
-    EnvironmentValue, ShellEnvironmentCache, ShellEnvironmentError,
+    EnvironmentSnapshot, EnvironmentValue, ShellEnvironmentCache, ShellEnvironmentError,
     normalize_environment_variable_name,
 };
 pub use session_config::{
@@ -744,7 +745,7 @@ impl SessionManager {
         }
     }
 
-    /// 返回由 SSH 任务共享、仅存在于运行时的 Shell 环境缓存。
+    /// Return the runtime-only shell environment cache shared by SSH tasks.
     pub fn shell_environment(&self) -> Arc<ShellEnvironmentCache> {
         Arc::clone(&self.shell_environment)
     }
@@ -765,7 +766,23 @@ impl SessionManager {
             .map_err(SessionError::OpenPty)?;
 
         let mut command = build_command(&config);
-        configure_environment(&mut command);
+        // Startup asynchronously warms the complete shell environment. Copy
+        // values from the shared snapshot here without starting another shell.
+        // If a terminal is created before warm-up finishes, retain portable-pty's
+        // inherited environment as a non-blocking fallback.
+        let requested_shell = config
+            .shell_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(default_local_shell_path);
+        let shell_snapshot = self
+            .shell_environment
+            .snapshot()
+            .ok()
+            .flatten()
+            .filter(|snapshot| snapshot.matches_shell_path(Some(Path::new(&requested_shell))));
+        configure_environment(&mut command, shell_snapshot.as_deref());
         if let Some(working_dir) = &config.working_dir {
             command.cwd(working_dir);
         }
@@ -3316,9 +3333,10 @@ fn build_command(config: &LocalSessionConfig) -> CommandBuilder {
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
-        .unwrap_or_else(default_shell);
+        .unwrap_or_else(default_local_shell_path);
     let mut command = CommandBuilder::new(&shell);
-    if config.shell_args.is_empty() && cfg!(not(target_os = "windows")) {
+    if config.shell_args.is_empty() {
+        #[cfg(not(windows))]
         if should_use_interactive_login_args(&shell) {
             command.args(["--login", "-i"]);
         }
@@ -3328,7 +3346,23 @@ fn build_command(config: &LocalSessionConfig) -> CommandBuilder {
     command
 }
 
-fn configure_environment(command: &mut CommandBuilder) {
+fn configure_environment(
+    command: &mut CommandBuilder,
+    shell_snapshot: Option<&EnvironmentSnapshot>,
+) {
+    if let Some(shell_snapshot) = shell_snapshot {
+        // Clear portable-pty's inherited process environment only after a shell
+        // query succeeds and can be represented completely. This prevents
+        // variables removed by the shell (especially stale SSH agent paths)
+        // from leaking through, while preserving non-UTF-8 values that may be
+        // omitted by the inherited fallback snapshot.
+        if shell_snapshot.replaces_inherited_environment() {
+            command.env_clear();
+        }
+        for (variable, value) in shell_snapshot.iter() {
+            command.env(variable, value.as_str());
+        }
+    }
     command.env("TERM", "xterm-256color");
     if cfg!(target_os = "macos") {
         command.env("LANG", utf8_env_or("LANG", "en_US.UTF-8"));
@@ -3346,14 +3380,23 @@ fn utf8_env_or(name: &str, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn default_shell() -> String {
-    if cfg!(target_os = "windows") {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    }
+#[cfg(windows)]
+fn default_local_shell_path() -> String {
+    std::env::var("COMSPEC")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| "cmd.exe".to_string())
 }
 
+#[cfg(not(windows))]
+fn default_local_shell_path() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
+#[cfg(not(windows))]
 fn should_use_interactive_login_args(program: &str) -> bool {
     let name = program
         .rsplit(['/', '\\'])
