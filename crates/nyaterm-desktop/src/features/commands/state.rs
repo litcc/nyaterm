@@ -443,12 +443,10 @@ impl CommandFeatureState {
     ) -> bool {
         if field == QuickCommandEditorField::Category {
             let changed = self.apply_quick_editor_category_search(text);
-            if changed {
-                if let Some(editor) = self.quick.editor.draft.as_mut() {
-                    editor.focused_field = field;
-                    editor.error = None;
-                    editor.error_field = None;
-                }
+            if changed && let Some(editor) = self.quick.editor.draft.as_mut() {
+                editor.focused_field = field;
+                editor.error = None;
+                editor.error_field = None;
             }
             return changed;
         }

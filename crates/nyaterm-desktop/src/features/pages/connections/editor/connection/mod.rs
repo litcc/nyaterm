@@ -1886,7 +1886,7 @@ fn connection_editor_group_control(
                         let Some(bounds) = bounds.into_iter().next() else {
                             return;
                         };
-                        _ = app.update(cx, |this, cx| {
+                        app.update(cx, |this, cx| {
                             this.set_connection_group_select_trigger_bounds(bounds, cx);
                         });
                     }

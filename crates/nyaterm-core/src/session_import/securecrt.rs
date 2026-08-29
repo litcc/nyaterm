@@ -74,10 +74,10 @@ fn parse_securecrt_content(content: &str) -> AppResult<Vec<ImportedSession>> {
                 current_value.clear();
             }
             Event::End(e) if e.name().as_ref() == b"key" => {
-                if let Some(frame) = stack.pop() {
-                    if let Some(session) = securecrt_session_from_frame(&frame, &stack) {
-                        sessions.push(session);
-                    }
+                if let Some(frame) = stack.pop()
+                    && let Some(session) = securecrt_session_from_frame(&frame, &stack)
+                {
+                    sessions.push(session);
                 }
             }
             Event::Eof => break,

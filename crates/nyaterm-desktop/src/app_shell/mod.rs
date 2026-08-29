@@ -494,7 +494,7 @@ impl AppShell {
         store_runtime.resume_after_failed_shutdown();
         self.lifecycle = AppShellLifecycle::Ready;
         if let Some(app) = &self.app {
-            let _ = app.update(cx, NyaTermApp::report_shutdown_retry_required);
+            app.update(cx, NyaTermApp::report_shutdown_retry_required);
         }
         cx.notify();
     }

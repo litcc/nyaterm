@@ -152,24 +152,24 @@ fn normalize_termius_indexed_db_path(path: PathBuf) -> PathBuf {
 }
 
 fn default_termius_indexed_db_path() -> PathBuf {
-    if cfg!(target_os = "windows") {
-        if let Some(appdata) = std::env::var_os("APPDATA") {
-            return PathBuf::from(appdata)
-                .join("Termius")
-                .join("IndexedDB")
-                .join("file__0.indexeddb.leveldb");
-        }
+    if cfg!(target_os = "windows")
+        && let Some(appdata) = std::env::var_os("APPDATA")
+    {
+        return PathBuf::from(appdata)
+            .join("Termius")
+            .join("IndexedDB")
+            .join("file__0.indexeddb.leveldb");
     }
 
-    if cfg!(target_os = "macos") {
-        if let Some(home) = dirs::home_dir() {
-            return home
-                .join("Library")
-                .join("Application Support")
-                .join("Termius")
-                .join("IndexedDB")
-                .join("file__0.indexeddb.leveldb");
-        }
+    if cfg!(target_os = "macos")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home
+            .join("Library")
+            .join("Application Support")
+            .join("Termius")
+            .join("IndexedDB")
+            .join("file__0.indexeddb.leveldb");
     }
 
     if let Some(xdg_config_home) = std::env::var_os("XDG_CONFIG_HOME") {
@@ -202,7 +202,7 @@ fn normalize_termius_local_key_bytes(secret: &[u8]) -> AppResult<Zeroizing<[u8; 
         collect_termius_local_key_text_candidates(text, &mut candidates);
     }
 
-    if secret.len() % 2 == 0 {
+    if secret.len().is_multiple_of(2) {
         let utf16: Vec<u16> = secret
             .chunks_exact(2)
             .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
@@ -303,8 +303,10 @@ fn copy_leveldb_dir(source: &Path, target: &Path) -> AppResult<()> {
 }
 
 fn read_copied_leveldb_records(db_path: &Path) -> AppResult<Vec<u8>> {
-    let mut options = rusty_leveldb::Options::default();
-    options.create_if_missing = false;
+    let options = rusty_leveldb::Options {
+        create_if_missing: false,
+        ..rusty_leveldb::Options::default()
+    };
     let mut db = rusty_leveldb::DB::open(db_path, options)
         .map_err(|error| AppError::Config(format!("Cannot open Termius IndexedDB: {error}")))?;
     let mut iter = db
@@ -329,12 +331,12 @@ fn parse_tagged_values(bytes: &[u8]) -> Vec<TermiusTaggedValue> {
     let mut index = 0;
 
     while index < bytes.len() {
-        if bytes[index] == b'I' {
-            if let Some((value, consumed)) = read_v8_signed_integer(&bytes[index + 1..]) {
-                strings.push(TermiusTaggedValue::Integer(value));
-                index += 1 + consumed;
-                continue;
-            }
+        if bytes[index] == b'I'
+            && let Some((value, consumed)) = read_v8_signed_integer(&bytes[index + 1..])
+        {
+            strings.push(TermiusTaggedValue::Integer(value));
+            index += 1 + consumed;
+            continue;
         }
 
         if bytes[index] != b'"' {
@@ -439,10 +441,9 @@ fn collect_termius_store(strings: &[TermiusTaggedValue]) -> TermiusRawStore {
                 .get(index + 1)
                 .and_then(TermiusTaggedValue::as_str)
                 .is_some_and(|uri| uri.contains("/terminal/ssh/config/"))
+            && let Some(config) = collect_ssh_config_record(strings, index)
         {
-            if let Some(config) = collect_ssh_config_record(strings, index) {
-                store.ssh_configs.push(config);
-            }
+            store.ssh_configs.push(config);
         }
 
         if !is_record_marker(strings, index) {

@@ -89,7 +89,7 @@ pub(super) fn connection_editor_telnet_section(
         editor,
         fields,
     } = section;
-    let auth_values = vec!["none".to_string(), "password".to_string()];
+    let auth_values = ["none".to_string(), "password".to_string()];
     let auth_tabs = NyaTabs::new("connection-telnet-auth-tabs")
         .items([
             NyaTabItem::new(t!("dialog.noAuthentication")),

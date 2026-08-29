@@ -1436,7 +1436,7 @@ mod tests {
         let workspace = [KeyContext::parse(WORKSPACE_KEY_CONTEXT).unwrap()];
         assert!(
             keymap
-                .bindings_for_input(&[open_settings.clone()], &workspace)
+                .bindings_for_input(std::slice::from_ref(&open_settings), &workspace)
                 .0[0]
                 .action()
                 .partial_eq(&OpenSettings)

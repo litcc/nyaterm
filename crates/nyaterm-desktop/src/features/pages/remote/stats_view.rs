@@ -547,13 +547,15 @@ fn rich_gpu_panel(
             palette,
             search_input,
             total_processes,
-            visible_processes
-                .into_iter()
-                .map(|process| gpu_process_row(palette, &process))
-                .collect(),
-            pad_top,
-            pad_bottom,
-            list_height,
+            AcceleratorProcessWindow {
+                rows: visible_processes
+                    .into_iter()
+                    .map(|process| gpu_process_row(palette, &process))
+                    .collect(),
+                pad_top,
+                pad_bottom,
+                list_height,
+            },
             if normalized_query.is_empty() {
                 t!("gpuMonitor.noProcesses")
             } else {
@@ -637,13 +639,15 @@ fn rich_npu_panel(
             palette,
             search_input,
             total_processes,
-            visible_processes
-                .into_iter()
-                .map(|process| npu_process_row(palette, &process))
-                .collect(),
-            pad_top,
-            pad_bottom,
-            list_height,
+            AcceleratorProcessWindow {
+                rows: visible_processes
+                    .into_iter()
+                    .map(|process| npu_process_row(palette, &process))
+                    .collect(),
+                pad_top,
+                pad_bottom,
+                list_height,
+            },
             if normalized_query.is_empty() {
                 t!("ascendNpuMonitor.noProcesses")
             } else {
@@ -713,90 +717,91 @@ fn gpu_card(
     accelerator_device_card(
         palette,
         severity,
-        expanded,
         key.clone(),
         "gpu-card",
         cx.listener(move |panel, _, _, cx| {
             let key = key.clone();
             panel.with_app(cx, move |app, cx| app.toggle_gpu_device_expanded(key, cx));
         }),
-        div()
-            .flex()
-            .items_start()
-            .justify_between()
-            .gap_2()
-            .child(
-                div()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(accelerator_badge(
-                        palette,
-                        format!("GPU #{}", gpu.index),
-                        true,
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .font_family(gpui_code_font_family())
-                            .font_weight(FontWeight(700.))
-                            .text_size(px(13.))
-                            .text_color(rgb(palette.text))
-                            .child(truncate_preview(
-                                if gpu.name.trim().is_empty() {
-                                    t!("gpuMonitor.unknownGpu")
-                                } else {
-                                    Cow::Borrowed(gpu.name.as_str())
-                                }
-                                .as_ref(),
-                                28,
-                            )),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(accelerator_badge(
-                        palette,
-                        if gpu.pstate.trim().is_empty() {
-                            "-".to_string()
-                        } else {
-                            gpu.pstate.clone()
-                        },
-                        false,
-                    ))
-                    .child(accelerator_chevron(palette, expanded)),
-            ),
-        div()
-            .mt_2()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(accelerator_metric_bar(
-                palette,
-                t!("gpuMonitor.gpuUtilization"),
-                gpu_utilization,
-                format_percent(gpu_utilization),
-            ))
-            .child(accelerator_metric_bar(
-                palette,
-                t!("gpuMonitor.memoryUtilization"),
-                memory_percent,
-                format!(
-                    "{} / {}",
-                    format_memory_mb(gpu.memory_used_mb),
-                    format_memory_mb(gpu.memory_total_mb)
+        AcceleratorDeviceCardContent {
+            header: div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(accelerator_badge(
+                            palette,
+                            format!("GPU #{}", gpu.index),
+                            true,
+                        ))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .font_family(gpui_code_font_family())
+                                .font_weight(FontWeight(700.))
+                                .text_size(px(13.))
+                                .text_color(rgb(palette.text))
+                                .child(truncate_preview(
+                                    if gpu.name.trim().is_empty() {
+                                        t!("gpuMonitor.unknownGpu")
+                                    } else {
+                                        Cow::Borrowed(gpu.name.as_str())
+                                    }
+                                    .as_ref(),
+                                    28,
+                                )),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(accelerator_badge(
+                            palette,
+                            if gpu.pstate.trim().is_empty() {
+                                "-".to_string()
+                            } else {
+                                gpu.pstate.clone()
+                            },
+                            false,
+                        ))
+                        .child(accelerator_chevron(palette, expanded)),
                 ),
-            )),
-        if expanded {
-            gpu_details(palette, gpu).into_any_element()
-        } else {
-            div().into_any_element()
+            metrics: div()
+                .mt_2()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(accelerator_metric_bar(
+                    palette,
+                    t!("gpuMonitor.gpuUtilization"),
+                    gpu_utilization,
+                    format_percent(gpu_utilization),
+                ))
+                .child(accelerator_metric_bar(
+                    palette,
+                    t!("gpuMonitor.memoryUtilization"),
+                    memory_percent,
+                    format!(
+                        "{} / {}",
+                        format_memory_mb(gpu.memory_used_mb),
+                        format_memory_mb(gpu.memory_total_mb)
+                    ),
+                )),
+            details: if expanded {
+                gpu_details(palette, gpu).into_any_element()
+            } else {
+                div().into_any_element()
+            },
         },
     )
 }
@@ -814,109 +819,118 @@ fn npu_card(
     accelerator_device_card(
         palette,
         severity,
-        expanded,
         key.clone(),
         "npu-card",
         cx.listener(move |panel, _, _, cx| {
             let key = key.clone();
             panel.with_app(cx, move |app, cx| app.toggle_npu_device_expanded(key, cx));
         }),
-        div()
-            .flex()
-            .items_start()
-            .justify_between()
-            .gap_2()
-            .child(
-                div()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(accelerator_badge(
-                        palette,
-                        format!("NPU #{}:{}", npu.index, npu.chip_id),
-                        true,
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .font_family(gpui_code_font_family())
-                            .font_weight(FontWeight(700.))
-                            .text_size(px(13.))
-                            .text_color(rgb(palette.text))
-                            .child(truncate_preview(
-                                if npu.name.trim().is_empty() {
-                                    t!("ascendNpuMonitor.unknownNpu")
-                                } else {
-                                    Cow::Borrowed(npu.name.as_str())
-                                }
-                                .as_ref(),
-                                28,
-                            )),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(accelerator_badge(
-                        palette,
-                        if npu.health.trim().is_empty() {
-                            "-".to_string()
-                        } else {
-                            npu.health.clone()
-                        },
-                        false,
-                    ))
-                    .child(accelerator_chevron(palette, expanded)),
-            ),
-        div()
-            .mt_2()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(accelerator_metric_bar(
-                palette,
-                t!("ascendNpuMonitor.aicoreUtilization"),
-                aicore_utilization,
-                format_optional_percent(npu.utilization_aicore_percent),
-            ))
-            .child(accelerator_metric_bar(
-                palette,
-                t!("ascendNpuMonitor.memoryUtilization"),
-                memory_percent,
-                if npu.memory_total_mb > 0 {
-                    format!(
-                        "{} / {}",
-                        format_memory_mb(npu.memory_used_mb),
-                        format_memory_mb(npu.memory_total_mb)
-                    )
-                } else {
-                    "-".to_string()
-                },
-            )),
-        if expanded {
-            npu_details(palette, npu).into_any_element()
-        } else {
-            div().into_any_element()
+        AcceleratorDeviceCardContent {
+            header: div()
+                .flex()
+                .items_start()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(accelerator_badge(
+                            palette,
+                            format!("NPU #{}:{}", npu.index, npu.chip_id),
+                            true,
+                        ))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .font_family(gpui_code_font_family())
+                                .font_weight(FontWeight(700.))
+                                .text_size(px(13.))
+                                .text_color(rgb(palette.text))
+                                .child(truncate_preview(
+                                    if npu.name.trim().is_empty() {
+                                        t!("ascendNpuMonitor.unknownNpu")
+                                    } else {
+                                        Cow::Borrowed(npu.name.as_str())
+                                    }
+                                    .as_ref(),
+                                    28,
+                                )),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(accelerator_badge(
+                            palette,
+                            if npu.health.trim().is_empty() {
+                                "-".to_string()
+                            } else {
+                                npu.health.clone()
+                            },
+                            false,
+                        ))
+                        .child(accelerator_chevron(palette, expanded)),
+                ),
+            metrics: div()
+                .mt_2()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(accelerator_metric_bar(
+                    palette,
+                    t!("ascendNpuMonitor.aicoreUtilization"),
+                    aicore_utilization,
+                    format_optional_percent(npu.utilization_aicore_percent),
+                ))
+                .child(accelerator_metric_bar(
+                    palette,
+                    t!("ascendNpuMonitor.memoryUtilization"),
+                    memory_percent,
+                    if npu.memory_total_mb > 0 {
+                        format!(
+                            "{} / {}",
+                            format_memory_mb(npu.memory_used_mb),
+                            format_memory_mb(npu.memory_total_mb)
+                        )
+                    } else {
+                        "-".to_string()
+                    },
+                )),
+            details: if expanded {
+                npu_details(palette, npu).into_any_element()
+            } else {
+                div().into_any_element()
+            },
         },
     )
+}
+
+struct AcceleratorDeviceCardContent {
+    header: gpui::Div,
+    metrics: gpui::Div,
+    details: gpui::AnyElement,
 }
 
 fn accelerator_device_card(
     palette: crate::theme::ThemePalette,
     severity_percent: f64,
-    _expanded: bool,
     key: String,
     id_prefix: &'static str,
     on_toggle: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
-    header: gpui::Div,
-    metrics: gpui::Div,
-    details: gpui::AnyElement,
+    content: AcceleratorDeviceCardContent,
 ) -> impl IntoElement {
+    let AcceleratorDeviceCardContent {
+        header,
+        metrics,
+        details,
+    } = content;
     let accent = accelerator_accent_color(palette, severity_percent);
     div()
         .id(SharedString::from(format!("{id_prefix}-{key}")))
@@ -1142,17 +1156,27 @@ fn accelerator_detail_grid(
     grid
 }
 
-fn accelerator_process_section(
-    palette: crate::theme::ThemePalette,
-    search_input: gpui::AnyElement,
-    total_processes: usize,
+struct AcceleratorProcessWindow {
     rows: Vec<gpui::Div>,
     pad_top: f32,
     pad_bottom: f32,
     list_height: f32,
+}
+
+fn accelerator_process_section(
+    palette: crate::theme::ThemePalette,
+    search_input: gpui::AnyElement,
+    total_processes: usize,
+    window: AcceleratorProcessWindow,
     empty_message: impl Into<SharedString>,
     on_scroll: impl Fn(&ScrollWheelEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 ) -> gpui::Div {
+    let AcceleratorProcessWindow {
+        rows,
+        pad_top,
+        pad_bottom,
+        list_height,
+    } = window;
     let empty_message: SharedString = empty_message.into();
     let mut list_rows = div().flex().flex_col();
     if total_processes == 0 {

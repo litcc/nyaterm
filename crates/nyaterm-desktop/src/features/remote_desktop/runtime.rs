@@ -797,10 +797,9 @@ impl NyaTermApp {
         key: &str,
         key_char: Option<&str>,
         repeat: bool,
-        control: bool,
-        alt: bool,
-        platform: bool,
+        modifiers: (bool, bool, bool),
     ) -> bool {
+        let (control, alt, platform) = modifiers;
         if !self
             .remote_desktop
             .sessions

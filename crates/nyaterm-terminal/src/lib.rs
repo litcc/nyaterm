@@ -416,10 +416,11 @@ impl TerminalSearchCache {
         &mut self,
         key: TerminalSearchCacheKey,
     ) -> Result<&mut RegexSearch, TerminalSearchError> {
-        if self.entries.len() >= TERMINAL_SEARCH_CACHE_LIMIT && !self.entries.contains_key(&key) {
-            if let Some(old_key) = self.entries.keys().next().cloned() {
-                self.entries.remove(&old_key);
-            }
+        if self.entries.len() >= TERMINAL_SEARCH_CACHE_LIMIT
+            && !self.entries.contains_key(&key)
+            && let Some(old_key) = self.entries.keys().next().cloned()
+        {
+            self.entries.remove(&old_key);
         }
         if !self.entries.contains_key(&key) {
             let pattern = terminal_search_regex_pattern(&key);
@@ -1806,13 +1807,15 @@ fn snapshot_window_from_term(
                 term,
                 line_in_grid,
                 cols,
-                revision,
-                signature,
-                timestamp_ms,
-                wrapped,
-                command_mark,
-                line_id,
-                shell_input,
+                SnapshotRowMetadata {
+                    revision,
+                    signature,
+                    timestamp_ms,
+                    wrapped,
+                    command_mark,
+                    line_id,
+                    shell_input,
+                },
             ));
             row_cache.entries.insert(
                 key,
@@ -1875,10 +1878,7 @@ fn snapshot_window_from_term(
     (snapshot, stats)
 }
 
-fn snapshot_row_from_term(
-    term: &Term<NyaTermEventProxy>,
-    line: Option<Line>,
-    cols: usize,
+struct SnapshotRowMetadata {
     revision: u64,
     signature: u64,
     timestamp_ms: Option<u64>,
@@ -1886,7 +1886,23 @@ fn snapshot_row_from_term(
     command_mark: Option<ShellCommandMark>,
     line_id: Option<TerminalLineId>,
     shell_input: Option<ShellInputLineKind>,
+}
+
+fn snapshot_row_from_term(
+    term: &Term<NyaTermEventProxy>,
+    line: Option<Line>,
+    cols: usize,
+    metadata: SnapshotRowMetadata,
 ) -> TerminalSnapshotRow {
+    let SnapshotRowMetadata {
+        revision,
+        signature,
+        timestamp_ms,
+        wrapped,
+        command_mark,
+        line_id,
+        shell_input,
+    } = metadata;
     let mut hyperlink_intern = HashMap::new();
     let cells = if let Some(line) = line {
         (0..cols)
@@ -2469,7 +2485,7 @@ impl NyaTermSidecar {
         mark: char,
         exit_code: Option<i32>,
     ) -> Option<ShellBoundaryKind> {
-        let boundary = match mark {
+        match mark {
             'A' | 'B' => {
                 self.shell_integration_enabled = true;
                 if mark == 'B' {
@@ -2492,8 +2508,7 @@ impl NyaTermSidecar {
                 Some(ShellBoundaryKind::Finished { exit_code })
             }
             _ => None,
-        };
-        boundary
+        }
     }
 }
 

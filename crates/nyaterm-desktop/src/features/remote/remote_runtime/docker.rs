@@ -51,9 +51,9 @@ impl NyaTermApp {
         self.remote_ops.set_docker_status("loading Docker overview");
         std::thread::spawn(move || {
             let result = (|| {
-                Ok(DockerService::with_multiplex(config, multiplex)?
+                DockerService::with_multiplex(config, multiplex)?
                     .overview()
-                    .map(DockerJobOutput::Overview)?)
+                    .map(DockerJobOutput::Overview)
             })()
             .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(DockerJobResult {
@@ -135,12 +135,12 @@ impl NyaTermApp {
         );
         std::thread::spawn(move || {
             let result = (|| {
-                Ok(DockerService::with_multiplex(config, multiplex)?
+                DockerService::with_multiplex(config, multiplex)?
                     .container_details(&container_id)
                     .map(|details| DockerJobOutput::Details {
                         container_id,
                         details,
-                    })?)
+                    })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(DockerJobResult {
@@ -277,13 +277,13 @@ impl NyaTermApp {
         self.remote_ops.clear_compose_service_error(&key);
         std::thread::spawn(move || {
             let result = (|| {
-                Ok(DockerService::with_multiplex(config, multiplex)?
+                DockerService::with_multiplex(config, multiplex)?
                     .compose_services(&project_name, config_files.as_deref())
                     .map(|services| DockerJobOutput::ComposeServices {
                         key,
                         project_name,
                         services,
-                    })?)
+                    })
             })()
             .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(DockerJobResult {

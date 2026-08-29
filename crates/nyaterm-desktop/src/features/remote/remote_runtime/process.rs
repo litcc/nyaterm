@@ -172,9 +172,9 @@ impl NyaTermApp {
             .set_process_status("listing remote processes");
         std::thread::spawn(move || {
             let result = (|| {
-                Ok(SshProcessService::with_multiplex(config, multiplex)?
+                SshProcessService::with_multiplex(config, multiplex)?
                     .list_processes()
-                    .map(ProcessJobOutput::Listed)?)
+                    .map(ProcessJobOutput::Listed)
             })()
             .map_err(|error: anyhow::Error| error.to_string());
             let _ = ticket.tx.unbounded_send(ProcessJobResult {

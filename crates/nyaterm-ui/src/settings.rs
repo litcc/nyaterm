@@ -219,16 +219,16 @@ impl RenderOnce for NyaSettingsLayout {
             .flex_1()
             .min_h(px(0.))
             .size_full()
-            .child(settings_sidebar(
+            .child(settings_sidebar(SettingsSidebarParams {
                 palette,
                 sidebar_width,
                 compact,
-                self.sidebar_title,
-                self.groups,
+                sidebar_title: self.sidebar_title,
+                groups: self.groups,
                 active_item_id,
                 on_select,
                 on_toggle_group,
-            ))
+            }))
             .child(settings_content_panel(
                 palette,
                 compact,
@@ -250,7 +250,7 @@ fn active_item_title(
         .map(|item| item.label.clone())
 }
 
-fn settings_sidebar(
+struct SettingsSidebarParams {
     palette: ThemePalette,
     sidebar_width: f32,
     compact: bool,
@@ -259,7 +259,19 @@ fn settings_sidebar(
     active_item_id: SharedString,
     on_select: Option<NyaSettingsSelectHandler>,
     on_toggle_group: Option<NyaSettingsGroupToggleHandler>,
-) -> impl IntoElement {
+}
+
+fn settings_sidebar(params: SettingsSidebarParams) -> impl IntoElement {
+    let SettingsSidebarParams {
+        palette,
+        sidebar_width,
+        compact,
+        sidebar_title,
+        groups,
+        active_item_id,
+        on_select,
+        on_toggle_group,
+    } = params;
     div()
         .w(px(sidebar_width))
         .flex_none()

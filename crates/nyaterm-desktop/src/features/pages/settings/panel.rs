@@ -693,9 +693,7 @@ impl SettingsPanel {
         id: I,
         label: L,
         desc: Option<SharedString>,
-        options: Vec<NyaSelectOption>,
-        selected_value: S,
-        disabled: bool,
+        select: (Vec<NyaSelectOption>, S, bool),
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<I, L, S>
     where
@@ -703,6 +701,7 @@ impl SettingsPanel {
         L: Into<SharedString>,
         S: Into<String>,
     {
+        let (options, selected_value, disabled) = select;
         let palette = self.theme_palette();
         div()
             .flex()
@@ -1066,7 +1065,7 @@ impl SettingsPanel {
         .wide_breakpoint(1024.)
         .on_select(move |item_id, _, cx| {
             if let Some(tab) = settings_tab_from_nav_id(item_id.as_ref()) {
-                let _ = panel.update(cx, |panel, cx| {
+                panel.update(cx, |panel, cx| {
                     panel.with_app(cx, |app, cx| {
                         if tab == SettingsTab::Appearance {
                             app.ensure_appearance_font_options(cx);
@@ -1078,7 +1077,7 @@ impl SettingsPanel {
             }
         })
         .on_toggle_group(move |group_id, _, cx| {
-            let _ = toggle_panel.update(cx, |panel, cx| {
+            toggle_panel.update(cx, |panel, cx| {
                 panel.with_app(cx, |app, _| {
                     app.shell.toggle_settings_group(group_id.to_string());
                 });

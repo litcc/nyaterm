@@ -185,7 +185,7 @@ pub fn decode_activation_request(
         let arg = match encoding {
             0 => RawActivationArg::Bytes(bytes.to_vec()),
             1 => {
-                if byte_len % 2 != 0 {
+                if !byte_len.is_multiple_of(2) {
                     return Err(ActivationProtocolError::InvalidWideArgument);
                 }
                 RawActivationArg::Wide(

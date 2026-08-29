@@ -246,9 +246,11 @@ impl NyaTermApp {
                     &event.keystroke.key,
                     event.keystroke.key_char.as_deref(),
                     event.is_held,
-                    event.keystroke.modifiers.control,
-                    event.keystroke.modifiers.alt,
-                    event.keystroke.modifiers.platform,
+                    (
+                        event.keystroke.modifiers.control,
+                        event.keystroke.modifiers.alt,
+                        event.keystroke.modifiers.platform,
+                    ),
                 ) {
                     cx.stop_propagation();
                     this.mark_user_activity();

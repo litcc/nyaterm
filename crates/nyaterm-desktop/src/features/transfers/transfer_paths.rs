@@ -23,6 +23,15 @@ struct PendingBrowserUpload {
     path_options: SftpPathTransferOptions,
 }
 
+struct BrowserUploadRequest {
+    paths: Vec<PathBuf>,
+    remote_path: String,
+    session_id: Option<String>,
+    config: SshSessionConfig,
+    path_options: SftpPathTransferOptions,
+    fallback_name: &'static str,
+}
+
 impl NyaTermApp {
     pub(in crate::features) fn prompt_transfer_download_path_setting(
         &mut self,
@@ -458,12 +467,14 @@ impl NyaTermApp {
                     TransferPathPromptKind::DownloadDirectory => unreachable!(),
                 };
                 self.enqueue_transfer_browser_upload_paths(
-                    paths,
-                    remote_path,
-                    session_id,
-                    config,
-                    path_options,
-                    fallback,
+                    BrowserUploadRequest {
+                        paths,
+                        remote_path,
+                        session_id,
+                        config,
+                        path_options,
+                        fallback_name: fallback,
+                    },
                     cx,
                 );
             }
@@ -529,26 +540,31 @@ impl NyaTermApp {
         );
         let remote_path = self.normalized_transfer_browser_upload_target();
         self.enqueue_transfer_browser_upload_paths(
-            paths,
-            remote_path,
-            session_id,
-            config,
-            path_options,
-            "uploaded_item",
+            BrowserUploadRequest {
+                paths,
+                remote_path,
+                session_id,
+                config,
+                path_options,
+                fallback_name: "uploaded_item",
+            },
             cx,
         );
     }
 
     fn enqueue_transfer_browser_upload_paths(
         &mut self,
-        paths: Vec<PathBuf>,
-        remote_path: String,
-        session_id: Option<String>,
-        config: SshSessionConfig,
-        path_options: SftpPathTransferOptions,
-        fallback_name: &str,
+        request: BrowserUploadRequest,
         cx: &mut Context<Self>,
     ) {
+        let BrowserUploadRequest {
+            paths,
+            remote_path,
+            session_id,
+            config,
+            path_options,
+            fallback_name,
+        } = request;
         if paths.is_empty() {
             return;
         }

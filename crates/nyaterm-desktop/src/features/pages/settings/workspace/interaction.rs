@@ -263,12 +263,14 @@ impl SettingsPanel {
                     "settings.interaction.default-encoding",
                     t!("settings.defaultEncoding"),
                     Some(SharedString::from(t!("settings.defaultEncodingDesc"))),
-                    vec![
-                        NyaSelectOption::new("UTF-8", "UTF-8"),
-                        NyaSelectOption::new("GBK", "GBK"),
-                    ],
-                    encoding,
-                    false,
+                    (
+                        vec![
+                            NyaSelectOption::new("UTF-8", "UTF-8"),
+                            NyaSelectOption::new("GBK", "GBK"),
+                        ],
+                        encoding,
+                        false,
+                    ),
                     cx,
                 ),
             ))
@@ -295,9 +297,7 @@ impl SettingsPanel {
             id,
             label,
             Some(SharedString::from(description)),
-            options,
-            selected,
-            false,
+            (options, selected, false),
             cx,
         )
     }

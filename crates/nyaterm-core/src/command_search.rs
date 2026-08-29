@@ -92,7 +92,7 @@ pub fn manual_empty_command_suggestions(
         .iter()
         .filter(|command| !command.command.trim().is_empty())
         .collect::<Vec<_>>();
-    quick.sort_by(|left, right| quick_command_rank(right).cmp(&quick_command_rank(left)));
+    quick.sort_by_key(|command| std::cmp::Reverse(quick_command_rank(command)));
     results.extend(
         quick
             .into_iter()

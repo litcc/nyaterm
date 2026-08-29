@@ -683,6 +683,6 @@ mod tests {
 
     #[test]
     fn number_input_box_uses_stable_nonzero_width() {
-        assert!(ORDINARY_NUMBER_INPUT_WIDTH_PX >= 120.);
+        const { assert!(ORDINARY_NUMBER_INPUT_WIDTH_PX >= 120.) };
     }
 }

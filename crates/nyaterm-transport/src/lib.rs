@@ -550,7 +550,7 @@ pub struct SessionManager {
 enum ManagedSession {
     Local(LocalPtyTransport),
     Ssh(SshChannelTransport),
-    Tcp(TelnetTransport),
+    Tcp(Box<TelnetTransport>),
     Serial(SerialTransport),
 }
 
@@ -885,7 +885,7 @@ impl SessionManager {
         self.sessions
             .lock()
             .map_err(|_| SessionError::LockPoisoned)?
-            .insert(session_id, ManagedSession::Tcp(session));
+            .insert(session_id, ManagedSession::Tcp(Box::new(session)));
 
         Ok(info)
     }
@@ -1244,11 +1244,11 @@ impl TerminalTransport for TelnetTransport {
         let (data, visible_echo) = if self.config.local_line_edit {
             edit_telnet_line_input(&data, &mut self.local_line_buffer, &self.config)
         } else {
-            let visible_echo = self
-                .config
-                .local_echo
-                .then(|| data.clone())
-                .unwrap_or_default();
+            let visible_echo = if self.config.local_echo {
+                data.clone()
+            } else {
+                Vec::new()
+            };
             (data, visible_echo)
         };
         let data = normalize_telnet_input(&data, &self.config);
@@ -2133,11 +2133,11 @@ async fn open_ssh_shell_from_pending(
         SshShellHandle::Dedicated(handle) => handle.channel_open_session().await?,
         SshShellHandle::Multiplexed(handle) => handle.lock().await.channel_open_session().await?,
     };
-    if effective_agent_forwarding_config(config).is_some_and(|forwarding| forwarding.enabled) {
-        if let Err(error) = channel.agent_forward(false).await {
-            let _ = channel.close().await;
-            return Err(error.into());
-        }
+    if effective_agent_forwarding_config(config).is_some_and(|forwarding| forwarding.enabled)
+        && let Err(error) = channel.agent_forward(false).await
+    {
+        let _ = channel.close().await;
+        return Err(error.into());
     }
     tracing::debug!(
         stage = "interactive-channel",

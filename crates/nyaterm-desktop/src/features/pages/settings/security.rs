@@ -146,13 +146,15 @@ impl SettingsPanel {
                     "settings.security.host-key-policy",
                     host_key_label,
                     Some(SharedString::from(host_key_desc)),
-                    vec![
-                        NyaSelectOption::new("strict", t!("settings.hostKeyStrict")),
-                        NyaSelectOption::new("prompt", t!("settings.hostKeyPrompt")),
-                        NyaSelectOption::new("accept", t!("settings.hostKeyAccept")),
-                    ],
-                    host_key_policy,
-                    false,
+                    (
+                        vec![
+                            NyaSelectOption::new("strict", t!("settings.hostKeyStrict")),
+                            NyaSelectOption::new("prompt", t!("settings.hostKeyPrompt")),
+                            NyaSelectOption::new("accept", t!("settings.hostKeyAccept")),
+                        ],
+                        host_key_policy,
+                        false,
+                    ),
                     cx,
                 ),
             ))

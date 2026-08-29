@@ -77,12 +77,14 @@ impl SettingsPanel {
                     "settings.translation.target-language",
                     target_language_label,
                     Some(target_language_desc.into()),
-                    translation_target_languages()
-                        .iter()
-                        .map(|(code, label)| NyaSelectOption::new(*code, *label))
-                        .collect(),
-                    translation_settings.target_language.clone(),
-                    false,
+                    (
+                        translation_target_languages()
+                            .iter()
+                            .map(|(code, label)| NyaSelectOption::new(*code, *label))
+                            .collect(),
+                        translation_settings.target_language.clone(),
+                        false,
+                    ),
                     cx,
                 ),
             ))

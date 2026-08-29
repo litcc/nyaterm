@@ -2035,13 +2035,15 @@ impl SftpService {
                     let bytes = if metadata.is_dir() {
                         upload_local_directory(
                             Arc::clone(&sftp),
-                            &codec,
-                            &config,
-                            multiplex.as_ref(),
                             &local_path,
                             &remote_target,
-                            &control,
-                            &path_options,
+                            LocalDirectoryUploadContext {
+                                codec: &codec,
+                                config: &config,
+                                multiplex: multiplex.as_ref(),
+                                control: &control,
+                                path_options: &path_options,
+                            },
                             &mut progress,
                         )
                         .await?
@@ -2642,43 +2644,37 @@ struct LocalDirectoryUploadEntry {
     size: u64,
 }
 
+struct LocalDirectoryUploadContext<'a> {
+    codec: &'a SftpPathCodec,
+    config: &'a SshSessionConfig,
+    multiplex: Option<&'a SshMultiplexHandle>,
+    control: &'a SftpTransferControl,
+    path_options: &'a SftpPathTransferOptions,
+}
+
 async fn upload_local_directory<F>(
     sftp: Arc<SftpSession>,
-    codec: &SftpPathCodec,
-    config: &SshSessionConfig,
-    multiplex: Option<&SshMultiplexHandle>,
     local_path: &Path,
     remote_path: &str,
-    control: &SftpTransferControl,
-    path_options: &SftpPathTransferOptions,
+    context: LocalDirectoryUploadContext<'_>,
     progress: &mut F,
 ) -> anyhow::Result<u64>
 where
     F: FnMut(SftpTransferProgress) + Send,
 {
-    control.wait_if_paused().await?;
+    context.control.wait_if_paused().await?;
     let max_open_handles = sftp.max_open_handles();
-    let inventory = collect_local_directory_upload_inventory(local_path, control).await?;
+    let inventory = collect_local_directory_upload_inventory(local_path, context.control).await?;
     let entries = plan_local_directory_upload_entries(
         &sftp,
-        codec,
+        context.codec,
         remote_path,
         inventory,
-        control,
-        path_options,
+        context.control,
+        context.path_options,
     )
     .await?;
-    upload_local_directory_entries(
-        config,
-        multiplex,
-        *codec,
-        entries,
-        max_open_handles,
-        control,
-        path_options,
-        progress,
-    )
-    .await
+    upload_local_directory_entries(context, entries, max_open_handles, progress).await
 }
 
 async fn collect_local_directory_upload_inventory(
@@ -2809,13 +2805,9 @@ async fn plan_local_directory_upload_entries(
 }
 
 async fn upload_local_directory_entries<F>(
-    config: &SshSessionConfig,
-    multiplex: Option<&SshMultiplexHandle>,
-    codec: SftpPathCodec,
+    context: LocalDirectoryUploadContext<'_>,
     entries: Vec<LocalDirectoryUploadEntry>,
     max_open_handles: Option<u64>,
-    control: &SftpTransferControl,
-    path_options: &SftpPathTransferOptions,
     progress: &mut F,
 ) -> anyhow::Result<u64>
 where
@@ -2825,20 +2817,22 @@ where
     let expected_bytes = entries
         .iter()
         .fold(0_u64, |total, entry| total.saturating_add(entry.size));
-    let concurrency = sftp_directory_concurrency(max_open_handles, path_options.transfer_options());
+    let concurrency =
+        sftp_directory_concurrency(max_open_handles, context.path_options.transfer_options());
     let worker_count = directory_upload_worker_count(entries.len(), concurrency);
     if worker_count == 0 {
         return Ok(0);
     }
     let pool = SftpSessionPool::open(
-        config,
-        multiplex,
+        context.config,
+        context.multiplex,
         concurrency.session_pool_size,
-        sftp_client_config_for_options(path_options.transfer_options()),
+        sftp_client_config_for_options(context.path_options.transfer_options()),
     )
     .await?;
 
     let queue = Arc::new(StdMutex::new(VecDeque::from(entries)));
+    let codec = *context.codec;
     let bytes_transferred = Arc::new(AtomicU64::new(0));
     let item_count_completed = Arc::new(AtomicU64::new(0));
     let large_lane = Arc::new(Semaphore::new(concurrency.large_file_concurrency));
@@ -2848,8 +2842,8 @@ where
     for worker_index in 0..worker_count {
         let worker_sftp = pool.session_for(worker_index);
         let worker_queue = Arc::clone(&queue);
-        let worker_control = control.clone();
-        let worker_options = path_options.transfer_options().clone();
+        let worker_control = context.control.clone();
+        let worker_options = context.path_options.transfer_options().clone();
         let worker_bytes_transferred = Arc::clone(&bytes_transferred);
         let worker_item_count_completed = Arc::clone(&item_count_completed);
         let worker_large_lane = Arc::clone(&large_lane);
@@ -2931,10 +2925,10 @@ where
             _ = watchdog.tick() => {
                 let current_snapshot =
                     directory_upload_progress_snapshot(&bytes_transferred, &item_count_completed);
-                if control.is_paused() {
+                if context.control.is_paused() {
                     last_progress_snapshot = current_snapshot;
                     last_progress_at = Instant::now();
-                } else if control.is_cancelled() {
+                } else if context.control.is_cancelled() {
                     workers.abort_all();
                     return Err(anyhow::anyhow!(SFTP_TRANSFER_CANCELLED));
                 } else if current_snapshot != last_progress_snapshot {

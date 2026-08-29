@@ -603,7 +603,7 @@ impl NyaTermApp {
         }
 
         let open_ids = self.side_open_panel_ids(side);
-        let stack = if open_ids.is_empty() {
+        if open_ids.is_empty() {
             let fallback = match side {
                 PanelSide::Left => self.current_left_panel(),
                 PanelSide::Right => self.current_right_panel(),
@@ -670,9 +670,7 @@ impl NyaTermApp {
                 }
             }
             stack
-        };
-
-        stack
+        }
     }
 
     fn single_side_panel(

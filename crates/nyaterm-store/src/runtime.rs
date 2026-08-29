@@ -583,7 +583,10 @@ fn store_worker(config: StoreConfig, receiver: mpsc::Receiver<WorkerMessage>) {
     let mut barrier_failures = Vec::new();
     while let Ok(message) = receiver.recv() {
         match message {
-            WorkerMessage::Execute { domain, job } if domain == StoreDomain::Barrier => {
+            WorkerMessage::Execute {
+                domain: StoreDomain::Barrier,
+                job,
+            } => {
                 let aggregate = aggregate_barrier_failures(&barrier_failures);
                 if let Some(error) = aggregate.as_ref() {
                     job(Err(error));

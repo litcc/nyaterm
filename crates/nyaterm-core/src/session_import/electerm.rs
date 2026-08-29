@@ -156,10 +156,10 @@ fn prepare_electerm_bookmark(
         .get(&bookmark.id)
         .and_then(|group_id| electerm_group_path(group_id, groups_by_id));
 
-    if let Some(path) = &group_path {
-        if !groups.contains(path) {
-            groups.push(path.clone());
-        }
+    if let Some(path) = &group_path
+        && !groups.contains(path)
+    {
+        groups.push(path.clone());
     }
 
     let auth_mode = if bookmark.auth_type.trim().eq_ignore_ascii_case("password") {

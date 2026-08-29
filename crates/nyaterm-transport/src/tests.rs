@@ -1190,7 +1190,7 @@ fn ssh_osc_stripper_extracts_cwd_and_command_without_leaking_private_markers() {
     let mut stripper = super::OscStripper::new(&ready, legacy.as_deref());
     let command = base64::engine::general_purpose::STANDARD.encode("git status");
 
-    let first = stripper.push(format!("hello\x1b]7;file://host/home/user").as_bytes());
+    let first = stripper.push("hello\x1b]7;file://host/home/user".as_bytes());
     assert_eq!(first.visible, b"hello");
     assert!(first.cwd_paths.is_empty());
 

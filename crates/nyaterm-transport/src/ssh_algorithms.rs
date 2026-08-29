@@ -10,69 +10,70 @@ use russh::{Preferred, cipher, kex, mac};
 use super::{SshAlgorithmMode, SshAlgorithmPreferences};
 
 fn compatible_algorithms() -> Preferred {
-    let mut preferred = Preferred::default();
-    preferred.kex = Cow::Owned(vec![
-        kex::MLKEM768X25519_SHA256,
-        kex::CURVE25519,
-        kex::CURVE25519_PRE_RFC_8731,
-        kex::ECDH_SHA2_NISTP256,
-        kex::ECDH_SHA2_NISTP384,
-        kex::ECDH_SHA2_NISTP521,
-        kex::DH_G18_SHA512,
-        kex::DH_G17_SHA512,
-        kex::DH_G16_SHA512,
-        kex::DH_G15_SHA512,
-        kex::DH_G14_SHA256,
-        kex::DH_GEX_SHA256,
-        kex::DH_G14_SHA1,
-        kex::DH_GEX_SHA1,
-        kex::DH_G1_SHA1,
-        kex::EXTENSION_SUPPORT_AS_CLIENT,
-        kex::EXTENSION_SUPPORT_AS_SERVER,
-        kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
-        kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
-    ]);
-    preferred.key = Cow::Owned(vec![
-        Algorithm::Ed25519,
-        Algorithm::Ecdsa {
-            curve: EcdsaCurve::NistP256,
-        },
-        Algorithm::Ecdsa {
-            curve: EcdsaCurve::NistP384,
-        },
-        Algorithm::Rsa {
-            hash: Some(HashAlg::Sha512),
-        },
-        Algorithm::Rsa {
-            hash: Some(HashAlg::Sha256),
-        },
-        Algorithm::Rsa { hash: None },
-        Algorithm::Ecdsa {
-            curve: EcdsaCurve::NistP521,
-        },
-        Algorithm::Dsa,
-    ]);
-    preferred.cipher = Cow::Owned(vec![
-        cipher::CHACHA20_POLY1305,
-        cipher::AES_256_GCM,
-        cipher::AES_128_GCM,
-        cipher::AES_256_CTR,
-        cipher::AES_192_CTR,
-        cipher::AES_128_CTR,
-        cipher::AES_256_CBC,
-        cipher::AES_192_CBC,
-        cipher::AES_128_CBC,
-        cipher::TRIPLE_DES_CBC,
-    ]);
-    preferred.mac = Cow::Owned(vec![
-        mac::HMAC_SHA512_ETM,
-        mac::HMAC_SHA256_ETM,
-        mac::HMAC_SHA512,
-        mac::HMAC_SHA256,
-        mac::HMAC_SHA1_ETM,
-        mac::HMAC_SHA1,
-    ]);
-    preferred
+    Preferred {
+        kex: Cow::Owned(vec![
+            kex::MLKEM768X25519_SHA256,
+            kex::CURVE25519,
+            kex::CURVE25519_PRE_RFC_8731,
+            kex::ECDH_SHA2_NISTP256,
+            kex::ECDH_SHA2_NISTP384,
+            kex::ECDH_SHA2_NISTP521,
+            kex::DH_G18_SHA512,
+            kex::DH_G17_SHA512,
+            kex::DH_G16_SHA512,
+            kex::DH_G15_SHA512,
+            kex::DH_G14_SHA256,
+            kex::DH_GEX_SHA256,
+            kex::DH_G14_SHA1,
+            kex::DH_GEX_SHA1,
+            kex::DH_G1_SHA1,
+            kex::EXTENSION_SUPPORT_AS_CLIENT,
+            kex::EXTENSION_SUPPORT_AS_SERVER,
+            kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+            kex::EXTENSION_OPENSSH_STRICT_KEX_AS_SERVER,
+        ]),
+        key: Cow::Owned(vec![
+            Algorithm::Ed25519,
+            Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP256,
+            },
+            Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP384,
+            },
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha512),
+            },
+            Algorithm::Rsa {
+                hash: Some(HashAlg::Sha256),
+            },
+            Algorithm::Rsa { hash: None },
+            Algorithm::Ecdsa {
+                curve: EcdsaCurve::NistP521,
+            },
+            Algorithm::Dsa,
+        ]),
+        cipher: Cow::Owned(vec![
+            cipher::CHACHA20_POLY1305,
+            cipher::AES_256_GCM,
+            cipher::AES_128_GCM,
+            cipher::AES_256_CTR,
+            cipher::AES_192_CTR,
+            cipher::AES_128_CTR,
+            cipher::AES_256_CBC,
+            cipher::AES_192_CBC,
+            cipher::AES_128_CBC,
+            cipher::TRIPLE_DES_CBC,
+        ]),
+        mac: Cow::Owned(vec![
+            mac::HMAC_SHA512_ETM,
+            mac::HMAC_SHA256_ETM,
+            mac::HMAC_SHA512,
+            mac::HMAC_SHA256,
+            mac::HMAC_SHA1_ETM,
+            mac::HMAC_SHA1,
+        ]),
+        ..Preferred::default()
+    }
 }
 
 fn secure_algorithms() -> Preferred {
@@ -155,30 +156,29 @@ pub(super) fn resolve_preferred_algorithms(
     match preferences.mode {
         SshAlgorithmMode::Compatible => Ok(compatible_algorithms()),
         SshAlgorithmMode::Secure => Ok(secure_algorithms()),
-        SshAlgorithmMode::Custom => {
-            let mut preferred = Preferred::default();
-            preferred.kex = Cow::Owned(parse_required_list(
+        SshAlgorithmMode::Custom => Ok(Preferred {
+            kex: Cow::Owned(parse_required_list(
                 &preferences.kex,
                 SshAlgorithmListKind::KeyExchange,
                 |value| kex::Name::try_from(value).ok(),
-            )?);
-            preferred.cipher = Cow::Owned(parse_required_list(
+            )?),
+            cipher: Cow::Owned(parse_required_list(
                 &preferences.ciphers,
                 SshAlgorithmListKind::Cipher,
                 |value| cipher::Name::try_from(value).ok(),
-            )?);
-            preferred.mac = Cow::Owned(parse_required_list(
+            )?),
+            mac: Cow::Owned(parse_required_list(
                 &preferences.macs,
                 SshAlgorithmListKind::Mac,
                 |value| mac::Name::try_from(value).ok(),
-            )?);
-            preferred.key = Cow::Owned(parse_required_list(
+            )?),
+            key: Cow::Owned(parse_required_list(
                 &preferences.host_keys,
                 SshAlgorithmListKind::HostKey,
                 |value| Algorithm::from_str(value).ok(),
-            )?);
-            Ok(preferred)
-        }
+            )?),
+            ..Preferred::default()
+        }),
     }
 }
 
