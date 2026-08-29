@@ -5,6 +5,7 @@ use gpui::{
     ParentElement as _, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
     px, rgb, svg,
 };
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 use crate::models::{TransferBrowserUploadMenuState, TransferPathPromptKind};
@@ -74,45 +75,48 @@ impl NyaTermApp {
                     .top(px(menu_y))
                     .left(px(menu_x))
                     .w(px(176.))
-                    .max_h(px(menu_max_height))
-                    .overflow_y_scroll()
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
                     .bg(self.shell_surface_color(palette.surface))
                     .shadow_lg()
-                    .py_1()
-                    .flex()
-                    .flex_col()
                     .on_click(|_, _, cx| {
                         cx.stop_propagation();
                     })
-                    .child(upload_menu_item(
-                        palette,
-                        "transfer-browser-upload-menu-files",
-                        "icons/fe/upload.svg",
-                        t!("fileExplorer.upload"),
-                        cx.listener(|this, _, _, cx| {
-                            this.close_transfer_browser_upload_menu(cx);
-                            this.prompt_transfer_browser_upload_path(
-                                TransferPathPromptKind::UploadFile,
-                                cx,
-                            );
-                        }),
-                    ))
-                    .child(upload_menu_item(
-                        palette,
-                        "transfer-browser-upload-menu-folder",
-                        "icons/fe/upload-folder.svg",
-                        t!("fileExplorer.uploadFolder"),
-                        cx.listener(|this, _, _, cx| {
-                            this.close_transfer_browser_upload_menu(cx);
-                            this.prompt_transfer_browser_upload_path(
-                                TransferPathPromptKind::UploadDirectory,
-                                cx,
-                            );
-                        }),
-                    )),
+                    .child(
+                        div()
+                            .max_h(px(menu_max_height))
+                            .overflow_y_scrollbar()
+                            .py_1()
+                            .flex()
+                            .flex_col()
+                            .child(upload_menu_item(
+                                palette,
+                                "transfer-browser-upload-menu-files",
+                                "icons/fe/upload.svg",
+                                t!("fileExplorer.upload"),
+                                cx.listener(|this, _, _, cx| {
+                                    this.close_transfer_browser_upload_menu(cx);
+                                    this.prompt_transfer_browser_upload_path(
+                                        TransferPathPromptKind::UploadFile,
+                                        cx,
+                                    );
+                                }),
+                            ))
+                            .child(upload_menu_item(
+                                palette,
+                                "transfer-browser-upload-menu-folder",
+                                "icons/fe/upload-folder.svg",
+                                t!("fileExplorer.uploadFolder"),
+                                cx.listener(|this, _, _, cx| {
+                                    this.close_transfer_browser_upload_menu(cx);
+                                    this.prompt_transfer_browser_upload_path(
+                                        TransferPathPromptKind::UploadDirectory,
+                                        cx,
+                                    );
+                                }),
+                            )),
+                    ),
             )
     }
 }

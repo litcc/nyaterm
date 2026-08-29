@@ -5,6 +5,7 @@ use gpui::{
     SharedString, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 use crate::features::formatting::session_kind_label;
@@ -419,11 +420,11 @@ impl NyaTermApp {
             self.shell.consume_session_tab_scroll_into_view();
         }
         let tab_scroll = self.shell.session_tab_strip_scroll().clone();
+        let tab_scroll_for_wheel = tab_scroll.clone();
         let mut tabs = div()
             .id("session-tab-strip-scroll")
             .h_full()
-            .min_w_0()
-            .flex_1()
+            .w_full()
             .flex()
             .items_center()
             // Tauri tab-strip-scroll: horizontal overflow instead of clipping tabs.
@@ -435,14 +436,14 @@ impl NyaTermApp {
                     ScrollDelta::Lines(delta) => (delta.x * 36., delta.y * 36.),
                     ScrollDelta::Pixels(delta) => (f32::from(delta.x), f32::from(delta.y)),
                 };
-                let max_x = f32::from(tab_scroll.max_offset().x).max(0.);
+                let max_x = f32::from(tab_scroll_for_wheel.max_offset().x).max(0.);
                 if max_x <= 0. || (delta_x == 0. && delta_y == 0.) {
                     return;
                 }
-                let current = tab_scroll.offset();
+                let current = tab_scroll_for_wheel.offset();
                 let next_x = tab_scroll_x(f32::from(current.x), max_x, delta_x, delta_y);
                 if next_x != f32::from(current.x) {
-                    tab_scroll.set_offset(point(px(next_x), px(0.)));
+                    tab_scroll_for_wheel.set_offset(point(px(next_x), px(0.)));
                     cx.stop_propagation();
                 }
             }));
@@ -979,7 +980,15 @@ impl NyaTermApp {
             .border_b_1()
             .border_color(rgb(palette.border))
             .bg(self.shell_surface_color(palette.surface))
-            .child(tabs)
+            .child(
+                div()
+                    .h_full()
+                    .min_w_0()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(tabs)
+                    .horizontal_scrollbar(&tab_scroll),
+            )
             .child(session_actions)
     }
 }

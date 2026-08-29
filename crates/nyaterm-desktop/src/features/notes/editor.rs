@@ -1037,7 +1037,12 @@ fn open_note_editor_window(app: Entity<NyaTermApp>, note: NoteDocument, cx: &mut
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
+
+    use super::{
+        AUTOSAVE_DELAY, ExternalNoteAction, MarkdownCommand, NotesCatalogEvent,
+        event_revision_for_note, external_note_action, markdown_edit,
+    };
 
     #[test]
     fn markdown_commands_wrap_selection_and_snap_unicode_boundaries() {

@@ -14,6 +14,7 @@ use gpui::{
     App, ClickEvent, Context, IntoElement, KeyDownEvent, MouseButton, SharedString, Window, div,
     prelude::*, px, rgb, rgba, svg,
 };
+use nyaterm_ui::NyaScrollable;
 
 use super::super::TAB_PRESET_COLORS;
 
@@ -170,25 +171,11 @@ impl NyaTermApp {
                 (viewport_w, viewport_h),
             );
             let mut panel = div()
-                .id(SharedString::from("tab-actions-submenu"))
-                .absolute()
-                .left(px(submenu_x))
-                .top(px(submenu_y))
-                .w(px(submenu_width))
                 .max_h(px((viewport_h - 16.).max(80.)))
-                .overflow_y_scroll()
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(palette.border))
-                .bg(self.shell_surface_color(palette.surface))
-                .shadow_lg()
+                .overflow_y_scrollbar()
                 .py_1()
                 .flex()
-                .flex_col()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
-                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-                .on_click(|_, _, cx| cx.stop_propagation());
+                .flex_col();
 
             match submenu {
                 TabActionsSubmenu::Color => {
@@ -317,7 +304,22 @@ impl NyaTermApp {
                         ));
                 }
             }
-            panel
+            div()
+                .id(SharedString::from("tab-actions-submenu"))
+                .absolute()
+                .left(px(submenu_x))
+                .top(px(submenu_y))
+                .w(px(submenu_width))
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(palette.border))
+                .bg(self.shell_surface_color(palette.surface))
+                .shadow_lg()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(panel)
         });
 
         div()
@@ -359,317 +361,335 @@ impl NyaTermApp {
                     .left(px(menu_x))
                     .top(px(menu_y))
                     .w(px(240.))
-                    .max_h(px(menu_max_height))
-                    .overflow_y_scroll()
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
                     .bg(self.shell_surface_color(palette.surface))
                     .shadow_lg()
-                    .py_1()
-                    .flex()
-                    .flex_col()
                     .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(tab_actions_submenu_item(
-                        palette,
-                        TabActionsSubmenuItem {
-                            id: "tab-ctx-set-color",
-                            icon_path: "icons/menu/palette.svg",
-                            label: t!("tabCtx.setColor"),
-                            enabled: true,
-                            active: active_submenu == Some(TabActionsSubmenu::Color),
-                        },
-                        TabActionsSubmenuHandlers {
-                            on_hover: cx.listener(|this, hovered: &bool, _, cx| {
-                                if *hovered {
-                                    this.open_tab_actions_submenu(TabActionsSubmenu::Color, cx);
-                                }
-                            }),
-                            on_click: cx.listener(|this, _, _, cx| {
-                                this.open_tab_actions_submenu(TabActionsSubmenu::Color, cx);
-                            }),
-                        },
-                    ))
-                    .child(tab_menu_item(
-                        palette,
-                        "tab-ctx-rename",
-                        t!("tabCtx.rename"),
-                        cx.listener(move |this, _, window, cx| {
-                            this.close_tab_actions(cx);
-                            this.open_rename_session(rename_session_id.clone(), window, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item(
-                        palette,
-                        if locked {
-                            "tab-ctx-unlock"
-                        } else {
-                            "tab-ctx-lock"
-                        },
-                        if locked {
-                            t!("tabCtx.unlockTab")
-                        } else {
-                            t!("tabCtx.lockTab")
-                        },
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_tab_actions(cx);
-                            this.toggle_tab_tree_locked(&lock_session_id, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item(
-                        palette,
-                        "tab-ctx-copy-name",
-                        t!("tabCtx.copyName"),
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_tab_actions(cx);
-                            this.copy_session_name(&copy_name_session_id, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-copy-ip",
-                        t!("tabCtx.copyIp"),
-                        can_copy_ssh,
-                        cx.listener(move |this, _, _, cx| {
-                            this.select_session(copy_host_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            this.copy_active_session_ssh_host(cx);
-                        }),
-                    ))
-                    .child(tab_menu_separator(palette))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-duplicate",
-                        t!("tabCtx.duplicate"),
-                        can_spawn_session,
-                        cx.listener(move |this, _, window, cx| {
-                            this.select_session(duplicate_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            if !this.tab_action_can_spawn_session(&duplicate_session_id) {
-                                this.shell
-                                    .set_status("active session cannot be duplicated".to_string());
-                                cx.notify();
-                                return;
-                            }
-                            this.duplicate_active_session(window, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-duplicate-run",
-                        t!("tabCtx.duplicateWithCommand"),
-                        can_spawn_session,
-                        cx.listener(move |this, _, window, cx| {
-                            this.select_session(startup_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            if !this.tab_action_can_spawn_session(&startup_session_id) {
-                                this.shell
-                                    .set_status("active session cannot be duplicated".to_string());
-                                cx.notify();
-                                return;
-                            }
-                            this.open_startup_command_dialog(window, cx);
-                        }),
-                    ))
-                    .child(tab_actions_submenu_item(
-                        palette,
-                        TabActionsSubmenuItem {
-                            id: "tab-ctx-ssh-advanced",
-                            icon_path: "icons/menu/split.svg",
-                            label: t!("tabCtx.sshAdvanced"),
-                            enabled: can_multiplex,
-                            active: active_submenu == Some(TabActionsSubmenu::SshAdvanced),
-                        },
-                        TabActionsSubmenuHandlers {
-                            on_hover: cx.listener(move |this, hovered: &bool, _, cx| {
-                                if *hovered && can_multiplex {
-                                    this.open_tab_actions_submenu(
-                                        TabActionsSubmenu::SshAdvanced,
+                    .child(
+                        div()
+                            .max_h(px(menu_max_height))
+                            .overflow_y_scrollbar()
+                            .py_1()
+                            .flex()
+                            .flex_col()
+                            .child(tab_actions_submenu_item(
+                                palette,
+                                TabActionsSubmenuItem {
+                                    id: "tab-ctx-set-color",
+                                    icon_path: "icons/menu/palette.svg",
+                                    label: t!("tabCtx.setColor"),
+                                    enabled: true,
+                                    active: active_submenu == Some(TabActionsSubmenu::Color),
+                                },
+                                TabActionsSubmenuHandlers {
+                                    on_hover: cx.listener(|this, hovered: &bool, _, cx| {
+                                        if *hovered {
+                                            this.open_tab_actions_submenu(
+                                                TabActionsSubmenu::Color,
+                                                cx,
+                                            );
+                                        }
+                                    }),
+                                    on_click: cx.listener(|this, _, _, cx| {
+                                        this.open_tab_actions_submenu(TabActionsSubmenu::Color, cx);
+                                    }),
+                                },
+                            ))
+                            .child(tab_menu_item(
+                                palette,
+                                "tab-ctx-rename",
+                                t!("tabCtx.rename"),
+                                cx.listener(move |this, _, window, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.open_rename_session(rename_session_id.clone(), window, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item(
+                                palette,
+                                if locked {
+                                    "tab-ctx-unlock"
+                                } else {
+                                    "tab-ctx-lock"
+                                },
+                                if locked {
+                                    t!("tabCtx.unlockTab")
+                                } else {
+                                    t!("tabCtx.lockTab")
+                                },
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.toggle_tab_tree_locked(&lock_session_id, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item(
+                                palette,
+                                "tab-ctx-copy-name",
+                                t!("tabCtx.copyName"),
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.copy_session_name(&copy_name_session_id, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-copy-ip",
+                                t!("tabCtx.copyIp"),
+                                can_copy_ssh,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.select_session(copy_host_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    this.copy_active_session_ssh_host(cx);
+                                }),
+                            ))
+                            .child(tab_menu_separator(palette))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-duplicate",
+                                t!("tabCtx.duplicate"),
+                                can_spawn_session,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_session(duplicate_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    if !this.tab_action_can_spawn_session(&duplicate_session_id) {
+                                        this.shell.set_status(
+                                            "active session cannot be duplicated".to_string(),
+                                        );
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.duplicate_active_session(window, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-duplicate-run",
+                                t!("tabCtx.duplicateWithCommand"),
+                                can_spawn_session,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_session(startup_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    if !this.tab_action_can_spawn_session(&startup_session_id) {
+                                        this.shell.set_status(
+                                            "active session cannot be duplicated".to_string(),
+                                        );
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.open_startup_command_dialog(window, cx);
+                                }),
+                            ))
+                            .child(tab_actions_submenu_item(
+                                palette,
+                                TabActionsSubmenuItem {
+                                    id: "tab-ctx-ssh-advanced",
+                                    icon_path: "icons/menu/split.svg",
+                                    label: t!("tabCtx.sshAdvanced"),
+                                    enabled: can_multiplex,
+                                    active: active_submenu == Some(TabActionsSubmenu::SshAdvanced),
+                                },
+                                TabActionsSubmenuHandlers {
+                                    on_hover: cx.listener(move |this, hovered: &bool, _, cx| {
+                                        if *hovered && can_multiplex {
+                                            this.open_tab_actions_submenu(
+                                                TabActionsSubmenu::SshAdvanced,
+                                                cx,
+                                            );
+                                        }
+                                    }),
+                                    on_click: cx.listener(move |this, _, _, cx| {
+                                        if can_multiplex {
+                                            this.open_tab_actions_submenu(
+                                                TabActionsSubmenu::SshAdvanced,
+                                                cx,
+                                            );
+                                        }
+                                    }),
+                                },
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-reconnect",
+                                t!("tabCtx.reconnect"),
+                                can_reconnect,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_session(reconnect_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    if this.session.session_is_busy(&reconnect_session_id)
+                                        || this
+                                            .session
+                                            .start_reconnect_is_pending(&reconnect_session_id)
+                                    {
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.reconnect_active_session(window, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-disconnect",
+                                t!("tabCtx.disconnect"),
+                                can_disconnect,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_tab_actions(cx);
+                                    if this.session.session_is_busy(&disconnect_session_id)
+                                        || this.session.is_disconnected(&disconnect_session_id)
+                                    {
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.disconnect_session(disconnect_session_id.clone(), cx);
+                                }),
+                            ))
+                            .child(tab_actions_submenu_item(
+                                palette,
+                                TabActionsSubmenuItem {
+                                    id: "tab-ctx-ai",
+                                    icon_path: "icons/ai.svg",
+                                    label: t!("ai.title"),
+                                    enabled: true,
+                                    active: active_submenu == Some(TabActionsSubmenu::Ai),
+                                },
+                                TabActionsSubmenuHandlers {
+                                    on_hover: cx.listener(|this, hovered: &bool, _, cx| {
+                                        if *hovered {
+                                            this.open_tab_actions_submenu(
+                                                TabActionsSubmenu::Ai,
+                                                cx,
+                                            );
+                                        }
+                                    }),
+                                    on_click: cx.listener(|this, _, _, cx| {
+                                        this.open_tab_actions_submenu(TabActionsSubmenu::Ai, cx);
+                                    }),
+                                },
+                            ))
+                            .child(tab_menu_separator(palette))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-split-h",
+                                t!("tabCtx.splitHorizontal"),
+                                can_spawn_session,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_session(split_horizontal_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    if !this
+                                        .tab_action_can_spawn_session(&split_horizontal_session_id)
+                                    {
+                                        this.shell.set_status(
+                                            "active session cannot be duplicated for split"
+                                                .to_string(),
+                                        );
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.split_workspace_with_duplicate(
+                                        WorkspaceSplitDirection::Horizontal,
+                                        window,
                                         cx,
                                     );
-                                }
-                            }),
-                            on_click: cx.listener(move |this, _, _, cx| {
-                                if can_multiplex {
-                                    this.open_tab_actions_submenu(
-                                        TabActionsSubmenu::SshAdvanced,
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-split-v",
+                                t!("tabCtx.splitVertical"),
+                                can_spawn_session,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_session(split_vertical_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    if !this
+                                        .tab_action_can_spawn_session(&split_vertical_session_id)
+                                    {
+                                        this.shell.set_status(
+                                            "active session cannot be duplicated for split"
+                                                .to_string(),
+                                        );
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.split_workspace_with_duplicate(
+                                        WorkspaceSplitDirection::Vertical,
+                                        window,
                                         cx,
                                     );
-                                }
-                            }),
-                        },
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-reconnect",
-                        t!("tabCtx.reconnect"),
-                        can_reconnect,
-                        cx.listener(move |this, _, window, cx| {
-                            this.select_session(reconnect_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            if this.session.session_is_busy(&reconnect_session_id)
-                                || this
-                                    .session
-                                    .start_reconnect_is_pending(&reconnect_session_id)
-                            {
-                                cx.notify();
-                                return;
-                            }
-                            this.reconnect_active_session(window, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-disconnect",
-                        t!("tabCtx.disconnect"),
-                        can_disconnect,
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_tab_actions(cx);
-                            if this.session.session_is_busy(&disconnect_session_id)
-                                || this.session.is_disconnected(&disconnect_session_id)
-                            {
-                                cx.notify();
-                                return;
-                            }
-                            this.disconnect_session(disconnect_session_id.clone(), cx);
-                        }),
-                    ))
-                    .child(tab_actions_submenu_item(
-                        palette,
-                        TabActionsSubmenuItem {
-                            id: "tab-ctx-ai",
-                            icon_path: "icons/ai.svg",
-                            label: t!("ai.title"),
-                            enabled: true,
-                            active: active_submenu == Some(TabActionsSubmenu::Ai),
-                        },
-                        TabActionsSubmenuHandlers {
-                            on_hover: cx.listener(|this, hovered: &bool, _, cx| {
-                                if *hovered {
-                                    this.open_tab_actions_submenu(TabActionsSubmenu::Ai, cx);
-                                }
-                            }),
-                            on_click: cx.listener(|this, _, _, cx| {
-                                this.open_tab_actions_submenu(TabActionsSubmenu::Ai, cx);
-                            }),
-                        },
-                    ))
-                    .child(tab_menu_separator(palette))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-split-h",
-                        t!("tabCtx.splitHorizontal"),
-                        can_spawn_session,
-                        cx.listener(move |this, _, window, cx| {
-                            this.select_session(split_horizontal_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            if !this.tab_action_can_spawn_session(&split_horizontal_session_id) {
-                                this.shell.set_status(
-                                    "active session cannot be duplicated for split".to_string(),
-                                );
-                                cx.notify();
-                                return;
-                            }
-                            this.split_workspace_with_duplicate(
-                                WorkspaceSplitDirection::Horizontal,
-                                window,
-                                cx,
-                            );
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-split-v",
-                        t!("tabCtx.splitVertical"),
-                        can_spawn_session,
-                        cx.listener(move |this, _, window, cx| {
-                            this.select_session(split_vertical_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            if !this.tab_action_can_spawn_session(&split_vertical_session_id) {
-                                this.shell.set_status(
-                                    "active session cannot be duplicated for split".to_string(),
-                                );
-                                cx.notify();
-                                return;
-                            }
-                            this.split_workspace_with_duplicate(
-                                WorkspaceSplitDirection::Vertical,
-                                window,
-                                cx,
-                            );
-                        }),
-                    ))
-                    .when(can_unsplit, |this| {
-                        this.child(tab_menu_item(
-                            palette,
-                            "tab-ctx-unsplit",
-                            t!("tabCtx.unsplit"),
-                            cx.listener(|this, _, _, cx| {
-                                this.close_tab_actions(cx);
-                                this.unsplit_workspace(cx);
-                            }),
-                        ))
-                    })
-                    .child(tab_menu_separator(palette))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-close",
-                        t!("tabCtx.close"),
-                        !locked,
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_tab_actions(cx);
-                            this.close_tab_active_pane(&tab_root_id, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item(
-                        palette,
-                        "tab-ctx-close-all",
-                        t!("tabCtx.closeAll"),
-                        cx.listener(|this, _, window, cx| {
-                            this.close_tab_actions(cx);
-                            this.open_close_all_sessions_confirm(window, cx);
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-close-others",
-                        t!("tabCtx.closeInactive"),
-                        can_close_inactive,
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_tab_actions(cx);
-                            this.close_inactive_sessions(inactive_anchor.clone(), cx);
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-close-right",
-                        t!("tabCtx.closeRight"),
-                        can_close_right,
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_tab_actions(cx);
-                            this.close_sessions_to_right(right_anchor.clone(), cx);
-                        }),
-                    ))
-                    .child(tab_menu_item_enabled(
-                        palette,
-                        "tab-ctx-info",
-                        t!("tabCtx.sessionInfo"),
-                        can_session_info,
-                        cx.listener(move |this, _, window, cx| {
-                            this.select_session(info_session_id.clone(), cx);
-                            this.close_tab_actions(cx);
-                            if !this.tab_action_can_show_session_info(&info_session_id) {
-                                this.shell.set_status(
-                                    "active session has no saved connection info".to_string(),
-                                );
-                                cx.notify();
-                                return;
-                            }
-                            this.open_active_session_info(window, cx);
-                        }),
-                    )),
+                                }),
+                            ))
+                            .when(can_unsplit, |this| {
+                                this.child(tab_menu_item(
+                                    palette,
+                                    "tab-ctx-unsplit",
+                                    t!("tabCtx.unsplit"),
+                                    cx.listener(|this, _, _, cx| {
+                                        this.close_tab_actions(cx);
+                                        this.unsplit_workspace(cx);
+                                    }),
+                                ))
+                            })
+                            .child(tab_menu_separator(palette))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-close",
+                                t!("tabCtx.close"),
+                                !locked,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.close_tab_active_pane(&tab_root_id, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item(
+                                palette,
+                                "tab-ctx-close-all",
+                                t!("tabCtx.closeAll"),
+                                cx.listener(|this, _, window, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.open_close_all_sessions_confirm(window, cx);
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-close-others",
+                                t!("tabCtx.closeInactive"),
+                                can_close_inactive,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.close_inactive_sessions(inactive_anchor.clone(), cx);
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-close-right",
+                                t!("tabCtx.closeRight"),
+                                can_close_right,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_tab_actions(cx);
+                                    this.close_sessions_to_right(right_anchor.clone(), cx);
+                                }),
+                            ))
+                            .child(tab_menu_item_enabled(
+                                palette,
+                                "tab-ctx-info",
+                                t!("tabCtx.sessionInfo"),
+                                can_session_info,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_session(info_session_id.clone(), cx);
+                                    this.close_tab_actions(cx);
+                                    if !this.tab_action_can_show_session_info(&info_session_id) {
+                                        this.shell.set_status(
+                                            "active session has no saved connection info"
+                                                .to_string(),
+                                        );
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.open_active_session_info(window, cx);
+                                }),
+                            )),
+                    ),
             )
             .when_some(submenu_panel, |this, submenu| this.child(submenu))
             .into_any_element()

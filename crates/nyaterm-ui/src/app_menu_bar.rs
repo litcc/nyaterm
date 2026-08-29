@@ -13,6 +13,7 @@ use gpui_component::{
 };
 
 use crate::NyaMenuItem;
+use crate::NyaScrollable;
 
 const KEY_CONTEXT: &str = "NyaAppMenuBar";
 
@@ -238,14 +239,13 @@ impl Render for NyaAppMenuBar {
             .flex()
             .items_center()
             .gap_x_1()
-            .overflow_x_scroll()
-            .restrict_scroll_to_axis()
             .role(Role::MenuBar)
             .key_context(KEY_CONTEXT)
             // PopupMenu consumes arrows used by submenus. An unhandled top-level
             // arrow continues as a key event and is coordinated here.
             .on_key_down(cx.listener(Self::on_key_down))
             .children(self.menus.clone())
+            .overflow_x_scrollbar()
     }
 }
 

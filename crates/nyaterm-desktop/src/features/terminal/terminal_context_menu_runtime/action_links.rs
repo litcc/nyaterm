@@ -2,6 +2,7 @@ use rust_i18n::t;
 
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px, rgb};
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::NyaTermApp;
 
@@ -26,23 +27,11 @@ impl NyaTermApp {
             viewport_h,
         );
         let mut items = div()
-            .id(SharedString::from("action-link-menu"))
-            .absolute()
-            .top(px(menu_y))
-            .left(px(menu_x))
-            .w(px(260.))
             .max_h(px(360.))
-            .overflow_y_scroll()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .bg(self.shell_surface_color(palette.surface))
-            .shadow_lg()
+            .overflow_y_scrollbar()
             .py_1()
             .flex()
             .flex_col()
-            .on_mouse_down(MouseButton::Left, |_, _, _| {})
-            .on_click(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .px_3()
@@ -122,7 +111,22 @@ impl NyaTermApp {
                     this.close_action_link_menu(cx);
                 }),
             )
-            .child(items)
+            .child(
+                div()
+                    .id(SharedString::from("action-link-menu"))
+                    .absolute()
+                    .top(px(menu_y))
+                    .left(px(menu_x))
+                    .w(px(260.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(rgb(palette.border))
+                    .bg(self.shell_surface_color(palette.surface))
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_, _, _| {})
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(items),
+            )
             .into_any_element()
     }
 

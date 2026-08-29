@@ -142,18 +142,8 @@ impl NyaTermApp {
         sessions.reverse();
         let active_id = self.session.active_id_owned();
         let mut menu = div()
-            .id("workspace-open-tabs-dropdown")
-            .absolute()
-            .top(px(36.))
-            .right_0()
-            .w(px(256.))
             .max_h(px(360.))
-            .overflow_y_scroll()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .bg(self.shell_surface_color(palette.surface))
-            .shadow_lg()
+            .overflow_y_scrollbar()
             .py_1()
             .flex()
             .flex_col()
@@ -351,7 +341,18 @@ impl NyaTermApp {
                 );
             }
         }
-        menu
+        div()
+            .id("workspace-open-tabs-dropdown")
+            .absolute()
+            .top(px(36.))
+            .right_0()
+            .w(px(256.))
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(self.shell_surface_color(palette.surface))
+            .shadow_lg()
+            .child(menu)
     }
 
     pub(in crate::features) fn render_new_session_menu(
@@ -630,20 +631,8 @@ impl NyaTermApp {
         let no_saved_sessions_label = t!("terminal.noSavedSessions");
         let right = NEW_SESSION_MENU_WIDTH + depth as f32 * NEW_SESSION_SUBMENU_WIDTH;
         let mut menu = div()
-            .id(SharedString::from(format!(
-                "new-session-all-sessions-level-{depth}"
-            )))
-            .absolute()
-            .top(px(top))
-            .right(px(right))
-            .w(px(NEW_SESSION_SUBMENU_WIDTH))
             .max_h(px(420.))
-            .overflow_y_scroll()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .bg(self.shell_surface_color(palette.surface))
-            .shadow_lg()
+            .overflow_y_scrollbar()
             .py_1()
             .flex()
             .flex_col();
@@ -679,7 +668,21 @@ impl NyaTermApp {
             }
         }
 
-        menu.into_any_element()
+        div()
+            .id(SharedString::from(format!(
+                "new-session-all-sessions-level-{depth}"
+            )))
+            .absolute()
+            .top(px(top))
+            .right(px(right))
+            .w(px(NEW_SESSION_SUBMENU_WIDTH))
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(self.shell_surface_color(palette.surface))
+            .shadow_lg()
+            .child(menu)
+            .into_any_element()
     }
 
     fn new_session_group_menu_row(

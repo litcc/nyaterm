@@ -1229,7 +1229,14 @@ fn format_hotkey_part(part: &str) -> String {
 mod tests {
     use gpui::{KeyContext, Keymap};
 
-    use super::*;
+    use super::{
+        FILE_EXPLORER_KEY_CONTEXT, MODAL_KEY_CONTEXT, OpenSettings, RenameFile, ResolvedKeymap,
+        SCREEN_LOCKED_KEY_CONTEXT, SHORTCUT_REGISTRY, ShortcutBinding, ShortcutDiagnosticKind,
+        ShortcutId, ShortcutInvocation, ShortcutPlatform, ShortcutScope, SwitchToTab, TerminalCopy,
+        WORKSPACE_KEY_CONTEXT, gpui_bindings, is_default_binding, reset_known_overrides,
+        resolve_invocation,
+    };
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn registry_is_complete_unique_and_has_valid_platform_defaults() {

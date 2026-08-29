@@ -422,17 +422,19 @@ impl NyaTermApp {
                     .top(px(menu_y))
                     .left(px(menu_x))
                     .w(px(280.))
-                    .max_h(px(menu_max_height.min(324.)))
-                    .overflow_y_scroll()
-                    .scrollbar_width(px(6.))
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
                     .bg(self.shell_surface_color(palette.bg))
                     .shadow_lg()
-                    .p_1()
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(content),
+                    .child(
+                        div()
+                            .max_h(px(menu_max_height.min(324.)))
+                            .overflow_y_scrollbar()
+                            .p_1()
+                            .child(content),
+                    ),
             )
     }
 

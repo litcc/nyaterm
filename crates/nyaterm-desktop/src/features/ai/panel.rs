@@ -2174,41 +2174,44 @@ impl AiPanel {
                     .top(px(menu_y))
                     .left(px(menu_x))
                     .w(px(128.))
-                    .max_h(px(menu_max_h))
-                    .overflow_y_scroll()
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
                     .bg(snapshot.chrome.surface)
                     .shadow_lg()
-                    .py_1()
-                    .flex()
-                    .flex_col()
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(ai_message_menu_button(
-                        palette,
-                        "ai-message-menu-quote",
-                        "icons/quote.svg",
-                        t!("ai.quote"),
-                        cx.listener(move |panel, _, _, cx| {
-                            let quote_text = quote_text.clone();
-                            panel.with_app(cx, move |app, cx| {
-                                app.quote_ai_message_text(quote_text, cx);
-                            });
-                        }),
-                    ))
-                    .child(ai_message_menu_button(
-                        palette,
-                        "ai-message-menu-copy",
-                        "icons/copy.svg",
-                        t!("ai.copy"),
-                        cx.listener(move |panel, _, _, cx| {
-                            let copy_text = copy_text.clone();
-                            panel.with_app(cx, move |app, cx| {
-                                app.copy_ai_message_text(copy_text, cx);
-                            });
-                        }),
-                    )),
+                    .child(
+                        div()
+                            .max_h(px(menu_max_h))
+                            .overflow_y_scrollbar()
+                            .py_1()
+                            .flex()
+                            .flex_col()
+                            .child(ai_message_menu_button(
+                                palette,
+                                "ai-message-menu-quote",
+                                "icons/quote.svg",
+                                t!("ai.quote"),
+                                cx.listener(move |panel, _, _, cx| {
+                                    let quote_text = quote_text.clone();
+                                    panel.with_app(cx, move |app, cx| {
+                                        app.quote_ai_message_text(quote_text, cx);
+                                    });
+                                }),
+                            ))
+                            .child(ai_message_menu_button(
+                                palette,
+                                "ai-message-menu-copy",
+                                "icons/copy.svg",
+                                t!("ai.copy"),
+                                cx.listener(move |panel, _, _, cx| {
+                                    let copy_text = copy_text.clone();
+                                    panel.with_app(cx, move |app, cx| {
+                                        app.copy_ai_message_text(copy_text, cx);
+                                    });
+                                }),
+                            )),
+                    ),
             )
     }
 }

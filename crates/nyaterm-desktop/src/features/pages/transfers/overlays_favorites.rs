@@ -6,6 +6,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, rgb, svg,
 };
 use nyaterm_core::truncate_preview;
+use nyaterm_ui::NyaScrollable;
 
 use crate::features::{NyaTermApp, shell::gpui_code_font_family};
 use crate::models::TransferBrowserFavoritesMenuState;
@@ -158,62 +159,69 @@ impl NyaTermApp {
                     .top(px(menu_y))
                     .left(px(menu_x))
                     .w(px(300.))
-                    .max_h(px(menu_max_height))
-                    .overflow_y_scroll()
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
                     .bg(self.shell_surface_color(palette.bg))
                     .shadow_lg()
-                    .p_3()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
                     .on_click(|_, _, cx| {
                         cx.stop_propagation();
                     })
                     .child(
-                        div().flex().items_center().justify_between().gap_2().child(
-                            div()
-                                .text_xs()
-                                .font_weight(FontWeight(800.))
-                                .text_color(rgb(palette.text))
-                                .child(t!("fileExplorer.favorites")),
-                        ),
-                    )
-                    .child(favorite_menu_button(
-                        palette,
-                        "transfer-browser-favorite-menu-add-current",
-                        t!("fileExplorer.addCurrentDirToFavorites"),
-                        cx.listener(|this, _, _, cx| {
-                            this.add_current_transfer_browser_favorite(cx);
-                        }),
-                    ))
-                    .child(
                         div()
-                            .border_t_1()
-                            .border_color(rgb(palette.border))
-                            .pt_2()
+                            .max_h(px(menu_max_height))
+                            .overflow_y_scrollbar()
+                            .p_3()
                             .flex()
                             .flex_col()
-                            .gap_1()
-                            .when(self.transfer.browser_view().favorites.is_empty(), |this| {
-                                this.child(
+                            .gap_2()
+                            .child(
+                                div().flex().items_center().justify_between().gap_2().child(
                                     div()
-                                        .rounded_sm()
-                                        .border_1()
-                                        .border_color(rgb(palette.border))
-                                        .bg(rgb(palette.input))
-                                        .px_2()
-                                        .py_2()
                                         .text_xs()
-                                        .text_color(rgb(palette.text_muted))
-                                        .child(t!("fileExplorer.noFavorites")),
-                                )
-                            })
-                            .when(!self.transfer.browser_view().favorites.is_empty(), |this| {
-                                this.child(list)
-                            }),
+                                        .font_weight(FontWeight(800.))
+                                        .text_color(rgb(palette.text))
+                                        .child(t!("fileExplorer.favorites")),
+                                ),
+                            )
+                            .child(favorite_menu_button(
+                                palette,
+                                "transfer-browser-favorite-menu-add-current",
+                                t!("fileExplorer.addCurrentDirToFavorites"),
+                                cx.listener(|this, _, _, cx| {
+                                    this.add_current_transfer_browser_favorite(cx);
+                                }),
+                            ))
+                            .child(
+                                div()
+                                    .border_t_1()
+                                    .border_color(rgb(palette.border))
+                                    .pt_2()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .when(
+                                        self.transfer.browser_view().favorites.is_empty(),
+                                        |this| {
+                                            this.child(
+                                                div()
+                                                    .rounded_sm()
+                                                    .border_1()
+                                                    .border_color(rgb(palette.border))
+                                                    .bg(rgb(palette.input))
+                                                    .px_2()
+                                                    .py_2()
+                                                    .text_xs()
+                                                    .text_color(rgb(palette.text_muted))
+                                                    .child(t!("fileExplorer.noFavorites")),
+                                            )
+                                        },
+                                    )
+                                    .when(
+                                        !self.transfer.browser_view().favorites.is_empty(),
+                                        |this| this.child(list),
+                                    ),
+                            ),
                     ),
             )
     }

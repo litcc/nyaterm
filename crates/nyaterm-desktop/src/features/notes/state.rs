@@ -546,9 +546,11 @@ fn visible_note_rows(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashMap, HashSet};
 
-    use super::*;
+    use nyaterm_core::{NoteFolder, NoteSummary, NoteTreePayload, NotesUiState};
+
+    use super::{NotesFeatureState, visible_note_rows};
 
     fn folder(id: &str, parent: Option<&str>, order: i64) -> NoteFolder {
         NoteFolder {

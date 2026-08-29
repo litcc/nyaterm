@@ -374,19 +374,9 @@ impl NyaTermApp {
         } else {
             self.shell_surface_color(palette.surface)
         };
-        let mut tabs_menu = div()
-            .id("transfer-editor-tabs-menu")
-            .absolute()
-            .top(px(40.))
-            .right_0()
-            .w(px(320.))
+        let mut tabs_menu_content = div()
             .max_h(px(tabs_menu_max_height))
-            .overflow_y_scroll()
-            .rounded_bl_md()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .bg(tabs_menu_bg)
-            .shadow_lg()
+            .overflow_y_scrollbar()
             .py_1()
             .flex()
             .flex_col();
@@ -507,7 +497,7 @@ impl NyaTermApp {
             );
 
             let menu_tab_id = tab.id.clone();
-            tabs_menu = tabs_menu.child(
+            tabs_menu_content = tabs_menu_content.child(
                 div()
                     .id(SharedString::from(format!(
                         "transfer-editor-tabs-menu-item-{index}"
@@ -560,6 +550,18 @@ impl NyaTermApp {
                     ),
             );
         }
+        let tabs_menu = div()
+            .id("transfer-editor-tabs-menu")
+            .absolute()
+            .top(px(40.))
+            .right_0()
+            .w(px(320.))
+            .rounded_bl_md()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(tabs_menu_bg)
+            .shadow_lg()
+            .child(tabs_menu_content);
         let tab_strip = div()
             .id("transfer-editor-tabs")
             .h(px(40.))

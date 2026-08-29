@@ -971,8 +971,15 @@ fn invalid(message: impl Into<String>) -> StorageError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
+    use redb::ReadableDatabase;
+
+    use super::{
+        ConnectionStore, META_NOTE_SUMMARY_INDEX_VERSION, META_TABLE, NOTE_DOCUMENT_PREFIX,
+        NOTE_FOLDERS_TABLE, NOTE_SUMMARIES_TABLE, NOTE_SUMMARY_PREFIX, NOTES_TABLE, NoteDocument,
+        NoteNodeKind, NotesSnapshot, NotesUiState, PORTABLE_OPAQUE_ENTITIES_TABLE, entity_key,
+    };
 
     fn temp_store() -> ConnectionStore {
         let dir = std::env::temp_dir().join(format!(
