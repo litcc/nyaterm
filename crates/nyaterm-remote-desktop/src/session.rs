@@ -1,17 +1,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 use uuid::Uuid;
 
 use crate::helper_process;
 use crate::{
-    PROTOCOL_VERSION, PacketType, QueueWaker, RdpCertificateResponse, RdpControlMessage, RdpError,
-    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities,
-    RdpSessionConfig, RdpSessionDrain, RdpSessionState, decode_control, decode_cursor_packet,
-    decode_frame_packet, encode_control, read_packet, validate_committed_text, write_packet,
+    FRAME_PAYLOAD_LIMIT, PROTOCOL_VERSION, PacketType, QueueWaker, RdpCertificateResponse,
+    RdpControlMessage, RdpCursorEvent, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent,
+    RdpRuntimeEvent, RdpServerCapabilities, RdpSessionConfig, RdpSessionDrain, RdpSessionState,
+    decode_control, decode_cursor_packet_owned, decode_frame_packet_owned, encode_control,
+    read_packet, validate_committed_text, write_packet,
 };
 
 const MIN_WIDTH: u32 = 200;
@@ -19,6 +20,9 @@ const MIN_HEIGHT: u32 = 200;
 const MAX_WIDTH: u32 = 8192;
 const MAX_HEIGHT: u32 = 8192;
 const FRAME_QUEUE_LIMIT: usize = 64;
+const FRAME_QUEUE_BYTE_LIMIT: usize = FRAME_PAYLOAD_LIMIT;
+const CONTROL_QUEUE_LIMIT: usize = 256;
+const CONTROL_QUEUE_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 const HELPER_PACKAGE: &str = "nyaterm-rdp-helper";
 const HELPER_ENV_VAR: &str = "NYATERM_RDP_HELPER";
 
@@ -28,111 +32,238 @@ pub fn resolve_helper_path() -> Result<PathBuf, RdpError> {
 }
 
 #[derive(Default)]
-struct EventQueue {
-    /// Signalled after anything is enqueued. Held here rather than at each
-    /// call site so every producer path wakes the consumer.
+struct EventQueueState {
     waker: Option<QueueWaker>,
     control: VecDeque<RdpRuntimeEvent>,
+    control_bytes: usize,
     frames: VecDeque<RdpFrameEvent>,
+    frame_bytes: usize,
+    cursor: Option<RdpCursorEvent>,
     current_epoch: Option<u64>,
-    waiting_for_full_frame: bool,
-    dropped_frames: usize,
+    closed: bool,
+}
+
+fn frame_byte_cost(frame: &RdpFrameEvent) -> usize {
+    match frame {
+        RdpFrameEvent::Bitmap { pixels, .. } => pixels.len(),
+        _ => 0,
+    }
+}
+
+fn control_byte_cost(event: &RdpRuntimeEvent) -> usize {
+    match event {
+        RdpRuntimeEvent::State {
+            session_id,
+            message,
+            ..
+        } => session_id.len() + message.as_ref().map_or(0, String::len) + 64,
+        RdpRuntimeEvent::Frame { session_id, .. } => session_id.len() + 64,
+        RdpRuntimeEvent::Clipboard {
+            session_id, text, ..
+        } => session_id.len() + text.len() + 64,
+        RdpRuntimeEvent::CertificateRequest(request) => {
+            request.request_id.len()
+                + request.host.len()
+                + request.sha256_fingerprint.len()
+                + request.subject.as_ref().map_or(0, String::len)
+                + request.issuer.as_ref().map_or(0, String::len)
+                + request.valid_from.as_ref().map_or(0, String::len)
+                + request.valid_to.as_ref().map_or(0, String::len)
+                + 128
+        }
+        RdpRuntimeEvent::Capability { session_id, .. } => session_id.len() + 32,
+        RdpRuntimeEvent::Error {
+            session_id, error, ..
+        } => session_id.len() + error.message.len() + 64,
+    }
+}
+
+struct EventQueue {
+    state: Mutex<EventQueueState>,
+    space_available: Condvar,
+    frame_item_limit: usize,
+    frame_byte_limit: usize,
+}
+
+impl Default for EventQueue {
+    fn default() -> Self {
+        Self::with_limits(FRAME_QUEUE_LIMIT, FRAME_QUEUE_BYTE_LIMIT)
+    }
 }
 
 impl EventQueue {
-    fn push_control(&mut self, event: RdpRuntimeEvent) {
-        self.control.push_back(event);
-        self.wake();
+    fn with_limits(frame_item_limit: usize, frame_byte_limit: usize) -> Self {
+        Self {
+            state: Mutex::new(EventQueueState::default()),
+            space_available: Condvar::new(),
+            frame_item_limit,
+            frame_byte_limit,
+        }
     }
 
-    fn wake(&self) {
-        if let Some(waker) = &self.waker {
+    fn with_waker(waker: Option<QueueWaker>) -> Self {
+        let queue = Self::default();
+        queue
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .waker = waker;
+        queue
+    }
+
+    fn wake(state: &EventQueueState) {
+        if let Some(waker) = &state.waker {
             waker();
         }
     }
 
-    fn push_reset(&mut self, session_id: &str, epoch: u64, width: u32, height: u32) {
-        self.current_epoch = Some(epoch);
-        self.frames.clear();
-        self.waiting_for_full_frame = true;
-        self.control.push_back(RdpRuntimeEvent::Frame {
+    fn push_control(&self, event: RdpRuntimeEvent) -> bool {
+        let cost = control_byte_cost(&event);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while !state.closed
+            && (state.control.len() >= CONTROL_QUEUE_LIMIT
+                || state.control_bytes.saturating_add(cost) > CONTROL_QUEUE_BYTE_LIMIT)
+        {
+            state = self
+                .space_available
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        if state.closed {
+            return false;
+        }
+        state.control_bytes += cost;
+        state.control.push_back(event);
+        Self::wake(&state);
+        true
+    }
+
+    fn push_control_force(&self, event: RdpRuntimeEvent) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.control_bytes = state
+            .control_bytes
+            .saturating_add(control_byte_cost(&event));
+        state.control.push_back(event);
+        Self::wake(&state);
+    }
+
+    fn push_cursor(&self, cursor: RdpCursorEvent) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.closed {
+            return false;
+        }
+        state.cursor = Some(cursor);
+        Self::wake(&state);
+        true
+    }
+
+    fn push_reset(&self, session_id: &str, epoch: u64, width: u32, height: u32) -> bool {
+        {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if state.closed {
+                return false;
+            }
+            state.current_epoch = Some(epoch);
+            state.frames.clear();
+            state.frame_bytes = 0;
+        }
+        self.space_available.notify_all();
+        self.push_control(RdpRuntimeEvent::Frame {
             session_id: session_id.to_string(),
             event: RdpFrameEvent::Reset {
                 epoch,
                 width,
                 height,
             },
-        });
-        self.wake();
+        })
     }
 
-    fn push_frame(&mut self, frame: RdpFrameEvent) -> bool {
-        let dropped = self.push_frame_inner(frame);
-        // Wake unconditionally rather than mirroring the branch structure below.
-        // Two paths discard a frame for a stale epoch without touching the queue,
-        // and a redundant wake there costs one empty drain -- cheaper than a
-        // missed wake, and those paths only occur briefly after a resize.
-        self.wake();
-        dropped
-    }
-
-    fn push_frame_inner(&mut self, frame: RdpFrameEvent) -> bool {
-        let RdpFrameEvent::Bitmap {
-            epoch,
-            full,
-            x,
-            y,
-            width,
-            height,
-            ..
-        } = &frame
-        else {
-            self.frames.push_back(frame);
-            return false;
-        };
-        if self.current_epoch != Some(*epoch) {
+    fn push_frame(&self, frame: RdpFrameEvent) -> bool {
+        let cost = frame_byte_cost(&frame);
+        if cost > self.frame_byte_limit {
             return false;
         }
-        if self.waiting_for_full_frame {
-            if !*full {
+        let epoch = match &frame {
+            RdpFrameEvent::Bitmap { epoch, .. } => Some(*epoch),
+            _ => None,
+        };
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if epoch.is_some() && state.current_epoch != epoch {
+            return false;
+        }
+        while !state.closed
+            && (state.frames.len() >= self.frame_item_limit
+                || state.frame_bytes.saturating_add(cost) > self.frame_byte_limit)
+        {
+            state = self
+                .space_available
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if epoch.is_some() && state.current_epoch != epoch {
                 return false;
             }
-            self.frames.clear();
-            self.waiting_for_full_frame = false;
-            self.frames.push_back(frame);
+        }
+        if state.closed {
             return false;
         }
-        if let Some(existing) = self.frames.iter_mut().rev().find(|queued| matches!(queued,
-            RdpFrameEvent::Bitmap { epoch: queued_epoch, full: false, x: queued_x, y: queued_y, width: queued_width, height: queued_height, .. }
-                if queued_epoch == epoch && queued_x == x && queued_y == y && queued_width == width && queued_height == height
-        )) {
-            *existing = frame;
-            return false;
-        }
-        if self.frames.len() >= FRAME_QUEUE_LIMIT {
-            self.dropped_frames += self.frames.len() + 1;
-            self.frames.clear();
-            self.waiting_for_full_frame = true;
-            return true;
-        }
-        self.frames.push_back(frame);
-        false
+        state.frame_bytes += cost;
+        state.frames.push_back(frame);
+        Self::wake(&state);
+        true
     }
 
-    fn drain(&mut self) -> RdpSessionDrain {
-        RdpSessionDrain {
-            control: self.control.drain(..).collect(),
-            frames: self.frames.drain(..).collect(),
-            dropped_frames: std::mem::take(&mut self.dropped_frames),
-            waiting_for_full_frame: self.waiting_for_full_frame,
+    fn drain(&self) -> RdpSessionDrain {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut frames: Vec<RdpFrameEvent> = state.frames.drain(..).collect();
+        state.frame_bytes = 0;
+        if let Some(cursor) = state.cursor.take() {
+            frames.push(RdpFrameEvent::Cursor(cursor));
         }
+        let drain = RdpSessionDrain {
+            control: state.control.drain(..).collect(),
+            frames,
+            dropped_frames: 0,
+            waiting_for_full_frame: false,
+        };
+        state.control_bytes = 0;
+        drop(state);
+        self.space_available.notify_all();
+        drain
+    }
+
+    fn close(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.closed = true;
+        drop(state);
+        self.space_available.notify_all();
     }
 }
 
 struct SessionRecord {
     state: Arc<Mutex<RdpSessionState>>,
     capabilities: Arc<Mutex<Option<RdpServerCapabilities>>>,
-    queue: Arc<Mutex<EventQueue>>,
+    queue: Arc<EventQueue>,
     writer: Arc<Mutex<ChildStdin>>,
     child: Option<Child>,
     reader: Option<JoinHandle<()>>,
@@ -203,16 +334,12 @@ impl RdpSessionManager {
             )
         })?;
         let writer = Arc::new(Mutex::new(stdin));
-        let queue = Arc::new(Mutex::new(EventQueue {
-            waker: self.queue_waker(),
-            ..EventQueue::default()
-        }));
+        let queue = Arc::new(EventQueue::with_waker(self.queue_waker()));
         let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
         let capabilities = Arc::new(Mutex::new(None));
         let reader = spawn_reader(
             session_id.clone(),
             stdout,
-            writer.clone(),
             queue.clone(),
             state.clone(),
             capabilities.clone(),
@@ -245,15 +372,11 @@ impl RdpSessionManager {
             cleanup_child(&mut record);
             return Err(error);
         }
-        record
-            .queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(RdpRuntimeEvent::State {
-                session_id: session_id.clone(),
-                state: RdpSessionState::Connecting,
-                message: None,
-            });
+        record.queue.push_control(RdpRuntimeEvent::State {
+            session_id: session_id.clone(),
+            state: RdpSessionState::Connecting,
+            message: None,
+        });
         let mut sessions = match self.sessions.lock() {
             Ok(sessions) => sessions,
             Err(_) => {
@@ -293,11 +416,7 @@ impl RdpSessionManager {
         let Some(record) = sessions.get(session_id) else {
             return RdpSessionDrain::default();
         };
-        record
-            .queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .drain()
+        record.queue.drain()
     }
 
     pub fn drain_events(&self, session_id: &str) -> Vec<RdpRuntimeEvent> {
@@ -442,15 +561,11 @@ impl RdpSessionManager {
         );
         cleanup_child(&mut record);
         set_state(&record.state, RdpSessionState::Disconnected);
-        record
-            .queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(RdpRuntimeEvent::State {
-                session_id: session_id.to_string(),
-                state: RdpSessionState::Disconnected,
-                message: None,
-            });
+        record.queue.push_control_force(RdpRuntimeEvent::State {
+            session_id: session_id.to_string(),
+            state: RdpSessionState::Disconnected,
+            message: None,
+        });
         self.pending_certificates
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -540,8 +655,7 @@ fn send_control(
 fn spawn_reader(
     session_id: String,
     mut stdout: std::process::ChildStdout,
-    writer: Arc<Mutex<ChildStdin>>,
-    queue: Arc<Mutex<EventQueue>>,
+    queue: Arc<EventQueue>,
     state: Arc<Mutex<RdpSessionState>>,
     capabilities: Arc<Mutex<Option<RdpServerCapabilities>>>,
     pending_certificates: Arc<Mutex<HashMap<String, String>>>,
@@ -581,7 +695,7 @@ fn spawn_reader(
                         }),
                     PacketType::Frame => require_server_hello(hello_received, "frame packet")
                         .and_then(|()| {
-                            decode_frame_packet(&packet).map_err(|error| {
+                            decode_frame_packet_owned(packet).map_err(|error| {
                                 RdpError::new(RdpErrorKind::Protocol, error.to_string())
                             })
                         })
@@ -589,34 +703,17 @@ fn spawn_reader(
                             if frame_session != session_id {
                                 return;
                             }
-                            let request_full = queue
-                                .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                .push_frame(frame);
-                            if request_full {
-                                let _ = send_control(
-                                    &writer,
-                                    &RdpControlMessage::RequestFullFrame {
-                                        session_id: session_id.clone(),
-                                    },
-                                );
-                            }
+                            queue.push_frame(frame);
                         }),
                     PacketType::Cursor => require_server_hello(hello_received, "cursor packet")
                         .and_then(|()| {
-                            decode_cursor_packet(&packet).map_err(|error| {
+                            decode_cursor_packet_owned(packet).map_err(|error| {
                                 RdpError::new(RdpErrorKind::Protocol, error.to_string())
                             })
                         })
                         .map(|(cursor_session, cursor)| {
                             if cursor_session == session_id {
-                                queue
-                                    .lock()
-                                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                    .push_control(RdpRuntimeEvent::Frame {
-                                        session_id: session_id.clone(),
-                                        event: RdpFrameEvent::Cursor(cursor),
-                                    });
+                                queue.push_cursor(cursor);
                             }
                         }),
                 };
@@ -661,7 +758,7 @@ fn require_server_hello(received: bool, packet_kind: &str) -> Result<(), RdpErro
 fn handle_control(
     session_id: &str,
     message: RdpControlMessage,
-    queue: &Arc<Mutex<EventQueue>>,
+    queue: &Arc<EventQueue>,
     state: &Arc<Mutex<RdpSessionState>>,
     capabilities: &Arc<Mutex<Option<RdpServerCapabilities>>>,
     pending: &Arc<Mutex<HashMap<String, String>>>,
@@ -723,57 +820,48 @@ fn handle_control(
             epoch,
             width,
             height,
-        } if event_session == session_id => queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_reset(session_id, epoch, width, height),
+        } if event_session == session_id => {
+            queue.push_reset(session_id, epoch, width, height);
+        }
         RdpControlMessage::State {
             session_id: event_session,
             state: new_state,
             message,
         } if event_session == session_id => {
             set_state(state, new_state.clone());
-            queue
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push_control(RdpRuntimeEvent::State {
-                    session_id: session_id.to_string(),
-                    state: new_state,
-                    message,
-                });
+            queue.push_control(RdpRuntimeEvent::State {
+                session_id: session_id.to_string(),
+                state: new_state,
+                message,
+            });
         }
         RdpControlMessage::Clipboard {
             session_id: event_session,
             text,
             generation,
-        } if event_session == session_id => queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(RdpRuntimeEvent::Clipboard {
+        } if event_session == session_id => {
+            queue.push_control(RdpRuntimeEvent::Clipboard {
                 session_id: session_id.to_string(),
                 text,
                 generation,
-            }),
+            });
+        }
         RdpControlMessage::CertificateRequest(request) => {
             pending
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .insert(request.request_id.clone(), session_id.to_string());
-            queue
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push_control(RdpRuntimeEvent::CertificateRequest(request));
+            queue.push_control(RdpRuntimeEvent::CertificateRequest(request));
         }
         RdpControlMessage::Capability {
             session_id: event_session,
             capability,
-        } if event_session == session_id => queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(RdpRuntimeEvent::Capability {
+        } if event_session == session_id => {
+            queue.push_control(RdpRuntimeEvent::Capability {
                 session_id: session_id.to_string(),
                 capability,
-            }),
+            });
+        }
         RdpControlMessage::Error {
             session_id: event_session,
             error,
@@ -782,14 +870,11 @@ fn handle_control(
             if fatal {
                 set_state(state, RdpSessionState::Failed(error.clone()));
             }
-            queue
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push_control(RdpRuntimeEvent::Error {
-                    session_id: session_id.to_string(),
-                    error,
-                    fatal,
-                });
+            queue.push_control(RdpRuntimeEvent::Error {
+                session_id: session_id.to_string(),
+                error,
+                fatal,
+            });
         }
         _ => {}
     }
@@ -798,16 +883,13 @@ fn handle_control(
 
 fn push_reader_error(
     session_id: &str,
-    queue: &Arc<Mutex<EventQueue>>,
+    queue: &Arc<EventQueue>,
     state: &Arc<Mutex<RdpSessionState>>,
     kind: RdpErrorKind,
     message: String,
 ) {
     let error = RdpError::new(kind, message);
     set_state(state, RdpSessionState::Failed(error.clone()));
-    let mut queue = queue
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     queue.push_control(RdpRuntimeEvent::Error {
         session_id: session_id.to_string(),
         error: error.clone(),
@@ -827,6 +909,7 @@ fn set_state(state: &Arc<Mutex<RdpSessionState>>, new_state: RdpSessionState) {
 }
 
 fn cleanup_child(record: &mut SessionRecord) {
+    record.queue.close();
     helper_process::cleanup_child(&mut record.child, &mut record.reader);
 }
 
@@ -879,17 +962,15 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use super::{
-        EventQueue, FRAME_QUEUE_LIMIT, handle_control, require_server_hello, validate_rdp_input,
-    };
+    use super::{EventQueue, handle_control, require_server_hello, validate_rdp_input};
     use crate::{
-        PROTOCOL_VERSION, PixelFormat, RdpCapability, RdpControlMessage, RdpFrameEvent,
-        RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities, RdpSessionState,
+        PROTOCOL_VERSION, PixelFormat, RdpCapability, RdpControlMessage, RdpCursorEvent,
+        RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities, RdpSessionState,
     };
 
     #[test]
     fn server_hello_must_be_first_and_records_capabilities_only_once() {
-        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let queue = Arc::new(EventQueue::default());
         let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
         let capabilities = Arc::new(Mutex::new(None));
         let pending = Arc::new(Mutex::new(HashMap::new()));
@@ -1000,7 +1081,7 @@ mod tests {
 
     #[test]
     fn dynamic_resize_unavailable_remains_a_runtime_capability_event() {
-        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let queue = Arc::new(EventQueue::default());
         let state = Arc::new(Mutex::new(RdpSessionState::Connected));
         let capabilities = Arc::new(Mutex::new(Some(RdpServerCapabilities {
             committed_unicode_text: true,
@@ -1031,49 +1112,12 @@ mod tests {
             })
         );
         assert!(matches!(
-            queue.lock().unwrap().control.front(),
+            queue.drain().control.first(),
             Some(RdpRuntimeEvent::Capability {
                 capability: RdpCapability::DynamicResizeUnavailable,
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn every_producer_path_wakes_the_consumer() {
-        let signals = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&signals);
-        let mut queue = EventQueue {
-            waker: Some(Arc::new(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-            })),
-            ..EventQueue::default()
-        };
-
-        queue.push_reset("s", 1, 4, 4);
-        assert_eq!(signals.load(Ordering::Relaxed), 1, "a reset must wake");
-        queue.push_frame(frame(1, 0, true));
-        assert_eq!(signals.load(Ordering::Relaxed), 2, "a frame must wake");
-        queue.push_control(RdpRuntimeEvent::Clipboard {
-            session_id: "s".to_string(),
-            text: String::new(),
-            generation: 0,
-        });
-        assert_eq!(
-            signals.load(Ordering::Relaxed),
-            3,
-            "a control event must wake"
-        );
-    }
-
-    #[test]
-    fn a_queue_without_a_waker_still_works() {
-        let mut queue = EventQueue::default();
-
-        queue.push_reset("s", 1, 4, 4);
-        queue.push_frame(frame(1, 0, true));
-
-        assert_eq!(queue.drain().frames.len(), 1);
     }
 
     fn frame(epoch: u64, x: u32, full: bool) -> RdpFrameEvent {
@@ -1091,43 +1135,98 @@ mod tests {
     }
 
     #[test]
-    fn reset_discards_old_epoch_and_requires_full_frame() {
-        let mut queue = EventQueue::default();
-        queue.push_reset("s", 2, 4, 4);
-        queue.push_frame(frame(1, 0, true));
-        queue.push_frame(frame(2, 0, false));
-        assert!(queue.frames.is_empty());
-        queue.push_frame(frame(2, 0, true));
-        assert_eq!(queue.frames.len(), 1);
-        assert!(!queue.waiting_for_full_frame);
-    }
-
-    #[test]
-    fn overflow_clears_dirty_frames_and_waits_for_full_frame() {
-        let mut queue = EventQueue::default();
-        queue.push_reset("s", 1, 100, 100);
-        queue.push_frame(frame(1, 0, true));
-        queue.frames.clear();
-        for x in 0..FRAME_QUEUE_LIMIT as u32 {
-            assert!(!queue.push_frame(frame(1, x, false)));
-        }
-        assert!(queue.push_frame(frame(1, FRAME_QUEUE_LIMIT as u32, false)));
-        assert!(queue.frames.is_empty());
-        assert!(queue.waiting_for_full_frame);
-        queue.push_frame(frame(1, 99, false));
-        assert!(queue.frames.is_empty());
-        queue.push_frame(frame(1, 0, true));
-        assert_eq!(queue.frames.len(), 1);
-    }
-
-    #[test]
-    fn identical_dirty_region_is_replaced() {
-        let mut queue = EventQueue::default();
+    fn cursor_is_latest_only_and_rides_the_frame_drain() {
+        let queue = EventQueue::default();
         queue.push_reset("s", 1, 4, 4);
         queue.push_frame(frame(1, 0, true));
-        queue.frames.clear();
-        queue.push_frame(frame(1, 1, false));
-        queue.push_frame(frame(1, 1, false));
-        assert_eq!(queue.frames.len(), 1);
+        let cursor = |x| RdpCursorEvent {
+            epoch: 1,
+            visible: true,
+            x,
+            y: 0,
+            width: 1,
+            height: 1,
+            hotspot_x: 0,
+            hotspot_y: 0,
+            pixels: vec![0u8; 4],
+        };
+        queue.push_cursor(cursor(1));
+        queue.push_cursor(cursor(2));
+        queue.push_cursor(cursor(3));
+        // Latest-only: only the newest cursor survives, regardless of rate.
+        let drain = queue.drain();
+        let cursors: Vec<_> = drain
+            .frames
+            .iter()
+            .filter_map(|frame| match frame {
+                RdpFrameEvent::Cursor(cursor) => Some(cursor.x),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cursors, vec![3]);
+    }
+
+    #[test]
+    fn stale_epochs_are_ignored_without_waiting_for_full() {
+        let queue = EventQueue::default();
+        queue.push_reset("s", 2, 4, 4);
+        assert!(!queue.push_frame(frame(1, 0, true)));
+        assert!(queue.push_frame(frame(2, 0, false)));
+        let drain = queue.drain();
+        assert_eq!(drain.frames.len(), 1);
+        assert!(matches!(
+            drain.frames[0],
+            RdpFrameEvent::Bitmap {
+                epoch: 2,
+                full: false,
+                ..
+            }
+        ));
+        assert_eq!(drain.dropped_frames, 0);
+        assert!(!drain.waiting_for_full_frame);
+    }
+
+    #[test]
+    fn byte_budget_applies_backpressure_until_drain() {
+        let queue = Arc::new(EventQueue::with_limits(2, 8));
+        queue.push_reset("s", 1, 4, 4);
+        assert!(queue.push_frame(frame(1, 0, false)));
+        assert!(queue.push_frame(frame(1, 1, false)));
+        let producer_queue = Arc::clone(&queue);
+        let producer = std::thread::spawn(move || producer_queue.push_frame(frame(1, 2, false)));
+        std::thread::yield_now();
+        assert!(!producer.is_finished());
+        assert_eq!(queue.drain().frames.len(), 2);
+        assert!(producer.join().unwrap());
+        assert_eq!(queue.drain().frames.len(), 1);
+    }
+
+    #[test]
+    fn close_unblocks_a_backpressured_producer() {
+        let queue = Arc::new(EventQueue::with_limits(1, 4));
+        queue.push_reset("s", 1, 4, 4);
+        assert!(queue.push_frame(frame(1, 0, false)));
+        let producer_queue = Arc::clone(&queue);
+        let producer = std::thread::spawn(move || producer_queue.push_frame(frame(1, 1, false)));
+        std::thread::yield_now();
+        queue.close();
+        assert!(!producer.join().unwrap());
+    }
+
+    #[test]
+    fn every_producer_path_wakes_the_consumer() {
+        let signals = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&signals);
+        let queue = EventQueue::with_waker(Some(Arc::new(move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+        })));
+        queue.push_reset("s", 1, 4, 4);
+        queue.push_frame(frame(1, 0, true));
+        queue.push_control(RdpRuntimeEvent::Clipboard {
+            session_id: "s".to_string(),
+            text: String::new(),
+            generation: 0,
+        });
+        assert_eq!(signals.load(Ordering::Relaxed), 3);
     }
 }

@@ -351,16 +351,16 @@ pub enum RdpRuntimeEvent {
 /// Called after an event is enqueued on a session queue, so the consumer can be
 /// woken instead of polling for it.
 ///
-/// A callback rather than a channel on purpose: the session queues coalesce
-/// (they keep only the newest frame), so they cannot become channels, and this
-/// crate is linked by both helper processes and stays free of any async runtime.
+/// A callback rather than a channel keeps this crate free of any async runtime;
+/// the bounded session queues use a condition variable for producer backpressure
+/// and invoke this callback only to schedule a consumer drain.
 /// The application supplies a closure that signals its own wake.
 ///
 /// # Contract
 ///
 /// The waker is invoked while the session queue lock is held, so it must not
 /// block, must not re-enter the session manager, and must not panic. Signalling
-/// an atomic and posting to an unbounded channel is the intended shape.
+/// an atomic and posting a lightweight GPUI wake event is the intended shape.
 pub type QueueWaker = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

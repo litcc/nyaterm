@@ -5,6 +5,7 @@ use crate::{PixelFormat, RdpControlMessage, RdpCursorEvent, RdpFrameEvent, VncCo
 pub const HEADER_LEN: usize = 5;
 pub const CONTROL_PAYLOAD_LIMIT: usize = 1024 * 1024;
 pub const FRAME_PAYLOAD_LIMIT: usize = 160 * 1024 * 1024;
+pub const CURSOR_PAYLOAD_LIMIT: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -33,12 +34,23 @@ impl TryFrom<u8> for PacketType {
 pub struct Packet {
     pub packet_type: PacketType,
     pub payload: Vec<u8>,
+    body: Vec<u8>,
+}
+
+impl Packet {
+    fn payload_len(&self) -> io::Result<usize> {
+        self.payload
+            .len()
+            .checked_add(self.body.len())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "packet length overflow"))
+    }
 }
 
 fn payload_limit(packet_type: PacketType) -> usize {
     match packet_type {
         PacketType::Control => CONTROL_PAYLOAD_LIMIT,
-        PacketType::Frame | PacketType::Cursor => FRAME_PAYLOAD_LIMIT,
+        PacketType::Frame => FRAME_PAYLOAD_LIMIT,
+        PacketType::Cursor => CURSOR_PAYLOAD_LIMIT,
     }
 }
 
@@ -65,11 +77,19 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Packet>> {
             "helper IPC payload exceeds limit",
         ));
     }
-    let mut payload = vec![0; length];
+    let mut payload = Vec::new();
+    payload.try_reserve_exact(length).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            "failed to allocate helper IPC payload",
+        )
+    })?;
+    payload.resize(length, 0);
     reader.read_exact(&mut payload)?;
     Ok(Some(Packet {
         packet_type,
         payload,
+        body: Vec::new(),
     }))
 }
 
@@ -80,13 +100,14 @@ pub fn read_packet(reader: &mut impl Read) -> io::Result<Option<Packet>> {
 /// write syscalls. Helpers batch into a `BufWriter` and flush once the outbound
 /// queue drains; use [`write_packet`] when the packet must leave immediately.
 pub fn write_packet_into(writer: &mut impl Write, packet: &Packet) -> io::Result<()> {
-    if packet.payload.len() > payload_limit(packet.packet_type) {
+    let payload_len = packet.payload_len()?;
+    if payload_len > payload_limit(packet.packet_type) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "helper IPC payload exceeds limit",
         ));
     }
-    let length = u32::try_from(packet.payload.len()).map_err(|_| {
+    let length = u32::try_from(payload_len).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             "helper IPC payload is too large",
@@ -94,7 +115,8 @@ pub fn write_packet_into(writer: &mut impl Write, packet: &Packet) -> io::Result
     })?;
     writer.write_all(&[packet.packet_type as u8])?;
     writer.write_all(&length.to_le_bytes())?;
-    writer.write_all(&packet.payload)
+    writer.write_all(&packet.payload)?;
+    writer.write_all(&packet.body)
 }
 
 pub fn write_packet(writer: &mut impl Write, packet: &Packet) -> io::Result<()> {
@@ -131,6 +153,7 @@ impl PacketReader {
             packets.push(Packet {
                 packet_type,
                 payload: self.buffer[offset + HEADER_LEN..offset + packet_len].to_vec(),
+                body: Vec::new(),
             });
             offset += packet_len;
         }
@@ -152,6 +175,7 @@ pub fn encode_control(message: &RdpControlMessage) -> io::Result<Packet> {
     Ok(Packet {
         packet_type: PacketType::Control,
         payload,
+        body: Vec::new(),
     })
 }
 
@@ -183,6 +207,7 @@ pub fn encode_vnc_control(message: &VncControlMessage) -> io::Result<Packet> {
     Ok(Packet {
         packet_type: PacketType::Control,
         payload,
+        body: Vec::new(),
     })
 }
 
@@ -297,10 +322,75 @@ pub fn encode_frame_packet(session_id: &str, event: &RdpFrameEvent) -> io::Resul
     Ok(Packet {
         packet_type: PacketType::Frame,
         payload,
+        body: Vec::new(),
     })
 }
 
-pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent)> {
+/// Encode a frame without cloning its pixel buffer.
+///
+/// The packet writer emits `payload` and `body` contiguously, preserving the
+/// existing wire format while allowing helper decoders to transfer ownership of
+/// server-controlled image buffers directly to the stdout writer.
+pub fn encode_frame_packet_owned(session_id: &str, event: RdpFrameEvent) -> io::Result<Packet> {
+    let RdpFrameEvent::Bitmap {
+        epoch,
+        full,
+        x,
+        y,
+        width,
+        height,
+        stride,
+        format,
+        pixels,
+    } = event
+    else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "event is not a bitmap",
+        ));
+    };
+    let mut payload = Vec::with_capacity(40 + session_id.len());
+    put_session(&mut payload, session_id)?;
+    payload.extend_from_slice(&epoch.to_le_bytes());
+    payload.push(u8::from(full));
+    payload.push(match format {
+        PixelFormat::Bgra8 => 1,
+        PixelFormat::Rgba8 => 2,
+    });
+    for value in [x, y, width, height, stride] {
+        put_u32(&mut payload, value);
+    }
+    put_u32(
+        &mut payload,
+        u32::try_from(pixels.len())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "frame is too large"))?,
+    );
+    if payload.len().saturating_add(pixels.len()) > FRAME_PAYLOAD_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "frame exceeds limit",
+        ));
+    }
+    Ok(Packet {
+        packet_type: PacketType::Frame,
+        payload,
+        body: pixels,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct FrameHeader {
+    epoch: u64,
+    full: bool,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: PixelFormat,
+}
+
+fn decode_frame_header(packet: &Packet) -> io::Result<(String, FrameHeader, usize)> {
     if packet.packet_type != PacketType::Frame {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -332,21 +422,31 @@ pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent
         .and_then(|rows| rows.checked_mul(stride as usize))
         .and_then(|base| base.checked_add(width as usize * 4))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "frame dimensions overflow"))?;
+    let inline_data_len = packet.payload.len().saturating_sub(offset);
+    let actual_data_len = if packet.body.is_empty() {
+        inline_data_len
+    } else if inline_data_len == 0 {
+        packet.body.len()
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "frame pixels are split across inline and owned payloads",
+        ));
+    };
     if width == 0
         || height == 0
         || stride < width.saturating_mul(4)
         || data_len != required
-        || packet.payload.len() - offset != data_len
+        || actual_data_len != data_len
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "invalid frame dimensions or payload length",
         ));
     }
-    let pixels = packet.payload[offset..].to_vec();
     Ok((
         session_id,
-        RdpFrameEvent::Bitmap {
+        FrameHeader {
             epoch,
             full,
             x,
@@ -355,6 +455,53 @@ pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent
             height,
             stride,
             format,
+        },
+        offset,
+    ))
+}
+
+pub fn decode_frame_packet(packet: &Packet) -> io::Result<(String, RdpFrameEvent)> {
+    let (session_id, header, offset) = decode_frame_header(packet)?;
+    let pixels = if packet.body.is_empty() {
+        packet.payload[offset..].to_vec()
+    } else {
+        packet.body.clone()
+    };
+    Ok((
+        session_id,
+        RdpFrameEvent::Bitmap {
+            epoch: header.epoch,
+            full: header.full,
+            x: header.x,
+            y: header.y,
+            width: header.width,
+            height: header.height,
+            stride: header.stride,
+            format: header.format,
+            pixels,
+        },
+    ))
+}
+
+pub fn decode_frame_packet_owned(mut packet: Packet) -> io::Result<(String, RdpFrameEvent)> {
+    let (session_id, header, offset) = decode_frame_header(&packet)?;
+    let pixels = if packet.body.is_empty() {
+        packet.payload.drain(..offset);
+        packet.payload
+    } else {
+        packet.body
+    };
+    Ok((
+        session_id,
+        RdpFrameEvent::Bitmap {
+            epoch: header.epoch,
+            full: header.full,
+            x: header.x,
+            y: header.y,
+            width: header.width,
+            height: header.height,
+            stride: header.stride,
+            format: header.format,
             pixels,
         },
     ))
@@ -381,13 +528,32 @@ pub fn encode_cursor_packet(session_id: &str, cursor: &RdpCursorEvent) -> io::Re
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cursor is too large"))?,
     );
     payload.extend_from_slice(&cursor.pixels);
+    if payload.len() > CURSOR_PAYLOAD_LIMIT {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cursor exceeds limit",
+        ));
+    }
     Ok(Packet {
         packet_type: PacketType::Cursor,
         payload,
+        body: Vec::new(),
     })
 }
 
-pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEvent)> {
+#[derive(Clone, Copy)]
+struct CursorHeader {
+    epoch: u64,
+    visible: bool,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    hotspot_x: u32,
+    hotspot_y: u32,
+}
+
+fn decode_cursor_header(packet: &Packet) -> io::Result<(String, CursorHeader, usize)> {
     if packet.packet_type != PacketType::Cursor {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -422,7 +588,7 @@ pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEve
     }
     Ok((
         session_id,
-        RdpCursorEvent {
+        CursorHeader {
             epoch,
             visible,
             x,
@@ -431,7 +597,47 @@ pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEve
             height,
             hotspot_x,
             hotspot_y,
+        },
+        offset,
+    ))
+}
+
+pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEvent)> {
+    let (session_id, header, offset) = decode_cursor_header(packet)?;
+    Ok((
+        session_id,
+        RdpCursorEvent {
+            epoch: header.epoch,
+            visible: header.visible,
+            x: header.x,
+            y: header.y,
+            width: header.width,
+            height: header.height,
+            hotspot_x: header.hotspot_x,
+            hotspot_y: header.hotspot_y,
             pixels: packet.payload[offset..].to_vec(),
+        },
+    ))
+}
+
+pub fn decode_cursor_packet_owned(mut packet: Packet) -> io::Result<(String, RdpCursorEvent)> {
+    if !packet.body.is_empty() {
+        return decode_cursor_packet(&packet);
+    }
+    let (session_id, header, offset) = decode_cursor_header(&packet)?;
+    packet.payload.drain(..offset);
+    Ok((
+        session_id,
+        RdpCursorEvent {
+            epoch: header.epoch,
+            visible: header.visible,
+            x: header.x,
+            y: header.y,
+            width: header.width,
+            height: header.height,
+            hotspot_x: header.hotspot_x,
+            hotspot_y: header.hotspot_y,
+            pixels: packet.payload,
         },
     ))
 }
@@ -439,8 +645,9 @@ pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEve
 #[cfg(test)]
 mod tests {
     use super::{
-        PacketReader, decode_control, decode_frame_packet, decode_vnc_control, encode_control,
-        encode_frame_packet, encode_vnc_control, read_packet, write_packet, write_packet_into,
+        PacketReader, decode_control, decode_frame_packet_owned, decode_vnc_control,
+        encode_control, encode_frame_packet, encode_vnc_control, read_packet, write_packet,
+        write_packet_into,
     };
     use crate::{
         PROTOCOL_VERSION, PixelFormat, RdpControlMessage, RdpFrameEvent, RdpServerCapabilities,
@@ -500,7 +707,7 @@ mod tests {
         write_packet(&mut encoded, &packet).unwrap();
         let decoded = read_packet(&mut Cursor::new(encoded)).unwrap().unwrap();
         assert_eq!(
-            decode_frame_packet(&decoded).unwrap(),
+            decode_frame_packet_owned(decoded).unwrap(),
             ("session".to_string(), frame)
         );
     }

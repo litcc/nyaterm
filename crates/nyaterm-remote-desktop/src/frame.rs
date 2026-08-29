@@ -1,5 +1,48 @@
 use crate::{PixelFormat, RdpFrameEvent};
 
+/// Resource limits applied before allocating a server-controlled framebuffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FramebufferLimits {
+    pub max_width: u32,
+    pub max_height: u32,
+    pub max_bytes: usize,
+}
+
+pub const RDP_FRAMEBUFFER_LIMITS: FramebufferLimits = FramebufferLimits {
+    max_width: 8192,
+    max_height: 8192,
+    max_bytes: 256 * 1024 * 1024,
+};
+
+pub const VNC_FRAMEBUFFER_LIMITS: FramebufferLimits = FramebufferLimits {
+    max_width: 7680,
+    max_height: 4320,
+    max_bytes: 128 * 1024 * 1024,
+};
+
+pub fn validate_framebuffer_dimensions(
+    width: u32,
+    height: u32,
+    limits: FramebufferLimits,
+) -> Result<usize, FramebufferError> {
+    if width == 0 || height == 0 || width > limits.max_width || height > limits.max_height {
+        return Err(FramebufferError::DimensionsTooLarge { width, height });
+    }
+    let len = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(FramebufferError::SizeOverflow)?;
+    if len > limits.max_bytes {
+        return Err(FramebufferError::DimensionsTooLarge { width, height });
+    }
+    Ok(len)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirtyRect {
     pub x: u32,
@@ -45,6 +88,10 @@ pub enum FramebufferError {
     InvalidPayload,
     #[error("frame dimensions overflow addressable memory")]
     SizeOverflow,
+    #[error("framebuffer {width}x{height} exceeds the supported size")]
+    DimensionsTooLarge { width: u32, height: u32 },
+    #[error("failed to allocate {bytes} bytes for the framebuffer")]
+    AllocationFailed { bytes: usize },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,21 +103,24 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
-    pub fn new(epoch: u64, width: u32, height: u32) -> Result<Self, FramebufferError> {
-        let len = usize::try_from(width)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(height)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height))
-            })
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or(FramebufferError::SizeOverflow)?;
+    pub fn new(
+        epoch: u64,
+        width: u32,
+        height: u32,
+        limits: FramebufferLimits,
+    ) -> Result<Self, FramebufferError> {
+        let len = validate_framebuffer_dimensions(width, height, limits)?;
+        // Fallible allocation: a server-driven reset must degrade to a typed
+        // error, never abort the process the way `vec![0; len]` would on OOM.
+        let mut bgra = Vec::new();
+        bgra.try_reserve_exact(len)
+            .map_err(|_| FramebufferError::AllocationFailed { bytes: len })?;
+        bgra.resize(len, 0);
         Ok(Self {
             width,
             height,
             epoch,
-            bgra: vec![0; len],
+            bgra,
         })
     }
 
@@ -87,8 +137,14 @@ impl Framebuffer {
         &self.bgra
     }
 
-    pub fn reset(&mut self, epoch: u64, width: u32, height: u32) -> Result<(), FramebufferError> {
-        *self = Self::new(epoch, width, height)?;
+    pub fn reset(
+        &mut self,
+        epoch: u64,
+        width: u32,
+        height: u32,
+        limits: FramebufferLimits,
+    ) -> Result<(), FramebufferError> {
+        *self = Self::new(epoch, width, height, limits)?;
         Ok(())
     }
 
@@ -181,7 +237,10 @@ pub fn merge_dirty_rects(rects: impl IntoIterator<Item = DirtyRect>) -> Vec<Dirt
 
 #[cfg(test)]
 mod tests {
-    use crate::{Framebuffer, FramebufferError, PixelFormat, RdpFrameEvent};
+    use crate::{
+        Framebuffer, FramebufferError, FramebufferLimits, PixelFormat, RDP_FRAMEBUFFER_LIMITS,
+        RdpFrameEvent, VNC_FRAMEBUFFER_LIMITS, validate_framebuffer_dimensions,
+    };
 
     fn bitmap(epoch: u64, x: u32, y: u32, pixels: Vec<u8>) -> RdpFrameEvent {
         RdpFrameEvent::Bitmap {
@@ -199,7 +258,7 @@ mod tests {
 
     #[test]
     fn applies_two_by_two_update_to_four_by_four_framebuffer() {
-        let mut framebuffer = Framebuffer::new(3, 4, 4).unwrap();
+        let mut framebuffer = Framebuffer::new(3, 4, 4, RDP_FRAMEBUFFER_LIMITS).unwrap();
         let pixels = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         framebuffer.apply(&bitmap(3, 1, 1, pixels)).unwrap();
         assert_eq!(&framebuffer.pixels()[20..28], &[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -212,7 +271,7 @@ mod tests {
 
     #[test]
     fn rejects_stale_epoch_and_bad_payload() {
-        let mut framebuffer = Framebuffer::new(4, 4, 4).unwrap();
+        let mut framebuffer = Framebuffer::new(4, 4, 4, RDP_FRAMEBUFFER_LIMITS).unwrap();
         assert!(matches!(
             framebuffer.apply(&bitmap(3, 0, 0, vec![0; 16])),
             Err(FramebufferError::StaleEpoch { .. })
@@ -225,7 +284,7 @@ mod tests {
 
     #[test]
     fn converts_rgba_to_bgra() {
-        let mut framebuffer = Framebuffer::new(1, 2, 2).unwrap();
+        let mut framebuffer = Framebuffer::new(1, 2, 2, RDP_FRAMEBUFFER_LIMITS).unwrap();
         let frame = RdpFrameEvent::Bitmap {
             epoch: 1,
             full: true,
@@ -239,5 +298,63 @@ mod tests {
         };
         framebuffer.apply(&frame).unwrap();
         assert_eq!(&framebuffer.pixels()[0..4], &[3, 2, 1, 4]);
+    }
+
+    #[test]
+    fn rejects_zero_and_oversized_dimensions() {
+        assert_eq!(
+            Framebuffer::new(1, 0, 4, RDP_FRAMEBUFFER_LIMITS),
+            Err(FramebufferError::DimensionsTooLarge {
+                width: 0,
+                height: 4
+            })
+        );
+        assert_eq!(
+            Framebuffer::new(1, 4, 0, RDP_FRAMEBUFFER_LIMITS),
+            Err(FramebufferError::DimensionsTooLarge {
+                width: 4,
+                height: 0
+            })
+        );
+        let oversize = RDP_FRAMEBUFFER_LIMITS.max_width + 1;
+        assert_eq!(
+            Framebuffer::new(1, oversize, 4, RDP_FRAMEBUFFER_LIMITS),
+            Err(FramebufferError::DimensionsTooLarge {
+                width: oversize,
+                height: 4
+            })
+        );
+        assert_eq!(
+            Framebuffer::new(1, 4, oversize, RDP_FRAMEBUFFER_LIMITS),
+            Err(FramebufferError::DimensionsTooLarge {
+                width: 4,
+                height: oversize
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_total_byte_budget_even_when_edges_are_legal() {
+        let limits = FramebufferLimits {
+            max_width: 16,
+            max_height: 16,
+            max_bytes: 32,
+        };
+        assert_eq!(
+            validate_framebuffer_dimensions(4, 4, limits),
+            Err(FramebufferError::DimensionsTooLarge {
+                width: 4,
+                height: 4
+            })
+        );
+    }
+
+    #[test]
+    fn allocates_a_large_but_legal_framebuffer() {
+        // 4K fits comfortably below the byte budget and must allocate fallibly
+        // without aborting.
+        let framebuffer = Framebuffer::new(1, 3840, 2160, VNC_FRAMEBUFFER_LIMITS)
+            .expect("4K framebuffer allocates");
+        assert_eq!(framebuffer.pixels().len(), 3840 * 2160 * 4);
     }
 }

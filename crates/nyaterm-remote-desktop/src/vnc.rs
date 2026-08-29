@@ -1,21 +1,24 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 use uuid::Uuid;
 
 use crate::helper_process;
 use crate::{
-    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, PacketType, QueueWaker,
-    RdpFrameEvent, VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent,
-    VncSecurityMode, VncServerCapabilities, VncSessionConfig, VncSessionDrain, VncSessionState,
-    decode_frame_packet, decode_vnc_control, encode_vnc_control, read_packet,
-    validate_committed_text, write_packet,
+    FRAME_PAYLOAD_LIMIT, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION,
+    PacketType, QueueWaker, RdpFrameEvent, VncControlMessage, VncError, VncErrorKind,
+    VncInputEvent, VncRuntimeEvent, VncSecurityMode, VncServerCapabilities, VncSessionConfig,
+    VncSessionDrain, VncSessionState, decode_frame_packet_owned, decode_vnc_control,
+    encode_vnc_control, read_packet, validate_committed_text, write_packet,
 };
 
 const FRAME_QUEUE_LIMIT: usize = 64;
+const FRAME_QUEUE_BYTE_LIMIT: usize = FRAME_PAYLOAD_LIMIT;
+const CONTROL_QUEUE_LIMIT: usize = 256;
+const CONTROL_QUEUE_BYTE_LIMIT: usize = 4 * 1024 * 1024;
 const HELPER_PACKAGE: &str = "nyaterm-vnc-helper";
 const HELPER_ENV_VAR: &str = "NYATERM_VNC_HELPER";
 
@@ -25,96 +28,207 @@ fn resolve_helper_path() -> Result<PathBuf, VncError> {
 }
 
 #[derive(Default)]
-struct EventQueue {
-    /// Signalled after anything is enqueued. Held here rather than at each
-    /// call site so every producer path wakes the consumer.
+struct EventQueueState {
     waker: Option<QueueWaker>,
     control: VecDeque<VncRuntimeEvent>,
+    control_bytes: usize,
     frames: VecDeque<RdpFrameEvent>,
+    frame_bytes: usize,
     current_epoch: Option<u64>,
-    waiting_for_full_frame: bool,
-    dropped_frames: usize,
+    closed: bool,
+}
+
+fn frame_byte_cost(frame: &RdpFrameEvent) -> usize {
+    match frame {
+        RdpFrameEvent::Bitmap { pixels, .. } => pixels.len(),
+        _ => 0,
+    }
+}
+
+fn control_byte_cost(event: &VncRuntimeEvent) -> usize {
+    match event {
+        VncRuntimeEvent::State {
+            session_id,
+            message,
+            ..
+        } => session_id.len() + message.as_ref().map_or(0, String::len) + 64,
+        VncRuntimeEvent::Frame { session_id, .. } => session_id.len() + 64,
+        VncRuntimeEvent::Clipboard { session_id, text } => session_id.len() + text.len() + 64,
+        VncRuntimeEvent::Error {
+            session_id, error, ..
+        } => session_id.len() + error.message.len() + 64,
+    }
+}
+
+struct EventQueue {
+    state: Mutex<EventQueueState>,
+    space_available: Condvar,
+    frame_item_limit: usize,
+    frame_byte_limit: usize,
+}
+
+impl Default for EventQueue {
+    fn default() -> Self {
+        Self::with_limits(FRAME_QUEUE_LIMIT, FRAME_QUEUE_BYTE_LIMIT)
+    }
 }
 
 impl EventQueue {
-    fn push_control(&mut self, event: VncRuntimeEvent) {
-        self.control.push_back(event);
-        self.wake();
+    fn with_limits(frame_item_limit: usize, frame_byte_limit: usize) -> Self {
+        Self {
+            state: Mutex::new(EventQueueState::default()),
+            space_available: Condvar::new(),
+            frame_item_limit,
+            frame_byte_limit,
+        }
     }
 
-    fn wake(&self) {
-        if let Some(waker) = &self.waker {
+    fn with_waker(waker: Option<QueueWaker>) -> Self {
+        let queue = Self::default();
+        queue
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .waker = waker;
+        queue
+    }
+
+    fn wake(state: &EventQueueState) {
+        if let Some(waker) = &state.waker {
             waker();
         }
     }
 
-    fn push_reset(&mut self, session_id: &str, epoch: u64, width: u32, height: u32) {
-        self.current_epoch = Some(epoch);
-        self.frames.clear();
-        self.waiting_for_full_frame = true;
-        self.control.push_back(VncRuntimeEvent::Frame {
+    fn push_control(&self, event: VncRuntimeEvent) -> bool {
+        let cost = control_byte_cost(&event);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while !state.closed
+            && (state.control.len() >= CONTROL_QUEUE_LIMIT
+                || state.control_bytes.saturating_add(cost) > CONTROL_QUEUE_BYTE_LIMIT)
+        {
+            state = self
+                .space_available
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+        if state.closed {
+            return false;
+        }
+        state.control_bytes += cost;
+        state.control.push_back(event);
+        Self::wake(&state);
+        true
+    }
+
+    fn push_control_force(&self, event: VncRuntimeEvent) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.control_bytes = state
+            .control_bytes
+            .saturating_add(control_byte_cost(&event));
+        state.control.push_back(event);
+        Self::wake(&state);
+    }
+
+    fn push_reset(&self, session_id: &str, epoch: u64, width: u32, height: u32) -> bool {
+        {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if state.closed {
+                return false;
+            }
+            state.current_epoch = Some(epoch);
+            state.frames.clear();
+            state.frame_bytes = 0;
+        }
+        self.space_available.notify_all();
+        self.push_control(VncRuntimeEvent::Frame {
             session_id: session_id.to_string(),
             event: RdpFrameEvent::Reset {
                 epoch,
                 width,
                 height,
             },
-        });
-        self.wake();
+        })
     }
 
-    /// Queue a framebuffer update, returning `true` when the queue overflowed and
-    /// the helper must be asked for a full refresh.
-    ///
-    /// Frames from a superseded epoch are dropped here rather than decoded and
-    /// rejected later by `Framebuffer::apply`. Unlike the RDP queue this one does
-    /// not withhold partial frames while `waiting_for_full_frame`: a VNC frame is
-    /// flagged `full` merely by starting at the origin, so withholding would stall
-    /// the display whenever a server only sends interior rectangles.
-    fn push_frame(&mut self, frame: RdpFrameEvent) -> bool {
-        let dropped = self.push_frame_inner(frame);
-        // Wake unconditionally rather than mirroring the branch structure below;
-        // see the RDP queue for why a redundant wake is the cheaper mistake.
-        self.wake();
-        dropped
-    }
-
-    fn push_frame_inner(&mut self, frame: RdpFrameEvent) -> bool {
-        let RdpFrameEvent::Bitmap { epoch, full, .. } = &frame else {
-            self.frames.push_back(frame);
+    fn push_frame(&self, frame: RdpFrameEvent) -> bool {
+        let cost = frame_byte_cost(&frame);
+        if cost > self.frame_byte_limit {
             return false;
+        }
+        let epoch = match &frame {
+            RdpFrameEvent::Bitmap { epoch, .. } => Some(*epoch),
+            _ => None,
         };
-        if self.current_epoch != Some(*epoch) {
-            self.dropped_frames += 1;
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if epoch.is_some() && state.current_epoch != epoch {
             return false;
         }
-        if *full {
-            self.waiting_for_full_frame = false;
+        while !state.closed
+            && (state.frames.len() >= self.frame_item_limit
+                || state.frame_bytes.saturating_add(cost) > self.frame_byte_limit)
+        {
+            state = self
+                .space_available
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if epoch.is_some() && state.current_epoch != epoch {
+                return false;
+            }
         }
-        if self.frames.len() >= FRAME_QUEUE_LIMIT {
-            self.dropped_frames += self.frames.len() + 1;
-            self.frames.clear();
-            self.waiting_for_full_frame = true;
-            return true;
+        if state.closed {
+            return false;
         }
-        self.frames.push_back(frame);
-        false
+        state.frame_bytes += cost;
+        state.frames.push_back(frame);
+        Self::wake(&state);
+        true
     }
 
-    fn drain(&mut self) -> VncSessionDrain {
-        VncSessionDrain {
-            control: self.control.drain(..).collect(),
-            frames: self.frames.drain(..).collect(),
-            dropped_frames: std::mem::take(&mut self.dropped_frames),
-            waiting_for_full_frame: self.waiting_for_full_frame,
-        }
+    fn drain(&self) -> VncSessionDrain {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let drain = VncSessionDrain {
+            control: state.control.drain(..).collect(),
+            frames: state.frames.drain(..).collect(),
+            dropped_frames: 0,
+            waiting_for_full_frame: false,
+        };
+        state.control_bytes = 0;
+        state.frame_bytes = 0;
+        drop(state);
+        self.space_available.notify_all();
+        drain
+    }
+
+    fn close(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.closed = true;
+        drop(state);
+        self.space_available.notify_all();
     }
 }
 
 struct SessionRecord {
     state: Arc<Mutex<VncSessionState>>,
     capabilities: Arc<Mutex<Option<VncServerCapabilities>>>,
-    queue: Arc<Mutex<EventQueue>>,
+    queue: Arc<EventQueue>,
     writer: Arc<Mutex<ChildStdin>>,
     child: Option<Child>,
     reader: Option<JoinHandle<()>>,
@@ -187,16 +301,12 @@ impl VncSessionManager {
             )
         })?;
         let writer = Arc::new(Mutex::new(stdin));
-        let queue = Arc::new(Mutex::new(EventQueue {
-            waker: self.queue_waker(),
-            ..EventQueue::default()
-        }));
+        let queue = Arc::new(EventQueue::with_waker(self.queue_waker()));
         let state = Arc::new(Mutex::new(VncSessionState::Connecting));
         let capabilities = Arc::new(Mutex::new(None));
         let reader = spawn_reader(
             session_id.clone(),
             stdout,
-            writer.clone(),
             queue.clone(),
             state.clone(),
             capabilities.clone(),
@@ -228,15 +338,11 @@ impl VncSessionManager {
             cleanup_child(&mut record);
             return Err(error);
         }
-        record
-            .queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(VncRuntimeEvent::State {
-                session_id: session_id.clone(),
-                state: VncSessionState::Connecting,
-                message: None,
-            });
+        record.queue.push_control(VncRuntimeEvent::State {
+            session_id: session_id.clone(),
+            state: VncSessionState::Connecting,
+            message: None,
+        });
         let mut sessions = match self.sessions.lock() {
             Ok(sessions) => sessions,
             Err(_) => {
@@ -322,11 +428,7 @@ impl VncSessionManager {
         let Some(record) = sessions.get(session_id) else {
             return VncSessionDrain::default();
         };
-        record
-            .queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .drain()
+        record.queue.drain()
     }
 
     /// Close a session, keeping its record so [`Self::state`] still answers.
@@ -359,15 +461,11 @@ impl VncSessionManager {
         );
         cleanup_child(&mut record);
         set_state(&record.state, VncSessionState::Disconnected);
-        record
-            .queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(VncRuntimeEvent::State {
-                session_id: session_id.to_string(),
-                state: VncSessionState::Disconnected,
-                message: None,
-            });
+        record.queue.push_control_force(VncRuntimeEvent::State {
+            session_id: session_id.to_string(),
+            state: VncSessionState::Disconnected,
+            message: None,
+        });
         self.sessions
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -508,8 +606,7 @@ fn send_control(
 fn spawn_reader(
     session_id: String,
     mut stdout: std::process::ChildStdout,
-    writer: Arc<Mutex<ChildStdin>>,
-    queue: Arc<Mutex<EventQueue>>,
+    queue: Arc<EventQueue>,
     state: Arc<Mutex<VncSessionState>>,
     capabilities: Arc<Mutex<Option<VncServerCapabilities>>>,
 ) -> JoinHandle<()> {
@@ -547,7 +644,7 @@ fn spawn_reader(
                         }),
                     PacketType::Frame => require_server_hello(hello_received, "frame packet")
                         .and_then(|()| {
-                            decode_frame_packet(&packet).map_err(|error| {
+                            decode_frame_packet_owned(packet).map_err(|error| {
                                 VncError::new(VncErrorKind::Protocol, error.to_string())
                             })
                         })
@@ -555,20 +652,7 @@ fn spawn_reader(
                             if frame_session != session_id {
                                 return;
                             }
-                            let request_full = queue
-                                .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                .push_frame(frame);
-                            if request_full {
-                                // Overflow discarded queued rectangles, so ask the
-                                // server to repaint instead of leaving them lost.
-                                let _ = send_control(
-                                    &writer,
-                                    &VncControlMessage::RequestFullFrame {
-                                        session_id: session_id.clone(),
-                                    },
-                                );
-                            }
+                            queue.push_frame(frame);
                         }),
                     // The VNC path never advertises cursor encodings.
                     PacketType::Cursor => {
@@ -624,7 +708,7 @@ fn require_server_hello(received: bool, packet_kind: &str) -> Result<(), VncErro
 fn handle_control(
     session_id: &str,
     message: VncControlMessage,
-    queue: &Arc<Mutex<EventQueue>>,
+    queue: &Arc<EventQueue>,
     state: &Arc<Mutex<VncSessionState>>,
     capabilities: &Arc<Mutex<Option<VncServerCapabilities>>>,
     hello_received: &mut bool,
@@ -682,35 +766,30 @@ fn handle_control(
             epoch,
             width,
             height,
-        } if event_session == session_id => queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_reset(session_id, epoch, width, height),
+        } if event_session == session_id => {
+            queue.push_reset(session_id, epoch, width, height);
+        }
         VncControlMessage::State {
             session_id: event_session,
             state: new_state,
             message,
         } if event_session == session_id => {
             set_state(state, new_state);
-            queue
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push_control(VncRuntimeEvent::State {
-                    session_id: session_id.to_string(),
-                    state: new_state,
-                    message,
-                });
+            queue.push_control(VncRuntimeEvent::State {
+                session_id: session_id.to_string(),
+                state: new_state,
+                message,
+            });
         }
         VncControlMessage::Clipboard {
             session_id: event_session,
             text,
-        } if event_session == session_id => queue
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push_control(VncRuntimeEvent::Clipboard {
+        } if event_session == session_id => {
+            queue.push_control(VncRuntimeEvent::Clipboard {
                 session_id: session_id.to_string(),
                 text,
-            }),
+            });
+        }
         VncControlMessage::Error {
             session_id: event_session,
             error,
@@ -719,14 +798,11 @@ fn handle_control(
             if fatal {
                 set_state(state, VncSessionState::Failed);
             }
-            queue
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push_control(VncRuntimeEvent::Error {
-                    session_id: session_id.to_string(),
-                    error,
-                    fatal,
-                });
+            queue.push_control(VncRuntimeEvent::Error {
+                session_id: session_id.to_string(),
+                error,
+                fatal,
+            });
         }
         _ => {}
     }
@@ -735,16 +811,13 @@ fn handle_control(
 
 fn push_reader_error(
     session_id: &str,
-    queue: &Arc<Mutex<EventQueue>>,
+    queue: &Arc<EventQueue>,
     state: &Arc<Mutex<VncSessionState>>,
     kind: VncErrorKind,
     message: String,
 ) {
     let error = VncError::new(kind, message);
     set_state(state, VncSessionState::Failed);
-    let mut queue = queue
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     queue.push_control(VncRuntimeEvent::Error {
         session_id: session_id.to_string(),
         error,
@@ -764,6 +837,7 @@ fn set_state(state: &Arc<Mutex<VncSessionState>>, new_state: VncSessionState) {
 }
 
 fn cleanup_child(record: &mut SessionRecord) {
+    record.queue.close();
     helper_process::cleanup_child(&mut record.child, &mut record.reader);
 }
 
@@ -777,8 +851,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{
-        EventQueue, FRAME_QUEUE_LIMIT, handle_control, is_latin1_within_limit,
-        require_server_hello, validate_vnc_config, validate_vnc_input,
+        EventQueue, handle_control, is_latin1_within_limit, require_server_hello,
+        validate_vnc_config, validate_vnc_input,
     };
     use crate::{
         Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PROTOCOL_VERSION, PixelFormat, RdpFrameEvent,
@@ -789,7 +863,7 @@ mod tests {
 
     #[test]
     fn server_hello_must_be_first_and_records_capabilities_only_once() {
-        let queue = Arc::new(Mutex::new(EventQueue::default()));
+        let queue = Arc::new(EventQueue::default());
         let state = Arc::new(Mutex::new(VncSessionState::Connecting));
         let capabilities = Arc::new(Mutex::new(None));
         let advertised = VncServerCapabilities {
@@ -895,12 +969,9 @@ mod tests {
     fn every_producer_path_wakes_the_consumer() {
         let signals = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&signals);
-        let mut queue = EventQueue {
-            waker: Some(Arc::new(move || {
-                counter.fetch_add(1, Ordering::Relaxed);
-            })),
-            ..EventQueue::default()
-        };
+        let queue = EventQueue::with_waker(Some(Arc::new(move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+        })));
 
         queue.push_reset("s", 1, 4, 4);
         assert_eq!(signals.load(Ordering::Relaxed), 1, "a reset must wake");
@@ -966,7 +1037,8 @@ mod tests {
 
     #[test]
     fn rgba_vnc_frame_reaches_shared_framebuffer_as_bgra() {
-        let mut framebuffer = Framebuffer::new(1, 1, 1).expect("framebuffer");
+        let mut framebuffer =
+            Framebuffer::new(1, 1, 1, crate::VNC_FRAMEBUFFER_LIMITS).expect("framebuffer");
         let frame = RdpFrameEvent::Bitmap {
             epoch: 1,
             full: true,
@@ -984,53 +1056,51 @@ mod tests {
 
     #[test]
     fn frames_from_a_superseded_epoch_are_dropped() {
-        let mut queue = EventQueue::default();
+        let queue = EventQueue::default();
         queue.push_reset("s", 2, 4, 4);
         assert!(!queue.push_frame(frame(1, 0, true)));
-        assert!(queue.frames.is_empty());
-        assert_eq!(queue.dropped_frames, 1);
-        assert!(!queue.push_frame(frame(2, 0, true)));
-        assert_eq!(queue.frames.len(), 1);
-    }
-
-    #[test]
-    fn partial_frames_are_kept_while_waiting_for_a_full_frame() {
-        // A VNC frame is flagged `full` only by starting at the origin, so interior
-        // rectangles must still paint instead of being withheld.
-        let mut queue = EventQueue::default();
-        queue.push_reset("s", 1, 100, 100);
-        assert!(queue.waiting_for_full_frame);
-        assert!(!queue.push_frame(frame(1, 40, false)));
-        assert_eq!(queue.frames.len(), 1);
-        assert!(queue.waiting_for_full_frame);
-        assert!(!queue.push_frame(frame(1, 0, true)));
-        assert!(!queue.waiting_for_full_frame);
-    }
-
-    #[test]
-    fn overflow_requests_a_full_frame_and_reports_the_drop() {
-        let mut queue = EventQueue::default();
-        queue.push_reset("s", 1, 100, 100);
-        for x in 0..FRAME_QUEUE_LIMIT as u32 {
-            assert!(!queue.push_frame(frame(1, x, false)));
-        }
-        assert!(queue.push_frame(frame(1, FRAME_QUEUE_LIMIT as u32, false)));
-        assert!(queue.frames.is_empty());
-        assert!(queue.waiting_for_full_frame);
-        assert_eq!(queue.dropped_frames, FRAME_QUEUE_LIMIT + 1);
-    }
-
-    #[test]
-    fn drain_reports_and_clears_drop_accounting() {
-        let mut queue = EventQueue::default();
-        queue.push_reset("s", 1, 4, 4);
-        queue.push_frame(frame(1, 0, true));
+        assert!(queue.push_frame(frame(2, 0, true)));
         let drain = queue.drain();
         assert_eq!(drain.frames.len(), 1);
-        assert_eq!(drain.control.len(), 1);
         assert_eq!(drain.dropped_frames, 0);
+    }
+
+    #[test]
+    fn partial_frames_are_kept_after_a_reset() {
+        // A VNC frame is flagged `full` only by starting at the origin, so interior
+        // rectangles must still paint instead of being withheld.
+        let queue = EventQueue::default();
+        queue.push_reset("s", 1, 100, 100);
+        assert!(queue.push_frame(frame(1, 40, false)));
         let drain = queue.drain();
-        assert!(drain.frames.is_empty());
-        assert!(drain.control.is_empty());
+        assert_eq!(drain.frames.len(), 1);
+        assert!(!drain.waiting_for_full_frame);
+    }
+
+    #[test]
+    fn byte_budget_applies_backpressure_until_drain() {
+        let queue = Arc::new(EventQueue::with_limits(2, 8));
+        queue.push_reset("s", 1, 4, 4);
+        assert!(queue.push_frame(frame(1, 0, false)));
+        assert!(queue.push_frame(frame(1, 1, false)));
+        let producer_queue = Arc::clone(&queue);
+        let producer = std::thread::spawn(move || producer_queue.push_frame(frame(1, 2, false)));
+        std::thread::yield_now();
+        assert!(!producer.is_finished());
+        assert_eq!(queue.drain().frames.len(), 2);
+        assert!(producer.join().unwrap());
+        assert_eq!(queue.drain().frames.len(), 1);
+    }
+
+    #[test]
+    fn close_unblocks_a_backpressured_producer() {
+        let queue = Arc::new(EventQueue::with_limits(1, 4));
+        queue.push_reset("s", 1, 4, 4);
+        assert!(queue.push_frame(frame(1, 0, false)));
+        let producer_queue = Arc::clone(&queue);
+        let producer = std::thread::spawn(move || producer_queue.push_frame(frame(1, 1, false)));
+        std::thread::yield_now();
+        queue.close();
+        assert!(!producer.join().unwrap());
     }
 }

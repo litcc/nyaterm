@@ -16,7 +16,7 @@ use super::Outbound;
 
 pub(super) struct ClipboardBridge {
     session_id: String,
-    output_tx: mpsc::Sender<Outbound>,
+    output_tx: mpsc::SyncSender<Outbound>,
     state: Mutex<ClipboardState>,
 }
 
@@ -37,7 +37,7 @@ impl fmt::Debug for ClipboardBridge {
 }
 
 impl ClipboardBridge {
-    pub(super) fn new(session_id: String, output_tx: mpsc::Sender<Outbound>) -> Arc<Self> {
+    pub(super) fn new(session_id: String, output_tx: mpsc::SyncSender<Outbound>) -> Arc<Self> {
         Arc::new(Self {
             session_id,
             output_tx,
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn headless_clipboard_accepts_text_and_rejects_oversize_payloads() {
-        let (output_tx, _output_rx) = mpsc::channel();
+        let (output_tx, _output_rx) = mpsc::sync_channel(1);
         let bridge = ClipboardBridge::new("session".to_string(), output_tx);
         bridge.set_local_text("hello".to_string()).unwrap();
         assert_eq!(bridge.local_text(), "hello");

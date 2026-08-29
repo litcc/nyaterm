@@ -19,11 +19,12 @@ use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
 use ironrdp_pdu::input::mouse::PointerFlags;
 use ironrdp_pdu::rdp::capability_sets::MajorPlatformType;
 use nyaterm_remote_desktop::{
-    PROTOCOL_VERSION, Packet, PixelFormat, RdpCapability, RdpCertificateRequest,
-    RdpCertificateResponse, RdpControlMessage, RdpCursorEvent, RdpError, RdpErrorKind,
-    RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpServerCapabilities, RdpSessionConfig,
-    RdpSessionState, decode_control, encode_control, encode_cursor_packet, encode_frame_packet,
-    read_packet, validate_committed_text, write_packet_into,
+    PROTOCOL_VERSION, Packet, PixelFormat, RDP_FRAMEBUFFER_LIMITS, RdpCapability,
+    RdpCertificateRequest, RdpCertificateResponse, RdpControlMessage, RdpCursorEvent, RdpError,
+    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpServerCapabilities,
+    RdpSessionConfig, RdpSessionState, decode_control, encode_control, encode_cursor_packet,
+    encode_frame_packet_owned, read_packet, validate_committed_text,
+    validate_framebuffer_dimensions, write_packet_into,
 };
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
@@ -130,7 +131,7 @@ fn install_crypto_provider() -> anyhow::Result<()> {
 }
 
 async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
-    let (output_tx, output_rx) = mpsc::channel();
+    let (output_tx, output_rx) = mpsc::sync_channel(1);
     let writer = spawn_stdout_writer(output_rx)?;
     let (control_tx, mut control_rx) =
         tokio_mpsc::unbounded_channel::<io::Result<RdpControlMessage>>();
@@ -471,7 +472,7 @@ fn spawn_stdin_reader(
 fn build_config(
     session_id: &str,
     config: &RdpSessionConfig,
-    output_tx: mpsc::Sender<Outbound>,
+    output_tx: mpsc::SyncSender<Outbound>,
     certificate_gate: Arc<CertificateGate>,
 ) -> anyhow::Result<(ironrdp_client::config::Config, Arc<ClipboardBridge>)> {
     let port = config.port;
@@ -595,7 +596,7 @@ fn build_config(
 async fn forward_output(
     session_id: String,
     mut receiver: tokio_mpsc::Receiver<RdpOutputEvent>,
-    output_tx: mpsc::Sender<Outbound>,
+    output_tx: mpsc::SyncSender<Outbound>,
     input_tx: RdpInputSender,
     certificate_gate: Arc<CertificateGate>,
     connection_timeout: Duration,
@@ -655,6 +656,30 @@ async fn forward_output(
         );
         let result: Result<(), ()> = match event {
             RdpOutputEvent::DesktopReset { width, height } => {
+                // Double-side validation: the application rejects an out-of-range
+                // reset in `Framebuffer::new`, but the helper is the authority for
+                // the bytes it puts on the wire, so it refuses here too rather than
+                // shipping a reset the consumer would only tear down.
+                if validate_framebuffer_dimensions(
+                    u32::from(width),
+                    u32::from(height),
+                    RDP_FRAMEBUFFER_LIMITS,
+                )
+                .is_err()
+                {
+                    let _ = output_tx.send(Outbound::Control(RdpControlMessage::Error {
+                        session_id: session_id.clone(),
+                        error: RdpError::new(
+                            RdpErrorKind::Protocol,
+                            format!(
+                                "RDP desktop reset {width}x{height} is outside the supported range"
+                            ),
+                        ),
+                        fatal: true,
+                    }));
+                    input_tx.request_close();
+                    return;
+                }
                 epoch = epoch.wrapping_add(1);
                 cursor.epoch = epoch;
                 let reset = output_tx.send(Outbound::Control(RdpControlMessage::DesktopReset {
@@ -694,7 +719,7 @@ async fn forward_output(
                     format: PixelFormat::Bgra8,
                     pixels,
                 };
-                encode_frame_packet(&session_id, &frame)
+                encode_frame_packet_owned(&session_id, frame)
                     .map(Outbound::Packet)
                     .and_then(|packet| {
                         output_tx.send(packet).map_err(|_| {
@@ -905,7 +930,7 @@ fn secure_attention_input(state: &InputState) -> SmallVec<[FastPathInputEvent; 2
 }
 
 fn send_cursor(
-    output_tx: &mpsc::Sender<Outbound>,
+    output_tx: &mpsc::SyncSender<Outbound>,
     session_id: &str,
     cursor: &RdpCursorEvent,
 ) -> Result<(), ()> {
@@ -1051,7 +1076,7 @@ fn classify_error(message: String, fallback: RdpErrorKind) -> RdpError {
 }
 
 fn send_control(
-    output_tx: &mpsc::Sender<Outbound>,
+    output_tx: &mpsc::SyncSender<Outbound>,
     message: RdpControlMessage,
 ) -> anyhow::Result<()> {
     output_tx
@@ -1060,7 +1085,7 @@ fn send_control(
 }
 
 fn send_error(
-    output_tx: &mpsc::Sender<Outbound>,
+    output_tx: &mpsc::SyncSender<Outbound>,
     session_id: &str,
     kind: RdpErrorKind,
     message: &str,
@@ -1077,7 +1102,7 @@ fn send_error(
 }
 
 fn report_ironrdp_panic(
-    output_tx: &mpsc::Sender<Outbound>,
+    output_tx: &mpsc::SyncSender<Outbound>,
     session_id: &str,
     payload: Box<dyn std::any::Any + Send>,
 ) {
@@ -1166,7 +1191,7 @@ mod tests {
     async fn stalled_security_negotiation_reports_a_fatal_timeout() {
         let (rdp_output_tx, rdp_output_rx) = tokio_mpsc::channel::<RdpOutputEvent>(1);
         let (input_tx, mut input_rx) = RdpInputSender::channel(1);
-        let (output_tx, output_rx) = mpsc::channel();
+        let (output_tx, output_rx) = mpsc::sync_channel(1);
 
         forward_output(
             "session".to_string(),
@@ -1195,7 +1220,7 @@ mod tests {
 
     #[test]
     fn ironrdp_panic_is_forwarded_without_multiline_output() {
-        let (output_tx, output_rx) = mpsc::channel();
+        let (output_tx, output_rx) = mpsc::sync_channel(1);
         report_ironrdp_panic(
             &output_tx,
             "session",

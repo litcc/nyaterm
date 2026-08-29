@@ -4,11 +4,12 @@ use futures::StreamExt as _;
 use gpui::{Bounds, ClipboardItem, Context, DevicePixels, Point, Size, Window, point, size};
 use nyaterm_remote_desktop::{
     CertificateDecision, CertificateMatchState, CertificatePromptReason, ClipboardOrigin,
-    DirtyRect, Framebuffer, RdpCapability, RdpCertificatePolicy, RdpCertificateRequest,
-    RdpCertificateResponse, RdpClipboardMode, RdpDisplayMode, RdpError, RdpErrorKind,
-    RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities, RdpSessionConfig,
-    RdpSessionState, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent, VncServerCapabilities,
-    VncSessionConfig, VncSessionState, evaluate_certificate_match,
+    DirtyRect, Framebuffer, FramebufferLimits, RDP_FRAMEBUFFER_LIMITS, RdpCapability,
+    RdpCertificatePolicy, RdpCertificateRequest, RdpCertificateResponse, RdpClipboardMode,
+    RdpDisplayMode, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent,
+    RdpServerCapabilities, RdpSessionConfig, RdpSessionState, VNC_FRAMEBUFFER_LIMITS, VncError,
+    VncErrorKind, VncInputEvent, VncRuntimeEvent, VncServerCapabilities, VncSessionConfig,
+    VncSessionState, evaluate_certificate_match,
 };
 use nyaterm_store::{RdpCertificateMetadata, RdpKnownHostCheck, StoreDomain, store_request};
 
@@ -619,7 +620,14 @@ impl NyaTermApp {
                     },
                 ..
             } => {
-                self.reset_rdp_framebuffer(session_id, epoch, width, height, window);
+                self.reset_rdp_framebuffer(
+                    session_id,
+                    epoch,
+                    width,
+                    height,
+                    VNC_FRAMEBUFFER_LIMITS,
+                    window,
+                );
             }
             VncRuntimeEvent::Frame { .. } => {}
             VncRuntimeEvent::Clipboard { text, .. } => {
@@ -1207,7 +1215,14 @@ impl NyaTermApp {
                     },
                 ..
             } => {
-                self.reset_rdp_framebuffer(session_id, epoch, width, height, window);
+                self.reset_rdp_framebuffer(
+                    session_id,
+                    epoch,
+                    width,
+                    height,
+                    RDP_FRAMEBUFFER_LIMITS,
+                    window,
+                );
             }
             RdpRuntimeEvent::Frame { .. } => {}
             RdpRuntimeEvent::Clipboard { text, .. } => {
@@ -1323,6 +1338,7 @@ impl NyaTermApp {
         epoch: u64,
         width: u32,
         height: u32,
+        limits: FramebufferLimits,
         window: &mut Window,
     ) {
         let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
@@ -1334,7 +1350,7 @@ impl NyaTermApp {
         if let Some(texture) = session.cursor_texture.take() {
             window.remove_dynamic_texture(texture);
         }
-        match Framebuffer::new(epoch, width, height) {
+        match Framebuffer::new(epoch, width, height, limits) {
             Ok(framebuffer) => {
                 let texture_size = size(DevicePixels(width as i32), DevicePixels(height as i32));
                 match window.create_dynamic_texture(texture_size, framebuffer.pixels(), width * 4) {

@@ -24,8 +24,8 @@ use nyaterm_remote_desktop::{
     MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH,
     MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, Packet, PixelFormat, RdpFrameEvent, VncControlMessage,
     VncError, VncErrorKind, VncInputEvent, VncSecurityMode, VncServerCapabilities,
-    VncSessionConfig, VncSessionState, decode_vnc_control, encode_frame_packet, encode_vnc_control,
-    read_packet, validate_committed_text, write_packet_into,
+    VncSessionConfig, VncSessionState, decode_vnc_control, encode_frame_packet_owned,
+    encode_vnc_control, read_packet, validate_committed_text, write_packet_into,
 };
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
@@ -96,7 +96,7 @@ fn server_write_allowed(view_only: bool, clipboard_enabled: bool, kind: ServerWr
 /// A live session: the worker thread plus the channels that steer it.
 struct Session {
     session_id: String,
-    sender: mpsc::Sender<WorkerCommand>,
+    sender: mpsc::SyncSender<WorkerCommand>,
     worker: Option<JoinHandle<()>>,
     close_requested: Arc<AtomicBool>,
 }
@@ -161,7 +161,7 @@ fn validate_active_session_id(active_session_id: Option<&str>, received: &str) -
 }
 
 fn run() -> io::Result<()> {
-    let (output_tx, output_rx) = mpsc::channel();
+    let (output_tx, output_rx) = mpsc::sync_channel(1);
     let writer = spawn_stdout_writer(output_rx)?;
     let mut stdin = io::stdin().lock();
     let mut session: Option<Session> = None;
@@ -348,10 +348,10 @@ fn write_outbound(writer: &mut impl io::Write, outbound: Outbound) -> io::Result
 fn spawn_session(
     session_id: String,
     config: VncSessionConfig,
-    output_tx: mpsc::Sender<Outbound>,
+    output_tx: mpsc::SyncSender<Outbound>,
 ) -> Session {
     let close_requested = Arc::new(AtomicBool::new(false));
-    let (sender, receiver) = mpsc::channel();
+    let (sender, receiver) = mpsc::sync_channel(256);
     let worker = spawn_worker(
         session_id.clone(),
         config,
@@ -388,7 +388,7 @@ fn close_session(mut session: Session) {
 fn spawn_worker(
     session_id: String,
     config: VncSessionConfig,
-    output_tx: mpsc::Sender<Outbound>,
+    output_tx: mpsc::SyncSender<Outbound>,
     close_requested: Arc<AtomicBool>,
     receiver: mpsc::Receiver<WorkerCommand>,
 ) -> JoinHandle<()> {
@@ -427,12 +427,12 @@ fn spawn_worker(
 /// ever moves forward.
 struct SessionOutput {
     session_id: String,
-    output_tx: mpsc::Sender<Outbound>,
+    output_tx: mpsc::SyncSender<Outbound>,
     epoch: u64,
 }
 
 impl SessionOutput {
-    fn new(session_id: String, output_tx: mpsc::Sender<Outbound>) -> Self {
+    fn new(session_id: String, output_tx: mpsc::SyncSender<Outbound>) -> Self {
         Self {
             session_id,
             output_tx,
@@ -477,8 +477,8 @@ impl SessionOutput {
         Ok(self.epoch)
     }
 
-    fn frame(&self, frame: &RdpFrameEvent) -> Result<(), VncError> {
-        let packet = encode_frame_packet(&self.session_id, frame)
+    fn frame(&self, frame: RdpFrameEvent) -> Result<(), VncError> {
+        let packet = encode_frame_packet_owned(&self.session_id, frame)
             .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
         self.send(Outbound::Packet(packet))
     }
@@ -688,7 +688,7 @@ fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), V
                 format: PixelFormat::Rgba8,
                 pixels,
             };
-            output.frame(&frame)?;
+            output.frame(frame)?;
             output.state(VncSessionState::Connected, None)?;
         }
         VncEvent::Text(text) if is_latin1_within_limit(&text) => {
@@ -902,14 +902,17 @@ fn is_latin1_within_limit(text: &str) -> bool {
     text.len() <= MAX_VNC_CLIPBOARD_TEXT_BYTES && text.chars().all(|ch| u32::from(ch) <= 0xff)
 }
 
-fn send_control(output_tx: &mpsc::Sender<Outbound>, message: VncControlMessage) -> io::Result<()> {
+fn send_control(
+    output_tx: &mpsc::SyncSender<Outbound>,
+    message: VncControlMessage,
+) -> io::Result<()> {
     output_tx
         .send(Outbound::Control(message))
         .map_err(|_| io::Error::other("the VNC helper stdout writer stopped"))
 }
 
 fn send_error(
-    output_tx: &mpsc::Sender<Outbound>,
+    output_tx: &mpsc::SyncSender<Outbound>,
     session_id: &str,
     kind: VncErrorKind,
     message: &str,
@@ -930,7 +933,7 @@ fn send_error(
 /// Without this the worker thread would die silently and the session would hang
 /// in whatever state it last reported.
 fn report_panic(
-    output_tx: &mpsc::Sender<Outbound>,
+    output_tx: &mpsc::SyncSender<Outbound>,
     session_id: &str,
     payload: Box<dyn std::any::Any + Send>,
 ) {
@@ -984,7 +987,7 @@ mod tests {
 
     #[test]
     fn panic_payloads_are_reported_as_a_fatal_single_line_error() {
-        let (output_tx, output_rx) = mpsc::channel();
+        let (output_tx, output_rx) = mpsc::sync_channel(1);
         report_panic(
             &output_tx,
             "session",
