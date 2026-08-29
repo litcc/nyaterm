@@ -32,6 +32,21 @@ pub(super) fn parse_complete_base64_shell_output(
     output: &[u8],
 ) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
     let output = Zeroizing::new(String::from_utf8_lossy(output).into_owned());
+    let export_blob_prefix = format!("{marker}:EXPORT_BLOB:");
+    if let Some(encoded) = output
+        .lines()
+        .find_map(|line| line.strip_prefix(&export_blob_prefix))
+    {
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded)
+            .map_err(|_| ShellEnvironmentError::ValueEncoding)?;
+        return parse_nul_export_environment_blob(
+            marker,
+            &export_blob_prefix,
+            output.as_bytes(),
+            decoded,
+        );
+    }
+
     let blob_prefix = format!("{marker}:BLOB:");
     if let Some(encoded) = output
         .lines()
@@ -51,33 +66,8 @@ fn parse_nul_environment_blob(
     output: &[u8],
     decoded: Vec<u8>,
 ) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
-    let start = format!("{marker}:START");
     let blob_prefix = format!("{marker}:BLOB:");
-    let end = format!("{marker}:END");
-    let mut started = false;
-    let mut blob_found = false;
-    let mut ended = false;
-    for raw_line in output.split(|byte| *byte == b'\n') {
-        let line = raw_line.strip_suffix(b"\r").unwrap_or(raw_line);
-        if !started {
-            started = line == start.as_bytes();
-            continue;
-        }
-        if line.strip_prefix(blob_prefix.as_bytes()).is_some() {
-            if blob_found {
-                return Err(ShellEnvironmentError::OutputEncoding);
-            }
-            blob_found = true;
-            continue;
-        }
-        if line == end.as_bytes() {
-            ended = true;
-            break;
-        }
-    }
-    if !started || !blob_found || !ended {
-        return Err(ShellEnvironmentError::OutputEncoding);
-    }
+    validate_nul_blob_frame(marker, &blob_prefix, output)?;
 
     let decoded = Zeroizing::new(decoded);
     let mut result = HashMap::new();
@@ -111,6 +101,101 @@ fn parse_nul_environment_blob(
         );
     }
     Ok(result)
+}
+
+#[cfg(any(unix, windows))]
+/// Parse the `NAME=VALUE\0` stream exported by Fish through `env -0`.
+///
+/// Fish stores path variables as lists but exports them as colon-delimited strings.
+/// Parsing the child-process environment preserves that representation without
+/// indirect Fish expansion. A request-specific sentinel rejects truncated snapshots.
+fn parse_nul_export_environment_blob(
+    marker: &str,
+    blob_prefix: &str,
+    output: &[u8],
+    decoded: Vec<u8>,
+) -> Result<HashMap<String, EnvironmentValue>, ShellEnvironmentError> {
+    validate_nul_blob_frame(marker, blob_prefix, output)?;
+
+    let decoded = Zeroizing::new(decoded);
+    let Some(without_trailing_nul) = decoded.strip_suffix(&[0]) else {
+        return Err(ShellEnvironmentError::OutputEncoding);
+    };
+    let sentinel_separator = without_trailing_nul.iter().rposition(|byte| *byte == 0);
+    let (records, sentinel_record) = match sentinel_separator {
+        Some(separator) => (
+            &without_trailing_nul[..separator],
+            &without_trailing_nul[separator + 1..],
+        ),
+        None => (&[][..], without_trailing_nul),
+    };
+    let expected_sentinel = format!("{}={marker}", super::COMPLETE_SNAPSHOT_SENTINEL_VARIABLE);
+    if sentinel_record != expected_sentinel.as_bytes() {
+        return Err(ShellEnvironmentError::OutputEncoding);
+    }
+
+    let mut result = HashMap::new();
+    for record in records.split(|byte| *byte == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        // Split only on the first equals sign so equals signs in values are preserved.
+        let separator = record
+            .iter()
+            .position(|byte| *byte == b'=')
+            .ok_or(ShellEnvironmentError::OutputEncoding)?;
+        let variable = &record[..separator];
+        let value = &record[separator + 1..];
+        let Ok(variable) = std::str::from_utf8(variable) else {
+            continue;
+        };
+        if !super::is_snapshot_environment_variable_name(variable)
+            || variable == super::COMPLETE_SNAPSHOT_SENTINEL_VARIABLE
+        {
+            continue;
+        }
+        result.insert(
+            variable.to_string(),
+            decode_utf8_environment_value(value.to_vec())?,
+        );
+    }
+    Ok(result)
+}
+
+#[cfg(any(unix, windows))]
+/// Validate that a NUL stream has START, exactly one data frame, and END.
+fn validate_nul_blob_frame(
+    marker: &str,
+    blob_prefix: &str,
+    output: &[u8],
+) -> Result<(), ShellEnvironmentError> {
+    let start = format!("{marker}:START");
+    let end = format!("{marker}:END");
+    let mut started = false;
+    let mut blob_found = false;
+    let mut ended = false;
+    for raw_line in output.split(|byte| *byte == b'\n') {
+        let line = raw_line.strip_suffix(b"\r").unwrap_or(raw_line);
+        if !started {
+            started = line == start.as_bytes();
+            continue;
+        }
+        if line.strip_prefix(blob_prefix.as_bytes()).is_some() {
+            if blob_found {
+                return Err(ShellEnvironmentError::OutputEncoding);
+            }
+            blob_found = true;
+            continue;
+        }
+        if line == end.as_bytes() {
+            ended = true;
+            break;
+        }
+    }
+    if !started || !blob_found || !ended {
+        return Err(ShellEnvironmentError::OutputEncoding);
+    }
+    Ok(())
 }
 
 #[cfg(any(unix, windows))]

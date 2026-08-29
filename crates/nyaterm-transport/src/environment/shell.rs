@@ -421,20 +421,23 @@ function has_suffix(value, token) {{ return length(value) >= length(token) && su
 }
 
 #[cfg(unix)]
-fn build_complete_fish_shell_script(marker: &str) -> String {
+pub(super) fn build_complete_fish_shell_script(marker: &str) -> String {
     let start = format!("{marker}:START");
-    let blob_prefix = format!("{marker}:BLOB:");
+    let blob_prefix = format!("{marker}:EXPORT_BLOB:");
     let end = format!("{marker}:END");
     let sentinel = super::COMPLETE_SNAPSHOT_SENTINEL_VARIABLE;
     let mut script = String::new();
-    for command in ["env", "awk", "base64", "tr"] {
+    for command in ["env", "base64", "tr"] {
         script.push_str(&format!("if not type -q {command}\n    exit 127\nend\n"));
     }
     script.push_str(&format!("printf '\\n%s\\n' '{start}'\n"));
     script.push_str(&format!("printf '%s' '{blob_prefix}'\n"));
     script.push_str(
         &format!(
-            "begin\n    for variable in (command env | command awk -F= '/^[A-Za-z_][A-Za-z0-9_]*={{print $1}}')\n        set value $$variable\n        printf '%s\\0%s\\0' \"$variable\" \"$value\"\n    end\n    printf '%s\\0%s\\0' '{sentinel}' '{marker}'\nend | command base64 | command tr -d '\\r\\n'\nset -l pipeline_status $pipestatus\nfor status in $pipeline_status\n    if test $status -ne 0\n        exit 1\n    end\nend\n"
+            // Fish stores path variables such as PATH as lists. Indirect expansion loses
+            // their colon-delimited export representation, so read the environment passed
+            // to child processes. NUL framing preserves empty values, equals, and newlines.
+            "begin\n    command env -0\n    set -l exported_environment_status $status\n    printf '%s=%s\\0' '{sentinel}' '{marker}'\n    test $exported_environment_status -eq 0\nend | command base64 | command tr -d '\\r\\n'\nset -l pipeline_status $pipestatus\nfor pipeline_status_code in $pipeline_status\n    if test $pipeline_status_code -ne 0\n        exit 1\n    end\nend\n"
         ),
     );
     script.push_str(&format!("printf '\\n%s\\n' '{end}'\n"));

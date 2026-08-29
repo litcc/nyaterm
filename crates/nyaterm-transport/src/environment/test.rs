@@ -6,6 +6,8 @@ use std::collections::HashMap;
 #[cfg(windows)]
 use super::parser::parse_cmd_shell_output;
 use super::parser::{parse_base64_shell_output, parse_complete_base64_shell_output};
+#[cfg(unix)]
+use super::shell::build_complete_fish_shell_script;
 #[cfg(windows)]
 use super::shell::{
     build_complete_windows_shell_script, build_shell_command, build_windows_shell_script,
@@ -172,6 +174,62 @@ fn complete_blob_parser_preserves_empty_and_multiline_values() {
         values.get("MULTILINE").map(EnvironmentValue::as_str),
         Some("first\nsecond")
     );
+}
+
+#[test]
+fn complete_export_blob_parser_preserves_fish_path_serialization() {
+    let marker = "__NYATERM_ENV_test__";
+    let sentinel = super::COMPLETE_SNAPSHOT_SENTINEL_VARIABLE;
+    let blob = format!(
+        "PATH=/custom/bin:/usr/bin\0EMPTY=\0MULTILINE=first\nsecond\0EQUAL=a=b\0{sentinel}={marker}\0"
+    );
+    let encoded =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, blob.as_bytes());
+    let output = format!("{marker}:START\n{marker}:EXPORT_BLOB:{encoded}\n{marker}:END\n");
+
+    let values = parse_complete_base64_shell_output(marker, output.as_bytes()).unwrap();
+
+    assert_eq!(
+        values.get("PATH").map(EnvironmentValue::as_str),
+        Some("/custom/bin:/usr/bin")
+    );
+    assert_eq!(values.get("EMPTY").map(EnvironmentValue::as_str), Some(""));
+    assert_eq!(
+        values.get("MULTILINE").map(EnvironmentValue::as_str),
+        Some("first\nsecond")
+    );
+    assert_eq!(
+        values.get("EQUAL").map(EnvironmentValue::as_str),
+        Some("a=b")
+    );
+    assert!(!values.contains_key(sentinel));
+}
+
+#[test]
+fn complete_export_blob_parser_rejects_an_incomplete_stream() {
+    let marker = "__NYATERM_ENV_test__";
+    let blob = b"PATH=/custom/bin:/usr/bin\0";
+    let encoded =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, blob.as_slice());
+    let output = format!("{marker}:START\n{marker}:EXPORT_BLOB:{encoded}\n{marker}:END\n");
+
+    let error = parse_complete_base64_shell_output(marker, output.as_bytes()).unwrap_err();
+
+    assert!(matches!(error, ShellEnvironmentError::OutputEncoding));
+}
+
+#[cfg(unix)]
+#[test]
+fn complete_fish_script_uses_the_exported_nul_stream() {
+    let marker = "__NYATERM_ENV_test__";
+    let script = build_complete_fish_shell_script(marker);
+
+    assert!(script.contains("command env -0"));
+    assert!(script.contains("test $exported_environment_status -eq 0"));
+    assert!(script.contains("for pipeline_status_code in $pipeline_status"));
+    assert!(!script.contains("for status in $pipeline_status"));
+    assert!(script.contains("EXPORT_BLOB"));
+    assert!(!script.contains("$$variable"));
 }
 
 #[test]
