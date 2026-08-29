@@ -24,6 +24,7 @@ mod command_history;
 mod config_backup;
 mod keyword_highlights;
 mod known_hosts;
+mod notes;
 mod portable;
 mod remote_file_backend;
 mod session_import;
@@ -57,6 +58,11 @@ const KNOWN_HOST_PREFIX: &str = "known_hosts/";
 const KNOWN_HOST_RAW_PREFIX: &str = "known_hosts/raw/";
 const RDP_KNOWN_HOST_PREFIX: &str = "rdp_known_hosts/";
 const COMMAND_HISTORY_PREFIX: &str = "command_history/";
+const NOTE_FOLDER_PREFIX: &str = "note_folders/";
+const NOTE_DOCUMENT_PREFIX: &str = "notes/";
+const NOTE_SUMMARY_PREFIX: &str = "note_summaries/";
+const NOTE_SNAPSHOT_EXTRA_KEY: &str = "snapshot_extra";
+const META_NOTE_SUMMARY_INDEX_VERSION: &str = "notes/summary_index_version";
 const META_MASTER_KEY: &str = "security/master_key";
 const META_PORTABLE_SOURCE_PAYLOAD_HASH: &str = "portable_snapshot/source_payload_hash";
 const META_PORTABLE_SOURCE_SCHEMA_VERSION: &str = "portable_snapshot/source_schema_version";
@@ -89,6 +95,9 @@ const RDP_KNOWN_HOSTS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new
 const PORTABLE_OPAQUE_ENTITIES_TABLE: TableDefinition<&str, &str> =
     TableDefinition::new("portable_snapshot_opaque_entities");
 const COMMAND_HISTORY_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("command_history");
+const NOTE_FOLDERS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("note_folders");
+const NOTES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("notes");
+const NOTE_SUMMARIES_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("note_summaries");
 const SETTINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("settings");
 const IDX_CONNECTIONS_BY_GROUP_TABLE: TableDefinition<&str, &str> =
     TableDefinition::new("idx_connections_by_group");
@@ -699,6 +708,9 @@ impl ConnectionStore {
         txn.open_table(RDP_KNOWN_HOSTS_TABLE)?;
         txn.open_table(PORTABLE_OPAQUE_ENTITIES_TABLE)?;
         txn.open_table(COMMAND_HISTORY_TABLE)?;
+        txn.open_table(NOTE_FOLDERS_TABLE)?;
+        txn.open_table(NOTES_TABLE)?;
+        txn.open_table(NOTE_SUMMARIES_TABLE)?;
         txn.open_table(SETTINGS_TABLE)?;
         txn.open_table(IDX_CONNECTIONS_BY_GROUP_TABLE)?;
         txn.open_table(IDX_CONNECTIONS_BY_LAST_USED_TABLE)?;

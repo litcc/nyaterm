@@ -72,6 +72,14 @@ fn markdown_inline_text(palette: ThemePalette, raw: &str) -> gpui::AnyElement {
                 color: Some(rgb(palette.text_muted).into()),
                 ..Default::default()
             },
+            InlineMdStyle::Underline => HighlightStyle {
+                underline: Some(UnderlineStyle {
+                    thickness: px(1.),
+                    color: Some(rgb(palette.text).into()),
+                    wavy: false,
+                }),
+                ..Default::default()
+            },
         };
         (range, highlight)
     });

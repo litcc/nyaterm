@@ -59,6 +59,7 @@ pub(crate) enum NavItem {
     Processes,
     Docker,
     Transfers,
+    Notes,
     Settings,
     AiAssistant,
     ActiveSessions,
@@ -79,6 +80,7 @@ impl NavItem {
             NavItem::Processes => "panel.processManager",
             NavItem::Docker => "panel.dockerManager",
             NavItem::Transfers => "panel.fileExplorer",
+            NavItem::Notes => "panel.notes",
             NavItem::Settings => "settings.title",
             NavItem::AiAssistant => "ai.title",
             NavItem::ActiveSessions => "panel.activeSessions",
@@ -101,6 +103,7 @@ impl NavItem {
             NavItem::Processes => "Process Manager",
             NavItem::Docker => "Docker",
             NavItem::Transfers => "File Explorer",
+            NavItem::Notes => "Notes",
             NavItem::Settings => "Settings",
             NavItem::AiAssistant => "AI Assistant",
             NavItem::ActiveSessions => "Active Sessions",
@@ -115,6 +118,7 @@ impl NavItem {
     pub(crate) fn panel_title(self) -> &'static str {
         match self {
             NavItem::Transfers => "Files",
+            NavItem::Notes => "Notes",
             NavItem::Tunnels => "Network",
             NavItem::Connections => "Connections",
             NavItem::AiAssistant => "AI Assistant",
@@ -138,6 +142,7 @@ impl NavItem {
     pub(crate) fn icon_path(self) -> &'static str {
         match self {
             NavItem::Transfers => "icons/files.svg",
+            NavItem::Notes => "icons/notes.svg",
             NavItem::Tunnels => "icons/network.svg",
             NavItem::SecurityAuth => "icons/auth.svg",
             NavItem::SyncBackupHistory => "icons/sync.svg",
@@ -160,6 +165,7 @@ impl NavItem {
         matches!(
             self,
             NavItem::Transfers
+                | NavItem::Notes
                 | NavItem::Tunnels
                 | NavItem::SecurityAuth
                 | NavItem::SyncBackupHistory
@@ -199,6 +205,7 @@ impl NavItem {
             NavItem::Processes => "processManager",
             NavItem::Docker => "dockerManager",
             NavItem::Transfers => "fileExplorer",
+            NavItem::Notes => "notes",
             NavItem::Settings => "settings",
             NavItem::AiAssistant => "aiAssistant",
             NavItem::ActiveSessions => "activeSessions",
@@ -220,6 +227,7 @@ impl NavItem {
             "processes" | "processManager" => Some(NavItem::Processes),
             "docker" | "dockerManager" => Some(NavItem::Docker),
             "fileExplorer" | "fileTransfer" | "transfers" => Some(NavItem::Transfers),
+            "notes" => Some(NavItem::Notes),
             "settings" => Some(NavItem::Settings),
             "aiAssistant" | "ai" => Some(NavItem::AiAssistant),
             "activeSessions" => Some(NavItem::ActiveSessions),
@@ -357,8 +365,6 @@ impl Default for ActivityBarLayoutState {
         Self {
             left_top: vec![
                 "fileExplorer".to_string(),
-                // Keep the main/Tauri schema position even though GPUI does not
-                // yet expose a Notes panel. Unknown entries remain unavailable.
                 "notes".to_string(),
                 "network".to_string(),
                 "securityAuth".to_string(),
@@ -617,7 +623,10 @@ mod tests {
     fn retired_migration_panel_is_ignored_when_loading_persisted_layouts() {
         assert_eq!(NavItem::from_persistence_id("migration"), None);
         assert_eq!(ActivityBarEntry::from_persistence_id("migration"), None);
-        assert_eq!(ActivityBarEntry::from_persistence_id("notes"), None);
+        assert_eq!(
+            ActivityBarEntry::from_persistence_id("notes"),
+            Some(ActivityBarEntry::Panel(NavItem::Notes))
+        );
     }
 
     #[test]
@@ -729,7 +738,7 @@ mod tests {
         // First visible panel now skips the hidden entry.
         assert_eq!(
             layout.first_panel_on_side(PanelSide::Left),
-            Some(NavItem::Tunnels)
+            Some(NavItem::Notes)
         );
         assert_eq!(
             layout.hidden_entries_ordered(),

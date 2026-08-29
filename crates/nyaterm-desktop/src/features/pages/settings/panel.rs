@@ -1950,6 +1950,7 @@ forward_app_action!(
     toggle_mac_ime_compatibility,
     toggle_minimize_to_tray,
     toggle_multi_line_paste_dialog,
+    toggle_notes_panel,
     toggle_osc52_clipboard_write,
     toggle_panel_multi_open,
     toggle_paste_image_as_path,

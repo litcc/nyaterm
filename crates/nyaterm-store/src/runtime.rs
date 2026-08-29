@@ -46,6 +46,7 @@ pub enum StoreDomain {
     Settings,
     Connections,
     Commands,
+    Notes,
     Security,
     Tunnels,
     CloudSync,

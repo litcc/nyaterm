@@ -5,6 +5,7 @@ mod button;
 mod child_window;
 mod command;
 mod dialog;
+mod document_editor;
 mod input;
 mod input_focus;
 mod menu;
@@ -26,6 +27,7 @@ pub use button::{NyaButton, NyaButtonVariant, NyaIconButton};
 pub use child_window::{ChildWindowSlot, activate_child_window};
 pub use command::{NyaCommand, NyaCommandIndex, NyaCommandItem, NyaCommandState};
 pub use dialog::{NyaConfirmDialog, NyaDialog, NyaDialogFooter, NyaDialogWindowExt};
+pub use document_editor::{NyaDocumentEditor, NyaDocumentEditorEvent, NyaDocumentEditorState};
 pub use gpui_component::input::{
     Copy as NyaCopy, Cut as NyaCut, Paste as NyaPaste, Redo as NyaRedo, SelectAll as NyaSelectAll,
     Undo as NyaUndo,

@@ -164,6 +164,9 @@ pub struct AppSettingsSummary {
     /// Online search engines for terminal selection context menu (Tauri search.custom_engines).
     #[serde(default = "default_search_engines")]
     pub search_custom_engines: Vec<SearchEngineConfig>,
+    /// Whether the Tauri-compatible Notes panel is available in the activity bar.
+    #[serde(default = "default_true")]
+    pub ui_show_notes_panel: bool,
     pub ui_show_remote_stats: bool,
     pub ui_remote_stats_interval: u32,
     #[serde(default)]
@@ -410,6 +413,7 @@ impl Default for AppSettingsSummary {
             terminal_action_links_enabled: false,
             terminal_action_links_matchers: ActionLinksMatcherSettings::default(),
             search_custom_engines: default_search_engines(),
+            ui_show_notes_panel: true,
             ui_show_remote_stats: true,
             ui_remote_stats_interval: 3,
             ui_show_gpu_monitor: false,
@@ -510,8 +514,6 @@ impl Default for AppSettingsSummary {
 fn default_activity_left_top() -> Vec<String> {
     vec![
         "fileExplorer".to_string(),
-        // Main keeps this schema slot even when a client has not implemented
-        // the Notes panel; desktop availability prevents a dead button.
         "notes".to_string(),
         "network".to_string(),
         "securityAuth".to_string(),

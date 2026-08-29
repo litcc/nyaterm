@@ -33,6 +33,7 @@ pub(in crate::features) enum InlineMdStyle {
     Code,
     Link,
     Strike,
+    Underline,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,6 +133,21 @@ pub(in crate::features) fn parse_inline_markdown(input: &str) -> InlineMarkdown 
     let mut i = 0usize;
 
     while i < bytes.len() {
+        // Markdown permits inline HTML; Notes emits the conservative <u> tag
+        // because CommonMark has no underline delimiter.
+        if input[i..].starts_with("<u>")
+            && let Some(end) = input[i + 3..].find("</u>")
+        {
+            let inner = &input[i + 3..i + 3 + end];
+            if !inner.is_empty() && !inner.contains('\n') {
+                let start = text.len();
+                text.push_str(inner);
+                highlights.push((start..text.len(), InlineMdStyle::Underline));
+                i = i + 3 + end + 4;
+                continue;
+            }
+        }
+
         // Fenced-style inline code: `code`
         if bytes[i] == b'`'
             && let Some(end) = input[i + 1..].find('`')

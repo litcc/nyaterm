@@ -173,6 +173,7 @@ impl ConnectionStore {
             ),
             terminal_action_links_matchers: load_action_links_matchers(&value),
             search_custom_engines: load_search_engines(&value),
+            ui_show_notes_panel: json_bool(&value, &["ui", "show_notes_panel"], true),
             ui_show_remote_stats: json_bool(&value, &["ui", "show_remote_stats"], true),
             ui_remote_stats_interval: json_u32(&value, &["ui", "remote_stats_interval"], 3)
                 .clamp(1, 60),
@@ -1140,6 +1141,11 @@ impl ConnectionStore {
         );
         set_nested_json_value(
             &mut value,
+            &["ui", "show_notes_panel"],
+            serde_json::Value::Bool(settings.ui_show_notes_panel),
+        );
+        set_nested_json_value(
+            &mut value,
             &["ui", "show_remote_stats"],
             serde_json::Value::Bool(settings.ui_show_remote_stats),
         );
@@ -1482,6 +1488,7 @@ fn default_activity_left_bottom() -> Vec<String> {
 fn default_activity_left_top() -> Vec<String> {
     vec![
         "fileExplorer".to_string(),
+        "notes".to_string(),
         "network".to_string(),
         "securityAuth".to_string(),
     ]

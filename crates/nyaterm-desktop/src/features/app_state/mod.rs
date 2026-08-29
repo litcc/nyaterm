@@ -5,6 +5,7 @@ use super::ai::{AiFeatureState, AiPanel};
 use super::assets::StartWorkspaceFeatureState;
 use super::commands::CommandFeatureState;
 use super::connections::ConnectionFeatureState;
+use super::notes::{NotesCatalogEvent, NotesFeatureState, NotesPanel};
 use super::pages::connections::panel::ConnectionPanel;
 use super::pages::remote::RemotePanels;
 use super::pages::settings::panel::SettingsPanel;
@@ -43,6 +44,8 @@ pub struct NyaTermApp {
     pub(in crate::features) settings_panel: gpui::Entity<SettingsPanel>,
     pub(in crate::features) native_settings_panel: Option<gpui::WeakEntity<SettingsPanel>>,
     pub(in crate::features) transfer_panel: gpui::Entity<TransferPanel>,
+    pub(in crate::features) notes: NotesFeatureState,
+    pub(in crate::features) notes_panel: gpui::Entity<NotesPanel>,
     /// Real text inputs for the panels that have not been given their own,
     /// keyed by an id the panel picks. See `features::text_inputs`.
     pub(in crate::features) text_inputs: TextInputRegistry,
@@ -70,3 +73,5 @@ pub struct NyaTermApp {
     pub(in crate::features) recording: RecordingFeatureState,
     pub(in crate::features) tunnel_state: TunnelFeatureState,
 }
+
+impl gpui::EventEmitter<NotesCatalogEvent> for NyaTermApp {}

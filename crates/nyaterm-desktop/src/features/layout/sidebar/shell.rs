@@ -61,6 +61,15 @@ impl NyaTermApp {
                 .clone()
                 .cached(cached_panel_style())
                 .into_any_element(),
+            NavItem::Notes if self.settings.summary().ui_show_notes_panel => self
+                .notes_panel
+                .clone()
+                .cached(cached_panel_style())
+                .into_any_element(),
+            NavItem::Notes => {
+                crate::features::inspector::disabled_inspector_panel(palette, t!("notes.disabled"))
+                    .into_any_element()
+            }
             NavItem::Tunnels => self.tunnels_view(cx).into_any_element(),
             NavItem::SecurityAuth => self.security_auth_panel(cx).into_any_element(),
             NavItem::SyncBackupHistory => self.sync_backup_history_panel(cx).into_any_element(),

@@ -48,6 +48,7 @@ impl NyaTermApp {
     fn panel_id_visible(&self, id: &str) -> bool {
         let summary = self.settings.summary();
         match NavItem::from_persistence_id(id) {
+            Some(NavItem::Notes) => summary.ui_show_notes_panel,
             Some(NavItem::Stats) => summary.ui_show_remote_stats,
             Some(NavItem::GpuMonitor) => summary.ui_show_gpu_monitor,
             Some(NavItem::AscendNpuMonitor) => summary.ui_show_ascend_npu_monitor,

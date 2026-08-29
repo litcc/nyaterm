@@ -1,6 +1,7 @@
 pub mod connection;
 pub mod credentials;
 pub mod network;
+pub mod notes;
 pub mod quick_commands;
 pub mod sessions;
 pub mod settings;
@@ -8,6 +9,7 @@ pub mod workspace;
 pub use connection::*;
 pub use credentials::*;
 pub use network::*;
+pub use notes::*;
 pub use quick_commands::*;
 pub use sessions::*;
 pub use settings::*;

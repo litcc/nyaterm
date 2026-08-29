@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use serde::de::DeserializeOwned;
 
+use super::notes::replace_notes_snapshot_in_txn;
 use super::vault::bump_ssh_key_revision;
 use super::{
     CREDENTIAL_PREFIX, CREDENTIALS_TABLE, ConfigBackupInfo, ConnectionStore, DATABASE_FILE,
@@ -29,8 +30,8 @@ use crate::{
 };
 use nyaterm_core::portable_snapshot::validate_raw_snapshot;
 use nyaterm_core::{
-    CommandHistoryEntry, ConnectionType, PortableSnapshotKind, RawPortableSnapshot, SessionsConfig,
-    SshAgentEndpoint, TunnelGroup, migrate_legacy_ssh_agent_settings,
+    CommandHistoryEntry, ConnectionType, NotesSnapshot, PortableSnapshotKind, RawPortableSnapshot,
+    SessionsConfig, SshAgentEndpoint, TunnelGroup, migrate_legacy_ssh_agent_settings,
     ssh_agent_endpoint_supported_on_current_platform, validate_ssh_agent_endpoint,
     validate_ssh_agent_forwarding_config,
 };
@@ -425,6 +426,10 @@ impl ConnectionStore {
             "known_hosts".to_string(),
             serde_json::to_string(&self.render_known_hosts_export()?)?,
         );
+        snapshot.entities.insert(
+            "notes".to_string(),
+            serde_json::to_string(&self.load_notes_snapshot()?)?,
+        );
         Ok(snapshot)
     }
 
@@ -467,6 +472,19 @@ impl ConnectionStore {
         let known_hosts: String = read_snapshot_entity(snapshot, "known_hosts")?;
         let master_key_token: Option<String> = read_snapshot_entity(snapshot, "master_key_token")?;
         let tunnel_groups: Vec<TunnelGroup> = read_snapshot_entity(snapshot, "tunnel_groups")?;
+        let notes = snapshot
+            .entities
+            .get("notes")
+            .map(|raw| {
+                serde_json::from_str::<NotesSnapshot>(raw).map_err(|error| {
+                    StorageError::PortableSnapshotEntity {
+                        entity: "notes".to_string(),
+                        message: error.to_string(),
+                    }
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
         let current_settings = self.load_settings_value()?;
         validate_and_migrate_agent_settings(&mut sessions)?;
         match snapshot.meta.snapshot_kind {
@@ -560,6 +578,12 @@ impl ConnectionStore {
         )?;
         let history: Vec<CommandHistoryEntry> = read_snapshot_entity(snapshot, "history")?;
         replace_command_history_in_txn(&txn, &history)?;
+        replace_notes_snapshot_in_txn(&txn, &notes).map_err(|error| {
+            StorageError::PortableSnapshotEntity {
+                entity: "notes".to_string(),
+                message: error.to_string(),
+            }
+        })?;
 
         let merged_settings = merge_imported_settings(settings, current_settings);
         write_json_in_txn(&txn, SETTINGS_TABLE, SETTINGS_DEFAULT, &merged_settings)?;
@@ -596,6 +620,7 @@ fn is_known_portable_entity(entity: &str) -> bool {
             | "history"
             | "master_key_token"
             | "known_hosts"
+            | "notes"
     )
 }
 

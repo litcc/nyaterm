@@ -674,6 +674,10 @@ impl NyaTermApp {
             "redb connection store online".to_string(),
             true,
         );
+        // Notes are not part of BootstrapSnapshot because their Markdown bodies
+        // are loaded on demand. A backup import or cloud pull may have replaced
+        // the entire catalog, so refresh its lightweight tree explicitly.
+        self.refresh_notes(cx);
         self.request_settings_panel_refresh(cx);
     }
 }
