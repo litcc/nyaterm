@@ -197,7 +197,7 @@ impl NyaTermApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         match event.keystroke.key.as_str() {
             "enter" => {
                 self.submit_quick_command_ai_prompt(window, cx);
@@ -206,7 +206,8 @@ impl NyaTermApp {
                 self.commands.close_quick_ai_popover();
                 cx.notify();
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 }

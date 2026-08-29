@@ -331,8 +331,9 @@ impl NyaTermApp {
             .gap_4()
             .on_click(|_, _, cx| cx.stop_propagation())
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                cx.stop_propagation();
-                this.handle_credential_key_down(event, cx);
+                if this.handle_credential_key_down(event, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .child(details)
             .child(input)
@@ -586,8 +587,9 @@ impl NyaTermApp {
             .gap_4()
             .on_click(|_, _, cx| cx.stop_propagation())
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                cx.stop_propagation();
-                this.handle_keyboard_interactive_key_down(event, window, cx);
+                if this.handle_keyboard_interactive_key_down(event, window, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .overflow_y_scrollbar()
             .child(

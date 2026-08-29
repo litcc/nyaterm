@@ -556,11 +556,11 @@ impl NyaTermApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         match keystroke.key.as_str() {
@@ -582,8 +582,9 @@ impl NyaTermApp {
                 self.terminal.search.active_index = 0;
                 self.refresh_terminal_search_state(cx);
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Apply an edit from the active sessions filter box.

@@ -117,7 +117,9 @@ impl SettingsPanel {
                 let manual_key = cx.listener({
                     let group = group_key.clone();
                     move |this, event: &KeyDownEvent, window, cx| {
-                        this.handle_ai_manual_model_key_down(&group, event, window, cx);
+                        if this.handle_ai_manual_model_key_down(&group, event, window, cx) {
+                            cx.stop_propagation();
+                        }
                     }
                 });
                 let manual_input = self.existing_text_input_box(

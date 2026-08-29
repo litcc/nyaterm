@@ -335,21 +335,39 @@ impl NyaTermApp {
             .items_center()
             .justify_center()
             .track_focus(self.sync_input.focus())
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                cx.stop_propagation();
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let mut handled = false;
                 if this.sync_input.has_delete_pending() {
                     match event.keystroke.key.as_str() {
-                        "escape" => this.cancel_delete_sync_group(cx),
-                        "enter" => this.confirm_delete_sync_group(cx),
+                        "escape" => {
+                            this.cancel_delete_sync_group(cx);
+                            handled = true;
+                        }
+                        "enter" => {
+                            this.confirm_delete_sync_group(cx);
+                            handled = true;
+                        }
                         _ => {}
                     }
-                    return;
+                } else {
+                    match event.keystroke.key.as_str() {
+                        "escape" => {
+                            this.close_sync_groups(cx);
+                            handled = true;
+                        }
+                        "n" | "N" if this.sync_input.focus().is_focused(window) => {
+                            this.create_sync_group(cx);
+                            handled = true;
+                        }
+                        "delete" if this.sync_input.focus().is_focused(window) => {
+                            this.request_delete_selected_sync_group(cx);
+                            handled = true;
+                        }
+                        _ => {}
+                    }
                 }
-                match event.keystroke.key.as_str() {
-                    "escape" => this.close_sync_groups(cx),
-                    "n" | "N" => this.create_sync_group(cx),
-                    "delete" => this.request_delete_selected_sync_group(cx),
-                    _ => {}
+                if handled {
+                    cx.stop_propagation();
                 }
             }))
             .child(

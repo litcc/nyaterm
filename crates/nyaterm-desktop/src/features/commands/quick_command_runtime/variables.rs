@@ -41,12 +41,12 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         let keystroke = &event.keystroke;
         let primary = keystroke.modifiers.platform || keystroke.modifiers.control;
         if primary || keystroke.modifiers.alt || keystroke.modifiers.function {
-            return;
+            return false;
         }
 
         // Every field owns its own text, clipboard, and — for an option list — its
@@ -54,8 +54,9 @@ impl NyaTermApp {
         match keystroke.key.as_str() {
             "escape" => self.cancel_quick_command_variable_prompt(cx),
             "enter" => self.submit_quick_command_variable_prompt(cx),
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Apply an edit from one of the variable prompt's boxes.

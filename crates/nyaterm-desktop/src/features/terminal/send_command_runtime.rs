@@ -46,11 +46,11 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         let keystroke = &event.keystroke;
         if keystroke.modifiers.alt || keystroke.modifiers.function {
-            return;
+            return false;
         }
         let accel = keystroke.modifiers.platform || keystroke.modifiers.control;
 
@@ -64,8 +64,9 @@ impl NyaTermApp {
                 self.shell.set_status("command send cleared".to_string());
                 cx.notify();
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Apply an edit from the command send box.

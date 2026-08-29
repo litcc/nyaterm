@@ -57,8 +57,9 @@ impl NyaTermApp {
             .track_focus(self.security.screen_lock_focus())
             .on_click(move |_, window, cx| window.focus(&overlay_focus, cx))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                cx.stop_propagation();
-                this.handle_lock_key_down(event, cx);
+                if this.handle_lock_key_down(event, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .when(!cfg!(target_os = "macos"), |this| {
                 this.child(

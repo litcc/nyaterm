@@ -392,11 +392,10 @@ impl NyaTermApp {
         event: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        cx.stop_propagation();
+    ) -> bool {
         let interaction = self.settings.keyword_highlight_presentation();
         let Some(rule_id) = interaction.edit_id else {
-            return;
+            return false;
         };
         let field = interaction.edit_field;
         match event.keystroke.key.as_str() {
@@ -423,8 +422,9 @@ impl NyaTermApp {
                 window.focus(self.settings.keyword_highlight_focus(), cx);
                 self.save_keyword_highlights(cx);
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn apply_keyword_highlight_input(

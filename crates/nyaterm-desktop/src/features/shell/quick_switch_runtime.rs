@@ -2,14 +2,30 @@ use rust_i18n::t;
 
 use std::collections::HashMap;
 
-use gpui::{Context, KeyDownEvent, Window};
+use gpui::{AppContext as _, Context, Window};
 use nyaterm_core::fuzzy_search_items;
+use nyaterm_ui::NyaCommandState;
 
 use crate::entities::{OverlayStore, QuickSwitchState};
-use crate::features::{
-    NyaTermApp, formatting::session_kind_label, formatting::short_id, text_inputs::TextInputSetup,
-};
+use crate::features::{NyaTermApp, formatting::session_kind_label, formatting::short_id};
 use crate::models::QuickSwitchItem;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceSurfaceFocusTarget {
+    Terminal,
+    RemoteDesktop,
+}
+
+fn workspace_surface_focus_target(
+    active_session_id: Option<&str>,
+    is_remote_desktop: impl FnOnce(&str) -> bool,
+) -> WorkspaceSurfaceFocusTarget {
+    if active_session_id.is_some_and(is_remote_desktop) {
+        WorkspaceSurfaceFocusTarget::RemoteDesktop
+    } else {
+        WorkspaceSurfaceFocusTarget::Terminal
+    }
+}
 
 impl NyaTermApp {
     pub(in crate::features) fn quick_switch_state(
@@ -43,29 +59,53 @@ impl NyaTermApp {
         changed
     }
 
+    pub(in crate::features) fn quick_switch_command_state(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Entity<NyaCommandState>> {
+        self.quick_switch_state(cx).command_state()
+    }
+
     pub(in crate::features) fn open_quick_switch(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.update_quick_switch_state(cx, |store| store.open_quick_switch());
-        self.forget_text_inputs("quick-switch.query");
-        let field = self.text_input(
-            "quick-switch.query",
-            "",
-            TextInputSetup::placeholder(t!("sessionQuickSwitcher.searchPlaceholder")),
-            cx,
-        );
+        let command_state = cx.new(|cx| NyaCommandState::new(window, cx));
+        self.update_quick_switch_state(cx, |store| store.open_quick_switch(command_state.clone()));
+        command_state.update(cx, |state, cx| state.focus(window, cx));
         self.shell.set_status("quick switch opened".to_string());
-        window.focus(&field.read(cx).focus_handle(), cx);
         cx.notify();
     }
 
     pub(in crate::features) fn close_quick_switch(&mut self, cx: &mut Context<Self>) {
         self.update_quick_switch_state(cx, |store| store.close_quick_switch());
-        self.forget_text_inputs("quick-switch.query");
         self.shell.set_status("quick switch closed".to_string());
         cx.notify();
+    }
+
+    pub(in crate::features) fn dismiss_quick_switch(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_quick_switch(cx);
+        self.focus_active_workspace_surface(window, cx);
+    }
+
+    pub(in crate::features) fn focus_active_workspace_surface(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match workspace_surface_focus_target(self.session.active_id(), |session_id| {
+            self.remote_desktop.is_session(session_id)
+        }) {
+            WorkspaceSurfaceFocusTarget::RemoteDesktop => {
+                window.focus(self.remote_desktop.focus(), cx)
+            }
+            WorkspaceSurfaceFocusTarget::Terminal => window.focus(self.terminal.input_focus(), cx),
+        }
     }
 
     pub(in crate::features) fn quick_switch_items(&self) -> Vec<QuickSwitchItem> {
@@ -198,41 +238,9 @@ impl NyaTermApp {
 
     pub(in crate::features) fn filtered_quick_switch_items(
         &self,
-        cx: &mut Context<Self>,
+        query: &str,
     ) -> Vec<QuickSwitchItem> {
-        let items = self.quick_switch_items();
-        let query = self
-            .quick_switch_state(cx)
-            .query()
-            .trim()
-            .to_ascii_lowercase();
-        if query.is_empty() {
-            return items;
-        }
-        let candidates = items
-            .iter()
-            .map(|item| (item.search_text(), item.id()))
-            .collect::<Vec<_>>();
-        let candidate_refs = candidates
-            .iter()
-            .map(|(display, id)| (display.as_str(), id.as_str()))
-            .collect::<Vec<_>>();
-        let matches = fuzzy_search_items(
-            &candidate_refs,
-            &query,
-            "sessionQuickSwitcher",
-            50,
-            None,
-            None,
-        );
-        let mut items_by_id = items
-            .into_iter()
-            .map(|item| (item.id(), item))
-            .collect::<HashMap<_, _>>();
-        matches
-            .into_iter()
-            .filter_map(|matched| items_by_id.remove(&matched.command))
-            .collect()
+        filter_quick_switch_items(self.quick_switch_items(), query)
     }
 
     pub(in crate::features) fn select_quick_switch_item(
@@ -241,8 +249,9 @@ impl NyaTermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.update_quick_switch_state(cx, |store| store.reset_quick_switch_input_and_close());
-        self.forget_text_inputs("quick-switch.query");
+        let command_focus = window.focused(cx);
+        self.close_quick_switch(cx);
+        self.mark_user_activity();
         match item {
             QuickSwitchItem::Session { id, .. } => {
                 self.select_session(id, cx);
@@ -261,63 +270,44 @@ impl NyaTermApp {
                 cx.notify();
             }
         }
-    }
-
-    pub(in crate::features) fn handle_quick_switch_key_down(
-        &mut self,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.mark_user_activity();
-        let items = self.filtered_quick_switch_items(cx);
-        let keystroke = &event.keystroke;
-        if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
-        }
-
-        match keystroke.key.as_str() {
-            "escape" => self.close_quick_switch(cx),
-            "up" => {
-                if !items.is_empty() {
-                    let selected_index = self.quick_switch_state(cx).selected_index();
-                    let next_index = (selected_index + items.len() - 1) % items.len();
-                    self.update_quick_switch_state(cx, |store| {
-                        store.set_quick_switch_selected_index(next_index)
-                    });
-                }
-                cx.notify();
-            }
-            "down" => {
-                if !items.is_empty() {
-                    let selected_index = self.quick_switch_state(cx).selected_index();
-                    let next_index = (selected_index + 1) % items.len();
-                    self.update_quick_switch_state(cx, |store| {
-                        store.set_quick_switch_selected_index(next_index)
-                    });
-                }
-                cx.notify();
-            }
-            "enter" => {
-                let selected_index = self.quick_switch_state(cx).selected_index();
-                if let Some(item) = items
-                    .get(selected_index.min(items.len().saturating_sub(1)))
-                    .cloned()
-                {
-                    self.select_quick_switch_item(item, window, cx);
-                }
-            }
-            _ => {}
+        if window.focused(cx) == command_focus {
+            self.focus_active_workspace_surface(window, cx);
         }
     }
+}
 
-    pub(in crate::features) fn apply_quick_switch_query(
-        &mut self,
-        text: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.update_quick_switch_state(cx, |store| store.set_quick_switch_query(text));
+const QUICK_SWITCH_RESULT_LIMIT: usize = 50;
+
+fn filter_quick_switch_items(items: Vec<QuickSwitchItem>, query: &str) -> Vec<QuickSwitchItem> {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return items.into_iter().take(QUICK_SWITCH_RESULT_LIMIT).collect();
     }
+
+    let candidates = items
+        .iter()
+        .map(|item| (item.search_text(), item.id()))
+        .collect::<Vec<_>>();
+    let candidate_refs = candidates
+        .iter()
+        .map(|(display, id)| (display.as_str(), id.as_str()))
+        .collect::<Vec<_>>();
+    let matches = fuzzy_search_items(
+        &candidate_refs,
+        &query,
+        "sessionQuickSwitcher",
+        QUICK_SWITCH_RESULT_LIMIT,
+        None,
+        None,
+    );
+    let mut items_by_id = items
+        .into_iter()
+        .map(|item| (item.id(), item))
+        .collect::<HashMap<_, _>>();
+    matches
+        .into_iter()
+        .filter_map(|matched| items_by_id.remove(&matched.command))
+        .collect()
 }
 
 fn quick_switch_transient_insert_index(
@@ -333,7 +323,60 @@ fn quick_switch_transient_insert_index(
 
 #[cfg(test)]
 mod tests {
-    use super::quick_switch_transient_insert_index;
+    use super::{
+        WorkspaceSurfaceFocusTarget, filter_quick_switch_items,
+        quick_switch_transient_insert_index, workspace_surface_focus_target,
+    };
+    use crate::models::QuickSwitchItem;
+
+    fn session_item(
+        index: usize,
+        title: impl Into<String>,
+        subtitle: impl Into<String>,
+    ) -> QuickSwitchItem {
+        QuickSwitchItem::Session {
+            id: format!("session-{index}"),
+            title: title.into(),
+            subtitle: subtitle.into(),
+            active: false,
+        }
+    }
+
+    #[test]
+    fn empty_query_keeps_catalog_order_and_limits_results_to_fifty() {
+        let items = (0..60)
+            .map(|index| session_item(index, format!("Session {index}"), "Local"))
+            .collect();
+
+        let filtered = filter_quick_switch_items(items, "   ");
+
+        assert_eq!(filtered.len(), 50);
+        assert_eq!(
+            filtered.first().map(QuickSwitchItem::title),
+            Some("Session 0")
+        );
+        assert_eq!(
+            filtered.last().map(QuickSwitchItem::title),
+            Some("Session 49")
+        );
+    }
+
+    #[test]
+    fn non_empty_query_uses_search_text_and_limits_fuzzy_results() {
+        let mut items = (0..60)
+            .map(|index| session_item(index, format!("Server {index}"), "needle target"))
+            .collect::<Vec<_>>();
+        items.push(session_item(99, "Unrelated", "nothing here"));
+
+        let filtered = filter_quick_switch_items(items, "needle");
+
+        assert_eq!(filtered.len(), 50);
+        assert!(
+            filtered
+                .iter()
+                .all(|item| item.subtitle() == "needle target")
+        );
+    }
 
     #[test]
     fn transient_items_follow_workspace_tab_insertion_rules() {
@@ -341,5 +384,21 @@ mod tests {
         assert_eq!(quick_switch_transient_insert_index(3, None, Some(0)), 1);
         assert_eq!(quick_switch_transient_insert_index(3, Some(2), Some(0)), 2);
         assert_eq!(quick_switch_transient_insert_index(3, Some(99), None), 3);
+    }
+
+    #[test]
+    fn workspace_focus_targets_terminal_or_remote_desktop_by_active_session() {
+        assert_eq!(
+            workspace_surface_focus_target(None, |_| true),
+            WorkspaceSurfaceFocusTarget::Terminal
+        );
+        assert_eq!(
+            workspace_surface_focus_target(Some("ssh"), |_| false),
+            WorkspaceSurfaceFocusTarget::Terminal
+        );
+        assert_eq!(
+            workspace_surface_focus_target(Some("rdp-or-vnc"), |_| true),
+            WorkspaceSurfaceFocusTarget::RemoteDesktop
+        );
     }
 }

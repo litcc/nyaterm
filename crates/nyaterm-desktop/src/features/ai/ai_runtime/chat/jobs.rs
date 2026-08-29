@@ -207,11 +207,11 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         // The box owns the text; the menu owns the keys that walk and pick.
@@ -239,8 +239,9 @@ impl NyaTermApp {
                     self.defer_ai_panel_snapshot_flush(cx);
                 }
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Apply an edit from the model search box.
@@ -456,16 +457,16 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         if self.ai.chat_or_agent_is_running() || !self.ai.settings_enabled() {
             self.ai.hide_chat_mention();
             self.defer_ai_panel_snapshot_flush(cx);
-            return;
+            return false;
         }
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         // While the @-mention list is open it owns the keys that walk and pick;
@@ -476,21 +477,21 @@ impl NyaTermApp {
                 "escape" => {
                     self.ai.close_chat_mention();
                     self.defer_ai_panel_snapshot_flush(cx);
-                    return;
+                    return true;
                 }
                 "up" => {
                     self.ai.move_chat_mention_index(candidate_count, -1);
                     self.defer_ai_panel_snapshot_flush(cx);
-                    return;
+                    return true;
                 }
                 "down" => {
                     self.ai.move_chat_mention_index(candidate_count, 1);
                     self.defer_ai_panel_snapshot_flush(cx);
-                    return;
+                    return true;
                 }
                 "enter" => {
                     self.select_ai_mention_candidate(cx);
-                    return;
+                    return true;
                 }
                 _ => {}
             }
@@ -504,8 +505,9 @@ impl NyaTermApp {
                 self.ai.blur_chat_prompt();
                 self.defer_ai_panel_snapshot_flush(cx);
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Put text into the prompt, from somewhere other than the box.

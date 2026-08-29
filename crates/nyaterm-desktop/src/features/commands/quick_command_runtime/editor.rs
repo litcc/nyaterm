@@ -214,16 +214,16 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         self.mark_user_activity();
         let keystroke = &event.keystroke;
         let primary = keystroke.modifiers.platform || keystroke.modifiers.control;
         if primary && !keystroke.modifiers.alt && matches!(keystroke.key.as_str(), "s" | "S") {
             self.save_quick_command_editor(cx);
-            return;
+            return true;
         }
         if primary || keystroke.modifiers.alt || keystroke.modifiers.function {
-            return;
+            return false;
         }
 
         // The boxes own the text and the clipboard; the dialog owns the keys
@@ -232,8 +232,9 @@ impl NyaTermApp {
         match keystroke.key.as_str() {
             "escape" => self.close_quick_command_editor(cx),
             "enter" => self.save_quick_command_editor(cx),
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     /// Apply an edit from one of the quick command editor's inputs.

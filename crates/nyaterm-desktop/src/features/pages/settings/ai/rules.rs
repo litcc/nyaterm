@@ -139,7 +139,9 @@ impl SettingsPanel {
                         .gap_3()
                         .track_focus(self.ai.settings_action_focus())
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                            this.handle_ai_action_key_down(event, window, cx);
+                            if this.handle_ai_action_key_down(event, window, cx) {
+                                cx.stop_propagation();
+                            }
                         }))
                         .child(
                             div()

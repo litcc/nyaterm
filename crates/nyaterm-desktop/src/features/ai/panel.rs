@@ -265,9 +265,11 @@ impl AiPanel {
                             .flex()
                             .when(composer_disabled, |this| this.opacity(0.56))
                             .on_key_down(cx.listener(|panel, event: &gpui::KeyDownEvent, _, cx| {
-                                panel.with_app(cx, |app, cx| {
-                                    app.handle_ai_prompt_key_down(event, cx);
-                                });
+                                if panel.with_app(cx, |app, cx| {
+                                    app.handle_ai_prompt_key_down(event, cx)
+                                }) {
+                                    cx.stop_propagation();
+                                }
                             }))
                             .child(div().min_w_0().flex_1().child(prompt_input)),
                     )
@@ -773,9 +775,11 @@ impl AiPanel {
                 div()
                     .mb_1()
                     .on_key_down(cx.listener(|panel, event: &gpui::KeyDownEvent, _, cx| {
-                        panel.with_app(cx, |app, cx| {
-                            app.handle_ai_model_search_key_down(event, cx);
-                        });
+                        if panel
+                            .with_app(cx, |app, cx| app.handle_ai_model_search_key_down(event, cx))
+                        {
+                            cx.stop_propagation();
+                        }
                     }))
                     .child(model_search_input),
             );

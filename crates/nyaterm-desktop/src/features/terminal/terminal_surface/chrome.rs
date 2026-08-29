@@ -369,8 +369,9 @@ impl NyaTermApp {
             .px_2()
             .py_1()
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                cx.stop_propagation();
-                this.handle_terminal_search_key_down(event, window, cx);
+                if this.handle_terminal_search_key_down(event, window, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .child(
                 div()

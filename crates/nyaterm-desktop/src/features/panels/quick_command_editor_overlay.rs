@@ -445,7 +445,9 @@ impl NyaTermApp {
             // label-div fields, and would now steal focus back from whichever
             // box the pointer just landed on, since click follows mouse-down.
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                this.handle_quick_command_editor_key_down(event, cx);
+                if this.handle_quick_command_editor_key_down(event, cx) {
+                    cx.stop_propagation();
+                }
             }))
             .child(
                 div()

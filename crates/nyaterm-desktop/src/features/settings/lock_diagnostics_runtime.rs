@@ -83,10 +83,10 @@ impl NyaTermApp {
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let keystroke = &event.keystroke;
         if keystroke.modifiers.platform || keystroke.modifiers.alt || keystroke.modifiers.control {
-            return;
+            return false;
         }
 
         match keystroke.key.as_str() {
@@ -98,8 +98,9 @@ impl NyaTermApp {
                 self.reset_text_input("lock-screen.password", "", cx);
                 cx.notify();
             }
-            _ => {}
+            _ => return false,
         }
+        true
     }
 
     pub(in crate::features) fn apply_lock_password_input(
