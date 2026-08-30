@@ -25,7 +25,7 @@ use crate::features::remote::list_window::{
 };
 use crate::features::{
     runtime_jobs::DockerJobResult, runtime_jobs::GpuJobResult, runtime_jobs::NpuJobResult,
-    runtime_jobs::ProcessJobResult, runtime_jobs::StatsJobResult,
+    runtime_jobs::ProcessJobOutput, runtime_jobs::ProcessJobResult, runtime_jobs::StatsJobResult,
 };
 use crate::models::{DockerTab, RemoteProcessSortDirection, RemoteProcessSortKey};
 
@@ -40,6 +40,12 @@ pub(in crate::features) enum StatsApplyOutcome {
     Failed {
         status: String,
     },
+}
+
+pub(in crate::features) enum ProcessApplyOutcome {
+    Ignored,
+    CompletedInactive,
+    Applied { status: String },
 }
 
 pub(in crate::features) struct RemoteOpsFeatureState {
@@ -852,26 +858,57 @@ impl RemoteOpsFeatureState {
         self.process.take_event_receiver()
     }
 
-    pub(in crate::features) fn complete_process_event(
+    pub(in crate::features) fn apply_process_event(
         &mut self,
-        job_id: u64,
-        session_id: &str,
-    ) -> bool {
-        self.process.complete_event(job_id, session_id)
+        event: ProcessJobResult,
+        active_session_id: Option<&str>,
+    ) -> ProcessApplyOutcome {
+        if !self.process.complete_event(event.job_id, &event.session_id) {
+            return ProcessApplyOutcome::Ignored;
+        }
+        if active_session_id != Some(event.session_id.as_str()) {
+            return ProcessApplyOutcome::CompletedInactive;
+        }
+        let was_list_refresh = self.process.status == "listing remote processes";
+        let status = match event.result {
+            Ok(ProcessJobOutput::Listed(processes)) => {
+                self.process.reset_refresh_failures();
+                let status = format!("loaded {} remote process(es)", processes.len());
+                self.process.apply_processes(processes);
+                status
+            }
+            Ok(ProcessJobOutput::Signalled {
+                pid,
+                signal,
+                processes,
+            }) => {
+                self.process.apply_processes(processes);
+                format!("sent {signal} to pid {pid}")
+            }
+            Ok(ProcessJobOutput::Reniced {
+                pid,
+                nice,
+                processes,
+            }) => {
+                self.process.apply_processes(processes);
+                format!("reniced pid {pid} to {nice}")
+            }
+            Err(error) => {
+                if was_list_refresh {
+                    let terminal =
+                        error.contains(nyaterm_transport::PROCESS_LIST_UNSUPPORTED_ERROR);
+                    if self.process.record_refresh_failure(terminal) >= 3 {
+                        self.process.clear_data();
+                    }
+                }
+                format!("process operation failed: {error}")
+            }
+        };
+        self.process.set_status(status.clone());
+        ProcessApplyOutcome::Applied { status }
     }
 
-    pub(in crate::features) fn reset_process_refresh_failures(&mut self) {
-        self.process.reset_refresh_failures();
-    }
-
-    pub(in crate::features) fn record_process_refresh_failure(&mut self, terminal: bool) -> u8 {
-        self.process.record_refresh_failure(terminal)
-    }
-
-    pub(in crate::features) fn clear_process_data(&mut self) {
-        self.process.clear_data();
-    }
-
+    #[cfg(test)]
     pub(in crate::features) fn apply_processes(&mut self, processes: Vec<RemoteProcess>) {
         self.process.apply_processes(processes);
     }
@@ -2117,11 +2154,11 @@ mod tests {
     };
 
     use super::{
-        AcceleratorProcessList, DockerDerivedItems, ProcessSortColumns, RemoteOpsFeatureFocus,
-        RemoteOpsFeatureState, StatsApplyOutcome,
+        AcceleratorProcessList, DockerDerivedItems, ProcessApplyOutcome, ProcessSortColumns,
+        RemoteOpsFeatureFocus, RemoteOpsFeatureState, StatsApplyOutcome,
     };
     use crate::features::remote::job_state::RemoteJobState;
-    use crate::features::runtime_jobs::StatsJobResult;
+    use crate::features::runtime_jobs::{ProcessJobOutput, ProcessJobResult, StatsJobResult};
     use crate::models::{DockerTab, RemoteProcessSortKey};
 
     fn process(pid: u32) -> RemoteProcess {
@@ -2415,6 +2452,34 @@ mod tests {
         state.apply_processes(vec![process(3)]);
         let refreshed = state.derived_processes();
         assert!(!Arc::ptr_eq(&sorted, &refreshed));
+    }
+
+    #[test]
+    fn process_owner_reduces_matching_and_stale_job_events() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        let ticket = state.begin_process_job("session-a".to_string());
+        let outcome = state.apply_process_event(
+            ProcessJobResult {
+                job_id: ticket.job_id,
+                session_id: "session-a".to_string(),
+                result: Ok(ProcessJobOutput::Listed(vec![process(7)])),
+            },
+            Some("session-a"),
+        );
+        assert!(matches!(outcome, ProcessApplyOutcome::Applied { .. }));
+        assert_eq!(state.process_presentation().items[0].pid, 7);
+
+        assert!(matches!(
+            state.apply_process_event(
+                ProcessJobResult {
+                    job_id: ticket.job_id,
+                    session_id: "session-a".to_string(),
+                    result: Err("stale".to_string()),
+                },
+                Some("session-a"),
+            ),
+            ProcessApplyOutcome::Ignored
+        ));
     }
 
     #[test]

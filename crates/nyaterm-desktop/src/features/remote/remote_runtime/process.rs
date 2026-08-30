@@ -5,6 +5,7 @@ use gpui::{ClipboardItem, Context, Window};
 use nyaterm_transport::SshProcessService;
 
 use crate::features::NyaTermApp;
+use crate::features::remote::state::ProcessApplyOutcome;
 use crate::features::runtime_jobs::{ProcessJobOutput, ProcessJobResult};
 use crate::models::{DockerTab, RemoteProcessSortKey};
 
@@ -359,64 +360,16 @@ impl NyaTermApp {
 
     /// Apply one reply, reporting whether the UI needs a repaint.
     fn apply_process_event(&mut self, event: ProcessJobResult) -> bool {
-        if !self
+        match self
             .remote_ops
-            .complete_process_event(event.job_id, &event.session_id)
+            .apply_process_event(event, self.session.active_id())
         {
-            // A superseded job's reply; the pane has already moved on.
-            return false;
-        }
-        if self.session.active_id() != Some(event.session_id.as_str()) {
-            // Another session is active now, but completing the job is
-            // itself a state change worth painting.
-            return true;
-        }
-        let was_list_refresh = self.remote_ops.process_status() == "listing remote processes";
-        match event.result {
-            Ok(ProcessJobOutput::Listed(processes)) => {
-                self.remote_ops.reset_process_refresh_failures();
-                self.remote_ops
-                    .set_process_status(format!("loaded {} remote process(es)", processes.len()));
-                self.shell
-                    .set_status(self.remote_ops.process_status().to_string());
-                self.remote_ops.apply_processes(processes);
-            }
-            Ok(ProcessJobOutput::Signalled {
-                pid,
-                signal,
-                processes,
-            }) => {
-                self.remote_ops
-                    .set_process_status(format!("sent {signal} to pid {pid}"));
-                self.shell
-                    .set_status(self.remote_ops.process_status().to_string());
-                self.remote_ops.apply_processes(processes);
-            }
-            Ok(ProcessJobOutput::Reniced {
-                pid,
-                nice,
-                processes,
-            }) => {
-                self.remote_ops
-                    .set_process_status(format!("reniced pid {pid} to {nice}"));
-                self.shell
-                    .set_status(self.remote_ops.process_status().to_string());
-                self.remote_ops.apply_processes(processes);
-            }
-            Err(error) => {
-                if was_list_refresh {
-                    let terminal =
-                        error.contains(nyaterm_transport::PROCESS_LIST_UNSUPPORTED_ERROR);
-                    if self.remote_ops.record_process_refresh_failure(terminal) >= 3 {
-                        self.remote_ops.clear_process_data();
-                    }
-                }
-                self.remote_ops
-                    .set_process_status(format!("process operation failed: {error}"));
-                self.shell
-                    .set_status(self.remote_ops.process_status().to_string());
+            ProcessApplyOutcome::Ignored => false,
+            ProcessApplyOutcome::CompletedInactive => true,
+            ProcessApplyOutcome::Applied { status } => {
+                self.shell.set_status(status);
+                true
             }
         }
-        true
     }
 }
