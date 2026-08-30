@@ -203,7 +203,12 @@ impl Framebuffer {
             match format {
                 PixelFormat::Bgra8 => destination.copy_from_slice(source),
                 PixelFormat::Rgba8 => {
-                    for (src, dst) in source.chunks_exact(4).zip(destination.chunks_exact_mut(4)) {
+                    for (src, dst) in source
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(destination.as_chunks_mut::<4>().0.iter_mut())
+                    {
                         dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
                     }
                 }

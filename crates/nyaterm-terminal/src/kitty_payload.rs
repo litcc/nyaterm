@@ -95,7 +95,7 @@ fn rgb24_to_nyar(data: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
         return None;
     }
     let mut rgba = Vec::with_capacity(need / 3 * 4);
-    for px in data[..need].chunks_exact(3) {
+    for px in data[..need].as_chunks::<3>().0 {
         rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
     }
     Some(pack_nyar_rgba(w, h, &rgba))

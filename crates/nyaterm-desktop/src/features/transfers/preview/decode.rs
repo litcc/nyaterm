@@ -251,7 +251,7 @@ fn check_pixel_budget(
 fn render_image_from_rgba(mut rgba: image::RgbaImage) -> Result<PreviewImage, String> {
     let (width, height) = rgba.dimensions();
     check_pixel_budget(width, height, IMAGE_MAX_DIMENSION, IMAGE_MAX_PIXELS)?;
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let bgra = rgba.into_raw();
@@ -410,7 +410,7 @@ fn rasterize_pdf_page_inner(
     // swap to the BGRA the GPUI atlas expects.
     let unpremultiplied = pixmap.take_unpremultiplied();
     let mut rgba: Vec<u8> = bytemuck::cast_slice(&unpremultiplied).to_vec();
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let buffer = image::RgbaImage::from_raw(width, height, rgba.clone())

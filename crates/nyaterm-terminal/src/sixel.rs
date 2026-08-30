@@ -161,7 +161,7 @@ pub fn decode_sixel_rgba(dcs_body: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     if force_bg {
         // Fill with palette color 0 as opaque background.
         let bg = palette[0];
-        for px in rgba.chunks_exact_mut(4) {
+        for px in rgba.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&bg);
         }
     }

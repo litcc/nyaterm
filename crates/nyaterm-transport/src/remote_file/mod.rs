@@ -1361,7 +1361,7 @@ fn parse_enhanced_listing(
 ) -> anyhow::Result<Vec<SftpFileEntry>> {
     let fields = output.split(|byte| *byte == 0).collect::<Vec<_>>();
     let mut entries = Vec::new();
-    for fields in fields.chunks_exact(8) {
+    for fields in fields.as_chunks::<8>().0 {
         let name = String::from_utf8_lossy(fields[0]).into_owned();
         if name.is_empty() || name == "." || name == ".." {
             continue;

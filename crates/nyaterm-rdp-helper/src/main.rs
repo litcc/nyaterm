@@ -947,7 +947,7 @@ fn send_cursor(
 }
 
 fn rgba_to_bgra(mut pixels: Vec<u8>) -> Vec<u8> {
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     pixels
@@ -1268,7 +1268,7 @@ mod tests {
         .expect("non-empty committed text");
         let units = [0x0041, 0xd83d, 0xde00];
         assert_eq!(converted.len(), units.len() * 2);
-        for (pair, expected_unit) in converted.chunks_exact(2).zip(units) {
+        for (pair, expected_unit) in converted.as_chunks::<2>().0.iter().zip(units) {
             let [
                 FastPathInputEvent::UnicodeKeyboardEvent(down_flags, down_unit),
                 FastPathInputEvent::UnicodeKeyboardEvent(up_flags, up_unit),

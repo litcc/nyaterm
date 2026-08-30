@@ -175,7 +175,7 @@ pub fn decode_render_image(data: &[u8]) -> Option<Arc<RenderImage>> {
         decode_compressed_image(data)?
     };
     // GPUI atlas expects BGRA.
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let frames = SmallVec::from_elem(Frame::new(rgba), 1);
