@@ -113,7 +113,9 @@ pub(in crate::features) struct SessionTabHoverCard {
 impl RenderOnce for SessionTabHoverCard {
     fn render(self, _window: &mut Window, _cx: &mut gpui::App) -> impl IntoElement {
         let palette = self.palette;
-        let mut body = div().w(px(320.)).flex().flex_col().gap_2();
+        // Match Tauri's 260px tooltip content cap. The HoverCard appearance adds
+        // its own horizontal padding outside this content width.
+        let mut body = div().w(px(260.)).flex().flex_col().gap_2();
 
         body = body.child(session_tab_hover_card_row(
             palette,
@@ -159,10 +161,10 @@ fn session_tab_hover_card_row(
         .min_w_0()
         .flex()
         .items_center()
-        .gap_3()
+        .gap_2()
         .child(
             div()
-                .w(px(88.))
+                .w(px(76.))
                 .flex_none()
                 .text_size(px(12.))
                 .text_color(rgb(palette.text_muted))
