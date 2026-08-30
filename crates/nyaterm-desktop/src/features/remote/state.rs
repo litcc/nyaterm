@@ -33,6 +33,19 @@ pub(in crate::features) struct RemoteJobTicket<Event> {
     pub tx: UnboundedSender<Event>,
 }
 
+pub(in crate::features) enum StatsApplyOutcome {
+    Ignored,
+    CompletedInactive,
+    Applied {
+        session_id: String,
+        stats: Box<RemoteStats>,
+        status: String,
+    },
+    Failed {
+        status: String,
+    },
+}
+
 struct RemoteJobState<Event> {
     tx: UnboundedSender<Event>,
     /// Taken once when the pane's drain task starts, which owns delivery from
@@ -978,28 +991,68 @@ impl RemoteOpsFeatureState {
         self.stats.take_event_receiver()
     }
 
-    pub(in crate::features) fn complete_stats_event(
-        &mut self,
-        job_id: u64,
-        session_id: &str,
-    ) -> bool {
-        self.stats.complete_event(job_id, session_id)
-    }
-
+    #[cfg(test)]
     pub(in crate::features) fn reset_stats_refresh_failures(&mut self) {
         self.stats.reset_refresh_failures();
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn apply_stats(&mut self, stats: RemoteStats) {
         self.stats.apply_data(stats);
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn record_stats_refresh_failure(&mut self) -> u8 {
         let failures = self.stats.record_refresh_failure();
         if failures >= 3 {
             self.stats.clear_data();
         }
         failures
+    }
+
+    pub(in crate::features) fn apply_stats_event(
+        &mut self,
+        event: StatsJobResult,
+        active_session_id: Option<&str>,
+    ) -> StatsApplyOutcome {
+        if !self.stats.complete_event(event.job_id, &event.session_id) {
+            return StatsApplyOutcome::Ignored;
+        }
+        if active_session_id != Some(event.session_id.as_str()) {
+            return StatsApplyOutcome::CompletedInactive;
+        }
+        match event.result {
+            Ok(stats) => {
+                self.stats.reset_refresh_failures();
+                let status = format!(
+                    "loaded stats for {} · load {:.2}/{:.2}/{:.2}",
+                    if stats.system.hostname.trim().is_empty() {
+                        "remote host"
+                    } else {
+                        stats.system.hostname.as_str()
+                    },
+                    stats.load.load1,
+                    stats.load.load5,
+                    stats.load.load15
+                );
+                self.stats.set_status(status.clone());
+                self.stats.apply_data(stats.clone());
+                StatsApplyOutcome::Applied {
+                    session_id: event.session_id,
+                    stats: Box::new(stats),
+                    status,
+                }
+            }
+            Err(error) => {
+                let failures = self.stats.record_refresh_failure();
+                if failures >= 3 {
+                    self.stats.clear_data();
+                }
+                let status = format!("stats refresh failed: {error}");
+                self.stats.set_status(status.clone());
+                StatsApplyOutcome::Failed { status }
+            }
+        }
     }
 
     pub(in crate::features) fn gpu_is_pending_for(&self, session_id: &str) -> bool {
@@ -2159,8 +2212,9 @@ mod tests {
 
     use super::{
         AcceleratorProcessList, DockerDerivedItems, ProcessSortColumns, RemoteJobState,
-        RemoteOpsFeatureFocus, RemoteOpsFeatureState,
+        RemoteOpsFeatureFocus, RemoteOpsFeatureState, StatsApplyOutcome,
     };
+    use crate::features::runtime_jobs::StatsJobResult;
     use crate::models::{DockerTab, RemoteProcessSortKey};
 
     fn process(pid: u32) -> RemoteProcess {
@@ -2472,6 +2526,55 @@ mod tests {
             presentation.status,
             "start an SSH session to inspect remote stats"
         );
+    }
+
+    #[test]
+    fn stats_owner_reduces_matching_success_failure_and_stale_events() {
+        let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
+        let ticket = state.begin_stats_job("session-a".to_string());
+        let mut stats = RemoteStats::default();
+        stats.system.hostname = "host-a".to_string();
+        let outcome = state.apply_stats_event(
+            StatsJobResult {
+                job_id: ticket.job_id,
+                session_id: "session-a".to_string(),
+                result: Ok(stats),
+            },
+            Some("session-a"),
+        );
+        assert!(matches!(outcome, StatsApplyOutcome::Applied { .. }));
+        assert_eq!(
+            state.stats_presentation().data.unwrap().system.hostname,
+            "host-a"
+        );
+
+        assert!(matches!(
+            state.apply_stats_event(
+                StatsJobResult {
+                    job_id: ticket.job_id,
+                    session_id: "session-a".to_string(),
+                    result: Err("stale".to_string()),
+                },
+                Some("session-a"),
+            ),
+            StatsApplyOutcome::Ignored
+        ));
+
+        for failure in 1..=3 {
+            let ticket = state.begin_stats_job("session-a".to_string());
+            let outcome = state.apply_stats_event(
+                StatsJobResult {
+                    job_id: ticket.job_id,
+                    session_id: "session-a".to_string(),
+                    result: Err(format!("failure-{failure}")),
+                },
+                Some("session-a"),
+            );
+            assert!(matches!(outcome, StatsApplyOutcome::Failed { .. }));
+        }
+        let presentation = state.stats_presentation();
+        assert!(presentation.data.is_none());
+        assert_eq!(presentation.consecutive_refresh_failures, 3);
     }
 
     #[test]

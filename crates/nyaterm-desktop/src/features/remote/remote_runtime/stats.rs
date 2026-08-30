@@ -3,6 +3,7 @@ use gpui::Context;
 use nyaterm_transport::RemoteStatsService;
 
 use crate::features::NyaTermApp;
+use crate::features::remote::state::StatsApplyOutcome;
 use crate::features::runtime_jobs::StatsJobResult;
 
 impl NyaTermApp {
@@ -102,48 +103,28 @@ impl NyaTermApp {
 
     /// Apply one reply, reporting whether the UI needs a repaint.
     fn apply_stats_event(&mut self, event: StatsJobResult, cx: &mut Context<Self>) -> bool {
-        if !self
+        match self
             .remote_ops
-            .complete_stats_event(event.job_id, &event.session_id)
+            .apply_stats_event(event, self.session.active_id())
         {
-            // A superseded job's reply; the pane has already moved on.
-            return false;
-        }
-        if self.session.active_id() != Some(event.session_id.as_str()) {
-            // Another session is active now, but completing the job is
-            // itself a state change worth painting.
-            return true;
-        }
-        match event.result {
-            Ok(stats) => {
-                self.remote_ops.reset_stats_refresh_failures();
-                self.remote_ops.set_stats_status(format!(
-                    "loaded stats for {} · load {:.2}/{:.2}/{:.2}",
-                    if stats.system.hostname.trim().is_empty() {
-                        "remote host"
-                    } else {
-                        stats.system.hostname.as_str()
-                    },
-                    stats.load.load1,
-                    stats.load.load5,
-                    stats.load.load15
-                ));
-                self.shell
-                    .set_status(self.remote_ops.stats_status().to_string());
+            StatsApplyOutcome::Ignored => false,
+            StatsApplyOutcome::CompletedInactive => true,
+            StatsApplyOutcome::Applied {
+                session_id,
+                stats,
+                status,
+            } => {
+                self.shell.set_status(status);
                 // The snapshot is the only place the remote OS is reported,
                 // so this is where a connection's icon can be filled in.
-                self.apply_auto_detected_connection_icon(&event.session_id, &stats.system, cx);
-                self.cache_asset_stats_snapshot(&event.session_id, &stats);
-                self.remote_ops.apply_stats(stats);
+                self.apply_auto_detected_connection_icon(&session_id, &stats.system, cx);
+                self.cache_asset_stats_snapshot(&session_id, stats.as_ref());
+                true
             }
-            Err(error) => {
-                self.remote_ops.record_stats_refresh_failure();
-                self.remote_ops
-                    .set_stats_status(format!("stats refresh failed: {error}"));
-                self.shell
-                    .set_status(self.remote_ops.stats_status().to_string());
+            StatsApplyOutcome::Failed { status } => {
+                self.shell.set_status(status);
+                true
             }
         }
-        true
     }
 }
