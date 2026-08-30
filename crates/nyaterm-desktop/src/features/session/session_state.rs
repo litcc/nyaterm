@@ -351,9 +351,14 @@ impl NyaTermApp {
         }
     }
 
-    pub(in crate::features) fn toggle_new_session_menu(&mut self, cx: &mut Context<Self>) {
-        self.shell.toggle_new_session_menu();
-        cx.notify();
+    pub(in crate::features) fn open_new_session_menu(
+        &mut self,
+        anchor: crate::features::shell::NewSessionMenuAnchor,
+        cx: &mut Context<Self>,
+    ) {
+        if self.shell.open_new_session_menu(anchor) {
+            cx.notify();
+        }
     }
 
     pub(in crate::features) fn close_new_session_menu(&mut self, cx: &mut Context<Self>) {

@@ -1,13 +1,13 @@
 use rust_i18n::t;
 
-use nyaterm_ui::NyaScrollable;
+use nyaterm_ui::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement, NyaScrollArea, NyaScrollable};
 use std::collections::{HashMap, HashSet};
 
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, MouseButton, SharedString, div, prelude::*, px,
     rgb, rgba, svg,
 };
-use nyaterm_core::{ConnectionType, Group, SavedConnection, truncate_preview};
+use nyaterm_core::{ConnectionType, Group, SavedConnection, build_group_path, truncate_preview};
 
 use crate::features::NyaTermApp;
 use crate::features::icons::resolve_connection_icon;
@@ -18,7 +18,73 @@ use crate::theme::ThemePalette;
 const NEW_SESSION_MENU_WIDTH: f32 = 300.;
 const NEW_SESSION_SUBMENU_WIDTH: f32 = 260.;
 const NEW_SESSION_MENU_ROW_HEIGHT: f32 = 32.;
-const NEW_SESSION_MENU_PADDING: f32 = 4.;
+
+fn new_session_shell_connections(connections: &[SavedConnection]) -> Vec<SavedConnection> {
+    let mut shell = connections
+        .iter()
+        .filter(|connection| matches!(connection.config, ConnectionType::LocalTerminal { .. }))
+        .cloned()
+        .collect::<Vec<_>>();
+    shell.sort_by(|left, right| {
+        left.sort_order
+            .cmp(&right.sort_order)
+            .then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    shell
+}
+
+fn new_session_recent_connections(connections: &[SavedConnection]) -> Vec<SavedConnection> {
+    let mut recent = connections
+        .iter()
+        .filter(|connection| connection.last_used_at_ms.unwrap_or(0) > 0)
+        .cloned()
+        .collect::<Vec<_>>();
+    recent.sort_by(|left, right| {
+        right
+            .last_used_at_ms
+            .unwrap_or(0)
+            .cmp(&left.last_used_at_ms.unwrap_or(0))
+            .then_with(|| left.sort_order.cmp(&right.sort_order))
+            .then_with(|| {
+                left.name
+                    .to_ascii_lowercase()
+                    .cmp(&right.name.to_ascii_lowercase())
+            })
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    recent.truncate(10);
+    recent
+}
+
+fn new_session_connection_protocol(connection: &SavedConnection) -> &'static str {
+    match connection.config {
+        ConnectionType::LocalTerminal { .. } => "shell",
+        ConnectionType::Telnet { .. } => "telnet",
+        ConnectionType::Serial { .. } => "serial",
+        ConnectionType::Rdp { .. } => "rdp",
+        ConnectionType::Ssh { .. } => "ssh",
+        ConnectionType::Vnc { .. } => "vnc",
+    }
+}
+
+fn new_session_recent_label(connection: &SavedConnection, groups: &[Group]) -> String {
+    let mut path = build_group_path(groups, connection.group_id.as_deref())
+        .into_iter()
+        .skip(1)
+        .map(|segment| segment.name)
+        .collect::<Vec<_>>();
+    path.push(connection.name.clone());
+    format!(
+        "{}://{}",
+        new_session_connection_protocol(connection),
+        path.join("/")
+    )
+}
 
 fn new_session_visible_group_ids(
     connections: &[SavedConnection],
@@ -298,6 +364,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn render_new_session_menu(
         &mut self,
+        menu_id_suffix: &str,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let palette = self.theme_palette();
@@ -309,59 +376,95 @@ impl NyaTermApp {
         let recent_sessions_label = t!("terminal.recentSessions");
         let no_recent_sessions_label = t!("terminal.noRecentSessions");
         let all_sessions_open = self.shell.new_session_all_sessions_is_open();
-        // Tauri TabBar new-session: shell sessions + recent by last_used.
-        let mut shell: Vec<_> = self
-            .connection_state
-            .connections()
-            .iter()
-            .filter(|connection| matches!(connection.config, ConnectionType::LocalTerminal { .. }))
-            .cloned()
-            .collect();
-        shell.sort_by_key(|connection| connection.sort_order);
-        let mut recent: Vec<_> = self
-            .connection_state
-            .connections()
-            .iter()
-            .filter(|connection| connection.last_used_at_ms.unwrap_or(0) > 0)
-            .cloned()
-            .collect();
-        recent.sort_by(|left, right| {
-            right
-                .last_used_at_ms
-                .unwrap_or(0)
-                .cmp(&left.last_used_at_ms.unwrap_or(0))
+        let shell = new_session_shell_connections(self.connection_state.connections());
+        let recent = new_session_recent_connections(self.connection_state.connections());
+        let menu_max_height = (self.shell.viewport_size().1 - 96.).clamp(240., 640.);
+        let menu_id_suffix = menu_id_suffix.to_string();
+        let visible_group_ids = new_session_visible_group_ids(
+            self.connection_state.connections(),
+            self.connection_state.groups(),
+        );
+        let all_sessions_content = self.render_new_session_all_sessions_level(
+            None,
+            &visible_group_ids,
+            0,
+            &menu_id_suffix,
+            cx,
+        );
+        let group_menu_path_empty = self.shell.new_session_group_menu_path().is_empty();
+        let all_sessions_trigger = div()
+            .id(SharedString::from(format!(
+                "new-session-connections-{menu_id_suffix}"
+            )))
+            .h(px(32.))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_2()
+            .cursor_pointer()
+            .bg(if all_sessions_open {
+                self.shell_surface_color(palette.hover)
+            } else {
+                rgba(0x00000000)
+            })
+            .hover(move |this| this.bg(hover_bg))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if *hovered {
+                    this.open_new_session_all_sessions_menu(cx);
+                }
+            }))
+            .child(
+                svg()
+                    .size(px(12.))
+                    .path("icons/connections.svg")
+                    .text_color(rgb(palette.text_muted)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .text_size(px(12.))
+                    .text_color(rgb(palette.text))
+                    .child(all_sessions_label),
+            )
+            .child(
+                svg()
+                    .size(px(12.))
+                    .path("icons/fe/forward.svg")
+                    .text_color(rgb(palette.text_dimmed)),
+            );
+        let app = cx.weak_entity();
+        let all_sessions_popover = NyaPopover::new(
+            SharedString::from(format!("new-session-all-sessions-popover-{menu_id_suffix}")),
+            all_sessions_trigger,
+            all_sessions_content,
+        )
+        .placement(NyaPopoverPlacement::Right)
+        .align(NyaPopoverAlign::Start)
+        .offset(px(4.))
+        .appearance(false)
+        .overlay_closable(group_menu_path_empty)
+        .open(all_sessions_open)
+        .on_open_change(cx.listener(|this, open, _, cx| {
+            if *open {
+                this.open_new_session_all_sessions_menu(cx);
+            } else {
+                this.close_new_session_all_sessions_menu(cx);
+            }
+        }))
+        .on_click_outside(move |_, cx| {
+            _ = app.update(cx, |this, cx| this.close_new_session_menu(cx));
         });
-        recent.truncate(10);
-        if recent.is_empty() {
-            // Fallback when no usage timestamps yet: first non-shell connections.
-            recent = self
-                .connection_state
-                .connections()
-                .iter()
-                .filter(|connection| {
-                    !matches!(connection.config, ConnectionType::LocalTerminal { .. })
-                })
-                .take(8)
-                .cloned()
-                .collect();
-        }
 
         let mut menu = div()
-            .id("workspace-new-session-dropdown-scroll")
-            .w(px(NEW_SESSION_MENU_WIDTH))
-            .max_h(px(460.))
-            .overflow_y_scrollbar()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(palette.border))
-            .bg(self.shell_surface_color(palette.surface))
-            .shadow_lg()
             .py_1()
             .flex()
             .flex_col()
             .child(
                 div()
-                    .id("new-session-new")
+                    .id(SharedString::from(format!(
+                        "new-session-new-{menu_id_suffix}"
+                    )))
                     .h(px(32.))
                     .px_3()
                     .flex()
@@ -391,50 +494,7 @@ impl NyaTermApp {
                             .child(new_session_label),
                     ),
             )
-            .child(
-                div()
-                    .id("new-session-connections")
-                    .h(px(32.))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .cursor_pointer()
-                    .bg(if all_sessions_open {
-                        self.shell_surface_color(palette.hover)
-                    } else {
-                        rgba(0x00000000)
-                    })
-                    .hover(move |this| this.bg(hover_bg))
-                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                        if *hovered {
-                            this.open_new_session_all_sessions_menu(cx);
-                        }
-                    }))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.toggle_new_session_all_sessions_menu(cx);
-                    }))
-                    .child(
-                        svg()
-                            .size(px(12.))
-                            .path("icons/connections.svg")
-                            .text_color(rgb(palette.text_muted)),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(px(12.))
-                            .text_color(rgb(palette.text))
-                            .child(all_sessions_label),
-                    )
-                    .child(
-                        svg()
-                            .size(px(12.))
-                            .path("icons/fe/forward.svg")
-                            .text_color(rgb(palette.text_dimmed)),
-                    ),
-            );
+            .child(all_sessions_popover);
 
         menu = menu
             .child(div().mx_2().my_1().h(px(1.)).bg(rgb(palette.border)))
@@ -458,7 +518,14 @@ impl NyaTermApp {
             );
         } else {
             for connection in shell {
-                menu = menu.child(self.new_session_connection_row(palette, connection, cx));
+                let label = connection.name.clone();
+                menu = menu.child(self.new_session_connection_row(
+                    palette,
+                    connection,
+                    label,
+                    &menu_id_suffix,
+                    cx,
+                ));
             }
         }
 
@@ -468,9 +535,18 @@ impl NyaTermApp {
                 div()
                     .px_3()
                     .py_1()
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .text_size(px(10.))
                     .font_weight(FontWeight(700.))
                     .text_color(rgb(palette.text_dimmed))
+                    .child(
+                        svg()
+                            .size(px(12.))
+                            .path("icons/history.svg")
+                            .text_color(rgb(palette.text_dimmed)),
+                    )
                     .child(recent_sessions_label),
             );
         if recent.is_empty() {
@@ -484,77 +560,46 @@ impl NyaTermApp {
             );
         } else {
             for connection in recent {
-                menu = menu.child(self.new_session_connection_row(palette, connection, cx));
+                let label = new_session_recent_label(&connection, self.connection_state.groups());
+                menu = menu.child(self.new_session_connection_row(
+                    palette,
+                    connection,
+                    label,
+                    &menu_id_suffix,
+                    cx,
+                ));
             }
         }
         div()
-            .id("workspace-new-session-dropdown")
-            .absolute()
-            .top(px(36.))
-            .right_0()
+            .id(SharedString::from(format!(
+                "workspace-new-session-dropdown-{menu_id_suffix}"
+            )))
             .w(px(NEW_SESSION_MENU_WIDTH))
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(palette.border))
+            .bg(self.shell_surface_color(palette.surface))
+            .shadow_lg()
+            .overflow_hidden()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|_, _, _, cx| cx.stop_propagation()),
             )
-            .child(menu)
-            .when(all_sessions_open, |this| {
-                this.child(self.render_new_session_all_sessions_menus(cx))
-            })
-    }
-
-    fn render_new_session_all_sessions_menus(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let path = self.shell.new_session_group_menu_path().to_vec();
-        let visible_group_ids = new_session_visible_group_ids(
-            self.connection_state.connections(),
-            self.connection_state.groups(),
-        );
-        let mut parent_group_id = None;
-        let mut top = NEW_SESSION_MENU_ROW_HEIGHT + NEW_SESSION_MENU_PADDING;
-        let mut menus = div();
-
-        for depth in 0..=path.len() {
-            let groups = new_session_groups_for_parent(
-                self.connection_state.groups(),
-                &visible_group_ids,
-                parent_group_id.as_deref(),
-            );
-            let selected_group_id = path.get(depth).cloned();
-            menus = menus.child(self.render_new_session_all_sessions_level(
-                parent_group_id.clone(),
-                selected_group_id.clone(),
-                &visible_group_ids,
-                depth,
-                top,
-                cx,
-            ));
-
-            let Some(selected_group_id) = selected_group_id else {
-                break;
-            };
-            let Some(selected_index) = groups
-                .iter()
-                .position(|group| group.id == selected_group_id)
-            else {
-                break;
-            };
-            top += NEW_SESSION_MENU_PADDING + selected_index as f32 * NEW_SESSION_MENU_ROW_HEIGHT;
-            parent_group_id = Some(selected_group_id);
-        }
-
-        menus
+            .child(
+                NyaScrollArea::new(SharedString::from(format!(
+                    "workspace-new-session-dropdown-scroll-{menu_id_suffix}"
+                )))
+                .max_h(px(menu_max_height))
+                .child(menu),
+            )
     }
 
     fn render_new_session_all_sessions_level(
         &mut self,
         parent_group_id: Option<String>,
-        selected_group_id: Option<String>,
         visible_group_ids: &HashSet<String>,
         depth: usize,
-        top: f32,
+        menu_id_suffix: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = self.theme_palette();
@@ -570,13 +615,10 @@ impl NyaTermApp {
         );
         let has_groups = !groups.is_empty();
         let no_saved_sessions_label = t!("terminal.noSavedSessions");
-        let right = NEW_SESSION_MENU_WIDTH + depth as f32 * NEW_SESSION_SUBMENU_WIDTH;
-        let mut menu = div()
-            .max_h(px(420.))
-            .overflow_y_scrollbar()
-            .py_1()
-            .flex()
-            .flex_col();
+        let selected_group_id = self.shell.new_session_group_menu_path().get(depth).cloned();
+        let has_open_descendant = self.shell.new_session_group_menu_path().len() > depth + 1;
+        let submenu_max_height = (self.shell.viewport_size().1 - 32.).clamp(160., 420.);
+        let mut menu = div().py_1().flex().flex_col();
 
         if groups.is_empty() && connections.is_empty() {
             menu = menu.child(
@@ -591,38 +633,87 @@ impl NyaTermApp {
             );
         } else {
             for group in groups {
-                menu = menu.child(self.new_session_group_menu_row(
+                let group_id = group.id.clone();
+                let selected = selected_group_id.as_deref() == Some(group_id.as_str());
+                let child_menu = if selected {
+                    self.render_new_session_all_sessions_level(
+                        Some(group_id.clone()),
+                        visible_group_ids,
+                        depth + 1,
+                        menu_id_suffix,
+                        cx,
+                    )
+                } else {
+                    div().into_any_element()
+                };
+                let row = self.new_session_group_menu_row(
                     palette,
                     group,
-                    selected_group_id.as_deref(),
+                    selected,
                     depth,
+                    menu_id_suffix,
                     cx,
-                ));
+                );
+                let popover_group_id = group_id.clone();
+                let app = cx.weak_entity();
+                menu = menu.child(
+                    NyaPopover::new(
+                        SharedString::from(format!(
+                            "new-session-group-popover-{menu_id_suffix}-{depth}-{group_id}"
+                        )),
+                        row,
+                        child_menu,
+                    )
+                    .placement(NyaPopoverPlacement::Right)
+                    .align(NyaPopoverAlign::Start)
+                    .offset(px(4.))
+                    .appearance(false)
+                    .overlay_closable(!has_open_descendant)
+                    .open(selected)
+                    .on_open_change(cx.listener(move |this, open, _, cx| {
+                        if *open {
+                            this.open_new_session_group_menu(popover_group_id.clone(), depth, cx);
+                        } else {
+                            this.truncate_new_session_group_menu(depth, cx);
+                        }
+                    }))
+                    .on_click_outside(move |_, cx| {
+                        _ = app.update(cx, |this, cx| this.close_new_session_menu(cx));
+                    }),
+                );
             }
             if has_groups && !connections.is_empty() {
                 menu = menu.child(div().mx_2().my_1().h(px(1.)).bg(rgb(palette.border)));
             }
             for connection in connections {
-                menu = menu.child(
-                    self.new_session_all_sessions_connection_row(palette, connection, depth, cx),
-                );
+                menu = menu.child(self.new_session_all_sessions_connection_row(
+                    palette,
+                    connection,
+                    depth,
+                    menu_id_suffix,
+                    cx,
+                ));
             }
         }
 
         div()
             .id(SharedString::from(format!(
-                "new-session-all-sessions-level-{depth}"
+                "new-session-all-sessions-level-{menu_id_suffix}-{depth}"
             )))
-            .absolute()
-            .top(px(top))
-            .right(px(right))
             .w(px(NEW_SESSION_SUBMENU_WIDTH))
             .rounded_md()
             .border_1()
             .border_color(rgb(palette.border))
             .bg(self.shell_surface_color(palette.surface))
             .shadow_lg()
-            .child(menu)
+            .overflow_hidden()
+            .child(
+                NyaScrollArea::new(SharedString::from(format!(
+                    "new-session-all-sessions-scroll-{menu_id_suffix}-{depth}"
+                )))
+                .max_h(px(submenu_max_height))
+                .child(menu),
+            )
             .into_any_element()
     }
 
@@ -630,18 +721,17 @@ impl NyaTermApp {
         &mut self,
         palette: ThemePalette,
         group: Group,
-        selected_group_id: Option<&str>,
+        selected: bool,
         depth: usize,
+        menu_id_suffix: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let hover_bg = self.shell_surface_color(palette.hover);
         let group_id = group.id.clone();
         let hover_group_id = group_id.clone();
-        let click_group_id = group_id.clone();
-        let selected = selected_group_id == Some(group_id.as_str());
         div()
             .id(SharedString::from(format!(
-                "new-session-group-{depth}-{group_id}"
+                "new-session-group-{menu_id_suffix}-{depth}-{group_id}"
             )))
             .h(px(NEW_SESSION_MENU_ROW_HEIGHT))
             .px_3()
@@ -659,9 +749,6 @@ impl NyaTermApp {
                 if *hovered {
                     this.open_new_session_group_menu(hover_group_id.clone(), depth, cx);
                 }
-            }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.open_new_session_group_menu(click_group_id.clone(), depth, cx);
             }))
             .child(
                 svg()
@@ -692,20 +779,22 @@ impl NyaTermApp {
         palette: ThemePalette,
         connection: SavedConnection,
         depth: usize,
+        menu_id_suffix: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let hover_bg = self.shell_surface_color(palette.hover);
         let connection_id = connection.id.clone();
-        let icon = match &connection.config {
-            ConnectionType::Ssh { .. } => "icons/conn/server.svg",
-            ConnectionType::Telnet { .. } => "icons/conn/telnet.svg",
-            ConnectionType::Serial { .. } => "icons/conn/serial.svg",
-            ConnectionType::LocalTerminal { .. } => "icons/conn/terminal.svg",
-            ConnectionType::Rdp { .. } | ConnectionType::Vnc { .. } => "icons/conn/server.svg",
-        };
+        let icon = resolve_connection_icon(
+            connection
+                .icon
+                .as_deref()
+                .filter(|icon| !icon.trim().is_empty()),
+            connection.kind_label(),
+        );
+        let label = connection.name.clone();
         div()
             .id(SharedString::from(format!(
-                "new-session-all-connection-{connection_id}"
+                "new-session-all-connection-{menu_id_suffix}-{connection_id}"
             )))
             .h(px(NEW_SESSION_MENU_ROW_HEIGHT))
             .px_3()
@@ -732,19 +821,24 @@ impl NyaTermApp {
                 }
             }))
             .child(
-                svg()
-                    .size(px(12.))
-                    .path(icon)
-                    .text_color(rgb(palette.text_muted)),
+                div()
+                    .size(px(14.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(themed_icon(palette, icon, false, 14.)),
             )
             .child(
                 div()
                     .min_w_0()
                     .flex_1()
                     .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
                     .text_size(px(12.))
                     .text_color(rgb(palette.text))
-                    .child(truncate_preview(&connection.name, 30)),
+                    .child(label),
             )
             .into_any_element()
     }
@@ -753,11 +847,6 @@ impl NyaTermApp {
         if self.shell.open_new_session_all_sessions() {
             cx.notify();
         }
-    }
-
-    fn toggle_new_session_all_sessions_menu(&mut self, cx: &mut Context<Self>) {
-        self.shell.toggle_new_session_all_sessions();
-        cx.notify();
     }
 
     fn close_new_session_all_sessions_menu(&mut self, cx: &mut Context<Self>) {
@@ -787,24 +876,22 @@ impl NyaTermApp {
         &mut self,
         palette: ThemePalette,
         connection: SavedConnection,
+        label: String,
+        menu_id_suffix: &str,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let hover_bg = self.shell_surface_color(palette.hover);
         let connection_id = connection.id.clone();
-        let name = connection.name.clone();
-        let kind = connection.kind_label();
-        let icon = match &connection.config {
-            ConnectionType::Ssh { .. } => "icons/conn/server.svg",
-            ConnectionType::Telnet { .. } => "icons/conn/telnet.svg",
-            ConnectionType::Serial { .. } => "icons/conn/serial.svg",
-            ConnectionType::LocalTerminal { .. } => "icons/conn/terminal.svg",
-            ConnectionType::Rdp { .. } | ConnectionType::Vnc { .. } => "icons/conn/server.svg",
-        };
-        let endpoint = connection.endpoint();
-        let label = name.clone();
+        let icon = resolve_connection_icon(
+            connection
+                .icon
+                .as_deref()
+                .filter(|icon| !icon.trim().is_empty()),
+            connection.kind_label(),
+        );
         div()
             .id(SharedString::from(format!(
-                "new-session-conn-{connection_id}"
+                "new-session-conn-{menu_id_suffix}-{connection_id}"
             )))
             .h(px(32.))
             .px_3()
@@ -831,39 +918,24 @@ impl NyaTermApp {
                 }
             }))
             .child(
-                svg()
-                    .size(px(12.))
-                    .path(icon)
-                    .text_color(rgb(palette.text_muted)),
+                div()
+                    .size(px(14.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(themed_icon(palette, icon, false, 14.)),
             )
             .child(
                 div()
                     .min_w_0()
                     .flex_1()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .text_color(rgb(palette.text))
-                            .overflow_hidden()
-                            .child(truncate_preview(&label, 28)),
-                    )
-                    .when(!endpoint.is_empty() && endpoint != name, |this| {
-                        this.child(
-                            div()
-                                .text_size(px(10.))
-                                .text_color(rgb(palette.text_dimmed))
-                                .overflow_hidden()
-                                .child(truncate_preview(&endpoint, 32)),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .text_size(px(10.))
-                    .text_color(rgb(palette.text_dimmed))
-                    .child(kind),
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_size(px(12.))
+                    .text_color(rgb(palette.text))
+                    .child(label),
             )
     }
 }
@@ -873,8 +945,9 @@ mod tests {
     use nyaterm_core::{ConnectionType, Group, SavedConnection};
 
     use super::{
-        new_session_connections_for_group, new_session_groups_for_parent,
-        new_session_visible_group_ids,
+        new_session_connection_protocol, new_session_connections_for_group,
+        new_session_groups_for_parent, new_session_recent_connections, new_session_recent_label,
+        new_session_shell_connections, new_session_visible_group_ids,
     };
 
     fn group(id: &str, name: &str, parent_id: Option<&str>, sort_order: i32) -> Group {
@@ -922,6 +995,23 @@ mod tests {
             updated_at_ms: None,
             last_used_at_ms: None,
         }
+    }
+
+    fn ssh_connection(id: &str, name: &str, group_id: Option<&str>) -> SavedConnection {
+        let mut connection = connection(id, name, group_id, 0);
+        connection.config = ConnectionType::Ssh {
+            host: "example.test".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            backspace_mode: "auto".to_string(),
+            ai_execution_profile: Default::default(),
+            x11_forwarding: false,
+            auth_agent_endpoint: None,
+            agent_forwarding_config: None,
+            legacy_agent_forwarding: None,
+            encoding: String::new(),
+        };
+        connection
     }
 
     #[test]
@@ -1008,5 +1098,73 @@ mod tests {
         let grouped = new_session_connections_for_group(&connections, &groups, Some("group-a"));
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].id, "grouped");
+    }
+
+    #[test]
+    fn shell_connections_follow_configured_order_with_stable_ties() {
+        let mut remote = ssh_connection("remote", "Remote", None);
+        remote.sort_order = -1;
+        let connections = vec![
+            connection("z", "Zulu", None, 2),
+            remote,
+            connection("b", "Beta", None, 1),
+            connection("a", "Alpha", None, 1),
+        ];
+
+        let shell = new_session_shell_connections(&connections);
+        assert_eq!(
+            shell
+                .iter()
+                .map(|connection| connection.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "z"]
+        );
+    }
+
+    #[test]
+    fn recent_connections_use_last_used_order_limit_and_no_fallback() {
+        let unused = vec![connection("unused", "Unused", None, 0)];
+        assert!(new_session_recent_connections(&unused).is_empty());
+
+        let mut connections = (0..12)
+            .map(|index| {
+                let mut item = connection(
+                    &format!("id-{index}"),
+                    &format!("Connection {index}"),
+                    None,
+                    index,
+                );
+                item.last_used_at_ms = Some(index as u64 + 1);
+                item
+            })
+            .collect::<Vec<_>>();
+        connections.reverse();
+
+        let recent = new_session_recent_connections(&connections);
+        assert_eq!(recent.len(), 10);
+        assert_eq!(recent.first().map(|item| item.id.as_str()), Some("id-11"));
+        assert_eq!(recent.last().map(|item| item.id.as_str()), Some("id-2"));
+    }
+
+    #[test]
+    fn recent_labels_include_protocol_and_cycle_safe_group_path() {
+        let groups = vec![
+            group("a", "A", Some("b"), 0),
+            group("b", "B", Some("a"), 0),
+            group("orphan", "Orphan", Some("missing"), 0),
+        ];
+        let local = connection("local", "PowerShell", Some("a"), 0);
+        let ssh = ssh_connection("ssh", "Server", Some("orphan"));
+
+        assert_eq!(new_session_connection_protocol(&local), "shell");
+        assert_eq!(new_session_connection_protocol(&ssh), "ssh");
+        assert_eq!(
+            new_session_recent_label(&local, &groups),
+            "shell://B/A/PowerShell"
+        );
+        assert_eq!(
+            new_session_recent_label(&ssh, &groups),
+            "ssh://Orphan/Server"
+        );
     }
 }

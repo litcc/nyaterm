@@ -42,7 +42,7 @@ pub use menu::{NyaContextMenu, NyaDropdownMenu, NyaMenuAnchor, NyaMenuItem};
 pub use number_input::{
     NyaNumberInput, NyaNumberInputEvent, NyaNumberInputOptions, NyaNumberInputState, NyaNumberStep,
 };
-pub use popover::NyaPopover;
+pub use popover::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
 pub use root::{NyaRoot, NyaWindowHandle, nya_root};
 pub use selectable_text::NyaSelectableText;
 pub use selection::{

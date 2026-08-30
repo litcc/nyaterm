@@ -3,6 +3,7 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{SessionInfo, SessionKind};
+use nyaterm_ui::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -10,7 +11,9 @@ use super::super::super::NyaTermApp;
 use super::PaneBorderEdges;
 use crate::features::formatting::{session_kind_label, short_id};
 use crate::features::perf::record_gpui_perf_sample;
-use crate::features::shell::{SessionTabDragPayload, SessionTabDragPreview, SessionTabTooltip};
+use crate::features::shell::{
+    NewSessionMenuAnchor, SessionTabDragPayload, SessionTabDragPreview, SessionTabTooltip,
+};
 use crate::models::{
     TabDockEdge, TabDockZone, TerminalWindowNode, WorkspacePaneNode, WorkspaceSplitDirection,
 };
@@ -360,35 +363,67 @@ impl NyaTermApp {
                             ),
                     );
                 }
+                let menu_anchor = NewSessionMenuAnchor::TerminalLeaf(id.clone());
+                let menu_open = self.shell.new_session_menu_is_open_at(&menu_anchor);
+                let menu_has_submenu = self.shell.new_session_all_sessions_is_open();
+                let menu_suffix = format!("leaf-{id}");
+                let trigger = div()
+                    .id(SharedString::from(format!("tw-leaf-add-{id}")))
+                    .h_full()
+                    .w(px(36.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .border_l_1()
+                    .border_color(rgb(palette.border))
+                    .bg(if menu_open {
+                        self.shell_surface_color(palette.hover)
+                    } else {
+                        rgba(0x00000000)
+                    })
+                    .text_color(rgb(palette.text_muted))
+                    .hover(|this| this.bg(rgb(palette.hover)).text_color(rgb(palette.text)))
+                    .cursor_pointer()
+                    .child(
+                        svg()
+                            .size(px(16.))
+                            .path("icons/conn/add.svg")
+                            .text_color(rgb(palette.text_muted)),
+                    )
+                    .tooltip(|window, cx| {
+                        nyaterm_ui::NyaTooltip::new(rust_i18n::t!("terminal.newSession"))
+                            .build(window, cx)
+                    });
+                let popover_anchor = menu_anchor.clone();
+                let popover = NyaPopover::new(
+                    SharedString::from(format!("tw-leaf-new-session-popover-{id}")),
+                    trigger,
+                    self.render_new_session_menu(&menu_suffix, cx),
+                )
+                .placement(NyaPopoverPlacement::Bottom)
+                .align(NyaPopoverAlign::End)
+                .offset(px(4.))
+                .appearance(false)
+                .overlay_closable(!menu_has_submenu)
+                .open(menu_open)
+                .on_open_change(cx.listener(move |this, open, _, cx| {
+                    if *open {
+                        if let NewSessionMenuAnchor::TerminalLeaf(leaf_id) = &popover_anchor {
+                            this.shell.set_focused_terminal_leaf(Some(leaf_id.clone()));
+                        }
+                        this.open_new_session_menu(popover_anchor.clone(), cx);
+                    } else if this.shell.new_session_menu_is_open_at(&popover_anchor) {
+                        this.close_new_session_menu(cx);
+                    }
+                }));
                 strip = strip.child(
                     div()
-                        .id(SharedString::from(format!("tw-leaf-add-{id}")))
                         .h_full()
-                        .w(px(36.))
-                        .flex_none()
                         .flex()
                         .items_center()
-                        .justify_center()
-                        .border_l_1()
-                        .border_color(rgb(palette.border))
-                        .text_xs()
-                        .font_weight(FontWeight(700.))
-                        .text_color(rgb(palette.text_muted))
-                        .hover(|this| this.bg(rgb(palette.hover)).text_color(rgb(palette.text)))
-                        .cursor_pointer()
-                        .child(
-                            svg()
-                                .size(px(16.))
-                                .path("icons/conn/add.svg")
-                                .text_color(rgb(palette.text_muted)),
-                        )
-                        .on_click(cx.listener({
-                            let leaf_id = id.clone();
-                            move |this, _, window, cx| {
-                                this.shell.set_focused_terminal_leaf(Some(leaf_id.clone()));
-                                this.start_local_session(window, cx);
-                            }
-                        })),
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(popover),
                 );
                 let canvas = if active.is_empty() {
                     div().flex_1().into_any_element()

@@ -5,12 +5,14 @@ use gpui::{
     ScrollWheelEvent, SharedString, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaPopover;
+use nyaterm_ui::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
 
 use crate::features::NyaTermApp;
 use crate::features::formatting::session_kind_label;
 use crate::features::icons::resolve_connection_icon;
-use crate::features::shell::{SessionTabDragPayload, SessionTabDragPreview, SessionTabTooltip};
+use crate::features::shell::{
+    NewSessionMenuAnchor, SessionTabDragPayload, SessionTabDragPreview, SessionTabTooltip,
+};
 use crate::features::view_widgets::{connection_spinner, themed_icon};
 
 use super::super::super::view_helpers::session_kind_icon_path;
@@ -918,7 +920,9 @@ impl NyaTermApp {
 
         // Tauri TabBar trailing chrome: optional open-tabs overflow menu + new session menu.
         let open_tabs_menu = self.shell.open_tabs_menu_is_open();
-        let new_session_menu = self.shell.new_session_menu_is_open();
+        let new_session_anchor = NewSessionMenuAnchor::MainTabStrip;
+        let new_session_menu = self.shell.new_session_menu_is_open_at(&new_session_anchor);
+        let new_session_has_submenu = self.shell.new_session_all_sessions_is_open();
         let open_tabs_label = t!("terminal.openTabs").to_string();
         let new_session_label = t!("terminal.newSession").to_string();
         let tab_strip_has_overflow = self.shell.session_tab_strip_has_overflow();
@@ -989,48 +993,61 @@ impl NyaTermApp {
             );
         }
 
+        let new_session_trigger = div()
+            .id("workspace-new-session-menu")
+            .size(px(SESSION_TAB_ACTION_SIZE))
+            .flex()
+            .items_center()
+            .justify_center()
+            .border_r_1()
+            .border_color(rgb(palette.border))
+            .bg(if new_session_menu {
+                self.shell_surface_color(palette.hover)
+            } else {
+                rgba(0x00000000)
+            })
+            .text_color(rgb(palette.text_muted))
+            .cursor_pointer()
+            .hover(move |this| this.bg(shell_hover_bg).text_color(rgb(palette.text)))
+            .child(
+                svg()
+                    .size(px(16.))
+                    .flex_none()
+                    .path("icons/conn/add.svg")
+                    .text_color(rgb(palette.text_muted)),
+            )
+            .tooltip(move |window, cx| {
+                nyaterm_ui::NyaTooltip::new(new_session_label.clone()).build(window, cx)
+            });
+        let new_session_popover = NyaPopover::new(
+            "workspace-new-session-popover",
+            new_session_trigger,
+            self.render_new_session_menu("main", cx),
+        )
+        .placement(NyaPopoverPlacement::Bottom)
+        .align(NyaPopoverAlign::End)
+        .offset(px(4.))
+        .appearance(false)
+        .overlay_closable(!new_session_has_submenu)
+        .open(new_session_menu)
+        .on_open_change(cx.listener(|this, open, _, cx| {
+            let anchor = NewSessionMenuAnchor::MainTabStrip;
+            if *open {
+                this.open_new_session_menu(anchor, cx);
+            } else if this.shell.new_session_menu_is_open_at(&anchor) {
+                this.close_new_session_menu(cx);
+            }
+        }));
         session_actions = session_actions.child(
             div()
-                .relative()
                 .h_full()
+                .flex()
+                .items_center()
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|_, _, _, cx| cx.stop_propagation()),
                 )
-                .child(
-                    div()
-                        .id("workspace-new-session-menu")
-                        .size(px(SESSION_TAB_ACTION_SIZE))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .border_r_1()
-                        .border_color(rgb(palette.border))
-                        .bg(if new_session_menu {
-                            self.shell_surface_color(palette.hover)
-                        } else {
-                            rgba(0x00000000)
-                        })
-                        .text_color(rgb(palette.text_muted))
-                        .cursor_pointer()
-                        .hover(move |this| this.bg(shell_hover_bg).text_color(rgb(palette.text)))
-                        .child(
-                            svg()
-                                .size(px(16.))
-                                .flex_none()
-                                .path("icons/conn/add.svg")
-                                .text_color(rgb(palette.text_muted)),
-                        )
-                        .tooltip(move |window, cx| {
-                            nyaterm_ui::NyaTooltip::new(new_session_label.clone()).build(window, cx)
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.toggle_new_session_menu(cx);
-                        })),
-                )
-                .when(new_session_menu, |this| {
-                    this.child(self.render_new_session_menu(cx))
-                }),
+                .child(new_session_popover),
         );
 
         let tracked_app = cx.weak_entity();

@@ -33,7 +33,7 @@ pub(in crate::features) use appearance::{
 };
 #[cfg(test)]
 pub(in crate::features) use state::ResizeHandleHoverState;
-pub(in crate::features) use state::{ShellFeatureInit, ShellFeatureState};
+pub(in crate::features) use state::{NewSessionMenuAnchor, ShellFeatureInit, ShellFeatureState};
 pub(in crate::features) use tab_mouse::{
     SessionTabDragPayload, SessionTabDragPreview, SessionTabTooltip, TAB_MOUSE_ACTIONS,
     TabMouseActionTarget,

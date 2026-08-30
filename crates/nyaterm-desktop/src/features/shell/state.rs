@@ -22,6 +22,16 @@ use crate::models::{
 
 pub(in crate::features) const RESIZE_HANDLE_HOVER_DELAY: Duration = Duration::from_millis(250);
 
+/// The tab-strip trigger that owns the currently open new-session menu.
+///
+/// This is transient chrome state. Keeping the anchor here guarantees that a
+/// multi-leaf workspace never opens the same controlled popover in every leaf.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::features) enum NewSessionMenuAnchor {
+    MainTabStrip,
+    TerminalLeaf(String),
+}
+
 pub(in crate::features) struct ShellFeatureState {
     /// Application-wide transient status shown by shell chrome and terminal overlays.
     status: String,
@@ -161,7 +171,7 @@ pub(super) struct ShellChromeState {
     pub(super) activity_bar_context_menu: Option<ActivityBarContextMenuState>,
     pub(super) header_status: HeaderStatusState,
     pub(super) open_tabs_menu_open: bool,
-    pub(super) new_session_menu_open: bool,
+    pub(super) new_session_menu_anchor: Option<NewSessionMenuAnchor>,
     pub(super) new_session_all_sessions_open: bool,
     pub(super) new_session_group_menu_path: Vec<String>,
     pub(super) session_tab_strip_scroll: ScrollHandle,
@@ -238,7 +248,7 @@ impl ShellFeatureState {
                 activity_bar_context_menu: None,
                 header_status: HeaderStatusState::default(),
                 open_tabs_menu_open: false,
-                new_session_menu_open: false,
+                new_session_menu_anchor: None,
                 new_session_all_sessions_open: false,
                 new_session_group_menu_path: Vec::new(),
                 session_tab_strip_scroll: ScrollHandle::new(),
@@ -624,11 +634,21 @@ impl ShellFeatureState {
     }
 
     pub(in crate::features) fn new_session_menu_is_open(&self) -> bool {
-        self.chrome.new_session_menu_open
+        self.chrome.new_session_menu_anchor.is_some()
     }
 
-    pub(in crate::features) fn toggle_new_session_menu(&mut self) {
-        self.chrome.toggle_new_session_menu();
+    pub(in crate::features) fn new_session_menu_is_open_at(
+        &self,
+        anchor: &NewSessionMenuAnchor,
+    ) -> bool {
+        self.chrome.new_session_menu_anchor.as_ref() == Some(anchor)
+    }
+
+    pub(in crate::features) fn open_new_session_menu(
+        &mut self,
+        anchor: NewSessionMenuAnchor,
+    ) -> bool {
+        self.chrome.open_new_session_menu(anchor)
     }
 
     pub(in crate::features) fn close_new_session_menu(&mut self) -> bool {
@@ -650,11 +670,6 @@ impl ShellFeatureState {
         self.chrome.new_session_all_sessions_open = true;
         self.chrome.new_session_group_menu_path.clear();
         true
-    }
-
-    pub(in crate::features) fn toggle_new_session_all_sessions(&mut self) {
-        self.chrome.new_session_all_sessions_open = !self.chrome.new_session_all_sessions_open;
-        self.chrome.new_session_group_menu_path.clear();
     }
 
     pub(in crate::features) fn close_new_session_all_sessions(&mut self) -> bool {
@@ -1073,20 +1088,25 @@ impl ShellChromeState {
         std::mem::take(&mut self.open_tabs_menu_open)
     }
 
-    pub(in crate::features) fn toggle_new_session_menu(&mut self) {
-        self.new_session_menu_open = !self.new_session_menu_open;
-        if self.new_session_menu_open {
-            self.open_tabs_menu_open = false;
+    pub(in crate::features) fn open_new_session_menu(
+        &mut self,
+        anchor: NewSessionMenuAnchor,
+    ) -> bool {
+        if self.new_session_menu_anchor.as_ref() == Some(&anchor) {
+            return false;
         }
+        self.new_session_menu_anchor = Some(anchor);
+        self.open_tabs_menu_open = false;
         self.new_session_all_sessions_open = false;
         self.new_session_group_menu_path.clear();
+        true
     }
 
     pub(in crate::features) fn close_new_session_menu(&mut self) -> bool {
-        let changed = self.new_session_menu_open
+        let changed = self.new_session_menu_anchor.is_some()
             || self.new_session_all_sessions_open
             || !self.new_session_group_menu_path.is_empty();
-        self.new_session_menu_open = false;
+        self.new_session_menu_anchor = None;
         self.new_session_all_sessions_open = false;
         self.new_session_group_menu_path.clear();
         changed
@@ -1147,7 +1167,7 @@ mod tests {
 
     use gpui::{RenderImage, SharedString, px};
 
-    use super::{ShellFeatureInit, ShellFeatureState};
+    use super::{NewSessionMenuAnchor, ShellFeatureInit, ShellFeatureState};
     use crate::models::{
         ActivityBarLayoutState, BottomPanelMode, MainMode, NavItem, PanelResizeSide, PanelSide,
         WorkspacePaneNode, WorkspaceSplitDirection,
@@ -1319,7 +1339,7 @@ mod tests {
     #[test]
     fn chrome_menu_transitions_are_mutually_exclusive() {
         let mut shell = shell(BottomPanelMode::Hidden);
-        shell.chrome.new_session_menu_open = true;
+        shell.chrome.new_session_menu_anchor = Some(NewSessionMenuAnchor::MainTabStrip);
         shell.chrome.new_session_all_sessions_open = true;
         shell
             .chrome
@@ -1328,20 +1348,43 @@ mod tests {
 
         shell.chrome.toggle_open_tabs_menu();
         assert!(shell.chrome.open_tabs_menu_open);
-        assert!(!shell.chrome.new_session_menu_open);
+        assert!(shell.chrome.new_session_menu_anchor.is_none());
         assert!(!shell.chrome.new_session_all_sessions_open);
         assert!(shell.chrome.new_session_group_menu_path.is_empty());
 
-        shell.chrome.toggle_new_session_menu();
+        assert!(
+            shell
+                .chrome
+                .open_new_session_menu(NewSessionMenuAnchor::MainTabStrip)
+        );
         assert!(!shell.chrome.open_tabs_menu_open);
-        assert!(shell.chrome.new_session_menu_open);
+        assert_eq!(
+            shell.chrome.new_session_menu_anchor,
+            Some(NewSessionMenuAnchor::MainTabStrip)
+        );
+
+        assert!(
+            shell
+                .chrome
+                .open_new_session_menu(NewSessionMenuAnchor::TerminalLeaf("right".to_string()))
+        );
+        assert_eq!(
+            shell.chrome.new_session_menu_anchor,
+            Some(NewSessionMenuAnchor::TerminalLeaf("right".to_string()))
+        );
+        assert!(
+            !shell
+                .chrome
+                .open_new_session_menu(NewSessionMenuAnchor::TerminalLeaf("right".to_string()))
+        );
     }
 
     #[test]
     fn root_menu_close_clears_every_owned_menu_branch() {
         let mut shell = shell(BottomPanelMode::Hidden);
         shell.chrome.open_tabs_menu_open = true;
-        shell.chrome.new_session_menu_open = true;
+        shell.chrome.new_session_menu_anchor =
+            Some(NewSessionMenuAnchor::TerminalLeaf("leaf".to_string()));
         shell.chrome.new_session_all_sessions_open = true;
         shell
             .chrome

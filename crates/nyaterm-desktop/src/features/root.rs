@@ -491,10 +491,6 @@ impl NyaTermApp {
                 );
             }
 
-            if self.terminal_windows_is_multi_leaf() && self.shell.new_session_menu_is_open() {
-                surface = surface.child(self.render_new_session_menu(cx));
-            }
-
             if left_drawer_open || right_drawer_open {
                 surface = surface.child(
                     full_window_input_layer("mobile-panel-backdrop")
