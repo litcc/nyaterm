@@ -72,17 +72,13 @@ impl NyaTermApp {
         &mut self,
         config: RdpSessionConfig,
     ) -> Result<String, RdpError> {
-        let session_id = self.remote_desktop.manager.create_session(config)?;
-        self.remote_desktop.insert_connecting(session_id.clone());
-        Ok(session_id)
+        self.remote_desktop.create_rdp_session(config)
     }
 
     pub(in crate::features) fn create_failed_rdp_runtime(&mut self, error: RdpError) -> String {
         let session_id = nyaterm_core::uuid();
-        self.remote_desktop.insert_connecting(session_id.clone());
-        if let Some(session) = self.remote_desktop.sessions.get_mut(&session_id) {
-            set_rdp_view_error(session, error.kind, error.message);
-        }
+        self.remote_desktop
+            .insert_failed_session(session_id.clone(), error.kind, error.message);
         session_id
     }
 
@@ -90,17 +86,16 @@ impl NyaTermApp {
         &mut self,
         config: VncSessionConfig,
     ) -> Result<String, VncError> {
-        let session_id = self.remote_desktop.vnc_manager.create_session(config)?;
-        self.remote_desktop.insert_connecting(session_id.clone());
-        Ok(session_id)
+        self.remote_desktop.create_vnc_session(config)
     }
 
     pub(in crate::features) fn create_failed_vnc_runtime(&mut self, error: VncError) -> String {
         let session_id = nyaterm_core::uuid();
-        self.remote_desktop.insert_connecting(session_id.clone());
-        if let Some(session) = self.remote_desktop.sessions.get_mut(&session_id) {
-            set_rdp_view_error(session, vnc_error_as_rdp_kind(error.kind), error.message);
-        }
+        self.remote_desktop.insert_failed_session(
+            session_id.clone(),
+            vnc_error_as_rdp_kind(error.kind),
+            error.message,
+        );
         session_id
     }
 
@@ -347,7 +342,6 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
     ) -> Result<(), RdpError> {
-        self.remote_desktop.input.clear_session(session_id);
         if self.session.active_id() == Some(session_id) {
             super::keyboard_capture::set_keyboard_capture(
                 self.remote_desktop.manager.clone(),
@@ -355,14 +349,7 @@ impl NyaTermApp {
             );
             self.release_remote_keys(session_id);
         }
-        if let Some(mut session) = self.remote_desktop.sessions.remove(session_id) {
-            if let Some(texture) = session.texture.take() {
-                self.remote_desktop.pending_texture_removals.push(texture);
-            }
-            if let Some(texture) = session.cursor_texture.take() {
-                self.remote_desktop.pending_texture_removals.push(texture);
-            }
-        }
+        self.remote_desktop.remove_session(session_id);
         self.remote_desktop.manager.close(session_id)
     }
 
@@ -370,18 +357,10 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
     ) -> Result<(), VncError> {
-        self.remote_desktop.input.clear_session(session_id);
         if self.session.active_id() == Some(session_id) {
             self.release_remote_keys(session_id);
         }
-        if let Some(mut session) = self.remote_desktop.sessions.remove(session_id) {
-            if let Some(texture) = session.texture.take() {
-                self.remote_desktop.pending_texture_removals.push(texture);
-            }
-            if let Some(texture) = session.cursor_texture.take() {
-                self.remote_desktop.pending_texture_removals.push(texture);
-            }
-        }
+        self.remote_desktop.remove_session(session_id);
         self.remote_desktop.vnc_manager.close(session_id)
     }
 
@@ -702,18 +681,15 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn remote_marked_text(&self, session_id: &str) -> String {
-        self.remote_desktop
-            .input
-            .marked_text(session_id)
-            .to_string()
+        self.remote_desktop.marked_text(session_id)
     }
 
     pub(in crate::features) fn set_remote_marked_text(&mut self, session_id: &str, text: &str) {
-        self.remote_desktop.input.set_marked_text(session_id, text);
+        self.remote_desktop.set_marked_text(session_id, text);
     }
 
     pub(in crate::features) fn clear_remote_marked_text(&mut self, session_id: &str) {
-        self.remote_desktop.input.clear_marked_text(session_id);
+        self.remote_desktop.clear_marked_text(session_id);
     }
 
     pub(in crate::features) fn send_remote_committed_text(

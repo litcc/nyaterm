@@ -7,8 +7,9 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{Bounds, DynamicTexture, FocusHandle, Pixels, Subscription};
 use nyaterm_remote_desktop::{
     CertificatePromptReason, ClipboardTracker, Framebuffer, KeyMapper, RdpCapability,
-    RdpCertificateRequest, RdpCursorEvent, RdpError, RdpServerCapabilities, RdpSessionManager,
-    RdpSessionState, VncServerCapabilities, VncSessionManager,
+    RdpCertificateRequest, RdpCursorEvent, RdpError, RdpErrorKind, RdpServerCapabilities,
+    RdpSessionConfig, RdpSessionManager, RdpSessionState, VncError, VncServerCapabilities,
+    VncSessionConfig, VncSessionManager,
 };
 
 pub(in crate::features) struct RemoteDesktopFeatureState {
@@ -238,6 +239,67 @@ impl RemoteDesktopFeatureState {
         &self.focus
     }
 
+    pub(in crate::features) fn marked_text(&self, session_id: &str) -> String {
+        self.input.marked_text(session_id).to_string()
+    }
+
+    pub(in crate::features) fn set_marked_text(&mut self, session_id: &str, text: &str) {
+        self.input.set_marked_text(session_id, text);
+    }
+
+    pub(in crate::features) fn clear_marked_text(&mut self, session_id: &str) {
+        self.input.clear_marked_text(session_id);
+    }
+
+    pub(in crate::features) fn create_rdp_session(
+        &mut self,
+        config: RdpSessionConfig,
+    ) -> Result<String, RdpError> {
+        let session_id = self.manager.create_session(config)?;
+        self.insert_connecting(session_id.clone());
+        Ok(session_id)
+    }
+
+    pub(in crate::features) fn create_vnc_session(
+        &mut self,
+        config: VncSessionConfig,
+    ) -> Result<String, VncError> {
+        let session_id = self.vnc_manager.create_session(config)?;
+        self.insert_connecting(session_id.clone());
+        Ok(session_id)
+    }
+
+    pub(in crate::features) fn insert_failed_session(
+        &mut self,
+        session_id: String,
+        kind: RdpErrorKind,
+        message: String,
+    ) {
+        self.insert_connecting(session_id.clone());
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            let error = RdpError::new(kind, message);
+            session.state = RdpSessionState::Failed(error.clone());
+            session.error = Some(error);
+            session.pending_pointer = None;
+            session.pending_resize = None;
+            session.reconnect_at = None;
+            session.certificate_request = None;
+            session.keys = KeyMapper::default();
+        }
+    }
+
+    pub(in crate::features) fn remove_session(&mut self, session_id: &str) {
+        self.input.clear_session(session_id);
+        if let Some(mut session) = self.sessions.remove(session_id) {
+            if let Some(texture) = session.texture.take() {
+                self.pending_texture_removals.push(texture);
+            }
+            if let Some(texture) = session.cursor_texture.take() {
+                self.pending_texture_removals.push(texture);
+            }
+        }
+    }
+
     pub(super) fn insert_connecting(&mut self, session_id: String) {
         self.sessions
             .insert(session_id, RemoteDesktopSessionState::default());
@@ -253,7 +315,9 @@ impl RemoteDesktopFeatureState {
 
 #[cfg(test)]
 mod tests {
-    use super::RemoteDesktopInputState;
+    use nyaterm_remote_desktop::{RdpErrorKind, RdpSessionState};
+
+    use super::{RemoteDesktopFeatureState, RemoteDesktopInputState};
 
     #[test]
     fn marked_text_and_suppressed_key_ups_are_owned_by_one_session() {
@@ -280,5 +344,26 @@ mod tests {
 
         input.clear_session("second");
         assert_eq!(input.marked_text("second"), "");
+    }
+
+    #[test]
+    fn failed_session_transition_clears_transient_protocol_state() {
+        let cx = gpui::TestAppContext::single();
+        let focus = cx.update(|cx| cx.focus_handle());
+        let mut state = RemoteDesktopFeatureState::new(focus);
+        state.insert_failed_session(
+            "failed".to_string(),
+            RdpErrorKind::Protocol,
+            "failure".to_string(),
+        );
+
+        let session = state.sessions.get("failed").expect("failed session");
+        assert!(matches!(session.state, RdpSessionState::Failed(_)));
+        assert_eq!(
+            session.error.as_ref().map(|error| error.message.as_str()),
+            Some("failure")
+        );
+        assert!(session.pending_pointer.is_none());
+        assert!(session.pending_resize.is_none());
     }
 }
