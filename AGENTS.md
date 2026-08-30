@@ -136,10 +136,7 @@ handlers must not immediately steal focus from a field. Keep controls usable
 with keyboard navigation and ensure overlays and child windows restore focus
 predictably.
 
-Every scroll container must render a scrollbar. GPUI's `overflow_y_scroll()`
-enables scrolling but paints nothing, and `scrollbar_width` only reserves gutter
-space, so use `NyaScrollable` (the `ScrollableElement` trait re-exported by
-`nyaterm-ui`):
+GPUI's `overflow_y_scroll()` enables scrolling but paints nothing, and `scrollbar_width` only reserves gutter space, so use `NyaScrollable` (the `ScrollableElement` trait re-exported by `nyaterm-ui`):
 
 * In-flow containers: use `overflow_*_scrollbar()` instead of
   `overflow_*_scroll()`, and do not also reserve a `scrollbar_width` gutter -
