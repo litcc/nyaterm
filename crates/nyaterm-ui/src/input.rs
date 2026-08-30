@@ -78,6 +78,7 @@ pub struct NyaInputState {
     applied_masked: bool,
     multi_line: bool,
     code: bool,
+    language: Option<SharedString>,
     rows: Option<usize>,
     disabled: bool,
     readonly: bool,
@@ -100,6 +101,7 @@ impl NyaInputState {
             applied_masked: false,
             multi_line: false,
             code: false,
+            language: None,
             rows: None,
             disabled: false,
             readonly: false,
@@ -126,6 +128,12 @@ impl NyaInputState {
         self.multi_line = true;
         self.code = true;
         self.rows = rows;
+        self
+    }
+
+    /// Sets the syntax-highlighting language for a source-code editor.
+    pub fn language(mut self, language: impl Into<SharedString>) -> Self {
+        self.language = Some(language.into());
         self
     }
 
@@ -243,14 +251,19 @@ impl NyaInputState {
         let masked = self.masked;
         let multi_line = self.multi_line;
         let placeholder = component_placeholder(self.placeholder.clone(), multi_line);
+        let language = self.language.clone();
         let rows = self.rows;
         let (state, subscription) = if multi_line && self.code {
             let state = cx.new(|cx| {
-                EditorState::new(window, cx)
+                let mut editor = EditorState::new(window, cx)
                     .default_value(value)
-                    .placeholder(placeholder)
-                    // A shell script's own newlines are the structure; wrapping them
-                    // would make the gutter numbers stop matching the visible lines.
+                    .placeholder(placeholder);
+                if let Some(language) = language {
+                    editor = editor.language(language);
+                }
+                editor
+                    // Source newlines define the script structure; wrapping would
+                    // make gutter numbers stop matching the visible lines.
                     .soft_wrap(false)
             });
             let subscription = cx.subscribe(&state, |this, input, event: &InputEvent, cx| {
@@ -639,6 +652,8 @@ mod tests {
         TestAppContext, div,
     };
 
+    use gpui_component::highlighter::LanguageRegistry;
+
     use super::{NyaInputState, component_placeholder};
 
     struct AncestorKeyListenerFixture {
@@ -664,6 +679,23 @@ mod tests {
                 .child(self.plain.clone())
                 .child(self.masked.clone())
         }
+    }
+
+    #[test]
+    fn code_input_keeps_registered_bash_language() {
+        assert!(LanguageRegistry::singleton().language("bash").is_some());
+
+        let mut cx = TestAppContext::single();
+        let field = cx.new(|cx| {
+            NyaInputState::new(cx, "echo hello")
+                .code(Some(4))
+                .language("bash")
+        });
+
+        assert_eq!(
+            cx.read_entity(&field, |field, _| field.language.clone()),
+            Some("bash".into())
+        );
     }
 
     #[test]

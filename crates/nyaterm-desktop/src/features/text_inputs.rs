@@ -170,6 +170,17 @@ impl NyaTermApp {
         setup: TextInputSetup,
         cx: &mut Context<Self>,
     ) -> Entity<NyaInputState> {
+        self.text_input_with_language(id, seed, setup, None, cx)
+    }
+
+    fn text_input_with_language(
+        &mut self,
+        id: impl Into<SharedString>,
+        seed: &str,
+        setup: TextInputSetup,
+        language: Option<SharedString>,
+        cx: &mut Context<Self>,
+    ) -> Entity<NyaInputState> {
         let id = id.into();
         if let Some(field) = self.text_inputs.fields.get(&id) {
             return field.clone();
@@ -181,6 +192,11 @@ impl NyaTermApp {
                 input.code(Some(4))
             } else if setup.multi_line {
                 input.multi_line(Some(4))
+            } else {
+                input
+            };
+            let input = if let Some(language) = language {
+                input.language(language)
             } else {
                 input
             };
@@ -216,6 +232,25 @@ impl NyaTermApp {
         let id = id.into();
         let multi_line = setup.multi_line;
         let field = self.text_input(id.clone(), seed, setup, cx);
+        let shell = NyaInputShell::new(id, &field);
+        if multi_line {
+            shell.multi_line()
+        } else {
+            shell
+        }
+    }
+
+    pub(in crate::features) fn text_input_box_with_language<I: Into<SharedString>>(
+        &mut self,
+        id: I,
+        seed: &str,
+        setup: TextInputSetup,
+        language: SharedString,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<I> {
+        let id = id.into();
+        let multi_line = setup.multi_line;
+        let field = self.text_input_with_language(id.clone(), seed, setup, Some(language), cx);
         let shell = NyaInputShell::new(id, &field);
         if multi_line {
             shell.multi_line()

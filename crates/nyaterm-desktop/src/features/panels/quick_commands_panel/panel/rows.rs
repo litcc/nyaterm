@@ -1,8 +1,10 @@
+use std::rc::Rc;
+
 use rust_i18n::t;
 
 use gpui::{
-    AnyElement, AppContext as _, ClickEvent, Context, FontWeight, IntoElement, SharedString, div,
-    prelude::*, px, relative, rgb, rgba,
+    AnyElement, AppContext as _, ClickEvent, Context, FontWeight, IntoElement, MouseButton,
+    SharedString, div, prelude::*, px, relative, rgb, rgba,
 };
 use nyaterm_core::QuickCommand;
 use nyaterm_ui::{NyaContextMenu, NyaMenuItem};
@@ -69,82 +71,114 @@ impl NyaTermApp {
             // Flattened once per row: the preview lines are `.truncate()`d, and GPUI
             // still splits on newlines when wrapping is off.
             let command_preview = quick_command_single_line(&command.command);
+            let tile_tooltip_control = self.commands.quick_tooltip_control();
             let command_item = match view_mode {
-                QuickCommandViewMode::Tile => NyaContextMenu::new(
-                    div()
-                        .id(SharedString::from(format!(
-                            "quick-command-tile-{command_id}"
-                        )))
-                        .relative()
-                        // Content-width chip in a wrapping row, like Tauri's
-                        // `max-w-full shrink-0`: it never pads out to a grid cell, and
-                        // only a chip wider than the row truncates.
-                        .flex_none()
-                        .max_w_full()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(rgba((palette.border << 8) | 0x59))
-                        .bg(rgba((palette.surface_elevated << 8) | 0x33))
-                        .px_2()
-                        .py(px(4.))
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .cursor_pointer()
-                        .hover(move |this| this.bg(rgba((palette.surface_elevated << 8) | 0x80)))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.run_quick_command_by_id(run_command_id.clone(), cx);
-                        }))
-                        .child(quick_command_icon_slot(
-                            14.,
-                            quick_command_icon_mark(
-                                palette,
-                                command.icon_tag.as_deref(),
-                                command.color_tag.as_deref(),
-                                12.,
-                            ),
-                        ))
-                        .when(command.pinned.unwrap_or_default(), |this| {
-                            this.child(quick_command_pin_mark(palette, 10.))
-                        })
-                        .child(
-                            div()
-                                .min_w_0()
-                                .text_size(px(11.))
-                                .font_weight(FontWeight(500.))
-                                .text_color(rgb(palette.text))
-                                .truncate()
-                                .child(command.label.clone()),
-                        )
-                        // Tauri's tile hover is the full command card, not a text
-                        // blurb: in tile mode it is the only way to read the command.
-                        // Hoverable so the pointer can enter the card and copy, as
-                        // it can in Tauri's non-`disableHoverableContent` tooltip.
-                        .hoverable_tooltip({
-                            let tooltip_command = command.clone();
-                            let tooltip_category = quick_command_category_label(
-                                self.commands.quick_command_categories(),
-                                &command,
-                            );
-                            let tooltip_app = cx.entity().downgrade();
-                            let tooltip_badge = badge_mode.clone();
-                            move |_, cx| {
-                                cx.new(|_| {
-                                    QuickCommandTooltip::new(
-                                        palette,
-                                        card_surface,
-                                        tooltip_command.clone(),
-                                        tooltip_category.clone(),
-                                        tooltip_badge.clone(),
-                                        tooltip_app.clone(),
-                                    )
-                                })
-                                .into()
-                            }
-                        }),
-                    menu_items,
-                )
-                .into_any_element(),
+                QuickCommandViewMode::Tile => {
+                    let tooltip_control_for_right_click = tile_tooltip_control.clone();
+                    let tooltip_command_id_for_right_click = command_id.clone();
+                    let tooltip_control_for_hover = tile_tooltip_control.clone();
+                    let tooltip_command_id_for_hover = command_id.clone();
+                    NyaContextMenu::new(
+                        div()
+                            .id(SharedString::from(format!(
+                                "quick-command-tile-{command_id}"
+                            )))
+                            .relative()
+                            // Content-width chip in a wrapping row, like Tauri's
+                            // `max-w-full shrink-0`: it never pads out to a grid cell, and
+                            // only a chip wider than the row truncates.
+                            .flex_none()
+                            .max_w_full()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgba((palette.border << 8) | 0x59))
+                            .bg(rgba((palette.surface_elevated << 8) | 0x33))
+                            .px_2()
+                            .py(px(4.))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .cursor_pointer()
+                            .hover(move |this| {
+                                this.bg(rgba((palette.surface_elevated << 8) | 0x80))
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.run_quick_command_by_id(run_command_id.clone(), cx);
+                            }))
+                            .on_mouse_down(MouseButton::Right, move |_, _, cx| {
+                                tooltip_control_for_right_click
+                                    .dismiss(&tooltip_command_id_for_right_click, cx);
+                            })
+                            .on_hover(move |hovered, _, _| {
+                                if *hovered {
+                                    tooltip_control_for_hover
+                                        .begin_hover(&tooltip_command_id_for_hover);
+                                }
+                            })
+                            .child(quick_command_icon_slot(
+                                14.,
+                                quick_command_icon_mark(
+                                    palette,
+                                    command.icon_tag.as_deref(),
+                                    command.color_tag.as_deref(),
+                                    12.,
+                                ),
+                            ))
+                            .when(command.pinned.unwrap_or_default(), |this| {
+                                this.child(quick_command_pin_mark(palette, 10.))
+                            })
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_size(px(11.))
+                                    .font_weight(FontWeight(500.))
+                                    .text_color(rgb(palette.text))
+                                    .truncate()
+                                    .child(command.label.clone()),
+                            )
+                            // Tauri's tile hover is the full command card, not a text
+                            // blurb: in tile mode it is the only way to read the command.
+                            // Hoverable so the pointer can enter the card and copy, as
+                            // it can in Tauri's non-`disableHoverableContent` tooltip.
+                            .hoverable_tooltip({
+                                let tooltip_command = command.clone();
+                                let tooltip_category = quick_command_category_label(
+                                    self.commands.quick_command_categories(),
+                                    &command,
+                                );
+                                let tooltip_app = cx.entity().downgrade();
+                                let tooltip_badge = badge_mode.clone();
+                                let tile_tooltip_control = tile_tooltip_control.clone();
+                                let tooltip_command_id = command_id.clone();
+                                move |_, cx| {
+                                    let tooltip = cx.new(|_| {
+                                        QuickCommandTooltip::new(
+                                            palette,
+                                            card_surface,
+                                            tooltip_command.clone(),
+                                            tooltip_category.clone(),
+                                            tooltip_badge.clone(),
+                                            tooltip_app.clone(),
+                                            tile_tooltip_control.is_suppressed(&tooltip_command_id),
+                                        )
+                                    });
+                                    let tooltip_to_dismiss = tooltip.downgrade();
+                                    tile_tooltip_control.register(
+                                        tooltip_command_id.clone(),
+                                        Rc::new(move |cx| {
+                                            if let Some(tooltip) = tooltip_to_dismiss.upgrade() {
+                                                tooltip
+                                                    .update(cx, |tooltip, cx| tooltip.dismiss(cx));
+                                            }
+                                        }),
+                                    );
+                                    tooltip.into()
+                                }
+                            }),
+                        menu_items,
+                    )
+                    .into_any_element()
+                }
                 QuickCommandViewMode::Compact => {
                     // Tauri compact: send + details + more (edit / send-all / delete).
                     let actions = quick_command_row_actions(

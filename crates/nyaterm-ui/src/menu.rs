@@ -480,6 +480,10 @@ where
     }
 }
 
+fn context_menu_should_scroll(items: &[NyaMenuItem]) -> bool {
+    items.len() > 20 && items.iter().all(|item| item.children().is_none())
+}
+
 impl<E> RenderOnce for NyaContextMenu<E>
 where
     E: InteractiveElement + ParentElement + Styled + IntoElement + 'static,
@@ -494,9 +498,10 @@ where
             .context_menu(move |menu, window, cx| {
                 let menu = menu.when_some(min_width, |menu, width| menu.min_w(width));
                 let items = items_builder(window, cx);
-                // Submenus cannot render inside a scrolling popup, so only bound
-                // the height when no item opens one.
-                let menu = menu.scrollable(items.iter().all(|item| item.children().is_none()));
+                // PopupMenu paints a vertical scrollbar whenever `scrollable` is
+                // true, even when every item fits. Keep short context menus clean;
+                // only long flat menus need the bounded scrolling behavior.
+                let menu = menu.scrollable(context_menu_should_scroll(&items));
                 items
                     .iter()
                     .fold(menu, |menu, item| item.append_to(menu, window, cx))
@@ -514,7 +519,7 @@ mod tests {
         VisualTestContext, Window, div, point, prelude::*, px, uniform_list,
     };
 
-    use super::{NyaContextMenu, NyaMenuItem, NyaMenuItemKind};
+    use super::{NyaContextMenu, NyaMenuItem, NyaMenuItemKind, context_menu_should_scroll};
 
     struct DynamicContextMenuFixture {
         target: Rc<Cell<u8>>,
@@ -607,6 +612,24 @@ mod tests {
         assert!(item.disabled);
         assert!(item.checked);
         assert!(item.danger);
+    }
+
+    #[test]
+    fn context_menu_scrolls_only_for_long_flat_item_lists() {
+        let short = vec![NyaMenuItem::action("Open"), NyaMenuItem::action("Delete")];
+        assert!(!context_menu_should_scroll(&short));
+
+        let long = (0..21)
+            .map(|index| NyaMenuItem::action(format!("Item {index}")))
+            .collect::<Vec<_>>();
+        assert!(context_menu_should_scroll(&long));
+
+        let mut long_with_submenu = long;
+        long_with_submenu.push(NyaMenuItem::submenu(
+            "Move",
+            vec![NyaMenuItem::action("Group")],
+        ));
+        assert!(!context_menu_should_scroll(&long_with_submenu));
     }
 
     #[test]

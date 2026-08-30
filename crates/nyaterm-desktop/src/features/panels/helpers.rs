@@ -311,20 +311,28 @@ fn quick_command_editor_input(
         error,
     } = spec;
     let palette = app.theme_palette();
-    let setup = if multi_line {
-        TextInputSetup::code(placeholder)
-    } else {
-        TextInputSetup::placeholder(placeholder)
-    };
-    let input = app.text_input_box(
-        format!(
-            "quick-command.editor.{}",
-            quick_command_editor_field_key(field)
-        ),
-        &value,
-        setup,
-        cx,
+    let input_id = format!(
+        "quick-command.editor.{}",
+        quick_command_editor_field_key(field)
     );
+    let input = if multi_line {
+        app.text_input_box_with_language(
+            input_id,
+            &value,
+            TextInputSetup::code(placeholder),
+            "bash".into(),
+            cx,
+        )
+        .into_any_element()
+    } else {
+        app.text_input_box(
+            input_id,
+            &value,
+            TextInputSetup::placeholder(placeholder),
+            cx,
+        )
+        .into_any_element()
+    };
     div()
         .min_w_0()
         .when(multi_line, |this| this.flex_1())

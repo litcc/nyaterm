@@ -190,6 +190,7 @@ pub(in crate::features) struct QuickCommandTooltip {
     category: String,
     execution_mode: QuickCommandCardExecutionMode,
     app: WeakEntity<NyaTermApp>,
+    dismissed: bool,
 }
 
 impl QuickCommandTooltip {
@@ -200,6 +201,7 @@ impl QuickCommandTooltip {
         category: String,
         execution_mode: QuickCommandCardExecutionMode,
         app: WeakEntity<NyaTermApp>,
+        dismissed: bool,
     ) -> Self {
         Self {
             palette,
@@ -208,12 +210,24 @@ impl QuickCommandTooltip {
             category,
             execution_mode,
             app,
+            dismissed,
+        }
+    }
+
+    pub(in crate::features) fn dismiss(&mut self, cx: &mut Context<Self>) {
+        if !self.dismissed {
+            self.dismissed = true;
+            cx.notify();
         }
     }
 }
 
 impl Render for QuickCommandTooltip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        if self.dismissed {
+            return div().into_any_element();
+        }
+
         let palette = self.palette;
         let copy_text = self.command.command.clone();
         let app = self.app.clone();
@@ -271,5 +285,6 @@ impl Render for QuickCommandTooltip {
                     copy_button: Some(copy_button),
                 },
             ))
+            .into_any_element()
     }
 }
