@@ -26,93 +26,20 @@ use super::RecordingWriteHandle;
 
 mod selection;
 pub(crate) use selection::{TerminalBufferCellPos, TerminalCellPos, TerminalSelection};
+mod presentation;
+pub(crate) use presentation::{
+    TERMINAL_OUTPUT_VISIBLE_BACKLOG_CAP, TERMINAL_OUTPUT_VISIBLE_BURST_OVERLOAD,
+    TERMINAL_PERFORMANCE_RECOVERY_NOTICE, TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM,
+    TERMINAL_UI_OUTPUT_TAIL_CAP, TerminalPerformanceMode, TerminalPerformanceOverlay,
+    TerminalPresentation, TerminalWorkPolicy,
+};
 
-/// Large-output protection modes (Tauri XTerminal performanceMode).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum TerminalPerformanceMode {
-    #[default]
-    Normal,
-    Overloaded,
-}
-
-/// In-pane large-output protection banner (Tauri PerformanceOverlayState).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TerminalPerformanceOverlay {
-    Overloaded,
-    Recovered,
-}
-
-/// Pure presentation state for deciding terminal data-plane and paint work.
-///
-/// A visible split pane is not background merely because another session owns
-/// keyboard focus. `VisibleInactive` therefore keeps live snapshots and surface
-/// notifications while reserving active-only decorations for `VisibleActive`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TerminalPresentation {
-    VisibleActive,
-    VisibleInactive,
-    Background,
-}
-
-impl TerminalPresentation {
-    pub(crate) fn resolve(is_active: bool, is_visible: bool) -> Self {
-        match (is_active, is_visible) {
-            (true, true) => Self::VisibleActive,
-            (false, true) => Self::VisibleInactive,
-            (_, false) => Self::Background,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TerminalWorkPolicy {
-    pub(crate) parse_output: bool,
-    pub(crate) live_snapshot: bool,
-    pub(crate) surface_notify: bool,
-    pub(crate) active_decorations: bool,
-}
-
-impl TerminalWorkPolicy {
-    pub(crate) const fn for_presentation(presentation: TerminalPresentation) -> Self {
-        let visible = matches!(
-            presentation,
-            TerminalPresentation::VisibleActive | TerminalPresentation::VisibleInactive
-        );
-        Self {
-            // Every state must advance the authoritative parser and protocol state.
-            parse_output: true,
-            live_snapshot: visible,
-            surface_notify: visible,
-            active_decorations: matches!(presentation, TerminalPresentation::VisibleActive),
-        }
-    }
-}
-
-pub(crate) const TERMINAL_OUTPUT_VISIBLE_BACKLOG_CAP: usize = 1_000_000;
-pub(crate) const TERMINAL_OUTPUT_VISIBLE_BURST_OVERLOAD: usize = 256 * 1024;
-/// UI-only text mirror cap. The authoritative terminal screen/scrollback lives
-/// in the frame worker; the GPUI thread keeps only a recent tail for prompts,
-/// AI context snippets, reconnect seed text, and compact tab actions.
-pub(crate) const TERMINAL_UI_OUTPUT_TAIL_CAP: usize = 128 * 1024;
 const TERMINAL_FRAME_VISIBLE_TEXT_TAIL_CAP: usize = 16 * 1024;
 const TERMINAL_FRAME_SCROLL_WINDOW_MIN_EXTRA_ROWS: usize = 32;
 const TERMINAL_FRAME_SCROLL_WINDOW_MAX_EXTRA_ROWS: usize = 192;
 const TERMINAL_FRAME_PRIORITY_SCROLL_WINDOW_MIN_EXTRA_ROWS: usize = 64;
 const TERMINAL_FRAME_PRIORITY_SCROLL_WINDOW_MAX_EXTRA_ROWS: usize = 256;
 const TERMINAL_SCROLLBACK_SNAPSHOT_CACHE_LIMIT: usize = 16;
-/// How long the "recovered" notice stays up after leaving overloaded mode.
-///
-/// Was `TERMINAL_PERFORMANCE_RECOVERY_TICKS: u8 = 60`, documented as "~3s recovery
-/// notice at the 50ms event-pump cadence" -- but the pump has three cadences, so 60
-/// ticks was 0.96s under pressure and **30s on the 500ms quiet interval**, which is
-/// exactly the state an app falls into once a flood ends and the user is left
-/// looking at the notice.
-pub(crate) const TERMINAL_PERFORMANCE_RECOVERY_NOTICE: Duration = Duration::from_secs(3);
-/// How long output must stay calm before expensive render decorations come back.
-///
-/// Was 8 ticks, which is 0.13s under pressure and 4s on the quiet interval.
-pub(crate) const TERMINAL_RENDER_DEGRADATION_RECOVERY_CALM: Duration = Duration::from_millis(400);
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TerminalFrameActionLinks {
     pub(crate) matcher_key: u64,
