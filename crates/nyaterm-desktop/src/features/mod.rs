@@ -9,6 +9,7 @@ mod formatting;
 mod icons;
 mod inspector;
 mod layout;
+mod notes;
 mod pages;
 mod panels;
 mod perf;

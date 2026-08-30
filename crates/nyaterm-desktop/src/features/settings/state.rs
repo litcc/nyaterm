@@ -539,6 +539,10 @@ impl SettingsFeatureState {
         self.summary.ui_show_remote_stats = !self.summary.ui_show_remote_stats;
     }
 
+    pub(in crate::features) fn toggle_notes_panel(&mut self) {
+        self.summary.ui_show_notes_panel = !self.summary.ui_show_notes_panel;
+    }
+
     pub(in crate::features) fn set_remote_stats_interval(&mut self, value: u32) {
         self.summary.ui_remote_stats_interval = value.clamp(1, 60);
     }

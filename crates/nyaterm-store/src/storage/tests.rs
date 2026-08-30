@@ -3484,7 +3484,7 @@ fn portable_snapshot_preserves_notes_and_unknown_entities_after_apply() {
             "tauri-test",
         )
         .expect("build source snapshot");
-    let notes = r#"{"folders":[],"notes":[{"id":"note-1","markdown":"preserve me"}]}"#;
+    let notes = r#"{"folders":[],"notes":[{"id":"note-1","parent_id":null,"title":"Imported","markdown":"preserve me","sort_order":0,"revision":1,"created_at_ms":1,"updated_at_ms":2}]}"#;
     let future = r#"{"schema":7,"payload":{"future":true}}"#;
     incoming
         .entities
@@ -3499,12 +3499,15 @@ fn portable_snapshot_preserves_notes_and_unknown_entities_after_apply() {
         .apply_raw_portable_snapshot(&incoming)
         .expect("apply source snapshot");
 
-    assert_eq!(
+    assert!(
         store
             .read_string_table(PORTABLE_OPAQUE_ENTITIES_TABLE, "notes")
             .expect("read opaque notes")
-            .as_deref(),
-        Some(notes)
+            .is_none()
+    );
+    assert_eq!(
+        store.load_notes_snapshot().expect("load typed notes").notes[0].markdown,
+        "preserve me"
     );
     assert_eq!(
         store

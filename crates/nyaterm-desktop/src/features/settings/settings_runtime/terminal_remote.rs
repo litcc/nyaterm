@@ -127,6 +127,12 @@ impl NyaTermApp {
         self.save_terminal_settings(cx);
     }
 
+    pub(in crate::features) fn toggle_notes_panel(&mut self, cx: &mut Context<Self>) {
+        self.settings.toggle_notes_panel();
+        self.reconcile_activity_panel_availability();
+        self.save_terminal_settings(cx);
+    }
+
     pub(in crate::features) fn set_remote_stats_interval(
         &mut self,
         value: u32,

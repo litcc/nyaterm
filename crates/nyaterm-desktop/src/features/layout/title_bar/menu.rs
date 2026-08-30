@@ -732,7 +732,7 @@ mod tests {
             .and_then(NyaMenuItem::children)
             .expect("left panel submenu");
         assert!(left.iter().any(|item| item.test_label() == "Files"));
-        assert!(!left.iter().any(|item| item.test_label() == "Notes"));
+        assert!(left.iter().any(|item| item.test_label() == "Notes"));
         assert!(left.iter().all(|item| item.test_presentation().4));
     }
 }

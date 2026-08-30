@@ -72,6 +72,7 @@ pub struct NyaInputState {
     state: Option<ComponentState>,
     seed: SharedString,
     pending_value: Option<SharedString>,
+    silent_value: Option<SharedString>,
     placeholder: SharedString,
     masked: bool,
     applied_masked: bool,
@@ -93,6 +94,7 @@ impl NyaInputState {
             state: None,
             seed: seed.into(),
             pending_value: None,
+            silent_value: None,
             placeholder: SharedString::default(),
             masked: false,
             applied_masked: false,
@@ -183,6 +185,14 @@ impl NyaInputState {
 
     pub fn set_content(&mut self, text: &str, cx: &mut Context<Self>) {
         self.pending_value = Some(SharedString::from(text.to_string()));
+        cx.notify();
+    }
+
+    /// Queue a programmatic replacement without reporting it as a user edit.
+    pub fn set_content_silent(&mut self, text: &str, cx: &mut Context<Self>) {
+        let value = SharedString::from(text.to_string());
+        self.silent_value = Some(value.clone());
+        self.pending_value = Some(value);
         cx.notify();
     }
 
@@ -288,7 +298,16 @@ fn forward_input_event(
     cx: &mut Context<NyaInputState>,
 ) {
     match event {
-        InputEvent::Change => cx.emit(NyaInputEvent::Changed(value)),
+        InputEvent::Change => {
+            if state
+                .silent_value
+                .take()
+                .is_some_and(|expected| expected.as_ref() == value)
+            {
+                return;
+            }
+            cx.emit(NyaInputEvent::Changed(value));
+        }
         InputEvent::PressEnter { .. } => cx.emit(NyaInputEvent::Submitted(value)),
         InputEvent::Focus => {
             state.focused = true;

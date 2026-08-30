@@ -25,6 +25,7 @@ use crate::features::commands::{
     quick_command_sort_mode_from_setting, quick_command_view_mode_from_setting,
 };
 use crate::features::connections::{ConnectionFeatureFocus, ConnectionFeatureState};
+use crate::features::notes::{NotesFeatureState, NotesPanel};
 use crate::features::pages::connections::panel::ConnectionPanel;
 use crate::features::pages::settings::panel::SettingsPanel;
 use crate::features::pages::transfers::panel::TransferPanel;
@@ -85,6 +86,27 @@ impl NyaTermApp {
             ai_audit_count,
             open_tabs,
         } = bootstrap;
+        let mut settings = settings;
+        // Localized child views cache placeholders while they are constructed, so
+        // the persisted locale must be active before any of those entities exist.
+        crate::i18n::apply_locale(&settings.language);
+        let notes_in_layout = settings
+            .ui_activity_bar_left_top
+            .iter()
+            .chain(&settings.ui_activity_bar_left_bottom)
+            .chain(&settings.ui_activity_bar_right_top)
+            .chain(&settings.ui_activity_bar_right_bottom)
+            .any(|id| id == "notes");
+        if !notes_in_layout {
+            let insert_at = settings
+                .ui_activity_bar_left_top
+                .iter()
+                .position(|id| id == "fileExplorer")
+                .map_or(0, |index| index + 1);
+            settings
+                .ui_activity_bar_left_top
+                .insert(insert_at, "notes".to_string());
+        }
         let store_status = (
             database_path.display().to_string(),
             "redb connection store online".to_string(),
@@ -181,6 +203,7 @@ impl NyaTermApp {
             cx.new(|cx| ConnectionPanel::new(app_entity.downgrade(), cx.focus_handle()));
         let settings_panel = cx.new(|cx| SettingsPanel::new(app_entity.downgrade(), cx));
         let transfer_panel = cx.new(|_| TransferPanel::new(app_entity.downgrade()));
+        let notes_panel = cx.new(|cx| NotesPanel::new(app_entity.downgrade(), cx));
         let ai_panel = cx.new(|_| AiPanel::new(app_entity.downgrade()));
         let start_workspace = StartWorkspaceFeatureState::new(&connection_groups, &settings, cx);
 
@@ -208,6 +231,8 @@ impl NyaTermApp {
             settings_panel,
             native_settings_panel: None,
             transfer_panel,
+            notes: NotesFeatureState::new(),
+            notes_panel,
             commands: CommandFeatureState::new(CommandFeatureInit {
                 commands: quick_commands,
                 categories: quick_command_categories,

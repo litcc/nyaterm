@@ -217,6 +217,19 @@ impl SettingsPanel {
                     ))
                     .child(settings_form_row(
                         palette,
+                        t!("settings.showNotesPanel"),
+                        Some(SharedString::from(t!("settings.showNotesPanelDesc"))),
+                        settings_switch(
+                            palette,
+                            "terminal-notes-panel",
+                            self.settings.summary().ui_show_notes_panel,
+                            cx.listener(|this, _, _, cx| {
+                                this.toggle_notes_panel(cx);
+                            }),
+                        ),
+                    ))
+                    .child(settings_form_row(
+                        palette,
                         t!("settings.showRemoteStats"),
                         Some(SharedString::from(t!("settings.showRemoteStatsDesc"))),
                         settings_switch(

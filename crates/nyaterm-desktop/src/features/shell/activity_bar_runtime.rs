@@ -93,6 +93,7 @@ impl NyaTermApp {
     pub(in crate::features) fn activity_entry_visible(&self, entry: ActivityBarEntry) -> bool {
         let summary = self.settings.summary();
         match entry {
+            ActivityBarEntry::Panel(NavItem::Notes) => summary.ui_show_notes_panel,
             ActivityBarEntry::Panel(NavItem::Stats) => summary.ui_show_remote_stats,
             ActivityBarEntry::Panel(NavItem::GpuMonitor) => summary.ui_show_gpu_monitor,
             ActivityBarEntry::Panel(NavItem::AscendNpuMonitor) => {
@@ -106,6 +107,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn reconcile_activity_panel_availability(&mut self) {
         for item in [
+            NavItem::Notes,
             NavItem::Stats,
             NavItem::GpuMonitor,
             NavItem::AscendNpuMonitor,
@@ -737,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn normalization_migrates_aliases_and_inserts_notes_at_its_anchor_without_a_button() {
+    fn normalization_migrates_aliases_and_inserts_notes_at_its_anchor() {
         let mut cx = TestAppContext::single();
         let app = test_app(&mut cx);
         cx.update_entity(&app, |app, _cx| {
@@ -766,7 +768,7 @@ mod tests {
             assert!(
                 app.activity_entries_for_zone(crate::models::ActivityBarZone::LeftTop)
                     .iter()
-                    .all(|entry| entry.persistence_id() != "notes")
+                    .any(|entry| entry.persistence_id() == "notes")
             );
         });
     }

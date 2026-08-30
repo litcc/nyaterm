@@ -182,4 +182,23 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn notes_panel_icons_are_embedded() {
+        const REQUIRED: &[&str] = &[
+            "icons/notes.svg",
+            "icons/conn/folder.svg",
+            "icons/conn/add.svg",
+            "icons/fe/new-folder.svg",
+            "icons/fe/refresh.svg",
+            "icons/session/more.svg",
+            "icons/file/description.svg",
+        ];
+        for path in REQUIRED {
+            assert!(
+                EmbeddedAssets::get(path).is_some(),
+                "{path} is referenced by the Notes panel but is not embedded"
+            );
+        }
+    }
 }

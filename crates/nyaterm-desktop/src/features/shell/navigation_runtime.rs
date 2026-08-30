@@ -54,6 +54,10 @@ impl NyaTermApp {
             return;
         }
 
+        if item == NavItem::Notes {
+            self.load_notes_if_needed(cx);
+        }
+
         if self.shell.panel_is_floating()
             && let Some(side) = self.panel_side_for_item(item)
         {
@@ -198,6 +202,7 @@ impl NyaTermApp {
             self.shell.set_status("left sidebar collapsed".to_string());
         }
         self.persist_ui_layout();
+        self.ensure_visible_notes_loaded(cx);
         cx.notify();
     }
 
@@ -239,6 +244,7 @@ impl NyaTermApp {
             self.shell.set_status("right sidebar collapsed".to_string());
         }
         self.persist_ui_layout();
+        self.ensure_visible_notes_loaded(cx);
         cx.notify();
     }
 
@@ -256,6 +262,7 @@ impl NyaTermApp {
             self.shell.panels.left_collapsed = false;
             self.shell.panels.mobile_left_open = true;
         }
+        self.ensure_visible_notes_loaded(cx);
         cx.notify();
     }
 
@@ -273,6 +280,7 @@ impl NyaTermApp {
             self.shell.panels.right_collapsed = false;
             self.shell.panels.mobile_right_open = true;
         }
+        self.ensure_visible_notes_loaded(cx);
         cx.notify();
     }
 
