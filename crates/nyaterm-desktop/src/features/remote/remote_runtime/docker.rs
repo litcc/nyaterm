@@ -10,11 +10,11 @@ use crate::features::formatting::{compact_id, docker_compose_project_key};
 use crate::features::runtime_jobs::{DockerJobOutput, DockerJobResult};
 use crate::models::{DockerConfirmAction, DockerConfirmState, NavItem};
 
-use super::super::state::RemoteJobTicket;
 use super::helpers::{
     ActiveSshRuntimeContext, DOCKER_SHELL_SELECTOR, docker_compose_terminal_base,
     docker_overview_status, shell_quote,
 };
+use crate::features::remote::job_state::RemoteJobTicket;
 
 fn submit_docker_job(
     scheduler: &BlockingJobScheduler,

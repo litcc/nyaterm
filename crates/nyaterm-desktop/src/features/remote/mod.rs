@@ -1,5 +1,6 @@
 //! Remote host operations: Docker, processes and stats runtime.
 
+mod job_state;
 mod list_window;
 mod remote_runtime;
 

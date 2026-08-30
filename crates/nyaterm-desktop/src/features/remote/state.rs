@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use futures::channel::mpsc::UnboundedReceiver;
 use std::time::Instant;
 
 use nyaterm_transport::{
@@ -18,6 +18,7 @@ use nyaterm_transport::{
 };
 
 use crate::features::formatting::docker_compose_project_key;
+use crate::features::remote::job_state::{RemoteJobState, RemoteJobTicket};
 use crate::features::remote::list_window::{
     ACCELERATOR_PROCESS_VIEWPORT_ROWS, DOCKER_RESOURCE_VIEWPORT_ROWS, DOCKER_VIEWPORT_ROWS,
     PROCESS_VIEWPORT_ROWS, max_list_offset,
@@ -27,11 +28,6 @@ use crate::features::{
     runtime_jobs::ProcessJobResult, runtime_jobs::StatsJobResult,
 };
 use crate::models::{DockerTab, RemoteProcessSortDirection, RemoteProcessSortKey};
-
-pub(in crate::features) struct RemoteJobTicket<Event> {
-    pub job_id: u64,
-    pub tx: UnboundedSender<Event>,
-}
 
 pub(in crate::features) enum StatsApplyOutcome {
     Ignored,
@@ -44,96 +40,6 @@ pub(in crate::features) enum StatsApplyOutcome {
     Failed {
         status: String,
     },
-}
-
-struct RemoteJobState<Event> {
-    tx: UnboundedSender<Event>,
-    /// Taken once when the pane's drain task starts, which owns delivery from
-    /// then on. `None` afterwards, so a second start is a no-op.
-    rx: Option<UnboundedReceiver<Event>>,
-    pending: bool,
-    job_id: u64,
-    session_id: Option<String>,
-    consecutive_refresh_failures: u8,
-    last_refresh_at: Option<Instant>,
-}
-
-impl<Event> RemoteJobState<Event> {
-    fn new() -> Self {
-        let (tx, rx) = unbounded();
-        Self {
-            tx,
-            rx: Some(rx),
-            pending: false,
-            job_id: 0,
-            session_id: None,
-            consecutive_refresh_failures: 0,
-            last_refresh_at: None,
-        }
-    }
-
-    fn is_pending(&self) -> bool {
-        self.pending
-    }
-
-    fn is_pending_for(&self, session_id: &str) -> bool {
-        self.pending && self.session_id.as_deref() == Some(session_id)
-    }
-
-    fn last_refresh_at(&self) -> Option<Instant> {
-        self.last_refresh_at
-    }
-
-    fn consecutive_refresh_failures(&self) -> u8 {
-        self.consecutive_refresh_failures
-    }
-
-    fn begin(&mut self, session_id: String) -> RemoteJobTicket<Event> {
-        self.job_id = self.job_id.wrapping_add(1).max(1);
-        self.session_id = Some(session_id);
-        self.pending = true;
-        RemoteJobTicket {
-            job_id: self.job_id,
-            tx: self.tx.clone(),
-        }
-    }
-
-    fn mark_refresh_started(&mut self) {
-        self.last_refresh_at = Some(Instant::now());
-    }
-
-    fn take_event_receiver(&mut self) -> Option<UnboundedReceiver<Event>> {
-        self.rx.take()
-    }
-
-    fn complete_if_matches(&mut self, job_id: u64, session_id: &str) -> bool {
-        if self.job_id != job_id || self.session_id.as_deref() != Some(session_id) {
-            return false;
-        }
-        self.pending = false;
-        self.session_id = None;
-        true
-    }
-
-    fn reset_refresh_failures(&mut self) {
-        self.consecutive_refresh_failures = 0;
-    }
-
-    fn record_refresh_failure(&mut self, terminal: bool) -> u8 {
-        self.consecutive_refresh_failures = if terminal {
-            3
-        } else {
-            self.consecutive_refresh_failures.saturating_add(1)
-        };
-        self.consecutive_refresh_failures
-    }
-
-    fn reset_for_session_switch(&mut self) {
-        self.pending = false;
-        self.session_id = None;
-        self.consecutive_refresh_failures = 0;
-        self.last_refresh_at = None;
-    }
 }
 
 pub(in crate::features) struct RemoteOpsFeatureState {
@@ -2211,9 +2117,10 @@ mod tests {
     };
 
     use super::{
-        AcceleratorProcessList, DockerDerivedItems, ProcessSortColumns, RemoteJobState,
-        RemoteOpsFeatureFocus, RemoteOpsFeatureState, StatsApplyOutcome,
+        AcceleratorProcessList, DockerDerivedItems, ProcessSortColumns, RemoteOpsFeatureFocus,
+        RemoteOpsFeatureState, StatsApplyOutcome,
     };
+    use crate::features::remote::job_state::RemoteJobState;
     use crate::features::runtime_jobs::StatsJobResult;
     use crate::models::{DockerTab, RemoteProcessSortKey};
 
