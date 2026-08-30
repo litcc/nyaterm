@@ -6,6 +6,7 @@ mod child_window;
 mod command;
 mod dialog;
 mod document_editor;
+mod hover_card;
 mod input;
 mod input_focus;
 mod menu;
@@ -35,6 +36,7 @@ pub use gpui_component::input::{
 pub use gpui_component::kbd::Kbd as NyaKbd;
 pub use gpui_component::scroll::ScrollableElement as NyaScrollable;
 pub use gpui_component::scroll::ScrollbarAxis as NyaScrollbarAxis;
+pub use hover_card::NyaHoverCard;
 pub use input::{
     NyaInput, NyaInputEvent, NyaInputShell, NyaInputState, NyaSearchInput, NyaTextArea,
 };
