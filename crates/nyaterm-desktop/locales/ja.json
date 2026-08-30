@@ -2374,7 +2374,9 @@
   },
 
   "sshAuth": {
-    "agentPromptTitle": "SSH エージェントの対応が必要です",
+    "agentWaitingTitle": "SSH エージェントの承認を待機中",
+    "agentFailedTitle": "SSH エージェント認証に失敗しました",
+    "agentApprovalWaiting": "ハードウェアキー・PIN・SSH エージェントの要求を承認してください。",
     "agentConnectFailed": "設定された SSH エージェントに接続できませんでした。実行中であることを確認してから再試行してください。",
     "agentIdentitiesFailed": "SSH エージェントが使用可能な ID を提供しませんでした。鍵のロックを解除するか読み込んでから再試行してください。",
     "agentApprovalRequired": "ハードウェアキー・PIN・SSH エージェントの要求を承認してから再試行してください。",

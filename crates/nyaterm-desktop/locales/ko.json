@@ -2366,7 +2366,9 @@
     "x11DisplayPlaceholder": "Windows: localhost:0 / Linux/macOS: :0"
   },
   "sshAuth": {
-    "agentPromptTitle": "SSH Agent에 확인이 필요합니다",
+    "agentWaitingTitle": "SSH Agent 승인 대기 중",
+    "agentFailedTitle": "SSH Agent 인증 실패",
+    "agentApprovalWaiting": "하드웨어 키, PIN 또는 SSH Agent 요청을 승인하세요.",
     "agentConnectFailed": "구성된 SSH Agent에 연결할 수 없습니다. 실행 중인지 확인한 후 다시 시도하세요.",
     "agentIdentitiesFailed": "SSH Agent가 사용할 수 있는 ID를 제공하지 않았습니다. 키를 잠금 해제하거나 로드한 후 다시 시도하세요.",
     "agentApprovalRequired": "하드웨어 키, PIN 또는 SSH Agent 요청을 승인한 후 다시 시도하세요.",
