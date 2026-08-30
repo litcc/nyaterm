@@ -1,11 +1,11 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, Context, IntoElement, PathPromptOptions, SharedString, Window};
+use gpui::{Context, IntoElement, PathPromptOptions, SharedString, Window};
 use nyaterm_core::export_quick_commands_json;
 use nyaterm_store::{StorageError, StoreDomain};
 use nyaterm_ui::NyaDialogWindowExt as _;
 
-use crate::features::NyaTermApp;
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job};
 use crate::models::{QuickCommandImportPathPromptKind, QuickCommandImportPathPromptResult};
 
 use super::merge::merge_import;
@@ -54,12 +54,13 @@ impl NyaTermApp {
         let directory = self.runtime.config_dir().to_path_buf();
         let receiver = cx.prompt_for_new_path(&directory, Some("nyaterm-quick-commands.json"));
         let store = self.store_blocking_client();
+        let scheduler = self.blocking_jobs.clone();
         self.shell
             .set_status("selecting quick command export destination".to_string());
         cx.spawn(async move |this, cx| {
             let result = match receiver.await {
                 Ok(Ok(Some(path))) => {
-                    cx.background_spawn(async move {
+                    let task = scheduler.submit_task("quick-command-export", move |_| {
                         let config = store
                             .request_fn(StoreDomain::Commands, |database| {
                                 database.load_quick_commands()
@@ -69,8 +70,8 @@ impl NyaTermApp {
                             .map_err(|error| error.to_string())?;
                         std::fs::write(&path, raw).map_err(|error| error.to_string())?;
                         Ok::<_, String>(path)
-                    })
-                    .await
+                    });
+                    await_blocking_job(task).await.and_then(|result| result)
                 }
                 Ok(Ok(None)) => Err("cancelled".to_string()),
                 Ok(Err(error)) => Err(error.to_string()),
@@ -127,13 +128,14 @@ impl NyaTermApp {
         };
         let receiver = cx.prompt_for_paths(options);
         let store = self.store_blocking_client();
+        let scheduler = self.blocking_jobs.clone();
         self.shell.set_status(kind.selecting_status().to_string());
 
         cx.spawn(async move |this, cx| {
             let result = match receiver.await {
                 Ok(Ok(Some(paths))) => match paths.into_iter().next() {
                     Some(path) => {
-                        cx.background_spawn(async move {
+                        let task = scheduler.submit_task("quick-command-import", move |_| {
                             let import_config = match parse_quick_commands_from_path(kind, &path) {
                                 Ok(config) => config,
                                 Err(error) => {
@@ -160,8 +162,10 @@ impl NyaTermApp {
                                     QuickCommandImportPathPromptResult::Failed(error.to_string())
                                 }
                             }
-                        })
-                        .await
+                        });
+                        await_blocking_job(task)
+                            .await
+                            .unwrap_or_else(QuickCommandImportPathPromptResult::Failed)
                     }
                     None => QuickCommandImportPathPromptResult::Cancelled,
                 },

@@ -1,10 +1,10 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, ClipboardItem, Context, IntoElement as _, KeyDownEvent, Window};
+use gpui::{ClipboardItem, Context, IntoElement as _, KeyDownEvent, Window};
 use nyaterm_core::SavedPassword;
 use nyaterm_ui::NyaDialogWindowExt as _;
 
-use crate::features::{NyaTermApp, formatting::compact_id};
+use crate::features::{NyaTermApp, formatting::compact_id, runtime_jobs::await_blocking_job};
 use crate::models::{SecurityAuthTab, SecurityPasswordEditorState, SecurityUnlockAction};
 
 use super::jobs::{SecurityStoreLocation, load_security_catalog};
@@ -178,17 +178,17 @@ impl NyaTermApp {
             return;
         };
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    let id = store
-                        .save_password(entry)
-                        .map_err(|error| error.to_string())?;
-                    let catalog = load_security_catalog(&store)?;
-                    Ok::<_, String>((id, catalog))
-                })
-                .await;
+            let task = scheduler.submit_task("saved-password-save", move |_| {
+                let store = location.open()?;
+                let id = store
+                    .save_password(entry)
+                    .map_err(|error| error.to_string())?;
+                let catalog = load_security_catalog(&store)?;
+                Ok::<_, String>((id, catalog))
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let mut close = false;
             let _ = this.update(cx, |this, cx| {
                 if !this.security.finish_editor_request(request_id) {
@@ -321,15 +321,15 @@ impl NyaTermApp {
         let request_password_id = password_id.clone();
         let request_id = self.security.begin_password_request(password_id.clone());
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    store
-                        .load_decrypted_password_by_id(&password_id)
-                        .map_err(|error| error.to_string())
-                })
-                .await;
+            let task = scheduler.submit_task("saved-password-reveal", move |_| {
+                let store = location.open()?;
+                store
+                    .load_decrypted_password_by_id(&password_id)
+                    .map_err(|error| error.to_string())
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if !this
                     .security
@@ -371,15 +371,15 @@ impl NyaTermApp {
             return;
         };
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    store
-                        .load_decrypted_password_by_id(&password_id)
-                        .map_err(|error| error.to_string())
-                })
-                .await;
+            let task = scheduler.submit_task("saved-password-editor-secret", move |_| {
+                let store = location.open()?;
+                store
+                    .load_decrypted_password_by_id(&password_id)
+                    .map_err(|error| error.to_string())
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if !this.security.finish_editor_request(request_id) {
                     return;

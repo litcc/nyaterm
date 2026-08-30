@@ -15,7 +15,7 @@ use crate::features::terminal::{ResolvedAppearanceFont, measure_terminal_font};
 use crate::features::{
     FontAvailability, FontAvailabilityReason, FontCatalogEntry, FontCatalogLoadState,
     FontCatalogSnapshot, FontResolutionSource, FontResolutionStatus, NyaTermApp,
-    font_names_fingerprint, normalize_font_family,
+    font_names_fingerprint, normalize_font_family, runtime_jobs::await_blocking_job,
 };
 pub(in crate::features) use crate::theme::{ThemePalette, apply_component_theme, theme_palette};
 
@@ -156,9 +156,13 @@ impl NyaTermApp {
             return;
         };
         let task_path = path.clone();
-        let task = cx.background_spawn(async move { load_wallpaper_image(&task_path) });
+        let task = self
+            .blocking_jobs
+            .submit_task("wallpaper-image-load", move |_| {
+                load_wallpaper_image(&task_path)
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.unwrap_or(Err(()));
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok((image, width, height)) => {

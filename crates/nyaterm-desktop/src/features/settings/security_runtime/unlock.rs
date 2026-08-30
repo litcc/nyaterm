@@ -1,9 +1,9 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, Context, KeyDownEvent, Window};
+use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_ui::NyaDialogWindowExt as _;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job, text_inputs::TextInputSetup};
 use crate::models::{NavItem, SecurityAuthTab, SecurityUnlockAction, SettingsTab};
 
 use super::jobs::{SecurityStoreLocation, load_security_catalog};
@@ -94,15 +94,15 @@ impl NyaTermApp {
             return;
         };
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    store
-                        .verify_master_password(password.expose_secret())
-                        .map_err(|error| error.to_string())
-                })
-                .await;
+            let task = scheduler.submit_task("security-unlock", move |_| {
+                let store = location.open()?;
+                store
+                    .verify_master_password(password.expose_secret())
+                    .map_err(|error| error.to_string())
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let mut pending_action = None;
             let _ = this.update(cx, |this, cx| {
                 if !this.security.finish_unlock_request(request_id) {
@@ -213,13 +213,13 @@ impl NyaTermApp {
 
     pub(in crate::features) fn refresh_security_catalog(&mut self, cx: &mut Context<Self>) {
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    load_security_catalog(&store)
-                })
-                .await;
+            let task = scheduler.submit_task("security-catalog-refresh", move |_| {
+                let store = location.open()?;
+                load_security_catalog(&store)
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(catalog) => this.security.replace_catalog_state(catalog),

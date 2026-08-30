@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use gpui::{AppContext, Context};
+use gpui::Context;
 use nyaterm_core::{
     AgentCapturedOutput, AiAction, AiChatRequest, AiCommandCard, AiExecutionProfile, AiMode,
     AppendAiAuditRequest, CommandObservation, build_agent_capture_command,
@@ -12,7 +12,7 @@ use nyaterm_transport::{SessionKind, SshProcessService, run_local_command};
 use crate::features::{
     NyaTermApp, runtime_jobs::AiAgentBackgroundTarget, runtime_jobs::AiAgentLoopState,
     runtime_jobs::AiAgentStepStatus, runtime_jobs::AiChatJobResult,
-    runtime_jobs::AiChatWorkerEvent,
+    runtime_jobs::AiChatWorkerEvent, runtime_jobs::await_blocking_job,
 };
 use crate::models::SessionLaunchConfig;
 
@@ -77,7 +77,7 @@ impl NyaTermApp {
             executed: execute,
             blocked: false,
         };
-        let task = cx.background_spawn(async move {
+        let task = self.blocking_jobs.submit_task("ai-audit-save", move |_| {
             let _guard = write_lock
                 .lock()
                 .map_err(|_| "AI audit write lock poisoned".to_string())?;
@@ -89,7 +89,7 @@ impl NyaTermApp {
                 .map_err(|error| error.to_string())
         });
         cx.spawn(async move |this, cx| {
-            if let Err(error) = task.await {
+            if let Err(error) = await_blocking_job(task).await.and_then(|result| result) {
                 let _ = this.update(cx, |this, cx| {
                     this.settings
                         .update_store_status(format!("AI audit save failed: {error}"), false);

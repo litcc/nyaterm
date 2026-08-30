@@ -1,14 +1,13 @@
 use rust_i18n::t;
 
 use gpui::{
-    AppContext, ClipboardItem, Context, IntoElement as _, KeyDownEvent, PathPromptOptions,
-    SharedString, Window,
+    ClipboardItem, Context, IntoElement as _, KeyDownEvent, PathPromptOptions, SharedString, Window,
 };
 use nyaterm_core::OtpEntry;
 use nyaterm_ui::NyaDialogWindowExt as _;
 use std::time::Duration;
 
-use crate::features::{NyaTermApp, formatting::compact_id};
+use crate::features::{NyaTermApp, formatting::compact_id, runtime_jobs::await_blocking_job};
 use crate::models::{SecurityAuthTab, SecurityOtpEditorState};
 use nyaterm_transport::SessionKind;
 
@@ -38,6 +37,7 @@ impl NyaTermApp {
             prompt: Some(SharedString::from(t!("otpManager.selectQrImage"))),
         };
         let receiver = cx.prompt_for_paths(options);
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn_in(window, async move |this, cx| {
             let selected = match receiver.await {
                 Ok(Ok(Some(paths))) => paths.into_iter().next(),
@@ -45,8 +45,10 @@ impl NyaTermApp {
             };
             let result = match selected {
                 Some(path) => {
-                    cx.background_spawn(async move { decode_security_otp_qr(&path).map(Some) })
-                        .await
+                    let task = scheduler.submit_task("otp-qr-decode", move |_| {
+                        decode_security_otp_qr(&path).map(Some)
+                    });
+                    await_blocking_job(task).await.and_then(|result| result)
                 }
                 None => Ok(None),
             };
@@ -342,17 +344,17 @@ impl NyaTermApp {
             return;
         };
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    let id = store
-                        .save_otp_entry(entry)
-                        .map_err(|error| error.to_string())?;
-                    let catalog = load_security_catalog(&store)?;
-                    Ok::<_, String>((id, catalog))
-                })
-                .await;
+            let task = scheduler.submit_task("otp-save", move |_| {
+                let store = location.open()?;
+                let id = store
+                    .save_otp_entry(entry)
+                    .map_err(|error| error.to_string())?;
+                let catalog = load_security_catalog(&store)?;
+                Ok::<_, String>((id, catalog))
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let mut close = false;
             let _ = this.update(cx, |this, cx| {
                 if !this.security.finish_editor_request(request_id) {
@@ -455,6 +457,7 @@ impl NyaTermApp {
         if self.security.visible_totp_ids().is_empty() || !self.security.arm_otp_refresh() {
             return;
         }
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
@@ -472,19 +475,18 @@ impl NyaTermApp {
                 let Some((ids, provider)) = work else {
                     break;
                 };
-                let codes = cx
-                    .background_spawn(async move {
-                        ids.into_iter()
-                            .filter_map(|otp_id| {
-                                provider
-                                    .preview_otp_code(&otp_id)
-                                    .ok()
-                                    .flatten()
-                                    .map(|preview| (otp_id, preview.code))
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .await;
+                let task = scheduler.submit_task("otp-visible-refresh", move |_| {
+                    ids.into_iter()
+                        .filter_map(|otp_id| {
+                            provider
+                                .preview_otp_code(&otp_id)
+                                .ok()
+                                .flatten()
+                                .map(|preview| (otp_id, preview.code))
+                        })
+                        .collect::<Vec<_>>()
+                });
+                let codes = await_blocking_job(task).await.unwrap_or_default();
                 let _ = this.update(cx, |this, cx| {
                     for (otp_id, code) in codes {
                         if this.security.otp_code_visible(&otp_id) {
@@ -509,10 +511,14 @@ impl NyaTermApp {
         let request_otp_id = otp_id.clone();
         let request_id = self.security.begin_otp_request(otp_id.clone());
         let provider = self.session.prompt_otp_provider();
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { provider.preview_otp_code(&otp_id) })
-                .await;
+            let task =
+                scheduler.submit_task("otp-preview", move |_| provider.preview_otp_code(&otp_id));
+            let result = match await_blocking_job(task).await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(error) => Err(error),
+            };
             let mut send_code = None;
             let mut refresh_catalog = false;
             let _ = this.update(cx, |this, cx| {
@@ -625,15 +631,15 @@ impl NyaTermApp {
             return;
         };
         let location = SecurityStoreLocation::new(self.store_blocking_client());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    store
-                        .load_decrypted_otp_entry_by_id(&otp_id)
-                        .map_err(|error| error.to_string())
-                })
-                .await;
+            let task = scheduler.submit_task("otp-editor-secret", move |_| {
+                let store = location.open()?;
+                store
+                    .load_decrypted_otp_entry_by_id(&otp_id)
+                    .map_err(|error| error.to_string())
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if !this.security.finish_editor_request(request_id) {
                     return;

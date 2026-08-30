@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use gpui::{AppContext, Context};
+use gpui::Context;
 use nyaterm_core::{
     AppSettingsSummary, ExistingFileBehavior as CoreExistingFileBehavior, Group,
     RecordingMode as CoreRecordingMode, RecordingRotationPolicy as CoreRecordingRotationPolicy,
@@ -13,8 +13,8 @@ use nyaterm_transport::{
 use time::OffsetDateTime;
 use time::macros::format_description;
 
-use crate::features::NyaTermApp;
 use crate::features::formatting::recording_file_path;
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job};
 use crate::models::{RecordingPathPromptKind, RecordingPathPromptResult, SessionLaunchConfig};
 
 impl NyaTermApp {
@@ -188,7 +188,7 @@ impl NyaTermApp {
         let writer = self.recording.writer();
         let job_session_id = session_id.to_string();
         let memory_limit = self.settings.summary().recording_memory_limit_bytes as usize;
-        let task = cx.background_spawn(async move {
+        let task = self.blocking_jobs.submit_task("recording-start", move |_| {
             writer.start(
                 job_session_id,
                 context,
@@ -199,7 +199,7 @@ impl NyaTermApp {
         });
         let result_session_id = session_id.to_string();
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 this.recording.finish_action(&result_session_id);
                 match result {
@@ -244,10 +244,12 @@ impl NyaTermApp {
         self.shell.set_status("stopping recording".to_string());
         let writer = self.recording.writer();
         let job_session_id = session_id.to_string();
-        let task = cx.background_spawn(async move { writer.stop(job_session_id) });
+        let task = self
+            .blocking_jobs
+            .submit_task("recording-stop", move |_| writer.stop(job_session_id));
         let result_session_id = session_id.to_string();
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 this.recording.finish_action(&result_session_id);
                 match result {
@@ -280,18 +282,20 @@ impl NyaTermApp {
         let memory_limit = self.settings.summary().recording_memory_limit_bytes as usize;
         let include_io_labels = self.settings.summary().recording_include_io_labels;
         let include_timestamps = self.settings.summary().recording_include_timestamps;
-        let task = cx.background_spawn(async move {
-            writer.save_transcript(
-                job_session_id,
-                path,
-                include_io_labels,
-                include_timestamps,
-                memory_limit,
-            )
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("recording-transcript", move |_| {
+                writer.save_transcript(
+                    job_session_id,
+                    path,
+                    include_io_labels,
+                    include_timestamps,
+                    memory_limit,
+                )
+            });
         let result_session_id = session_id.to_string();
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 this.recording.finish_action(&result_session_id);
                 match result {

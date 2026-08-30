@@ -1,10 +1,10 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, Context, KeyDownEvent, PathPromptOptions, SharedString, Window};
+use gpui::{Context, KeyDownEvent, PathPromptOptions, SharedString, Window};
 use nyaterm_core::KeywordHighlightRule;
 use nyaterm_store::{StoreDomain, store_request};
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job, text_inputs::TextInputSetup};
 use crate::models::{KeywordHighlightEditorField, KeywordHighlightPathPromptResult};
 
 const MAX_KEYWORD_HIGHLIGHT_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
@@ -75,6 +75,7 @@ impl NyaTermApp {
             prompt: Some(SharedString::from("Import keyword highlight JSON")),
         };
         let store = self.store_blocking_client();
+        let scheduler = self.blocking_jobs.clone();
         let receiver = cx.prompt_for_paths(options);
         self.shell
             .set_status("selecting keyword highlight import file".to_string());
@@ -82,7 +83,7 @@ impl NyaTermApp {
             let result = match receiver.await {
                 Ok(Ok(Some(paths))) => match paths.into_iter().next() {
                     Some(path) => {
-                        cx.background_spawn(async move {
+                        let task = scheduler.submit_task("keyword-highlight-import", move |_| {
                             match read_keyword_highlight_import_text(&path) {
                                 Ok(raw) => match store
                                     .request_fn(StoreDomain::Settings, move |database| {
@@ -101,8 +102,10 @@ impl NyaTermApp {
                                     KeywordHighlightPathPromptResult::Failed(error.to_string())
                                 }
                             }
-                        })
-                        .await
+                        });
+                        await_blocking_job(task)
+                            .await
+                            .unwrap_or_else(KeywordHighlightPathPromptResult::Failed)
                     }
                     None => KeywordHighlightPathPromptResult::Cancelled,
                 },

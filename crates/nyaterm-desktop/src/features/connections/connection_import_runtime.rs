@@ -1,11 +1,11 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, Context, IntoElement, PathPromptOptions, SharedString, Window};
+use gpui::{Context, IntoElement, PathPromptOptions, SharedString, Window};
 use nyaterm_store::StoreDomain;
 use nyaterm_ui::NyaDialogWindowExt as _;
 use zeroize::Zeroize as _;
 
-use crate::features::NyaTermApp;
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job};
 use crate::models::ConnectionImportSource;
 
 enum ConnectionImportResult {
@@ -118,6 +118,7 @@ impl NyaTermApp {
             prompt: Some(SharedString::from(source.prompt_label())),
         });
         let store = self.store_blocking_client();
+        let scheduler = self.blocking_jobs.clone();
         self.connection_state.begin_import_path_prompt(source);
         self.shell.set_status(source.selecting_status().to_string());
 
@@ -125,7 +126,7 @@ impl NyaTermApp {
             let result = match receiver.await {
                 Ok(Ok(Some(paths))) => match paths.into_iter().next() {
                     Some(path) => {
-                        cx.background_spawn(async move {
+                        let task = scheduler.submit_task("connection-import", move |_| {
                             match prepare_connection_source(source, Some(path.as_path())).and_then(
                                 |prepared| {
                                     store
@@ -142,8 +143,15 @@ impl NyaTermApp {
                                     error,
                                 },
                             }
-                        })
-                        .await
+                        });
+                        match await_blocking_job(task).await {
+                            Ok(result) => result,
+                            Err(error) => ConnectionImportResult::Failed {
+                                source,
+                                auto_termius: false,
+                                error,
+                            },
+                        }
                     }
                     None => ConnectionImportResult::Cancelled,
                 },
@@ -177,6 +185,7 @@ impl NyaTermApp {
         }
 
         let store = self.store_blocking_client();
+        let scheduler = self.blocking_jobs.clone();
         self.connection_state
             .begin_import_path_prompt(ConnectionImportSource::Termius);
         self.shell.set_status(if auto_termius {
@@ -186,28 +195,33 @@ impl NyaTermApp {
         });
 
         cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    match prepare_connection_source(
-                        ConnectionImportSource::Termius,
-                        indexed_db_path.as_deref(),
-                    )
-                    .and_then(|prepared| {
-                        store
-                            .request_fn(StoreDomain::Connections, move |database| {
-                                database.commit_session_import(prepared)
-                            })
-                            .map_err(|error| error.to_string())
-                    }) {
-                        Ok(count) => ConnectionImportResult::Imported(count),
-                        Err(error) => ConnectionImportResult::Failed {
-                            source: ConnectionImportSource::Termius,
-                            auto_termius,
-                            error,
-                        },
-                    }
-                })
-                .await;
+            let task =
+                scheduler.submit_task("termius-import", move |_| match prepare_connection_source(
+                    ConnectionImportSource::Termius,
+                    indexed_db_path.as_deref(),
+                )
+                .and_then(|prepared| {
+                    store
+                        .request_fn(StoreDomain::Connections, move |database| {
+                            database.commit_session_import(prepared)
+                        })
+                        .map_err(|error| error.to_string())
+                }) {
+                    Ok(count) => ConnectionImportResult::Imported(count),
+                    Err(error) => ConnectionImportResult::Failed {
+                        source: ConnectionImportSource::Termius,
+                        auto_termius,
+                        error,
+                    },
+                });
+            let result = match await_blocking_job(task).await {
+                Ok(result) => result,
+                Err(error) => ConnectionImportResult::Failed {
+                    source: ConnectionImportSource::Termius,
+                    auto_termius,
+                    error,
+                },
+            };
             let _ = this.update(cx, |this, cx| {
                 this.apply_connection_import_result(result, cx);
             });

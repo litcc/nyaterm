@@ -1,13 +1,13 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, Context, KeyDownEvent, Window};
+use gpui::{Context, KeyDownEvent, Window};
 use nyaterm_core::{
     DiagnosticsExportOptions, DiagnosticsRuntimeSnapshot, export_diagnostics_archive,
 };
 use nyaterm_store::{StoreDomain, store_request};
 use nyaterm_transport::SessionKind;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job, text_inputs::TextInputSetup};
 use crate::models::DiagnosticsPathPromptResult;
 use crate::models::TransferJobStatus;
 
@@ -152,18 +152,21 @@ impl NyaTermApp {
         let receiver = cx.prompt_for_new_path(&directory, Some("nyaterm-diagnostics.zip"));
         let runtime = self.runtime.clone();
         let options = self.diagnostics_export_options();
+        let scheduler = self.blocking_jobs.clone();
         self.shell
             .set_status("selecting diagnostics export destination".to_string());
         cx.spawn(async move |this, cx| {
             let result = match receiver.await {
                 Ok(Ok(Some(path))) => {
-                    cx.background_spawn(async move {
+                    let task = scheduler.submit_task("diagnostics-export", move |_| {
                         match export_diagnostics_archive(&runtime, &options, &path) {
                             Ok(info) => DiagnosticsPathPromptResult::Exported(info),
                             Err(error) => DiagnosticsPathPromptResult::Failed(error.to_string()),
                         }
-                    })
-                    .await
+                    });
+                    await_blocking_job(task)
+                        .await
+                        .unwrap_or_else(DiagnosticsPathPromptResult::Failed)
                 }
                 Ok(Ok(None)) => DiagnosticsPathPromptResult::Cancelled,
                 Ok(Err(error)) => DiagnosticsPathPromptResult::Failed(error.to_string()),

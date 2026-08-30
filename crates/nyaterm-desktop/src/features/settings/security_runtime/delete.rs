@@ -1,8 +1,8 @@
 use rust_i18n::t;
 
-use gpui::{AppContext, Context, Window};
+use gpui::{Context, Window};
 
-use crate::features::NyaTermApp;
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job};
 use crate::models::SecurityAuthTab;
 
 use super::jobs::{SecurityStoreLocation, load_security_catalog};
@@ -55,20 +55,20 @@ impl NyaTermApp {
         let location = SecurityStoreLocation::new(self.store_blocking_client());
         let request_item_id = id.clone();
         let request_id = self.security.begin_delete_request(id.clone());
+        let scheduler = self.blocking_jobs.clone();
         cx.spawn_in(window, async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    let store = location.open()?;
-                    match kind {
-                        SecurityAuthTab::Keys => store.delete_ssh_key(&id),
-                        SecurityAuthTab::Passwords => store.delete_password(&id),
-                        SecurityAuthTab::Credentials => store.delete_credential(&id),
-                        SecurityAuthTab::Otp => store.delete_otp_entry(&id),
-                    }
-                    .map_err(|error| error.to_string())?;
-                    load_security_catalog(&store)
-                })
-                .await;
+            let task = scheduler.submit_task("security-item-delete", move |_| {
+                let store = location.open()?;
+                match kind {
+                    SecurityAuthTab::Keys => store.delete_ssh_key(&id),
+                    SecurityAuthTab::Passwords => store.delete_password(&id),
+                    SecurityAuthTab::Credentials => store.delete_credential(&id),
+                    SecurityAuthTab::Otp => store.delete_otp_entry(&id),
+                }
+                .map_err(|error| error.to_string())?;
+                load_security_catalog(&store)
+            });
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if !this
                     .security

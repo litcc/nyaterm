@@ -5,11 +5,16 @@
 //! dedicated, explicitly owned threads instead of occupying this pool.
 
 use std::fmt;
+use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
+use std::task::{Context, Poll};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
+
+use futures::channel::oneshot;
 
 const DEFAULT_QUEUE_CAPACITY: usize = 256;
 const MIN_WORKERS: usize = 2;
@@ -45,6 +50,17 @@ pub enum JobExecutionError {
     Cancelled,
     Failed(JobFailure),
 }
+
+impl fmt::Display for JobExecutionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled => formatter.write_str("blocking job was cancelled"),
+            Self::Failed(JobFailure::Panicked) => formatter.write_str("blocking job panicked"),
+        }
+    }
+}
+
+impl std::error::Error for JobExecutionError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobRejected {
@@ -93,7 +109,7 @@ pub struct JobHandle {
 
 pub struct JobTask<T> {
     handle: JobHandle,
-    result_rx: mpsc::Receiver<T>,
+    result_rx: oneshot::Receiver<Result<T, JobExecutionError>>,
 }
 
 impl<T> JobTask<T> {
@@ -104,14 +120,16 @@ impl<T> JobTask<T> {
     pub fn cancel(&self) {
         self.handle.cancel();
     }
+}
 
-    pub fn wait(self) -> Result<T, JobExecutionError> {
-        match self.result_rx.recv() {
-            Ok(result) => Ok(result),
-            Err(_) => match self.handle.wait() {
-                JobOutcome::Completed | JobOutcome::Cancelled => Err(JobExecutionError::Cancelled),
-                JobOutcome::Failed(failure) => Err(JobExecutionError::Failed(failure)),
-            },
+impl<T> Future for JobTask<T> {
+    type Output = Result<T, JobExecutionError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match Pin::new(&mut self.result_rx).poll(cx) {
+            Poll::Ready(Ok(result)) => Poll::Ready(result),
+            Poll::Ready(Err(_)) => Poll::Ready(Err(JobExecutionError::Cancelled)),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
@@ -144,6 +162,8 @@ pub struct SchedulerMetrics {
 }
 
 type JobFn = Box<dyn FnOnce(CancellationToken) + Send + 'static>;
+type OutcomeFn = Box<dyn FnOnce(JobOutcome) + Send + 'static>;
+type TaskResultSender<T> = Arc<Mutex<Option<oneshot::Sender<Result<T, JobExecutionError>>>>>;
 
 struct QueuedJob {
     id: u64,
@@ -151,6 +171,7 @@ struct QueuedJob {
     cancelled: Arc<AtomicBool>,
     run: JobFn,
     outcome_tx: mpsc::SyncSender<JobOutcome>,
+    on_outcome: Option<OutcomeFn>,
 }
 
 struct SchedulerShared {
@@ -289,6 +310,15 @@ impl BlockingJobScheduler {
         name: &'static str,
         run: impl FnOnce(CancellationToken) + Send + 'static,
     ) -> Result<JobHandle, JobRejected> {
+        self.submit_inner(name, Box::new(run), None)
+    }
+
+    fn submit_inner(
+        &self,
+        name: &'static str,
+        run: JobFn,
+        on_outcome: Option<OutcomeFn>,
+    ) -> Result<JobHandle, JobRejected> {
         if self.inner.shared.stopping.load(Ordering::Acquire) {
             self.inner.shared.rejected.fetch_add(1, Ordering::Relaxed);
             return Err(JobRejected::ShuttingDown);
@@ -300,8 +330,9 @@ impl BlockingJobScheduler {
             id,
             name,
             cancelled: Arc::clone(&cancelled),
-            run: Box::new(run),
+            run,
             outcome_tx,
+            on_outcome,
         };
         let Some(sender) = self
             .inner
@@ -349,11 +380,26 @@ impl BlockingJobScheduler {
         name: &'static str,
         run: impl FnOnce(CancellationToken) -> T + Send + 'static,
     ) -> Result<JobTask<T>, JobRejected> {
-        let (result_tx, result_rx) = mpsc::sync_channel(1);
-        let handle = self.submit(name, move |cancel| {
-            let result = run(cancel);
-            let _ = result_tx.send(result);
-        })?;
+        let (result_tx, result_rx) = oneshot::channel();
+        let result_tx = Arc::new(Mutex::new(Some(result_tx)));
+        let run_result_tx = Arc::clone(&result_tx);
+        let run = Box::new(move |cancel: CancellationToken| {
+            let result = run(cancel.clone());
+            let result = if cancel.is_cancelled() {
+                Err(JobExecutionError::Cancelled)
+            } else {
+                Ok(result)
+            };
+            send_task_result(&run_result_tx, result);
+        });
+        let on_outcome = Box::new(move |outcome| {
+            let error = match outcome {
+                JobOutcome::Failed(failure) => JobExecutionError::Failed(failure),
+                JobOutcome::Completed | JobOutcome::Cancelled => JobExecutionError::Cancelled,
+            };
+            send_task_result(&result_tx, Err(error));
+        });
+        let handle = self.submit_inner(name, run, Some(on_outcome))?;
         Ok(JobTask { handle, result_rx })
     }
 
@@ -388,6 +434,9 @@ fn worker_loop(receiver: Arc<Mutex<mpsc::Receiver<QueuedJob>>>, shared: Arc<Sche
         };
         if token.is_cancelled() {
             let _ = job.outcome_tx.send(JobOutcome::Cancelled);
+            if let Some(on_outcome) = job.on_outcome {
+                on_outcome(JobOutcome::Cancelled);
+            }
             continue;
         }
         let QueuedJob {
@@ -395,6 +444,7 @@ fn worker_loop(receiver: Arc<Mutex<mpsc::Receiver<QueuedJob>>>, shared: Arc<Sche
             name,
             run,
             outcome_tx,
+            on_outcome,
             ..
         } = job;
         let _job_identity = (id, name);
@@ -407,6 +457,19 @@ fn worker_loop(receiver: Arc<Mutex<mpsc::Receiver<QueuedJob>>>, shared: Arc<Sche
             }
         };
         let _ = outcome_tx.send(outcome);
+        if let Some(on_outcome) = on_outcome {
+            on_outcome(outcome);
+        }
+    }
+}
+
+fn send_task_result<T>(result_tx: &TaskResultSender<T>, result: Result<T, JobExecutionError>) {
+    if let Some(result_tx) = result_tx
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+    {
+        let _ = result_tx.send(result);
     }
 }
 
@@ -488,13 +551,13 @@ mod tests {
         let completed = scheduler
             .submit_task("test-result", |_| 42)
             .expect("result job");
-        assert_eq!(completed.wait(), Ok(42));
+        assert_eq!(futures::executor::block_on(completed), Ok(42));
 
         let panicked = scheduler
             .submit_task::<usize>("test-result-panic", |_| panic!("expected test panic"))
             .expect("panic job");
         assert_eq!(
-            panicked.wait(),
+            futures::executor::block_on(panicked),
             Err(JobExecutionError::Failed(JobFailure::Panicked))
         );
         scheduler.shutdown();

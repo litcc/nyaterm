@@ -2,16 +2,17 @@ use rust_i18n::t;
 
 use std::time::Instant;
 
-use gpui::{AppContext, Context};
+use gpui::Context;
 use nyaterm_core::{
-    CLOUD_SYNC_HISTORY_LIMIT, CloudSyncHistoryEntry, CloudSyncSettings, LocalCloudSyncOptions,
-    LocalDirectoryRemote, RemoteSyncPointer, append_cloud_sync_history,
+    CLOUD_SYNC_HISTORY_LIMIT, CloudSyncError, CloudSyncHistoryEntry, CloudSyncSettings,
+    LocalCloudSyncOptions, LocalDirectoryRemote, RemoteSyncPointer, append_cloud_sync_history,
     cleanup_sync_snapshots_with_remote, pull_local_snapshot, push_local_snapshot,
     read_cloud_sync_history, recover_local_current_snapshot,
 };
 
-use crate::features::NyaTermApp;
+use crate::blocking_jobs::{BlockingJobScheduler, JobRejected, JobTask};
 use crate::features::formatting::{cloud_sync_history_status, configured_cloud_sync_provider};
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_result};
 
 use super::super::{
     cleanup_provider_snapshots, pull_provider_snapshot, push_provider_snapshot,
@@ -33,10 +34,11 @@ impl NyaTermApp {
             .set_status(format!("testing provider connection via {provider}"));
         self.shell
             .set_status("provider cloud sync connection test started".to_string());
-        let task =
-            cx.background_spawn(async move { test_provider_connection(&local_store, &settings) });
+        let task = self.blocking_jobs.submit_task("cloud-sync-test", move |_| {
+            test_provider_connection(&local_store, &settings)
+        });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_cloud_sync_job(task).await;
             let _ = this.update(cx, |this, cx| {
                 let status = match result {
                     Ok(()) => t!("settings.syncTestSuccess").to_string(),
@@ -74,16 +76,19 @@ impl NyaTermApp {
             "pushing local cloud sync snapshot".to_string()
         });
         self.shell.set_status("cloud sync push started".to_string());
-        let task = cx.background_spawn(async move {
-            push_local_snapshot(&local_store, &options, &state, force)
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("cloud-sync-local-push", move |_| {
+                push_local_snapshot(&local_store, &options, &state, force)
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_cloud_sync_job(task).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(result) => {
                         schedule_cloud_sync_cleanup(
                             this.store_blocking_client(),
+                            this.blocking_jobs.clone(),
                             None,
                             cleanup_options,
                             result.pointer.clone(),
@@ -163,16 +168,19 @@ impl NyaTermApp {
             "pulling local cloud sync snapshot".to_string()
         });
         self.shell.set_status("cloud sync pull started".to_string());
-        let task = cx.background_spawn(async move {
-            pull_local_snapshot(&local_store, &options, &state, force)
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("cloud-sync-local-pull", move |_| {
+                pull_local_snapshot(&local_store, &options, &state, force)
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_cloud_sync_job(task).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(result) => {
                         schedule_cloud_sync_cleanup(
                             this.store_blocking_client(),
+                            this.blocking_jobs.clone(),
                             None,
                             cleanup_options,
                             result.pointer.clone(),
@@ -258,16 +266,19 @@ impl NyaTermApp {
         });
         self.shell
             .set_status("provider cloud sync push started".to_string());
-        let task = cx.background_spawn(async move {
-            push_provider_snapshot(&local_store, &settings, &options, &state, force)
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("cloud-sync-provider-push", move |_| {
+                push_provider_snapshot(&local_store, &settings, &options, &state, force)
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_cloud_sync_job(task).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(result) => {
                         schedule_cloud_sync_cleanup(
                             this.store_blocking_client(),
+                            this.blocking_jobs.clone(),
                             Some(cleanup_settings),
                             cleanup_options,
                             result.pointer.clone(),
@@ -352,16 +363,19 @@ impl NyaTermApp {
         });
         self.shell
             .set_status("provider cloud sync pull started".to_string());
-        let task = cx.background_spawn(async move {
-            pull_provider_snapshot(&local_store, &settings, &options, &state, force)
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("cloud-sync-provider-pull", move |_| {
+                pull_provider_snapshot(&local_store, &settings, &options, &state, force)
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_cloud_sync_job(task).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(result) => {
                         schedule_cloud_sync_cleanup(
                             this.store_blocking_client(),
+                            this.blocking_jobs.clone(),
                             Some(cleanup_settings),
                             cleanup_options,
                             result.pointer.clone(),
@@ -459,20 +473,23 @@ impl NyaTermApp {
             .set_status("recovering incomplete cloud sync metadata".to_string());
         self.shell
             .set_status("cloud sync metadata recovery started".to_string());
-        let task = cx.background_spawn(async move {
-            if provider_action {
-                recover_provider_snapshot(&local_store, &settings, &options)
-            } else {
-                recover_local_current_snapshot(&local_store, &options)
-            }
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("cloud-sync-recover", move |_| {
+                if provider_action {
+                    recover_provider_snapshot(&local_store, &settings, &options)
+                } else {
+                    recover_local_current_snapshot(&local_store, &options)
+                }
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_cloud_sync_job(task).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(result) => {
                         schedule_cloud_sync_cleanup(
                             this.store_blocking_client(),
+                            this.blocking_jobs.clone(),
                             provider_action.then_some(cleanup_settings),
                             cleanup_options,
                             result.pointer.clone(),
@@ -539,14 +556,16 @@ impl NyaTermApp {
     ) {
         let log_dir = self.runtime.log_dir().to_path_buf();
         let retention_days = self.settings.summary().diagnostics_retention_days;
-        let task = cx.background_spawn(async move {
-            if let Some(entry) = entry.as_ref() {
-                append_cloud_sync_history(&log_dir, entry)?;
-            }
-            read_cloud_sync_history(&log_dir, retention_days, CLOUD_SYNC_HISTORY_LIMIT)
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("cloud-sync-history", move |_| {
+                if let Some(entry) = entry.as_ref() {
+                    append_cloud_sync_history(&log_dir, entry)?;
+                }
+                read_cloud_sync_history(&log_dir, retention_days, CLOUD_SYNC_HISTORY_LIMIT)
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_result(task).await;
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(history) => this.cloud_sync.replace_history(history),
@@ -572,6 +591,7 @@ impl NyaTermApp {
 
 fn schedule_cloud_sync_cleanup(
     local_store: nyaterm_store::StoreBlockingClient,
+    scheduler: BlockingJobScheduler,
     settings: Option<CloudSyncSettings>,
     options: LocalCloudSyncOptions,
     latest: Option<RemoteSyncPointer>,
@@ -581,7 +601,7 @@ fn schedule_cloud_sync_cleanup(
         .as_ref()
         .map(configured_cloud_sync_provider)
         .unwrap_or_else(|| "local_directory".to_string());
-    let task = cx.background_spawn(async move {
+    let task = scheduler.submit_task("cloud-sync-cleanup", move |_| {
         if let Some(settings) = settings {
             cleanup_provider_snapshots(&local_store, &settings, &options, latest.as_ref())
         } else {
@@ -590,7 +610,7 @@ fn schedule_cloud_sync_cleanup(
         }
     });
     cx.spawn(async move |_, _| {
-        if task.await.is_err() {
+        if await_cloud_sync_job(task).await.is_err() {
             tracing::warn!(
                 provider = %provider,
                 "cloud sync snapshot cleanup failed after a successful sync"
@@ -598,4 +618,15 @@ fn schedule_cloud_sync_cleanup(
         }
     })
     .detach();
+}
+
+async fn await_cloud_sync_job<T>(
+    task: Result<JobTask<Result<T, CloudSyncError>>, JobRejected>,
+) -> Result<T, CloudSyncError> {
+    match task {
+        Ok(task) => task
+            .await
+            .map_err(|error| CloudSyncError::Remote(error.to_string()))?,
+        Err(error) => Err(CloudSyncError::Remote(error.to_string())),
+    }
 }

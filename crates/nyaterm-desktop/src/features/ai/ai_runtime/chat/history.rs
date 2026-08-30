@@ -1,7 +1,7 @@
-use gpui::{AppContext, Context};
+use gpui::Context;
 use nyaterm_store::StoreDomain;
 
-use crate::features::{NyaTermApp, formatting::compact_id};
+use crate::features::{NyaTermApp, formatting::compact_id, runtime_jobs::await_blocking_job};
 
 use super::super::super::ai_jobs::{ai_active_profile_drafts, ai_usage_counts};
 
@@ -16,13 +16,13 @@ impl NyaTermApp {
             return;
         };
         let store = self.store_blocking_client();
-        let task = cx.background_spawn(async move {
+        let task = self.blocking_jobs.submit_task("ai-history-list", move |_| {
             store
                 .request_fn(StoreDomain::Ai, |store| store.list_ai_sessions())
                 .map_err(|error| error.to_string())
         });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if this.ai.finish_history_session_list(job_id, result) {
                     this.defer_ai_panel_snapshot_flush(cx);
@@ -50,15 +50,17 @@ impl NyaTermApp {
         let source_session_id = self.ai.chat_session_id().to_string();
         let store = self.store_blocking_client();
         let job_session_id = session_id.clone();
-        let task = cx.background_spawn(async move {
-            store
-                .request_fn(StoreDomain::Ai, move |store| {
-                    store.list_ai_messages(&job_session_id)
-                })
-                .map_err(|error| error.to_string())
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("ai-history-messages", move |_| {
+                store
+                    .request_fn(StoreDomain::Ai, move |store| {
+                        store.list_ai_messages(&job_session_id)
+                    })
+                    .map_err(|error| error.to_string())
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 let loaded_status = format!("loaded AI session {}", compact_id(&session_id));
                 if this.ai.finish_history_message_load(
@@ -85,15 +87,17 @@ impl NyaTermApp {
         };
         let store = self.store_blocking_client();
         let job_session_id = session_id.clone();
-        let task = cx.background_spawn(async move {
-            store
-                .request_fn(StoreDomain::Ai, move |store| {
-                    store.delete_ai_session(&job_session_id)
-                })
-                .map_err(|error| error.to_string())
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("ai-history-delete", move |_| {
+                store
+                    .request_fn(StoreDomain::Ai, move |store| {
+                        store.delete_ai_session(&job_session_id)
+                    })
+                    .map_err(|error| error.to_string())
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if let Some(succeeded) =
                     this.ai
@@ -115,13 +119,15 @@ impl NyaTermApp {
         };
         let source_session_id = self.ai.chat_session_id().to_string();
         let store = self.store_blocking_client();
-        let task = cx.background_spawn(async move {
-            store
-                .request_fn(StoreDomain::Ai, |store| store.clear_ai_history())
-                .map_err(|error| error.to_string())
-        });
+        let task = self
+            .blocking_jobs
+            .submit_task("ai-history-clear", move |_| {
+                store
+                    .request_fn(StoreDomain::Ai, |store| store.clear_ai_history())
+                    .map_err(|error| error.to_string())
+            });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if let Some(succeeded) =
                     this.ai
@@ -149,13 +155,13 @@ impl NyaTermApp {
     pub(in crate::features) fn refresh_ai_usage_counts(&mut self, cx: &mut Context<Self>) {
         let job_id = self.ai.begin_history_usage_count_job();
         let store = self.store_blocking_client();
-        let task = cx.background_spawn(async move {
+        let task = self.blocking_jobs.submit_task("ai-usage-counts", move |_| {
             store
                 .request_fn(StoreDomain::Ai, |store| Ok(ai_usage_counts(store)))
                 .map_err(|error| error.to_string())
         });
         cx.spawn(async move |this, cx| {
-            let result = task.await;
+            let result = await_blocking_job(task).await.and_then(|result| result);
             let _ = this.update(cx, |this, cx| {
                 if this.ai.finish_history_usage_counts(job_id, result) {
                     this.defer_ai_panel_snapshot_flush(cx);

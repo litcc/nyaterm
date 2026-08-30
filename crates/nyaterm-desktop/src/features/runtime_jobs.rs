@@ -12,8 +12,25 @@ use nyaterm_transport::{
     SshSessionConfig, SshTunnelInfo,
 };
 
-use crate::blocking_jobs::BlockingJobScheduler;
+use crate::blocking_jobs::{BlockingJobScheduler, JobRejected, JobTask};
 use crate::models::SessionLaunchConfig;
+
+pub(in crate::features) async fn await_blocking_job<T>(
+    task: Result<JobTask<T>, JobRejected>,
+) -> Result<T, String> {
+    match task {
+        Ok(task) => task.await.map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+pub(in crate::features) async fn await_blocking_result<T, E: std::fmt::Display>(
+    task: Result<JobTask<Result<T, E>>, JobRejected>,
+) -> Result<T, String> {
+    await_blocking_job(task)
+        .await
+        .and_then(|result| result.map_err(|error| error.to_string()))
+}
 
 pub(in crate::features) struct SessionStartResult {
     pub(in crate::features) request_id: String,

@@ -1,14 +1,14 @@
 use rust_i18n::t;
 
 use gpui::{
-    AnyElement, AppContext, Context, FontWeight, KeyDownEvent, PathPromptOptions, SharedString,
-    Window, div, prelude::*, rgb,
+    AnyElement, Context, FontWeight, KeyDownEvent, PathPromptOptions, SharedString, Window, div,
+    prelude::*, rgb,
 };
 use nyaterm_store::ConnectionStore;
 use nyaterm_store::{BootstrapSnapshot, LoadBootstrap};
 use nyaterm_transport::SftpDuplicatePolicy;
 
-use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
+use crate::features::{NyaTermApp, runtime_jobs::await_blocking_job, text_inputs::TextInputSetup};
 use crate::models::{
     ConfigPathPromptKind, ConfigPathPromptResult, SnapshotPasswordPromptKind,
     TranslationSecretDraft,
@@ -396,6 +396,7 @@ impl NyaTermApp {
         let receiver = cx.prompt_for_new_path(&directory, Some("nyaterm-encrypted.nya"));
         let config_dir = self.runtime.config_dir().to_path_buf();
         let portable_key_path = self.runtime.portable_key_path().map(ToOwned::to_owned);
+        let scheduler = self.blocking_jobs.clone();
         self.shell
             .set_status("selecting encrypted portable snapshot destination".to_string());
         self.settings
@@ -403,7 +404,7 @@ impl NyaTermApp {
         cx.spawn(async move |this, cx| {
             let result = match receiver.await {
                 Ok(Ok(Some(path))) => {
-                    cx.background_spawn(async move {
+                    let task = scheduler.submit_task("portable-snapshot-export", move |_| {
                         match ConnectionStore::export_encrypted_portable_snapshot(
                             &config_dir,
                             portable_key_path,
@@ -415,8 +416,10 @@ impl NyaTermApp {
                             Ok(info) => ConfigPathPromptResult::Exported(info),
                             Err(error) => ConfigPathPromptResult::Failed(error.to_string()),
                         }
-                    })
-                    .await
+                    });
+                    await_blocking_job(task)
+                        .await
+                        .unwrap_or_else(ConfigPathPromptResult::Failed)
                 }
                 Ok(Ok(None)) => ConfigPathPromptResult::Cancelled,
                 Ok(Err(error)) => ConfigPathPromptResult::Failed(error.to_string()),
@@ -458,6 +461,7 @@ impl NyaTermApp {
         let receiver = cx.prompt_for_paths(options);
         let config_dir = self.runtime.config_dir().to_path_buf();
         let portable_key_path = self.runtime.portable_key_path().map(ToOwned::to_owned);
+        let scheduler = self.blocking_jobs.clone();
         self.shell
             .set_status("selecting encrypted portable snapshot to import".to_string());
         self.settings
@@ -466,7 +470,7 @@ impl NyaTermApp {
             let result = match receiver.await {
                 Ok(Ok(Some(paths))) => match paths.into_iter().next() {
                     Some(path) => {
-                        cx.background_spawn(async move {
+                        let task = scheduler.submit_task("portable-snapshot-import", move |_| {
                             match ConnectionStore::import_encrypted_portable_snapshot(
                                 &config_dir,
                                 portable_key_path,
@@ -476,8 +480,10 @@ impl NyaTermApp {
                                 Ok(info) => ConfigPathPromptResult::Imported(info),
                                 Err(error) => ConfigPathPromptResult::Failed(error.to_string()),
                             }
-                        })
-                        .await
+                        });
+                        await_blocking_job(task)
+                            .await
+                            .unwrap_or_else(ConfigPathPromptResult::Failed)
                     }
                     None => ConfigPathPromptResult::Cancelled,
                 },
