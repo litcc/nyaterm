@@ -176,16 +176,6 @@ impl NyaTermApp {
         let viewport_session_id = session_id.clone();
         let canvas = canvas(
             move |bounds, window, cx| {
-                if input_is_active {
-                    let visible_bounds = window.content_mask().bounds.intersect(&bounds);
-                    if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.) {
-                        window.handle_input(
-                            &input_focus,
-                            ElementInputHandler::new(visible_bounds, input_entity.clone()),
-                            cx,
-                        );
-                    }
-                }
                 let app = app.clone();
                 let session_id = viewport_session_id.clone();
                 window.defer(cx, move |_, cx| {
@@ -195,7 +185,18 @@ impl NyaTermApp {
                 });
                 remote_desktop_image_bounds(bounds, remote_size.0, remote_size.1, scale_mode)
             },
-            move |_, image_bounds, window, _| {
+            move |bounds, image_bounds, window, cx| {
+                if input_is_active {
+                    // GPUI input handlers must be registered during paint, not prepaint.
+                    let visible_bounds = window.content_mask().bounds.intersect(&bounds);
+                    if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.) {
+                        window.handle_input(
+                            &input_focus,
+                            ElementInputHandler::new(visible_bounds, input_entity),
+                            cx,
+                        );
+                    }
+                }
                 let _ = window.paint_dynamic_texture(image_bounds, texture);
                 if let (Some(cursor), Some(cursor_texture)) = (&cursor, cursor_texture)
                     && cursor.visible
