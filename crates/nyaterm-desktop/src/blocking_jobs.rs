@@ -41,6 +41,12 @@ pub enum JobOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobExecutionError {
+    Cancelled,
+    Failed(JobFailure),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobRejected {
     QueueFull,
     ShuttingDown,
@@ -83,6 +89,31 @@ pub struct JobHandle {
     id: u64,
     cancelled: Arc<AtomicBool>,
     outcome_rx: mpsc::Receiver<JobOutcome>,
+}
+
+pub struct JobTask<T> {
+    handle: JobHandle,
+    result_rx: mpsc::Receiver<T>,
+}
+
+impl<T> JobTask<T> {
+    pub fn id(&self) -> u64 {
+        self.handle.id()
+    }
+
+    pub fn cancel(&self) {
+        self.handle.cancel();
+    }
+
+    pub fn wait(self) -> Result<T, JobExecutionError> {
+        match self.result_rx.recv() {
+            Ok(result) => Ok(result),
+            Err(_) => match self.handle.wait() {
+                JobOutcome::Completed | JobOutcome::Cancelled => Err(JobExecutionError::Cancelled),
+                JobOutcome::Failed(failure) => Err(JobExecutionError::Failed(failure)),
+            },
+        }
+    }
 }
 
 impl JobHandle {
@@ -313,6 +344,19 @@ impl BlockingJobScheduler {
         self.submit(name, run).map(drop)
     }
 
+    pub fn submit_task<T: Send + 'static>(
+        &self,
+        name: &'static str,
+        run: impl FnOnce(CancellationToken) -> T + Send + 'static,
+    ) -> Result<JobTask<T>, JobRejected> {
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let handle = self.submit(name, move |cancel| {
+            let result = run(cancel);
+            let _ = result_tx.send(result);
+        })?;
+        Ok(JobTask { handle, result_rx })
+    }
+
     pub fn metrics(&self) -> SchedulerMetrics {
         self.inner.shared.metrics()
     }
@@ -371,7 +415,10 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use super::{BlockingJobScheduler, JobFailure, JobOutcome, JobRejected, SchedulerMetrics};
+    use super::{
+        BlockingJobScheduler, JobExecutionError, JobFailure, JobOutcome, JobRejected,
+        SchedulerMetrics,
+    };
 
     #[test]
     fn full_queue_rejects_without_running_the_extra_job() {
@@ -432,6 +479,24 @@ mod tests {
             .expect("next job");
         assert_eq!(after.wait(), JobOutcome::Completed);
         assert_eq!(scheduler.metrics().panicked, 1);
+        scheduler.shutdown();
+    }
+
+    #[test]
+    fn task_returns_typed_result_and_converts_panics() {
+        let scheduler = BlockingJobScheduler::with_limits(1, 2).expect("scheduler");
+        let completed = scheduler
+            .submit_task("test-result", |_| 42)
+            .expect("result job");
+        assert_eq!(completed.wait(), Ok(42));
+
+        let panicked = scheduler
+            .submit_task::<usize>("test-result-panic", |_| panic!("expected test panic"))
+            .expect("panic job");
+        assert_eq!(
+            panicked.wait(),
+            Err(JobExecutionError::Failed(JobFailure::Panicked))
+        );
         scheduler.shutdown();
     }
 
