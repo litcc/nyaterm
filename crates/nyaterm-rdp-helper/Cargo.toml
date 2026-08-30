@@ -15,6 +15,7 @@ anyhow.workspace = true
 ironrdp-client = { version = "0.1.0", features = ["clipboard", "rustls"] }
 ironrdp-cliprdr = "0.7"
 ironrdp-core = { version = "0.2", features = ["alloc"] }
+ironrdp-input.workspace = true
 ironrdp-pdu = "0.9"
 # Only for the certificate-validation policy types named by `ConfigBuilder`.
 # ironrdp-client does not re-export them.

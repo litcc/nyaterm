@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io;
 use std::io::{BufWriter, Write as _};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -14,15 +13,17 @@ use ironrdp_client::config::{ClipboardType, ConfigBuilder, Destination};
 use ironrdp_client::rdp::{
     AutoReconnectDecision, RdpClient, RdpInputEvent as IronInput, RdpInputSender, RdpOutputEvent,
 };
-use ironrdp_pdu::input::MousePdu;
+use ironrdp_input::{
+    Database as InputDatabase, MouseButton, MousePosition, Operation, Scancode, WheelRotations,
+};
 use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
-use ironrdp_pdu::input::mouse::PointerFlags;
 use ironrdp_pdu::rdp::capability_sets::MajorPlatformType;
 use nyaterm_remote_desktop::{
-    PROTOCOL_VERSION, Packet, PixelFormat, RDP_FRAMEBUFFER_LIMITS, RdpCapability,
-    RdpCertificateRequest, RdpCertificateResponse, RdpControlMessage, RdpCursorEvent, RdpError,
-    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpPointerButton, RdpServerCapabilities,
-    RdpSessionConfig, RdpSessionState, decode_control, encode_control, encode_cursor_packet,
+    CursorPosition, CursorShape, CursorVisibility, PROTOCOL_VERSION, Packet, PixelFormat,
+    RDP_FRAMEBUFFER_LIMITS, RdpCapability, RdpCertificateRequest, RdpCertificateResponse,
+    RdpControlMessage, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpServerCapabilities,
+    RdpSessionConfig, RdpSessionState, RemoteCursorEvent, RemotePoint, RemotePointerButton,
+    RemotePointerEvent, RemoteWheelAxis, decode_control, encode_control, encode_cursor_packet,
     encode_frame_packet_owned, read_packet, validate_committed_text,
     validate_framebuffer_dimensions, write_packet_into,
 };
@@ -49,13 +50,6 @@ struct CertificateGate {
     response: Mutex<Option<(String, RdpCertificateResponse)>>,
     changed: Condvar,
     waiting: AtomicBool,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct InputState {
-    pressed_keys: HashSet<(u8, bool)>,
-    pointer_x: u16,
-    pointer_y: u16,
 }
 
 fn validate_control_phase(message: &RdpControlMessage, hello_received: bool) -> anyhow::Result<()> {
@@ -140,7 +134,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
     let mut iron_input = None;
     let mut client_task = None;
     let mut output_task = None;
-    let mut input_state = InputState::default();
+    let mut input_state = InputDatabase::default();
     let mut clipboard_bridge = None;
     let mut hello_received = false;
     let mut active_session_id: Option<String> = None;
@@ -248,7 +242,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                 };
                 validate_input_events(&events)?;
                 for event in events {
-                    convert_and_send_input(sender, event, &mut input_state)?;
+                    convert_and_send_input(sender, event, &mut input_state).await?;
                 }
             }
             RdpControlMessage::SecureAttention { session_id } => {
@@ -271,8 +265,7 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
             }
             RdpControlMessage::Resize {
                 session_id,
-                width,
-                height,
+                metrics,
             } => {
                 validate_active_session_id(active_session_id.as_deref(), &session_id)?;
                 let Some(sender) = iron_input.as_ref() else {
@@ -285,15 +278,15 @@ async fn run(provider_error: Option<String>) -> anyhow::Result<()> {
                     )?;
                     continue;
                 };
-                let width = u16::try_from(width).unwrap_or(u16::MAX);
-                let height = u16::try_from(height).unwrap_or(u16::MAX);
+                let width = u16::try_from(metrics.width).unwrap_or(u16::MAX);
+                let height = u16::try_from(metrics.height).unwrap_or(u16::MAX);
                 send_iron_input(
                     sender,
                     IronInput::Resize {
                         width,
                         height,
-                        scale_factor: 100,
-                        physical_size: None,
+                        scale_factor: metrics.desktop_scale_factor,
+                        physical_size: metrics.physical_size_mm,
                     },
                 )?;
             }
@@ -609,17 +602,15 @@ async fn forward_output(
 ) {
     let mut epoch = 0u64;
     let mut connected = false;
-    let mut cursor = RdpCursorEvent {
-        epoch: 0,
-        visible: true,
-        x: 0,
-        y: 0,
+    let mut cursor_shape = CursorShape {
+        shape_id: 0,
         width: 0,
         height: 0,
-        hotspot_x: 0,
-        hotspot_y: 0,
+        hotspot: RemotePoint { x: 0, y: 0 },
         pixels: Vec::new(),
     };
+    let mut cursor_position = CursorPosition::default();
+    let mut cursor_visible = true;
     let connection_deadline = tokio::time::sleep(connection_timeout);
     tokio::pin!(connection_deadline);
     loop {
@@ -687,7 +678,6 @@ async fn forward_output(
                     return;
                 }
                 epoch = epoch.wrapping_add(1);
-                cursor.epoch = epoch;
                 let reset = output_tx.send(Outbound::Control(RdpControlMessage::DesktopReset {
                     session_id: session_id.clone(),
                     epoch,
@@ -702,7 +692,25 @@ async fn forward_output(
                         message: None,
                     }));
                 }
-                reset.map_err(|_| ())
+                reset.map_err(|_| ()).and_then(|()| {
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Shape(cursor_shape.clone()),
+                    )?;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Position(cursor_position),
+                    )?;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Visibility(CursorVisibility {
+                            visible: cursor_visible,
+                        }),
+                    )
+                })
             }
             RdpOutputEvent::ImageRegion {
                 buffer,
@@ -744,31 +752,89 @@ async fn forward_output(
                     capability: RdpCapability::DynamicResizeUnavailable,
                 }))
                 .map_err(|_| ()),
-            RdpOutputEvent::PointerDefault => {
-                cursor.visible = true;
-                cursor.width = 0;
-                cursor.height = 0;
-                cursor.pixels.clear();
-                send_cursor(&output_tx, &session_id, &cursor).map_err(|_| ())
-            }
-            RdpOutputEvent::PointerHidden => {
-                cursor.visible = false;
-                send_cursor(&output_tx, &session_id, &cursor).map_err(|_| ())
-            }
-            RdpOutputEvent::PointerPosition { x, y } => {
-                cursor.x = u32::from(x);
-                cursor.y = u32::from(y);
-                send_cursor(&output_tx, &session_id, &cursor).map_err(|_| ())
-            }
-            RdpOutputEvent::PointerBitmap(pointer) => {
-                cursor.visible = true;
-                cursor.width = u32::from(pointer.width);
-                cursor.height = u32::from(pointer.height);
-                cursor.hotspot_x = u32::from(pointer.hotspot_x);
-                cursor.hotspot_y = u32::from(pointer.hotspot_y);
-                cursor.pixels = rgba_to_bgra(pointer.bitmap_data.clone());
-                send_cursor(&output_tx, &session_id, &cursor).map_err(|_| ())
-            }
+            RdpOutputEvent::PointerDefault => (|| {
+                if cursor_shape.width != 0 || cursor_shape.height != 0 {
+                    cursor_shape.shape_id = cursor_shape.shape_id.wrapping_add(1);
+                    cursor_shape.width = 0;
+                    cursor_shape.height = 0;
+                    cursor_shape.hotspot = RemotePoint { x: 0, y: 0 };
+                    cursor_shape.pixels.clear();
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Shape(cursor_shape.clone()),
+                    )?;
+                }
+                if !cursor_visible {
+                    cursor_visible = true;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Visibility(CursorVisibility { visible: true }),
+                    )?;
+                }
+                Ok(())
+            })(),
+            RdpOutputEvent::PointerHidden => (|| {
+                if cursor_visible {
+                    cursor_visible = false;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Visibility(CursorVisibility { visible: false }),
+                    )?;
+                }
+                Ok(())
+            })(),
+            RdpOutputEvent::PointerPosition { x, y } => (|| {
+                let position = CursorPosition {
+                    x: u32::from(x),
+                    y: u32::from(y),
+                };
+                if cursor_position != position {
+                    cursor_position = position;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Position(position),
+                    )?;
+                }
+                Ok(())
+            })(),
+            RdpOutputEvent::PointerBitmap(pointer) => (|| {
+                let pixels = rgba_to_bgra(pointer.bitmap_data.clone());
+                let width = u32::from(pointer.width);
+                let height = u32::from(pointer.height);
+                let hotspot = RemotePoint {
+                    x: u32::from(pointer.hotspot_x),
+                    y: u32::from(pointer.hotspot_y),
+                };
+                if cursor_shape.width != width
+                    || cursor_shape.height != height
+                    || cursor_shape.hotspot != hotspot
+                    || cursor_shape.pixels != pixels
+                {
+                    cursor_shape.shape_id = cursor_shape.shape_id.wrapping_add(1);
+                    cursor_shape.width = width;
+                    cursor_shape.height = height;
+                    cursor_shape.hotspot = hotspot;
+                    cursor_shape.pixels = pixels;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Shape(cursor_shape.clone()),
+                    )?;
+                }
+                if !cursor_visible {
+                    cursor_visible = true;
+                    send_cursor(
+                        &output_tx,
+                        &session_id,
+                        &RemoteCursorEvent::Visibility(CursorVisibility { visible: true }),
+                    )?;
+                }
+                Ok(())
+            })(),
             RdpOutputEvent::ConnectionFailure(error) => output_tx
                 .send(Outbound::Control(RdpControlMessage::Error {
                     session_id: session_id.clone(),
@@ -871,34 +937,36 @@ fn validate_input_events(events: &[RdpInputEvent]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn convert_and_send_input(
+async fn convert_and_send_input(
     sender: &RdpInputSender,
     event: RdpInputEvent,
-    state: &mut InputState,
+    state: &mut InputDatabase,
 ) -> anyhow::Result<()> {
-    let mut staged = state.clone();
-    let Some(batch) = convert_input(event, &mut staged) else {
+    let reliable = !matches!(
+        event,
+        RdpInputEvent::Pointer(RemotePointerEvent::Move { .. })
+    );
+    let Some(batch) = convert_input(event, state) else {
         return Ok(());
     };
-    if send_iron_input(sender, IronInput::FastPath(batch))? {
-        *state = staged;
+    let input = IronInput::FastPath(batch);
+    if reliable {
+        send_reliable_iron_input(sender, input).await?;
+    } else {
+        let _ = send_iron_input(sender, input)?;
     }
     Ok(())
 }
 
-fn secure_attention_input(state: &InputState) -> SmallVec<[FastPathInputEvent; 2]> {
+fn secure_attention_input(state: &InputDatabase) -> SmallVec<[FastPathInputEvent; 2]> {
     const CTRL: u8 = 0x1d;
     const ALT: u8 = 0x38;
     const DELETE: u8 = 0x53;
 
-    let ctrl_held = state
-        .pressed_keys
-        .iter()
-        .any(|(scan_code, _)| *scan_code == CTRL);
-    let alt_held = state
-        .pressed_keys
-        .iter()
-        .any(|(scan_code, _)| *scan_code == ALT);
+    let ctrl_held = state.is_key_pressed(Scancode::from_u8(false, CTRL))
+        || state.is_key_pressed(Scancode::from_u8(true, CTRL));
+    let alt_held = state.is_key_pressed(Scancode::from_u8(false, ALT))
+        || state.is_key_pressed(Scancode::from_u8(true, ALT));
     let mut events = SmallVec::new();
     if !ctrl_held {
         events.push(FastPathInputEvent::KeyboardEvent(
@@ -938,7 +1006,7 @@ fn secure_attention_input(state: &InputState) -> SmallVec<[FastPathInputEvent; 2
 fn send_cursor(
     output_tx: &mpsc::SyncSender<Outbound>,
     session_id: &str,
-    cursor: &RdpCursorEvent,
+    cursor: &RemoteCursorEvent,
 ) -> Result<(), ()> {
     match encode_cursor_packet(session_id, cursor) {
         Ok(packet) => output_tx.send(Outbound::Packet(packet)).map_err(|_| ()),
@@ -955,23 +1023,16 @@ fn rgba_to_bgra(mut pixels: Vec<u8>) -> Vec<u8> {
 
 fn convert_input(
     event: RdpInputEvent,
-    state: &mut InputState,
+    state: &mut InputDatabase,
 ) -> Option<SmallVec<[FastPathInputEvent; 2]>> {
-    let mut result = SmallVec::new();
-    match event {
+    let operations = match event {
         RdpInputEvent::KeyDown {
             scan_code,
             extended,
             ..
         } => {
             let code = u8::try_from(scan_code).ok()?;
-            state.pressed_keys.insert((code, extended));
-            let flags = if extended {
-                KeyboardFlags::EXTENDED
-            } else {
-                KeyboardFlags::empty()
-            };
-            result.push(FastPathInputEvent::KeyboardEvent(flags, code));
+            vec![Operation::KeyPressed(Scancode::from_u8(extended, code))]
         }
         RdpInputEvent::KeyUp {
             scan_code,
@@ -979,74 +1040,60 @@ fn convert_input(
             ..
         } => {
             let code = u8::try_from(scan_code).ok()?;
-            state.pressed_keys.remove(&(code, extended));
-            let mut flags = KeyboardFlags::RELEASE;
-            if extended {
-                flags |= KeyboardFlags::EXTENDED;
-            }
-            result.push(FastPathInputEvent::KeyboardEvent(flags, code));
+            vec![Operation::KeyReleased(Scancode::from_u8(extended, code))]
         }
         RdpInputEvent::Unicode { text } => {
-            for unit in text.encode_utf16() {
-                result.push(FastPathInputEvent::UnicodeKeyboardEvent(
-                    KeyboardFlags::empty(),
-                    unit,
-                ));
-                result.push(FastPathInputEvent::UnicodeKeyboardEvent(
-                    KeyboardFlags::RELEASE,
-                    unit,
-                ));
+            let mut operations = Vec::with_capacity(text.chars().count() * 2);
+            for character in text.chars() {
+                operations.push(Operation::UnicodeKeyPressed(character));
+                operations.push(Operation::UnicodeKeyReleased(character));
             }
+            operations
         }
-        RdpInputEvent::Pointer {
-            x,
-            y,
-            button,
-            pressed,
-        } => {
-            state.pointer_x = u16::try_from(x).unwrap_or(u16::MAX);
-            state.pointer_y = u16::try_from(y).unwrap_or(u16::MAX);
-            let mut flags = PointerFlags::MOVE;
-            let mut wheel = 0;
-            match button {
-                Some(RdpPointerButton::Left) => flags |= PointerFlags::LEFT_BUTTON,
-                Some(RdpPointerButton::Middle) => flags |= PointerFlags::MIDDLE_BUTTON_OR_WHEEL,
-                Some(RdpPointerButton::Right) => flags |= PointerFlags::RIGHT_BUTTON,
-                Some(RdpPointerButton::WheelUp) => {
-                    flags |= PointerFlags::VERTICAL_WHEEL;
-                    wheel = 120;
-                }
-                Some(RdpPointerButton::WheelDown) => {
-                    flags |= PointerFlags::VERTICAL_WHEEL;
-                    wheel = -120;
-                }
-                None => {}
-            }
-            if pressed
-                && !matches!(
+        RdpInputEvent::Pointer(pointer) => {
+            let (position, operation) = match pointer {
+                RemotePointerEvent::Move { position } => (position, None),
+                RemotePointerEvent::Button {
+                    position,
                     button,
-                    Some(RdpPointerButton::WheelUp | RdpPointerButton::WheelDown)
-                )
-            {
-                flags |= PointerFlags::DOWN;
-            }
-            result.push(FastPathInputEvent::MouseEvent(MousePdu {
-                flags,
-                number_of_wheel_rotation_units: wheel,
-                x_position: state.pointer_x,
-                y_position: state.pointer_y,
-            }));
-        }
-        RdpInputEvent::ReleaseAllKeys => {
-            for (code, extended) in state.pressed_keys.drain() {
-                let mut flags = KeyboardFlags::RELEASE;
-                if extended {
-                    flags |= KeyboardFlags::EXTENDED;
+                    pressed,
+                } => {
+                    let button = match button {
+                        RemotePointerButton::Left => MouseButton::Left,
+                        RemotePointerButton::Middle => MouseButton::Middle,
+                        RemotePointerButton::Right => MouseButton::Right,
+                        RemotePointerButton::X1 => MouseButton::X1,
+                        RemotePointerButton::X2 => MouseButton::X2,
+                    };
+                    let operation = if pressed {
+                        Operation::MouseButtonPressed(button)
+                    } else {
+                        Operation::MouseButtonReleased(button)
+                    };
+                    (position, Some(operation))
                 }
-                result.push(FastPathInputEvent::KeyboardEvent(flags, code));
-            }
+                RemotePointerEvent::Wheel {
+                    position,
+                    axis,
+                    rotation_units,
+                } => (
+                    position,
+                    Some(Operation::WheelRotations(WheelRotations {
+                        is_vertical: matches!(axis, RemoteWheelAxis::Vertical),
+                        rotation_units,
+                    })),
+                ),
+            };
+            let mut operations = vec![Operation::MouseMove(MousePosition {
+                x: u16::try_from(position.x).unwrap_or(u16::MAX),
+                y: u16::try_from(position.y).unwrap_or(u16::MAX),
+            })];
+            operations.extend(operation);
+            operations
         }
-    }
+        RdpInputEvent::ReleaseAllInputs => return Some(state.release_all()),
+    };
+    let result = state.apply(operations);
     (!result.is_empty()).then_some(result)
 }
 
@@ -1137,15 +1184,21 @@ mod tests {
     use std::time::Duration;
 
     use ironrdp_client::rdp::{RdpInputEvent as IronInput, RdpInputSender, RdpOutputEvent};
+    use ironrdp_input::{Database as InputDatabase, Operation, Scancode};
     use ironrdp_pdu::input::fast_path::{FastPathInputEvent, KeyboardFlags};
-    use nyaterm_remote_desktop::{RdpControlMessage, RdpErrorKind, RdpInputEvent};
+    use ironrdp_pdu::input::mouse::PointerFlags;
+    use ironrdp_pdu::input::mouse_x::PointerXFlags;
+    use nyaterm_remote_desktop::{
+        RdpControlMessage, RdpErrorKind, RdpInputEvent, RemotePoint, RemotePointerButton,
+        RemotePointerEvent, RemoteWheelAxis,
+    };
     use tokio::sync::mpsc as tokio_mpsc;
 
     use super::{
-        CertificateGate, InputState, Outbound, classify_error, convert_and_send_input,
-        convert_input, forward_output, install_crypto_provider, report_ironrdp_panic,
-        secure_attention_input, send_iron_input, send_reliable_iron_input,
-        validate_active_session_id, validate_input_events,
+        CertificateGate, Outbound, classify_error, convert_and_send_input, convert_input,
+        forward_output, install_crypto_provider, report_ironrdp_panic, secure_attention_input,
+        send_iron_input, send_reliable_iron_input, validate_active_session_id,
+        validate_input_events,
     };
 
     #[test]
@@ -1258,7 +1311,7 @@ mod tests {
         ];
         assert!(validate_input_events(&events).is_err());
 
-        let mut state = InputState::default();
+        let mut state = InputDatabase::default();
         let converted = convert_input(
             RdpInputEvent::Unicode {
                 text: "A😀".to_string(),
@@ -1266,22 +1319,24 @@ mod tests {
             &mut state,
         )
         .expect("non-empty committed text");
-        let units = [0x0041, 0xd83d, 0xde00];
-        assert_eq!(converted.len(), units.len() * 2);
-        for (pair, expected_unit) in converted.as_chunks::<2>().0.iter().zip(units) {
-            let [
-                FastPathInputEvent::UnicodeKeyboardEvent(down_flags, down_unit),
-                FastPathInputEvent::UnicodeKeyboardEvent(up_flags, up_unit),
-            ] = pair
-            else {
-                panic!("expected Unicode press/release pair");
+        let expected = [
+            (KeyboardFlags::empty(), 0x0041),
+            (KeyboardFlags::RELEASE, 0x0041),
+            (KeyboardFlags::empty(), 0xd83d),
+            (KeyboardFlags::empty(), 0xde00),
+            (KeyboardFlags::RELEASE, 0xd83d),
+            (KeyboardFlags::RELEASE, 0xde00),
+        ];
+        assert_eq!(converted.len(), expected.len());
+        for (event, (expected_flags, expected_unit)) in converted.iter().zip(expected) {
+            let FastPathInputEvent::UnicodeKeyboardEvent(flags, unit) = event else {
+                panic!("expected Unicode keyboard event");
             };
-            assert!(down_flags.is_empty());
-            assert_eq!(*down_unit, expected_unit);
-            assert_eq!(*up_flags, KeyboardFlags::RELEASE);
-            assert_eq!(*up_unit, expected_unit);
+            assert_eq!(*flags, expected_flags);
+            assert_eq!(*unit, expected_unit);
         }
-        assert_eq!(state, InputState::default());
+        assert!(!state.is_unicode_key_pressed('A'));
+        assert!(!state.is_unicode_key_pressed('😀'));
     }
 
     fn assert_keyboard_batch(batch: &[FastPathInputEvent], expected: &[(KeyboardFlags, u8)]) {
@@ -1297,7 +1352,7 @@ mod tests {
 
     #[test]
     fn secure_attention_is_one_ordered_fast_path_batch() {
-        let state = InputState::default();
+        let state = InputDatabase::default();
         let batch = secure_attention_input(&state);
         assert_keyboard_batch(
             &batch,
@@ -1310,14 +1365,13 @@ mod tests {
                 (KeyboardFlags::RELEASE, 0x1d),
             ],
         );
-        assert_eq!(state, InputState::default());
+        assert!(!state.is_key_pressed(Scancode::from_u8(false, 0x1d)));
     }
 
     #[test]
     fn secure_attention_reuses_held_ctrl_and_preserves_state() {
-        let mut state = InputState::default();
-        state.pressed_keys.insert((0x1d, true));
-        let original = state.clone();
+        let mut state = InputDatabase::default();
+        let _ = state.apply([Operation::KeyPressed(Scancode::from_u8(true, 0x1d))]);
 
         let batch = secure_attention_input(&state);
 
@@ -1330,14 +1384,13 @@ mod tests {
                 (KeyboardFlags::RELEASE, 0x38),
             ],
         );
-        assert_eq!(state, original);
+        assert!(state.is_key_pressed(Scancode::from_u8(true, 0x1d)));
     }
 
     #[test]
     fn secure_attention_reuses_held_alt_and_preserves_state() {
-        let mut state = InputState::default();
-        state.pressed_keys.insert((0x38, true));
-        let original = state.clone();
+        let mut state = InputDatabase::default();
+        let _ = state.apply([Operation::KeyPressed(Scancode::from_u8(true, 0x38))]);
 
         let batch = secure_attention_input(&state);
 
@@ -1350,15 +1403,16 @@ mod tests {
                 (KeyboardFlags::RELEASE, 0x1d),
             ],
         );
-        assert_eq!(state, original);
+        assert!(state.is_key_pressed(Scancode::from_u8(true, 0x38)));
     }
 
     #[test]
     fn secure_attention_reuses_both_held_modifiers_and_preserves_state() {
-        let mut state = InputState::default();
-        state.pressed_keys.insert((0x1d, false));
-        state.pressed_keys.insert((0x38, true));
-        let original = state.clone();
+        let mut state = InputDatabase::default();
+        let _ = state.apply([
+            Operation::KeyPressed(Scancode::from_u8(false, 0x1d)),
+            Operation::KeyPressed(Scancode::from_u8(true, 0x38)),
+        ]);
 
         let batch = secure_attention_input(&state);
 
@@ -1369,14 +1423,15 @@ mod tests {
                 (KeyboardFlags::EXTENDED | KeyboardFlags::RELEASE, 0x53),
             ],
         );
-        assert_eq!(state, original);
+        assert!(state.is_key_pressed(Scancode::from_u8(false, 0x1d)));
+        assert!(state.is_key_pressed(Scancode::from_u8(true, 0x38)));
     }
 
     #[tokio::test]
     async fn secure_attention_waits_for_full_queue_and_eventually_enqueues() {
         let (sender, mut receiver) = RdpInputSender::channel(1);
         assert!(send_iron_input(&sender, IronInput::RequestFullFrame).unwrap());
-        let batch = secure_attention_input(&InputState::default());
+        let batch = secure_attention_input(&InputDatabase::default());
         let enqueue_sender = sender.clone();
         let enqueue = tokio::spawn(async move {
             send_reliable_iron_input(&enqueue_sender, IronInput::FastPath(batch)).await
@@ -1417,7 +1472,7 @@ mod tests {
 
         let error = send_reliable_iron_input(
             &sender,
-            IronInput::FastPath(secure_attention_input(&InputState::default())),
+            IronInput::FastPath(secure_attention_input(&InputDatabase::default())),
         )
         .await
         .expect_err("closed queue must reject Secure Attention");
@@ -1425,46 +1480,43 @@ mod tests {
         assert_eq!(error.to_string(), "IronRDP input channel closed");
     }
 
-    #[test]
-    fn full_input_queue_does_not_commit_ordinary_pressed_state() {
+    #[tokio::test]
+    async fn reliable_key_release_waits_for_capacity_and_updates_state() {
         let (sender, mut receiver) = RdpInputSender::channel(1);
         assert!(send_iron_input(&sender, IronInput::RequestFullFrame).unwrap());
 
-        let mut state = InputState::default();
-        state.pressed_keys.insert((0x1d, false));
-        let original = state.clone();
-        convert_and_send_input(
-            &sender,
-            RdpInputEvent::KeyUp {
-                scan_code: 0x1d,
-                extended: false,
-                repeat: false,
-            },
-            &mut state,
-        )
-        .unwrap();
-        assert_eq!(state, original);
-
+        let mut state = InputDatabase::default();
+        let _ = state.apply([Operation::KeyPressed(Scancode::from_u8(false, 0x1d))]);
+        {
+            let release = convert_and_send_input(
+                &sender,
+                RdpInputEvent::KeyUp {
+                    scan_code: 0x1d,
+                    extended: false,
+                    repeat: false,
+                },
+                &mut state,
+            );
+            tokio::pin!(release);
+            tokio::select! {
+                _ = &mut release => panic!("release must wait while the queue is full"),
+                _ = tokio::task::yield_now() => {}
+            }
+            assert!(matches!(
+                receiver.recv().await,
+                Some(IronInput::RequestFullFrame)
+            ));
+            release.await.unwrap();
+        }
+        assert!(!state.is_key_pressed(Scancode::from_u8(false, 0x1d)));
         assert!(matches!(
-            receiver.try_recv().unwrap(),
-            IronInput::RequestFullFrame
+            receiver.recv().await,
+            Some(IronInput::FastPath(_))
         ));
-        convert_and_send_input(
-            &sender,
-            RdpInputEvent::KeyUp {
-                scan_code: 0x1d,
-                extended: false,
-                repeat: false,
-            },
-            &mut state,
-        )
-        .unwrap();
-        assert!(state.pressed_keys.is_empty());
 
         let (closed_sender, closed_receiver) = RdpInputSender::channel(1);
         drop(closed_receiver);
-        state.pressed_keys.insert((0x38, false));
-        let original = state.clone();
+        let _ = state.apply([Operation::KeyPressed(Scancode::from_u8(false, 0x38))]);
         assert!(
             convert_and_send_input(
                 &closed_sender,
@@ -1475,8 +1527,76 @@ mod tests {
                 },
                 &mut state,
             )
+            .await
             .is_err()
         );
-        assert_eq!(state, original);
+    }
+
+    #[test]
+    fn pointer_buttons_wheels_and_extended_buttons_are_distinct_from_move() {
+        let position = RemotePoint { x: 40, y: 50 };
+        let mut state = InputDatabase::default();
+        let movement = convert_input(
+            RdpInputEvent::Pointer(RemotePointerEvent::Move { position }),
+            &mut state,
+        )
+        .unwrap();
+        let [FastPathInputEvent::MouseEvent(movement)] = movement.as_slice() else {
+            panic!("expected one pointer move");
+        };
+        assert_eq!(movement.flags, PointerFlags::MOVE);
+
+        let button = convert_input(
+            RdpInputEvent::Pointer(RemotePointerEvent::Button {
+                position,
+                button: RemotePointerButton::Left,
+                pressed: true,
+            }),
+            &mut state,
+        )
+        .unwrap();
+        let [FastPathInputEvent::MouseEvent(button)] = button.as_slice() else {
+            panic!("expected one pointer button event");
+        };
+        assert!(
+            button
+                .flags
+                .contains(PointerFlags::LEFT_BUTTON | PointerFlags::DOWN)
+        );
+        assert!(!button.flags.contains(PointerFlags::MOVE));
+
+        let wheel = convert_input(
+            RdpInputEvent::Pointer(RemotePointerEvent::Wheel {
+                position,
+                axis: RemoteWheelAxis::Horizontal,
+                rotation_units: -120,
+            }),
+            &mut state,
+        )
+        .unwrap();
+        let [FastPathInputEvent::MouseEvent(wheel)] = wheel.as_slice() else {
+            panic!("expected one wheel event");
+        };
+        assert!(wheel.flags.contains(PointerFlags::HORIZONTAL_WHEEL));
+        assert!(!wheel.flags.contains(PointerFlags::MOVE));
+        assert_eq!(wheel.number_of_wheel_rotation_units, -120);
+
+        let extended = convert_input(
+            RdpInputEvent::Pointer(RemotePointerEvent::Button {
+                position,
+                button: RemotePointerButton::X1,
+                pressed: true,
+            }),
+            &mut state,
+        )
+        .unwrap();
+        let [FastPathInputEvent::MouseEventEx(extended)] = extended.as_slice() else {
+            panic!("expected one extended pointer event");
+        };
+        assert!(
+            extended
+                .flags
+                .contains(PointerXFlags::BUTTON1 | PointerXFlags::DOWN)
+        );
     }
 }

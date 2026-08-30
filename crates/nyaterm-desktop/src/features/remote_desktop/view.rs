@@ -4,18 +4,18 @@ use std::borrow::Cow;
 
 use gpui::{
     Bounds, Context, ElementInputHandler, FontWeight, IntoElement, KeyDownEvent, KeyUpEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
-    ScrollWheelEvent, SharedString, Size, canvas, div, prelude::*, px, rgb,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, Point,
+    ScrollDelta, ScrollWheelEvent, SharedString, Size, canvas, div, prelude::*, px, rgb,
 };
 use nyaterm_remote_desktop::{
-    CertificatePromptReason, RdpCertificateResponse, RdpPointerButton, RdpSessionState,
-    VncScaleMode,
+    CertificatePromptReason, DisplayScaleMode, DisplayTransform, LogicalPoint, LogicalRect,
+    LogicalSize, RdpCertificateResponse, RdpPointerButton, RemoteDesktopViewState, VncScaleMode,
 };
 
 use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
-use super::runtime::{format_rdp_error, secure_attention_available};
+use super::runtime::{format_remote_desktop_error, secure_attention_available};
 use super::state::RdpCertificatePrompt;
 
 impl NyaTermApp {
@@ -47,7 +47,7 @@ impl NyaTermApp {
                 .into_any_element();
         }
         if let Some(error) = session.error.clone()
-            && matches!(session.state, RdpSessionState::Failed(_))
+            && matches!(session.state, RemoteDesktopViewState::Failed)
         {
             let retry_id = session_id.clone();
             let close_id = session_id.clone();
@@ -73,7 +73,7 @@ impl NyaTermApp {
                         .text_center()
                         .text_size(px(12.))
                         .text_color(rgb(palette.text_dimmed))
-                        .child(format_rdp_error(&error)),
+                        .child(format_remote_desktop_error(&error)),
                 )
                 .child(
                     div()
@@ -99,7 +99,7 @@ impl NyaTermApp {
                 )
                 .into_any_element();
         }
-        if matches!(session.state, RdpSessionState::Disconnected) {
+        if matches!(session.state, RemoteDesktopViewState::Disconnected) {
             let retry_id = session_id.clone();
             let close_id = session_id.clone();
             return div()
@@ -144,11 +144,11 @@ impl NyaTermApp {
         let (Some(framebuffer), Some(texture)) = (session.framebuffer.as_ref(), session.texture)
         else {
             let detail = match session.state {
-                RdpSessionState::Connecting => t!("remoteDesktop.connecting"),
-                RdpSessionState::Disconnecting => {
+                RemoteDesktopViewState::Connecting => t!("remoteDesktop.connecting"),
+                RemoteDesktopViewState::Disconnecting => {
                     Cow::Borrowed("Disconnecting Remote Desktop session...")
                 }
-                RdpSessionState::Disconnected => {
+                RemoteDesktopViewState::Disconnected => {
                     Cow::Borrowed("Remote Desktop session is disconnected.")
                 }
                 _ => t!("remoteDesktop.waitingFrame"),
@@ -166,7 +166,9 @@ impl NyaTermApp {
                 _ => None,
             })
             .unwrap_or(VncScaleMode::Fit);
-        let cursor = session.cursor.clone();
+        let cursor_shape = session.cursor_shape.clone();
+        let cursor_position = session.cursor_position;
+        let cursor_visible = session.cursor_visible;
         let cursor_texture = session.cursor_texture;
         let app = cx.entity();
         let input_entity = app.clone();
@@ -174,53 +176,59 @@ impl NyaTermApp {
         let input_focus = surface_focus.clone();
         let input_is_active = self.session.active_id() == Some(session_id.as_str());
         let viewport_session_id = session_id.clone();
-        let canvas = canvas(
-            move |bounds, window, cx| {
-                let app = app.clone();
-                let session_id = viewport_session_id.clone();
-                window.defer(cx, move |_, cx| {
-                    app.update(cx, |this, _| {
-                        this.update_rdp_viewport(&session_id, bounds);
+        let canvas =
+            canvas(
+                move |bounds, window, cx| {
+                    let app = app.clone();
+                    let session_id = viewport_session_id.clone();
+                    let scale_factor = window.scale_factor();
+                    window.defer(cx, move |_, cx| {
+                        app.update(cx, |this, _| {
+                            this.update_rdp_viewport(&session_id, bounds, scale_factor);
+                        });
                     });
-                });
-                remote_desktop_image_bounds(bounds, remote_size.0, remote_size.1, scale_mode)
-            },
-            move |bounds, image_bounds, window, cx| {
-                if input_is_active {
-                    // GPUI input handlers must be registered during paint, not prepaint.
-                    let visible_bounds = window.content_mask().bounds.intersect(&bounds);
-                    if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.) {
-                        window.handle_input(
-                            &input_focus,
-                            ElementInputHandler::new(visible_bounds, input_entity),
-                            cx,
-                        );
+                    remote_desktop_image_bounds(bounds, remote_size.0, remote_size.1, scale_mode)
+                },
+                move |bounds, image_bounds, window, cx| {
+                    if input_is_active {
+                        // GPUI input handlers must be registered during paint, not prepaint.
+                        let visible_bounds = window.content_mask().bounds.intersect(&bounds);
+                        if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.)
+                        {
+                            window.handle_input(
+                                &input_focus,
+                                ElementInputHandler::new(visible_bounds, input_entity),
+                                cx,
+                            );
+                        }
                     }
-                }
-                let _ = window.paint_dynamic_texture(image_bounds, texture);
-                if let (Some(cursor), Some(cursor_texture)) = (&cursor, cursor_texture)
-                    && cursor.visible
-                    && remote_size.0 > 0
-                    && remote_size.1 > 0
-                {
-                    let scale = f32::from(image_bounds.size.width) / remote_size.0 as f32;
-                    let cursor_bounds = Bounds::new(
-                        Point::new(
-                            image_bounds.origin.x
-                                + px((cursor.x as f32 - cursor.hotspot_x as f32) * scale),
-                            image_bounds.origin.y
-                                + px((cursor.y as f32 - cursor.hotspot_y as f32) * scale),
-                        ),
-                        Size::new(
-                            px(cursor.width as f32 * scale),
-                            px(cursor.height as f32 * scale),
-                        ),
-                    );
-                    let _ = window.paint_dynamic_texture(cursor_bounds, cursor_texture);
-                }
-            },
-        )
-        .size_full();
+                    let _ = window.paint_dynamic_texture(image_bounds, texture);
+                    if let (Some(cursor), Some(cursor_texture)) = (&cursor_shape, cursor_texture)
+                        && cursor_visible
+                        && remote_size.0 > 0
+                        && remote_size.1 > 0
+                    {
+                        let scale_x = f32::from(image_bounds.size.width) / remote_size.0 as f32;
+                        let scale_y = f32::from(image_bounds.size.height) / remote_size.1 as f32;
+                        let cursor_bounds = Bounds::new(
+                            Point::new(
+                                image_bounds.origin.x
+                                    + px((cursor_position.x as f32 - cursor.hotspot.x as f32)
+                                        * scale_x),
+                                image_bounds.origin.y
+                                    + px((cursor_position.y as f32 - cursor.hotspot.y as f32)
+                                        * scale_y),
+                            ),
+                            Size::new(
+                                px(cursor.width as f32 * scale_x),
+                                px(cursor.height as f32 * scale_y),
+                            ),
+                        );
+                        let _ = window.paint_dynamic_texture(cursor_bounds, cursor_texture);
+                    }
+                },
+            )
+            .size_full();
 
         let move_id = session_id.clone();
         let left_down_id = session_id.clone();
@@ -229,6 +237,13 @@ impl NyaTermApp {
         let left_up_id = session_id.clone();
         let right_up_id = session_id.clone();
         let middle_up_id = session_id.clone();
+        let left_up_out_id = session_id.clone();
+        let right_up_out_id = session_id.clone();
+        let middle_up_out_id = session_id.clone();
+        let back_down_id = session_id.clone();
+        let forward_down_id = session_id.clone();
+        let back_up_id = session_id.clone();
+        let forward_up_id = session_id.clone();
         let scroll_id = session_id.clone();
         let key_down_id = session_id.clone();
         let key_up_id = session_id.clone();
@@ -260,11 +275,13 @@ impl NyaTermApp {
             .on_key_up(cx.listener(move |this, event: &KeyUpEvent, _, cx| {
                 if this.send_rdp_key_up(&key_up_id, &event.keystroke.key) {
                     cx.stop_propagation();
+                    this.mark_user_activity();
                 }
             }))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
                 if this.send_rdp_pointer(&move_id, event.position, None, false) {
                     cx.stop_propagation();
+                    this.mark_user_activity();
                 }
             }))
             .on_mouse_down(
@@ -272,12 +289,14 @@ impl NyaTermApp {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(this.remote_desktop.focus(), cx);
                     this.activate_workspace_pane(left_down_id.clone(), cx);
-                    let _ = this.send_rdp_pointer(
+                    if this.send_rdp_pointer(
                         &left_down_id,
                         event.position,
                         Some(RdpPointerButton::Left),
                         true,
-                    );
+                    ) {
+                        this.mark_user_activity();
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -286,12 +305,14 @@ impl NyaTermApp {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(this.remote_desktop.focus(), cx);
                     this.activate_workspace_pane(right_down_id.clone(), cx);
-                    let _ = this.send_rdp_pointer(
+                    if this.send_rdp_pointer(
                         &right_down_id,
                         event.position,
                         Some(RdpPointerButton::Right),
                         true,
-                    );
+                    ) {
+                        this.mark_user_activity();
+                    }
                     cx.stop_propagation();
                 }),
             )
@@ -300,66 +321,172 @@ impl NyaTermApp {
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     window.focus(this.remote_desktop.focus(), cx);
                     this.activate_workspace_pane(middle_down_id.clone(), cx);
-                    let _ = this.send_rdp_pointer(
+                    if this.send_rdp_pointer(
                         &middle_down_id,
                         event.position,
                         Some(RdpPointerButton::Middle),
                         true,
-                    );
+                    ) {
+                        this.mark_user_activity();
+                    }
                     cx.stop_propagation();
                 }),
             )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseUpEvent, _, cx| {
-                    let _ = this.send_rdp_pointer(
+                    if this.send_rdp_pointer(
                         &left_up_id,
                         event.position,
                         Some(RdpPointerButton::Left),
                         false,
-                    );
+                    ) {
+                        this.mark_user_activity();
+                    }
                     cx.stop_propagation();
                 }),
             )
             .on_mouse_up(
                 MouseButton::Right,
                 cx.listener(move |this, event: &MouseUpEvent, _, cx| {
-                    let _ = this.send_rdp_pointer(
+                    if this.send_rdp_pointer(
                         &right_up_id,
                         event.position,
                         Some(RdpPointerButton::Right),
                         false,
-                    );
+                    ) {
+                        this.mark_user_activity();
+                    }
                     cx.stop_propagation();
                 }),
             )
             .on_mouse_up(
                 MouseButton::Middle,
                 cx.listener(move |this, event: &MouseUpEvent, _, cx| {
-                    let _ = this.send_rdp_pointer(
+                    if this.send_rdp_pointer(
                         &middle_up_id,
                         event.position,
                         Some(RdpPointerButton::Middle),
                         false,
-                    );
+                    ) {
+                        this.mark_user_activity();
+                    }
                     cx.stop_propagation();
                 }),
             )
-            .on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _, cx| {
-                let delta_y = match event.delta {
-                    ScrollDelta::Pixels(delta) => f32::from(delta.y),
-                    ScrollDelta::Lines(delta) => delta.y,
-                };
-                let button = if delta_y < 0.0 {
-                    RdpPointerButton::WheelUp
-                } else {
-                    RdpPointerButton::WheelDown
-                };
-                if delta_y != 0.0 {
-                    let _ = this.send_rdp_pointer(&scroll_id, event.position, Some(button), true);
-                    cx.stop_propagation();
-                }
-            }))
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseUpEvent, _, _cx| {
+                    if this.send_rdp_pointer(
+                        &left_up_out_id,
+                        event.position,
+                        Some(RdpPointerButton::Left),
+                        false,
+                    ) {
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseUpEvent, _, _cx| {
+                    if this.send_rdp_pointer(
+                        &right_up_out_id,
+                        event.position,
+                        Some(RdpPointerButton::Right),
+                        false,
+                    ) {
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Middle,
+                cx.listener(move |this, event: &MouseUpEvent, _, _cx| {
+                    if this.send_rdp_pointer(
+                        &middle_up_out_id,
+                        event.position,
+                        Some(RdpPointerButton::Middle),
+                        false,
+                    ) {
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if this.send_rdp_pointer(
+                        &back_down_id,
+                        event.position,
+                        Some(RdpPointerButton::X1),
+                        true,
+                    ) {
+                        cx.stop_propagation();
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    if this.send_rdp_pointer(
+                        &forward_down_id,
+                        event.position,
+                        Some(RdpPointerButton::X2),
+                        true,
+                    ) {
+                        cx.stop_propagation();
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(move |this, event: &MouseUpEvent, _, cx| {
+                    if this.send_rdp_pointer(
+                        &back_up_id,
+                        event.position,
+                        Some(RdpPointerButton::X1),
+                        false,
+                    ) {
+                        cx.stop_propagation();
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(move |this, event: &MouseUpEvent, _, cx| {
+                    if this.send_rdp_pointer(
+                        &forward_up_id,
+                        event.position,
+                        Some(RdpPointerButton::X2),
+                        false,
+                    ) {
+                        cx.stop_propagation();
+                        this.mark_user_activity();
+                    }
+                }),
+            )
+            .on_scroll_wheel(
+                cx.listener(move |this, event: &ScrollWheelEvent, window, cx| {
+                    let line_height = f32::from(window.line_height()).max(1.0);
+                    let (delta_x, delta_y) = match event.delta {
+                        ScrollDelta::Pixels(delta) => (
+                            f32::from(delta.x) / line_height,
+                            f32::from(delta.y) / line_height,
+                        ),
+                        ScrollDelta::Lines(delta) => (delta.x, delta.y),
+                    };
+                    if (delta_x != 0.0 || delta_y != 0.0)
+                        && this.send_remote_wheel(&scroll_id, event.position, delta_x, delta_y)
+                    {
+                        cx.stop_propagation();
+                        this.mark_user_activity();
+                    }
+                }),
+            )
             .child(canvas)
             .when(secure_attention_is_available, |surface| {
                 surface.child(
@@ -542,23 +669,31 @@ fn remote_desktop_image_bounds(
     remote_height: u32,
     scale_mode: VncScaleMode,
 ) -> Bounds<Pixels> {
-    if matches!(scale_mode, VncScaleMode::Stretch) {
-        return viewport;
-    }
-    let viewport_width = f32::from(viewport.size.width);
-    let viewport_height = f32::from(viewport.size.height);
-    let scale = if matches!(scale_mode, VncScaleMode::Actual) {
-        1.0
-    } else {
-        (viewport_width / remote_width as f32).min(viewport_height / remote_height as f32)
+    let mode = match scale_mode {
+        VncScaleMode::Fit => DisplayScaleMode::Fit,
+        VncScaleMode::Stretch => DisplayScaleMode::Stretch,
+        VncScaleMode::Actual => DisplayScaleMode::Actual,
     };
-    let width = remote_width as f32 * scale;
-    let height = remote_height as f32 * scale;
-    Bounds::new(
-        Point::new(
-            viewport.origin.x + px((viewport_width - width) * 0.5),
-            viewport.origin.y + px((viewport_height - height) * 0.5),
-        ),
-        Size::new(px(width), px(height)),
-    )
+    let transform = DisplayTransform::new(
+        LogicalRect {
+            origin: LogicalPoint {
+                x: f32::from(viewport.origin.x),
+                y: f32::from(viewport.origin.y),
+            },
+            size: LogicalSize {
+                width: f32::from(viewport.size.width),
+                height: f32::from(viewport.size.height),
+            },
+        },
+        remote_width,
+        remote_height,
+        mode,
+    );
+    transform.map_or(viewport, |transform| {
+        let image = transform.image_bounds();
+        Bounds::new(
+            Point::new(px(image.origin.x), px(image.origin.y)),
+            Size::new(px(image.size.width), px(image.size.height)),
+        )
+    })
 }

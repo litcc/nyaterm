@@ -10,6 +10,7 @@
 //! (`view_only`, `shared`, clipboard enablement). The application must not be the
 //! only thing enforcing them.
 
+use std::collections::VecDeque;
 use std::io::{self, BufWriter, Write as _};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{
@@ -22,13 +23,15 @@ use std::time::{Duration, Instant};
 
 use nyaterm_remote_desktop::{
     MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH,
-    MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, Packet, PixelFormat, RdpFrameEvent, VncControlMessage,
-    VncError, VncErrorKind, VncInputEvent, VncSecurityMode, VncServerCapabilities,
-    VncSessionConfig, VncSessionState, decode_vnc_control, encode_frame_packet_owned,
-    encode_vnc_control, read_packet, validate_committed_text, write_packet_into,
+    MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, Packet, PixelFormat, RemoteFrameEvent,
+    RemotePointerButton, RemotePointerEvent, RemoteWheelAxis, VncControlMessage, VncError,
+    VncErrorKind, VncInputEvent, VncSecurityMode, VncServerCapabilities, VncSessionConfig,
+    VncSessionState, decode_vnc_control, encode_frame_packet_owned, encode_vnc_control,
+    read_packet, validate_committed_text, write_packet_into,
 };
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
+use tokio::sync::Notify;
 use tokio::time::timeout;
 use vnc::{
     ClientKeyEvent, ClientMouseEvent, PixelFormat as VncPixelFormat, Rect, Screen, VncClient,
@@ -42,6 +45,7 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const UPDATE_REQUEST_INTERVAL: Duration = Duration::from_millis(16);
 const STDOUT_BUFFER_BYTES: usize = 256 * 1024;
 const WORKER_JOIN_TIMEOUT: Duration = Duration::from_millis(700);
+const RELIABLE_WORKER_COMMAND_LIMIT: usize = 256;
 
 enum Outbound {
     Control(VncControlMessage),
@@ -52,10 +56,131 @@ enum WorkerCommand {
     Input(ValidatedVncInputBatch),
     Clipboard(String),
     FullRefresh,
+    ReleaseAllInputs,
     Close,
 }
 
 struct ValidatedVncInputBatch(Vec<VncInputEvent>);
+
+#[derive(Default)]
+struct WorkerMailboxState {
+    reliable: VecDeque<WorkerCommand>,
+    latest_move: Option<ValidatedVncInputBatch>,
+    release_all: bool,
+    resyncing: bool,
+    closed: bool,
+}
+
+struct WorkerMailbox {
+    state: Mutex<WorkerMailboxState>,
+    changed: Notify,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MailboxError {
+    Overflow,
+    Resyncing,
+    Closed,
+}
+
+impl WorkerMailbox {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(WorkerMailboxState::default()),
+            changed: Notify::new(),
+        }
+    }
+
+    fn enqueue_input(&self, batch: ValidatedVncInputBatch) -> Result<(), MailboxError> {
+        let move_only = batch.0.iter().all(|event| {
+            matches!(
+                event,
+                VncInputEvent::Pointer(RemotePointerEvent::Move { .. })
+            )
+        });
+        let mut state = self.state.lock().map_err(|_| MailboxError::Closed)?;
+        if state.closed {
+            return Err(MailboxError::Closed);
+        }
+        if state.resyncing {
+            return Err(MailboxError::Resyncing);
+        }
+        if move_only {
+            state.latest_move = Some(batch);
+        } else {
+            enqueue_worker_reliable(&mut state, WorkerCommand::Input(batch))?;
+        }
+        drop(state);
+        self.changed.notify_one();
+        Ok(())
+    }
+
+    fn enqueue_reliable(&self, command: WorkerCommand) -> Result<(), MailboxError> {
+        let mut state = self.state.lock().map_err(|_| MailboxError::Closed)?;
+        if state.closed {
+            return Err(MailboxError::Closed);
+        }
+        if state.resyncing {
+            return Err(MailboxError::Resyncing);
+        }
+        enqueue_worker_reliable(&mut state, command)?;
+        drop(state);
+        self.changed.notify_one();
+        Ok(())
+    }
+
+    fn close(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.closed = true;
+            state.reliable.clear();
+            state.latest_move = None;
+        }
+        self.changed.notify_waiters();
+    }
+
+    fn try_pop(&self) -> Option<WorkerCommand> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.closed {
+            return Some(WorkerCommand::Close);
+        }
+        if state.release_all {
+            state.release_all = false;
+            state.resyncing = false;
+            return Some(WorkerCommand::ReleaseAllInputs);
+        }
+        state
+            .reliable
+            .pop_front()
+            .or_else(|| state.latest_move.take().map(WorkerCommand::Input))
+    }
+}
+
+fn enqueue_worker_reliable(
+    state: &mut WorkerMailboxState,
+    command: WorkerCommand,
+) -> Result<(), MailboxError> {
+    if state.reliable.len() >= RELIABLE_WORKER_COMMAND_LIMIT {
+        state.reliable.clear();
+        state.latest_move = None;
+        state.release_all = true;
+        state.resyncing = true;
+        return Err(MailboxError::Overflow);
+    }
+    state.reliable.push_back(command);
+    Ok(())
+}
+
+#[derive(Default)]
+struct VncPointerState {
+    x: u16,
+    y: u16,
+    button_mask: u8,
+    vertical_wheel_remainder: i32,
+    horizontal_wheel_remainder: i32,
+}
 
 impl ValidatedVncInputBatch {
     fn try_new(events: Vec<VncInputEvent>) -> Result<Self, VncError> {
@@ -96,7 +221,7 @@ fn server_write_allowed(view_only: bool, clipboard_enabled: bool, kind: ServerWr
 /// A live session: the worker thread plus the channels that steer it.
 struct Session {
     session_id: String,
-    sender: mpsc::SyncSender<WorkerCommand>,
+    mailbox: Arc<WorkerMailbox>,
     worker: Option<JoinHandle<()>>,
     close_requested: Arc<AtomicBool>,
 }
@@ -232,9 +357,15 @@ fn run() -> io::Result<()> {
                 let Some(active) = session.as_ref() else {
                     continue;
                 };
-                // A closed channel means the worker already exited; it has
-                // reported why, so dropping late input is correct here.
-                let _ = active.sender.send(WorkerCommand::Input(batch));
+                if active.mailbox.enqueue_input(batch) == Err(MailboxError::Overflow) {
+                    send_error(
+                        &output_tx,
+                        &session_id,
+                        VncErrorKind::Transport,
+                        "InputBackpressure: VNC worker queue overflowed; releasing all inputs",
+                        false,
+                    )?;
+                }
             }
             VncControlMessage::Clipboard { session_id, text } => {
                 if !hello_complete {
@@ -247,8 +378,19 @@ fn run() -> io::Result<()> {
                     session.as_ref().map(|active| active.session_id.as_str()),
                     &session_id,
                 )?;
-                if let Some(active) = session.as_ref() {
-                    let _ = active.sender.send(WorkerCommand::Clipboard(text));
+                if let Some(active) = session.as_ref()
+                    && active
+                        .mailbox
+                        .enqueue_reliable(WorkerCommand::Clipboard(text))
+                        == Err(MailboxError::Overflow)
+                {
+                    send_error(
+                        &output_tx,
+                        &session_id,
+                        VncErrorKind::Transport,
+                        "InputBackpressure: VNC worker queue overflowed; releasing all inputs",
+                        false,
+                    )?;
                 }
             }
             VncControlMessage::RequestFullFrame { session_id } => {
@@ -256,8 +398,17 @@ fn run() -> io::Result<()> {
                     session.as_ref().map(|active| active.session_id.as_str()),
                     &session_id,
                 )?;
-                if let Some(active) = session.as_ref() {
-                    let _ = active.sender.send(WorkerCommand::FullRefresh);
+                if let Some(active) = session.as_ref()
+                    && active.mailbox.enqueue_reliable(WorkerCommand::FullRefresh)
+                        == Err(MailboxError::Overflow)
+                {
+                    send_error(
+                        &output_tx,
+                        &session_id,
+                        VncErrorKind::Transport,
+                        "InputBackpressure: VNC worker queue overflowed; releasing all inputs",
+                        false,
+                    )?;
                 }
             }
             VncControlMessage::Disconnect { session_id } => {
@@ -351,17 +502,17 @@ fn spawn_session(
     output_tx: mpsc::SyncSender<Outbound>,
 ) -> Session {
     let close_requested = Arc::new(AtomicBool::new(false));
-    let (sender, receiver) = mpsc::sync_channel(256);
+    let mailbox = Arc::new(WorkerMailbox::new());
     let worker = spawn_worker(
         session_id.clone(),
         config,
         output_tx,
         Arc::clone(&close_requested),
-        receiver,
+        Arc::clone(&mailbox),
     );
     Session {
         session_id,
-        sender,
+        mailbox,
         worker: Some(worker),
         close_requested,
     }
@@ -369,9 +520,7 @@ fn spawn_session(
 
 fn close_session(mut session: Session) {
     session.close_requested.store(true, Ordering::Release);
-    let _ = session.sender.send(WorkerCommand::Close);
-    // Drop the sender so a worker parked in recv_worker_command wakes up.
-    drop(session.sender);
+    session.mailbox.close();
     if let Some(worker) = session.worker.take() {
         let deadline = Instant::now() + WORKER_JOIN_TIMEOUT;
         while !worker.is_finished() && Instant::now() < deadline {
@@ -390,7 +539,7 @@ fn spawn_worker(
     config: VncSessionConfig,
     output_tx: mpsc::SyncSender<Outbound>,
     close_requested: Arc<AtomicBool>,
-    receiver: mpsc::Receiver<WorkerCommand>,
+    mailbox: Arc<WorkerMailbox>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
         .name(format!("nyaterm-vnc-{session_id}"))
@@ -400,7 +549,7 @@ fn spawn_worker(
             let result = catch_unwind(AssertUnwindSafe(move || match Runtime::new() {
                 Ok(runtime) => {
                     let mut output = SessionOutput::new(session_id.clone(), output_tx.clone());
-                    runtime.block_on(run_worker(&mut output, &config, &close_requested, receiver));
+                    runtime.block_on(run_worker(&mut output, &config, &close_requested, mailbox));
                 }
                 Err(error) => {
                     let _ = output_tx.send(Outbound::Control(VncControlMessage::Error {
@@ -477,7 +626,7 @@ impl SessionOutput {
         Ok(self.epoch)
     }
 
-    fn frame(&self, frame: RdpFrameEvent) -> Result<(), VncError> {
+    fn frame(&self, frame: RemoteFrameEvent) -> Result<(), VncError> {
         let packet = encode_frame_packet_owned(&self.session_id, frame)
             .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
         self.send(Outbound::Packet(packet))
@@ -495,9 +644,8 @@ async fn run_worker(
     output: &mut SessionOutput,
     config: &VncSessionConfig,
     close_requested: &AtomicBool,
-    receiver: mpsc::Receiver<WorkerCommand>,
+    mailbox: Arc<WorkerMailbox>,
 ) {
-    let receiver = Arc::new(Mutex::new(receiver));
     let mut attempt = 0;
     loop {
         if close_requested.load(Ordering::Acquire) {
@@ -512,7 +660,7 @@ async fn run_worker(
         if output.state(connecting_state, None).is_err() {
             return;
         }
-        let result = run_generation(output, config, Arc::clone(&receiver), close_requested).await;
+        let result = run_generation(output, config, Arc::clone(&mailbox), close_requested).await;
         match result {
             Ok(()) => return,
             Err(error) => {
@@ -538,7 +686,7 @@ async fn run_worker(
 async fn run_generation(
     output: &mut SessionOutput,
     config: &VncSessionConfig,
-    receiver: Arc<Mutex<mpsc::Receiver<WorkerCommand>>>,
+    mailbox: Arc<WorkerMailbox>,
     close_requested: &AtomicBool,
 ) -> Result<(), VncError> {
     let stream = timeout(
@@ -588,6 +736,7 @@ async fn run_generation(
         .map_err(classify_vnc_error)?;
     output.state(VncSessionState::Negotiating, None)?;
     let mut pressed_keys = Vec::new();
+    let mut pointer_state = VncPointerState::default();
     let mut poll = tokio::time::interval(EVENT_POLL_INTERVAL);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut refresh_due = false;
@@ -595,7 +744,7 @@ async fn run_generation(
     tokio::pin!(refresh_delay);
     loop {
         if close_requested.load(Ordering::Acquire) {
-            release_pressed_keys(&client, &mut pressed_keys).await;
+            release_all_inputs(&client, &mut pressed_keys, &mut pointer_state).await;
             let _ = client.close().await;
             return Ok(());
         }
@@ -617,7 +766,7 @@ async fn run_generation(
                 client.input(X11Event::Refresh).await.map_err(classify_vnc_error)?;
                 refresh_due = false;
             }
-            command = recv_worker_command(Arc::clone(&receiver)) => {
+            command = recv_worker_command(Arc::clone(&mailbox)) => {
                 match command {
                     // view_only and clipboard.enabled are enforced here, not only
                     // in the application: this process is the authority.
@@ -628,7 +777,13 @@ async fn run_generation(
                             ServerWriteKind::Input,
                         ) =>
                     {
-                        send_vnc_input_batch(&client, batch, &mut pressed_keys).await?;
+                        send_vnc_input_batch(
+                            &client,
+                            batch,
+                            &mut pressed_keys,
+                            &mut pointer_state,
+                        )
+                        .await?;
                     }
                     Some(WorkerCommand::Input(_)) => {}
                     Some(WorkerCommand::Clipboard(text))
@@ -644,8 +799,11 @@ async fn run_generation(
                     Some(WorkerCommand::FullRefresh) => {
                         client.input(X11Event::FullRefresh).await.map_err(classify_vnc_error)?;
                     }
+                    Some(WorkerCommand::ReleaseAllInputs) => {
+                        release_all_inputs(&client, &mut pressed_keys, &mut pointer_state).await;
+                    }
                     Some(WorkerCommand::Close) | None => {
-                        release_pressed_keys(&client, &mut pressed_keys).await;
+                        release_all_inputs(&client, &mut pressed_keys, &mut pointer_state).await;
                         let _ = client.close().await;
                         return Ok(());
                     }
@@ -655,13 +813,14 @@ async fn run_generation(
     }
 }
 
-async fn recv_worker_command(
-    receiver: Arc<Mutex<mpsc::Receiver<WorkerCommand>>>,
-) -> Option<WorkerCommand> {
-    tokio::task::spawn_blocking(move || receiver.lock().ok().and_then(|rx| rx.recv().ok()))
-        .await
-        .ok()
-        .flatten()
+async fn recv_worker_command(mailbox: Arc<WorkerMailbox>) -> Option<WorkerCommand> {
+    loop {
+        let changed = mailbox.changed.notified();
+        if let Some(command) = mailbox.try_pop() {
+            return Some(command);
+        }
+        changed.await;
+    }
 }
 
 fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), VncError> {
@@ -682,7 +841,7 @@ fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), V
                 output.epoch
             };
             validate_rect(rect)?;
-            let frame = RdpFrameEvent::Bitmap {
+            let frame = RemoteFrameEvent::Bitmap {
                 epoch,
                 full: rect.x == 0 && rect.y == 0,
                 x: u32::from(rect.x),
@@ -740,9 +899,10 @@ async fn send_vnc_input_batch(
     client: &VncClient,
     batch: ValidatedVncInputBatch,
     pressed_keys: &mut Vec<u32>,
+    pointer_state: &mut VncPointerState,
 ) -> Result<(), VncError> {
     for event in batch.0 {
-        send_vnc_input(client, event, pressed_keys).await?;
+        send_vnc_input(client, event, pressed_keys, pointer_state).await?;
     }
     Ok(())
 }
@@ -751,6 +911,7 @@ async fn send_vnc_input(
     client: &VncClient,
     event: VncInputEvent,
     pressed_keys: &mut Vec<u32>,
+    pointer_state: &mut VncPointerState,
 ) -> Result<(), VncError> {
     match event {
         VncInputEvent::Key { keysym, pressed } => {
@@ -783,19 +944,117 @@ async fn send_vnc_input(
                     .map_err(classify_vnc_error)?;
             }
         }
-        VncInputEvent::Pointer { x, y, button_mask } => {
-            client
-                .input(X11Event::PointerEvent(ClientMouseEvent {
-                    position_x: u16::try_from(x.min(u32::from(u16::MAX))).unwrap_or(u16::MAX),
-                    position_y: u16::try_from(y.min(u32::from(u16::MAX))).unwrap_or(u16::MAX),
-                    bottons: button_mask,
-                }))
-                .await
-                .map_err(classify_vnc_error)?;
+        VncInputEvent::Pointer(pointer) => {
+            let position = match pointer {
+                RemotePointerEvent::Move { position }
+                | RemotePointerEvent::Button { position, .. }
+                | RemotePointerEvent::Wheel { position, .. } => position,
+            };
+            pointer_state.x = u16::try_from(position.x).unwrap_or(u16::MAX);
+            pointer_state.y = u16::try_from(position.y).unwrap_or(u16::MAX);
+            match pointer {
+                RemotePointerEvent::Move { .. } => {
+                    send_vnc_pointer(client, pointer_state, pointer_state.button_mask).await?;
+                }
+                RemotePointerEvent::Button {
+                    button, pressed, ..
+                } => {
+                    // Classic RFB has only an eight-bit button mask. Navigation
+                    // buttons require a negotiated extension that vnc-rs does not
+                    // currently expose, so never mis-map them to an ordinary button.
+                    let bit = match button {
+                        RemotePointerButton::Left => Some(0x01),
+                        RemotePointerButton::Middle => Some(0x02),
+                        RemotePointerButton::Right => Some(0x04),
+                        RemotePointerButton::X1 | RemotePointerButton::X2 => None,
+                    };
+                    if let Some(bit) = bit {
+                        if pressed {
+                            pointer_state.button_mask |= bit;
+                        } else {
+                            pointer_state.button_mask &= !bit;
+                        }
+                        send_vnc_pointer(client, pointer_state, pointer_state.button_mask).await?;
+                    }
+                }
+                RemotePointerEvent::Wheel {
+                    axis,
+                    rotation_units,
+                    ..
+                } => {
+                    let (positive_mask, negative_mask, steps) = match axis {
+                        RemoteWheelAxis::Vertical => (
+                            0x08,
+                            0x10,
+                            accumulate_wheel_steps(
+                                &mut pointer_state.vertical_wheel_remainder,
+                                rotation_units,
+                            ),
+                        ),
+                        RemoteWheelAxis::Horizontal => (
+                            0x40,
+                            0x20,
+                            accumulate_wheel_steps(
+                                &mut pointer_state.horizontal_wheel_remainder,
+                                rotation_units,
+                            ),
+                        ),
+                    };
+                    for _ in 0..steps.unsigned_abs() {
+                        let positive = steps > 0;
+                        let mask = if positive {
+                            positive_mask
+                        } else {
+                            negative_mask
+                        };
+                        send_vnc_pointer(client, pointer_state, pointer_state.button_mask | mask)
+                            .await?;
+                        send_vnc_pointer(client, pointer_state, pointer_state.button_mask).await?;
+                    }
+                }
+            }
         }
-        VncInputEvent::ReleaseAllKeys => release_pressed_keys(client, pressed_keys).await,
+        VncInputEvent::ReleaseAllInputs => {
+            release_all_inputs(client, pressed_keys, pointer_state).await
+        }
     }
     Ok(())
+}
+
+fn accumulate_wheel_steps(remainder: &mut i32, rotation_units: i16) -> i32 {
+    *remainder = remainder.saturating_add(i32::from(rotation_units));
+    let steps = *remainder / 120;
+    *remainder -= steps * 120;
+    steps
+}
+
+async fn send_vnc_pointer(
+    client: &VncClient,
+    state: &VncPointerState,
+    button_mask: u8,
+) -> Result<(), VncError> {
+    client
+        .input(X11Event::PointerEvent(ClientMouseEvent {
+            position_x: state.x,
+            position_y: state.y,
+            bottons: button_mask,
+        }))
+        .await
+        .map_err(classify_vnc_error)
+}
+
+async fn release_all_inputs(
+    client: &VncClient,
+    pressed_keys: &mut Vec<u32>,
+    pointer_state: &mut VncPointerState,
+) {
+    release_pressed_keys(client, pressed_keys).await;
+    if pointer_state.button_mask != 0 {
+        pointer_state.button_mask = 0;
+        pointer_state.vertical_wheel_remainder = 0;
+        pointer_state.horizontal_wheel_remainder = 0;
+        let _ = send_vnc_pointer(client, pointer_state, 0).await;
+    }
 }
 
 async fn release_pressed_keys(client: &VncClient, pressed_keys: &mut Vec<u32>) {
@@ -967,15 +1226,16 @@ mod tests {
     use std::sync::mpsc;
 
     use nyaterm_remote_desktop::{
-        MAX_COMMITTED_TEXT_BYTES, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH,
-        VncControlMessage, VncErrorKind, VncInputEvent, VncSecurityMode,
+        MAX_COMMITTED_TEXT_BYTES, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, RemotePoint,
+        RemotePointerEvent, VncControlMessage, VncErrorKind, VncInputEvent, VncSecurityMode,
     };
     use vnc::VncSecurityPolicy;
 
     use super::{
-        Outbound, ServerWriteKind, ValidatedVncInputBatch, classify_vnc_error,
-        committed_text_key_events, is_latin1_within_limit, reconnect_delay, report_panic,
-        security_policy, server_write_allowed, unicode_scalar_to_keysym,
+        MailboxError, Outbound, RELIABLE_WORKER_COMMAND_LIMIT, ServerWriteKind,
+        ValidatedVncInputBatch, WorkerCommand, WorkerMailbox, accumulate_wheel_steps,
+        classify_vnc_error, committed_text_key_events, is_latin1_within_limit, reconnect_delay,
+        report_panic, security_policy, server_write_allowed, unicode_scalar_to_keysym,
         validate_active_session_id, validate_framebuffer_dimensions,
     };
 
@@ -1113,7 +1373,7 @@ mod tests {
         };
         assert!(ValidatedVncInputBatch::try_new(vec![oversized_text]).is_err());
 
-        let oversized_batch = vec![VncInputEvent::ReleaseAllKeys; MAX_VNC_INPUT_BATCH + 1];
+        let oversized_batch = vec![VncInputEvent::ReleaseAllInputs; MAX_VNC_INPUT_BATCH + 1];
         assert!(ValidatedVncInputBatch::try_new(oversized_batch).is_err());
     }
 
@@ -1142,5 +1402,80 @@ mod tests {
     fn reconnect_delay_escalates_and_then_plateaus() {
         let delays: Vec<u64> = (0..8).map(|n| reconnect_delay(n).as_secs()).collect();
         assert_eq!(delays, vec![1, 1, 2, 4, 8, 15, 30, 30]);
+    }
+
+    #[test]
+    fn worker_mailbox_coalesces_moves_after_reliable_commands() {
+        let mailbox = WorkerMailbox::new();
+        mailbox
+            .enqueue_reliable(WorkerCommand::Clipboard("first".to_string()))
+            .expect("reliable command");
+        for x in [10, 20] {
+            mailbox
+                .enqueue_input(ValidatedVncInputBatch(vec![VncInputEvent::Pointer(
+                    RemotePointerEvent::Move {
+                        position: RemotePoint { x, y: 7 },
+                    },
+                )]))
+                .expect("pointer move");
+        }
+
+        assert!(matches!(
+            mailbox.try_pop(),
+            Some(WorkerCommand::Clipboard(text)) if text == "first"
+        ));
+        assert!(matches!(
+            mailbox.try_pop(),
+            Some(WorkerCommand::Input(ValidatedVncInputBatch(events)))
+                if matches!(
+                    events.as_slice(),
+                    [VncInputEvent::Pointer(RemotePointerEvent::Move {
+                        position: RemotePoint { x: 20, y: 7 }
+                    })]
+                )
+        ));
+        assert!(mailbox.try_pop().is_none());
+    }
+
+    #[test]
+    fn worker_mailbox_overflow_releases_and_resynchronizes_input() {
+        let mailbox = WorkerMailbox::new();
+        for index in 0..RELIABLE_WORKER_COMMAND_LIMIT {
+            mailbox
+                .enqueue_reliable(WorkerCommand::Clipboard(index.to_string()))
+                .expect("queue has bounded capacity");
+        }
+        let overflow = mailbox.enqueue_input(ValidatedVncInputBatch(vec![VncInputEvent::Key {
+            keysym: 0x41,
+            pressed: true,
+        }]));
+        assert_eq!(overflow, Err(MailboxError::Overflow));
+        assert_eq!(
+            mailbox.enqueue_reliable(WorkerCommand::FullRefresh),
+            Err(MailboxError::Resyncing)
+        );
+        assert!(matches!(
+            mailbox.try_pop(),
+            Some(WorkerCommand::ReleaseAllInputs)
+        ));
+        mailbox
+            .enqueue_reliable(WorkerCommand::FullRefresh)
+            .expect("release completion resumes input");
+        assert!(matches!(
+            mailbox.try_pop(),
+            Some(WorkerCommand::FullRefresh)
+        ));
+    }
+
+    #[test]
+    fn wheel_units_emit_only_complete_rfb_pulses_and_keep_the_remainder() {
+        let mut remainder = 0;
+        assert_eq!(accumulate_wheel_steps(&mut remainder, 40), 0);
+        assert_eq!(accumulate_wheel_steps(&mut remainder, 80), 1);
+        assert_eq!(remainder, 0);
+        assert_eq!(accumulate_wheel_steps(&mut remainder, -250), -2);
+        assert_eq!(remainder, -10);
+        assert_eq!(accumulate_wheel_steps(&mut remainder, 130), 1);
+        assert_eq!(remainder, 0);
     }
 }

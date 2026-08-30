@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin};
+use std::process::Child;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -9,10 +9,10 @@ use uuid::Uuid;
 use crate::helper_process;
 use crate::{
     FRAME_PAYLOAD_LIMIT, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION,
-    PacketType, QueueWaker, RdpFrameEvent, VncControlMessage, VncError, VncErrorKind,
-    VncInputEvent, VncRuntimeEvent, VncSecurityMode, VncServerCapabilities, VncSessionConfig,
-    VncSessionDrain, VncSessionState, decode_frame_packet_owned, decode_vnc_control,
-    encode_vnc_control, read_packet, validate_committed_text, write_packet,
+    PacketType, QueueWaker, RemoteFrameEvent, RemotePointerEvent, VncControlMessage, VncError,
+    VncErrorKind, VncInputEvent, VncRuntimeEvent, VncSecurityMode, VncServerCapabilities,
+    VncSessionConfig, VncSessionDrain, VncSessionState, decode_frame_packet_owned,
+    decode_vnc_control, encode_vnc_control, read_packet, validate_committed_text,
 };
 
 const FRAME_QUEUE_LIMIT: usize = 64;
@@ -32,15 +32,15 @@ struct EventQueueState {
     waker: Option<QueueWaker>,
     control: VecDeque<VncRuntimeEvent>,
     control_bytes: usize,
-    frames: VecDeque<RdpFrameEvent>,
+    frames: VecDeque<RemoteFrameEvent>,
     frame_bytes: usize,
     current_epoch: Option<u64>,
     closed: bool,
 }
 
-fn frame_byte_cost(frame: &RdpFrameEvent) -> usize {
+fn frame_byte_cost(frame: &RemoteFrameEvent) -> usize {
     match frame {
-        RdpFrameEvent::Bitmap { pixels, .. } => pixels.len(),
+        RemoteFrameEvent::Bitmap { pixels, .. } => pixels.len(),
         _ => 0,
     }
 }
@@ -151,7 +151,7 @@ impl EventQueue {
         self.space_available.notify_all();
         self.push_control(VncRuntimeEvent::Frame {
             session_id: session_id.to_string(),
-            event: RdpFrameEvent::Reset {
+            event: RemoteFrameEvent::Reset {
                 epoch,
                 width,
                 height,
@@ -159,13 +159,13 @@ impl EventQueue {
         })
     }
 
-    fn push_frame(&self, frame: RdpFrameEvent) -> bool {
+    fn push_frame(&self, frame: RemoteFrameEvent) -> bool {
         let cost = frame_byte_cost(&frame);
         if cost > self.frame_byte_limit {
             return false;
         }
         let epoch = match &frame {
-            RdpFrameEvent::Bitmap { epoch, .. } => Some(*epoch),
+            RemoteFrameEvent::Bitmap { epoch, .. } => Some(*epoch),
             _ => None,
         };
         let mut state = self
@@ -204,8 +204,6 @@ impl EventQueue {
         let drain = VncSessionDrain {
             control: state.control.drain(..).collect(),
             frames: state.frames.drain(..).collect(),
-            dropped_frames: 0,
-            waiting_for_full_frame: false,
         };
         state.control_bytes = 0;
         state.frame_bytes = 0;
@@ -229,7 +227,7 @@ struct SessionRecord {
     state: Arc<Mutex<VncSessionState>>,
     capabilities: Arc<Mutex<Option<VncServerCapabilities>>>,
     queue: Arc<EventQueue>,
-    writer: Arc<Mutex<ChildStdin>>,
+    writer: helper_process::IpcWriter,
     child: Option<Child>,
     reader: Option<JoinHandle<()>>,
 }
@@ -291,7 +289,7 @@ impl VncSessionManager {
         }
         let helper = resolve_helper_path()?;
         let helper_process::HelperProcess {
-            child,
+            mut child,
             stdin,
             stdout,
         } = helper_process::spawn_helper(&helper).map_err(|error| {
@@ -300,7 +298,20 @@ impl VncSessionManager {
                 format!("failed to spawn the VNC helper: {error}"),
             )
         })?;
-        let writer = Arc::new(Mutex::new(stdin));
+        let writer = match helper_process::IpcWriter::spawn(
+            stdin,
+            format!("nyaterm-vnc-writer-{session_id}"),
+        ) {
+            Ok(writer) => writer,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(VncError::new(
+                    VncErrorKind::Ipc,
+                    format!("failed to start the VNC IPC writer: {error}"),
+                ));
+            }
+        };
         let queue = Arc::new(EventQueue::with_waker(self.queue_waker()));
         let state = Arc::new(Mutex::new(VncSessionState::Connecting));
         let capabilities = Arc::new(Mutex::new(None));
@@ -387,13 +398,36 @@ impl VncSessionManager {
                 ));
             }
         }
-        self.send(
-            session_id,
-            VncControlMessage::Input {
+        let move_only = !events.is_empty()
+            && events.iter().all(|event| {
+                matches!(
+                    event,
+                    VncInputEvent::Pointer(RemotePointerEvent::Move { .. })
+                )
+            });
+        let packet = encode_vnc_control(&VncControlMessage::Input {
+            session_id: session_id.to_string(),
+            events,
+        })
+        .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
+        let sessions = self.sessions.lock().map_err(|_| registry_poisoned())?;
+        let record = sessions.get(session_id).ok_or_else(|| {
+            VncError::new(
+                VncErrorKind::Protocol,
+                format!("VNC session '{session_id}' is not running"),
+            )
+        })?;
+        let result = if move_only {
+            record.writer.send_latest_move(packet)
+        } else {
+            let release = encode_vnc_control(&VncControlMessage::Input {
                 session_id: session_id.to_string(),
-                events,
-            },
-        )
+                events: vec![VncInputEvent::ReleaseAllInputs],
+            })
+            .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
+            record.writer.send_reliable(packet, release)
+        };
+        result.map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))
     }
 
     pub fn set_clipboard_text(&self, session_id: &str, text: String) -> Result<(), VncError> {
@@ -450,7 +484,7 @@ impl VncSessionManager {
             &record.writer,
             &VncControlMessage::Input {
                 session_id: session_id.to_string(),
-                events: vec![VncInputEvent::ReleaseAllKeys],
+                events: vec![VncInputEvent::ReleaseAllInputs],
             },
         );
         let _ = send_control(
@@ -589,18 +623,14 @@ fn registry_poisoned() -> VncError {
 }
 
 fn send_control(
-    writer: &Arc<Mutex<ChildStdin>>,
+    writer: &helper_process::IpcWriter,
     message: &VncControlMessage,
 ) -> Result<(), VncError> {
     let packet = encode_vnc_control(message)
         .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
-    write_packet(
-        &mut *writer
-            .lock()
-            .map_err(|_| VncError::new(VncErrorKind::Ipc, "VNC helper writer lock is poisoned"))?,
-        &packet,
-    )
-    .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))
+    writer
+        .send_critical(packet)
+        .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))
 }
 
 fn spawn_reader(
@@ -839,6 +869,7 @@ fn set_state(state: &Arc<Mutex<VncSessionState>>, new_state: VncSessionState) {
 fn cleanup_child(record: &mut SessionRecord) {
     record.queue.close();
     helper_process::cleanup_child(&mut record.child, &mut record.reader);
+    record.writer.shutdown();
 }
 
 fn is_latin1_within_limit(text: &str) -> bool {
@@ -855,7 +886,7 @@ mod tests {
         validate_vnc_config, validate_vnc_input,
     };
     use crate::{
-        Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PROTOCOL_VERSION, PixelFormat, RdpFrameEvent,
+        Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PROTOCOL_VERSION, PixelFormat, RemoteFrameEvent,
         VncClipboardConfig, VncControlMessage, VncDisplayConfig, VncErrorKind, VncInputEvent,
         VncReconnectConfig, VncRuntimeEvent, VncSecurityConfig, VncSecurityMode,
         VncServerCapabilities, VncSessionConfig, VncSessionState,
@@ -962,7 +993,7 @@ mod tests {
             },
         ];
         assert!(validate_vnc_input(&events).is_err());
-        assert!(!validate_vnc_input(&[VncInputEvent::ReleaseAllKeys]).unwrap());
+        assert!(!validate_vnc_input(&[VncInputEvent::ReleaseAllInputs]).unwrap());
     }
 
     #[test]
@@ -1003,8 +1034,8 @@ mod tests {
         }
     }
 
-    fn frame(epoch: u64, x: u32, full: bool) -> RdpFrameEvent {
-        RdpFrameEvent::Bitmap {
+    fn frame(epoch: u64, x: u32, full: bool) -> RemoteFrameEvent {
+        RemoteFrameEvent::Bitmap {
             epoch,
             full,
             x,
@@ -1039,7 +1070,7 @@ mod tests {
     fn rgba_vnc_frame_reaches_shared_framebuffer_as_bgra() {
         let mut framebuffer =
             Framebuffer::new(1, 1, 1, crate::VNC_FRAMEBUFFER_LIMITS).expect("framebuffer");
-        let frame = RdpFrameEvent::Bitmap {
+        let frame = RemoteFrameEvent::Bitmap {
             epoch: 1,
             full: true,
             x: 0,
@@ -1062,7 +1093,6 @@ mod tests {
         assert!(queue.push_frame(frame(2, 0, true)));
         let drain = queue.drain();
         assert_eq!(drain.frames.len(), 1);
-        assert_eq!(drain.dropped_frames, 0);
     }
 
     #[test]
@@ -1074,7 +1104,6 @@ mod tests {
         assert!(queue.push_frame(frame(1, 40, false)));
         let drain = queue.drain();
         assert_eq!(drain.frames.len(), 1);
-        assert!(!drain.waiting_for_full_frame);
     }
 
     #[test]

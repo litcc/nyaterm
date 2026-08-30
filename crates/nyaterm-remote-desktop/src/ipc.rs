@@ -1,6 +1,9 @@
 use std::io::{self, Read, Write};
 
-use crate::{PixelFormat, RdpControlMessage, RdpCursorEvent, RdpFrameEvent, VncControlMessage};
+use crate::{
+    CursorPosition, CursorShape, CursorVisibility, PixelFormat, RdpControlMessage, RdpFrameEvent,
+    RemoteCursorEvent, RemotePoint, VncControlMessage,
+};
 
 pub const HEADER_LEN: usize = 5;
 pub const CONTROL_PAYLOAD_LIMIT: usize = 1024 * 1024;
@@ -507,27 +510,38 @@ pub fn decode_frame_packet_owned(mut packet: Packet) -> io::Result<(String, RdpF
     ))
 }
 
-pub fn encode_cursor_packet(session_id: &str, cursor: &RdpCursorEvent) -> io::Result<Packet> {
-    let mut payload = Vec::with_capacity(44 + session_id.len() + cursor.pixels.len());
+pub fn encode_cursor_packet(session_id: &str, event: &RemoteCursorEvent) -> io::Result<Packet> {
+    let pixel_bytes = match event {
+        RemoteCursorEvent::Shape(shape) => shape.pixels.len(),
+        RemoteCursorEvent::Position(_) | RemoteCursorEvent::Visibility(_) => 0,
+    };
+    let mut payload = Vec::with_capacity(36 + session_id.len() + pixel_bytes);
     put_session(&mut payload, session_id)?;
-    payload.extend_from_slice(&cursor.epoch.to_le_bytes());
-    payload.push(u8::from(cursor.visible));
-    for value in [
-        cursor.x,
-        cursor.y,
-        cursor.width,
-        cursor.height,
-        cursor.hotspot_x,
-        cursor.hotspot_y,
-    ] {
-        put_u32(&mut payload, value);
+    match event {
+        RemoteCursorEvent::Shape(shape) => {
+            payload.push(1);
+            payload.extend_from_slice(&shape.shape_id.to_le_bytes());
+            for value in [shape.width, shape.height, shape.hotspot.x, shape.hotspot.y] {
+                put_u32(&mut payload, value);
+            }
+            put_u32(
+                &mut payload,
+                u32::try_from(shape.pixels.len()).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "cursor is too large")
+                })?,
+            );
+            payload.extend_from_slice(&shape.pixels);
+        }
+        RemoteCursorEvent::Position(position) => {
+            payload.push(2);
+            put_u32(&mut payload, position.x);
+            put_u32(&mut payload, position.y);
+        }
+        RemoteCursorEvent::Visibility(visibility) => {
+            payload.push(3);
+            payload.push(u8::from(visibility.visible));
+        }
     }
-    put_u32(
-        &mut payload,
-        u32::try_from(cursor.pixels.len())
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "cursor is too large"))?,
-    );
-    payload.extend_from_slice(&cursor.pixels);
     if payload.len() > CURSOR_PAYLOAD_LIMIT {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -541,19 +555,7 @@ pub fn encode_cursor_packet(session_id: &str, cursor: &RdpCursorEvent) -> io::Re
     })
 }
 
-#[derive(Clone, Copy)]
-struct CursorHeader {
-    epoch: u64,
-    visible: bool,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    hotspot_x: u32,
-    hotspot_y: u32,
-}
-
-fn decode_cursor_header(packet: &Packet) -> io::Result<(String, CursorHeader, usize)> {
+fn decode_cursor_payload(packet: &Packet) -> io::Result<(String, RemoteCursorEvent, usize)> {
     if packet.packet_type != PacketType::Cursor {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -562,95 +564,95 @@ fn decode_cursor_header(packet: &Packet) -> io::Result<(String, CursorHeader, us
     }
     let mut offset = 0;
     let session_id = take_session(&packet.payload, &mut offset)?;
-    let epoch = u64::from_le_bytes(take::<8>(&packet.payload, &mut offset)?);
-    let visible = take::<1>(&packet.payload, &mut offset)?[0] != 0;
-    let x = take_u32(&packet.payload, &mut offset)?;
-    let y = take_u32(&packet.payload, &mut offset)?;
-    let width = take_u32(&packet.payload, &mut offset)?;
-    let height = take_u32(&packet.payload, &mut offset)?;
-    let hotspot_x = take_u32(&packet.payload, &mut offset)?;
-    let hotspot_y = take_u32(&packet.payload, &mut offset)?;
-    let data_len = take_u32(&packet.payload, &mut offset)? as usize;
-    let expected = usize::try_from(width)
-        .ok()
-        .and_then(|width| {
-            usize::try_from(height)
+    let kind = take::<1>(&packet.payload, &mut offset)?[0];
+    let event = match kind {
+        1 => {
+            let shape_id = u64::from_le_bytes(take::<8>(&packet.payload, &mut offset)?);
+            let width = take_u32(&packet.payload, &mut offset)?;
+            let height = take_u32(&packet.payload, &mut offset)?;
+            let hotspot = RemotePoint {
+                x: take_u32(&packet.payload, &mut offset)?,
+                y: take_u32(&packet.payload, &mut offset)?,
+            };
+            let data_len = take_u32(&packet.payload, &mut offset)? as usize;
+            let expected = usize::try_from(width)
                 .ok()
-                .and_then(|height| width.checked_mul(height))
-        })
-        .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "cursor dimensions overflow"))?;
-    if data_len != expected || packet.payload.len() - offset != data_len {
+                .and_then(|width| {
+                    usize::try_from(height)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "cursor dimensions overflow")
+                })?;
+            if data_len != expected || packet.payload.len().saturating_sub(offset) != data_len {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid cursor payload length",
+                ));
+            }
+            RemoteCursorEvent::Shape(CursorShape {
+                shape_id,
+                width,
+                height,
+                hotspot,
+                pixels: Vec::new(),
+            })
+        }
+        2 => RemoteCursorEvent::Position(CursorPosition {
+            x: take_u32(&packet.payload, &mut offset)?,
+            y: take_u32(&packet.payload, &mut offset)?,
+        }),
+        3 => RemoteCursorEvent::Visibility(CursorVisibility {
+            visible: take::<1>(&packet.payload, &mut offset)?[0] != 0,
+        }),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown cursor event kind",
+            ));
+        }
+    };
+    if !matches!(event, RemoteCursorEvent::Shape(_)) && offset != packet.payload.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "invalid cursor payload length",
+            "trailing cursor event payload",
         ));
     }
-    Ok((
-        session_id,
-        CursorHeader {
-            epoch,
-            visible,
-            x,
-            y,
-            width,
-            height,
-            hotspot_x,
-            hotspot_y,
-        },
-        offset,
-    ))
+    Ok((session_id, event, offset))
 }
 
-pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RdpCursorEvent)> {
-    let (session_id, header, offset) = decode_cursor_header(packet)?;
-    Ok((
-        session_id,
-        RdpCursorEvent {
-            epoch: header.epoch,
-            visible: header.visible,
-            x: header.x,
-            y: header.y,
-            width: header.width,
-            height: header.height,
-            hotspot_x: header.hotspot_x,
-            hotspot_y: header.hotspot_y,
-            pixels: packet.payload[offset..].to_vec(),
-        },
-    ))
+pub fn decode_cursor_packet(packet: &Packet) -> io::Result<(String, RemoteCursorEvent)> {
+    let (session_id, mut event, offset) = decode_cursor_payload(packet)?;
+    if let RemoteCursorEvent::Shape(shape) = &mut event {
+        shape.pixels = packet.payload[offset..].to_vec();
+    }
+    Ok((session_id, event))
 }
 
-pub fn decode_cursor_packet_owned(mut packet: Packet) -> io::Result<(String, RdpCursorEvent)> {
+pub fn decode_cursor_packet_owned(mut packet: Packet) -> io::Result<(String, RemoteCursorEvent)> {
     if !packet.body.is_empty() {
         return decode_cursor_packet(&packet);
     }
-    let (session_id, header, offset) = decode_cursor_header(&packet)?;
-    packet.payload.drain(..offset);
-    Ok((
-        session_id,
-        RdpCursorEvent {
-            epoch: header.epoch,
-            visible: header.visible,
-            x: header.x,
-            y: header.y,
-            width: header.width,
-            height: header.height,
-            hotspot_x: header.hotspot_x,
-            hotspot_y: header.hotspot_y,
-            pixels: packet.payload,
-        },
-    ))
+    let (session_id, mut event, offset) = decode_cursor_payload(&packet)?;
+    if let RemoteCursorEvent::Shape(shape) = &mut event {
+        packet.payload.drain(..offset);
+        shape.pixels = packet.payload;
+    }
+    Ok((session_id, event))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        PacketReader, decode_control, decode_frame_packet_owned, decode_vnc_control,
-        encode_control, encode_frame_packet, encode_vnc_control, read_packet, write_packet,
-        write_packet_into,
+        PacketReader, decode_control, decode_cursor_packet_owned, decode_frame_packet_owned,
+        decode_vnc_control, encode_control, encode_cursor_packet, encode_frame_packet,
+        encode_vnc_control, read_packet, write_packet, write_packet_into,
     };
     use crate::{
-        PROTOCOL_VERSION, PixelFormat, RdpControlMessage, RdpFrameEvent, RdpServerCapabilities,
+        CursorPosition, CursorShape, CursorVisibility, PROTOCOL_VERSION, PixelFormat,
+        RdpControlMessage, RdpFrameEvent, RdpServerCapabilities, RemoteCursorEvent, RemotePoint,
         VncControlMessage, VncInputEvent, VncServerCapabilities, VncSessionState,
     };
     use std::io::{Cursor, Write};
@@ -742,6 +744,28 @@ mod tests {
             RdpControlMessage::SecureAttention { ref session_id } if session_id == "rdp"
         ));
         assert!(decode_vnc_control(&sas).is_err());
+    }
+
+    #[test]
+    fn cursor_shape_position_and_visibility_are_independent_packets() {
+        let events = [
+            RemoteCursorEvent::Shape(CursorShape {
+                shape_id: 9,
+                width: 2,
+                height: 2,
+                hotspot: RemotePoint { x: 1, y: 0 },
+                pixels: vec![7; 16],
+            }),
+            RemoteCursorEvent::Position(CursorPosition { x: 640, y: 360 }),
+            RemoteCursorEvent::Visibility(CursorVisibility { visible: false }),
+        ];
+        for event in events {
+            let packet = encode_cursor_packet("rdp", &event).expect("cursor packet");
+            assert_eq!(
+                decode_cursor_packet_owned(packet).expect("cursor round trip"),
+                ("rdp".to_string(), event)
+            );
+        }
     }
 
     #[test]
@@ -857,8 +881,12 @@ mod tests {
 
         let rdp_only = encode_control(&RdpControlMessage::Resize {
             session_id: "rdp".to_string(),
-            width: 800,
-            height: 600,
+            metrics: crate::RdpDisplayMetrics {
+                width: 800,
+                height: 600,
+                desktop_scale_factor: 150,
+                physical_size_mm: None,
+            },
         })
         .unwrap();
         assert!(decode_vnc_control(&rdp_only).is_err());

@@ -67,7 +67,7 @@ mod platform {
         if previous != session_id {
             let had_pressed_keys = reset_pressed_state(state);
             if had_pressed_keys && let Some(previous) = previous {
-                let _ = manager.send_input(&previous, vec![RdpInputEvent::ReleaseAllKeys]);
+                let _ = manager.send_input(&previous, vec![RdpInputEvent::ReleaseAllInputs]);
             }
         }
         if session_id.is_some() {

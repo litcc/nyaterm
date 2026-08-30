@@ -4,12 +4,15 @@ use futures::StreamExt as _;
 use gpui::{Bounds, ClipboardItem, Context, DevicePixels, Point, Size, Window, point, size};
 use nyaterm_remote_desktop::{
     CertificateDecision, CertificateMatchState, CertificatePromptReason, ClipboardOrigin,
-    DirtyRect, Framebuffer, FramebufferLimits, RDP_FRAMEBUFFER_LIMITS, RdpCapability,
-    RdpCertificatePolicy, RdpCertificateRequest, RdpCertificateResponse, RdpClipboardMode,
+    DirtyRect, DisplayScaleMode, DisplayTransform, Framebuffer, FramebufferLimits, LogicalPoint,
+    LogicalRect, LogicalSize, RDP_FRAMEBUFFER_LIMITS, RdpCapability, RdpCertificatePolicy,
+    RdpCertificateRequest, RdpCertificateResponse, RdpClipboardMode, RdpDisplayMetrics,
     RdpDisplayMode, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent,
-    RdpServerCapabilities, RdpSessionConfig, RdpSessionState, VNC_FRAMEBUFFER_LIMITS, VncError,
-    VncErrorKind, VncInputEvent, VncRuntimeEvent, VncServerCapabilities, VncSessionConfig,
-    VncSessionState, evaluate_certificate_match,
+    RdpServerCapabilities, RdpSessionConfig, RdpSessionState, RemoteCursorEvent,
+    RemoteDesktopError, RemoteDesktopViewState, RemotePoint, RemotePointerButton,
+    RemotePointerEvent, RemoteWheelAxis, VNC_FRAMEBUFFER_LIMITS, VncError, VncInputEvent,
+    VncRuntimeEvent, VncScaleMode, VncServerCapabilities, VncSessionConfig, VncSessionState,
+    evaluate_certificate_match,
 };
 use nyaterm_store::{RdpCertificateMetadata, RdpKnownHostCheck, StoreDomain, store_request};
 
@@ -91,11 +94,10 @@ impl NyaTermApp {
 
     pub(in crate::features) fn create_failed_vnc_runtime(&mut self, error: VncError) -> String {
         let session_id = nyaterm_core::uuid();
-        self.remote_desktop.insert_failed_session(
-            session_id.clone(),
-            vnc_error_as_rdp_kind(error.kind),
-            error.message,
-        );
+        self.remote_desktop.insert_connecting(session_id.clone());
+        if let Some(session) = self.remote_desktop.sessions.get_mut(&session_id) {
+            set_remote_view_error(session, error.into());
+        }
         session_id
     }
 
@@ -256,7 +258,7 @@ impl NyaTermApp {
                 self.remote_desktop
                     .insert_connecting(session_id.to_string());
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
-                    set_rdp_view_error(session, vnc_error_as_rdp_kind(error.kind), error.message);
+                    set_remote_view_error(session, error.into());
                 }
             }
         }
@@ -376,19 +378,26 @@ impl NyaTermApp {
                 let _ = self
                     .remote_desktop
                     .vnc_manager
-                    .send_input(session_id, vec![VncInputEvent::ReleaseAllKeys]);
+                    .send_input(session_id, vec![VncInputEvent::ReleaseAllInputs]);
+            }
+            if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
+                session.last_pointer = None;
+                session.wheel_remainder_x = 0.0;
+                session.wheel_remainder_y = 0.0;
             }
             return;
         }
         let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
             return;
         };
-        if let Some(event) = session.keys.release_all() {
-            let _ = self
-                .remote_desktop
-                .manager
-                .send_input(session_id, vec![event]);
-        }
+        let _ = session.keys.release_all();
+        session.last_pointer = None;
+        session.wheel_remainder_x = 0.0;
+        session.wheel_remainder_y = 0.0;
+        let _ = self
+            .remote_desktop
+            .manager
+            .send_input(session_id, vec![RdpInputEvent::ReleaseAllInputs]);
     }
 
     /// Deliver RDP and VNC session events as the helper processes produce them.
@@ -453,6 +462,7 @@ impl NyaTermApp {
             let vnc_drain = self.remote_desktop.vnc_manager.drain(&session_id);
             if drain.control.is_empty()
                 && drain.frames.is_empty()
+                && drain.cursors.is_empty()
                 && vnc_drain.control.is_empty()
                 && vnc_drain.frames.is_empty()
             {
@@ -461,15 +471,14 @@ impl NyaTermApp {
             if self.remote_desktop.metrics_enabled {
                 self.remote_desktop.metrics_control_events += drain.control.len();
                 self.remote_desktop.metrics_frame_updates += drain.frames.len();
-                self.remote_desktop.metrics_dropped_frames += drain.dropped_frames;
                 self.remote_desktop.metrics_control_events += vnc_drain.control.len();
                 self.remote_desktop.metrics_frame_updates += vnc_drain.frames.len();
-                self.remote_desktop.metrics_dropped_frames += vnc_drain.dropped_frames;
             }
             dirty = true;
             for event in drain.control {
                 self.apply_rdp_control_event(&session_id, event, window, cx);
             }
+            self.apply_remote_cursor_batch(&session_id, drain.cursors, window);
             self.apply_rdp_frame_batch(&session_id, drain.frames, window);
             for event in vnc_drain.control {
                 self.apply_vnc_control_event(&session_id, event, window, cx);
@@ -564,21 +573,7 @@ impl NyaTermApp {
                         .vnc_manager
                         .server_capabilities(session_id),
                 );
-                let state = match state {
-                    VncSessionState::Connecting
-                    | VncSessionState::Authenticating
-                    | VncSessionState::Negotiating => RdpSessionState::Connecting,
-                    VncSessionState::Connected => RdpSessionState::Connected,
-                    VncSessionState::Reconnecting => RdpSessionState::Reconnecting,
-                    VncSessionState::Disconnecting => RdpSessionState::Disconnecting,
-                    VncSessionState::Disconnected => RdpSessionState::Disconnected,
-                    VncSessionState::Failed => RdpSessionState::Failed(RdpError::new(
-                        RdpErrorKind::Session,
-                        message
-                            .clone()
-                            .unwrap_or_else(|| "VNC session failed".to_string()),
-                    )),
-                };
+                let state = RemoteDesktopViewState::from(&state);
                 if remote_state_clears_input(&state) {
                     self.remote_desktop.input.clear_session(session_id);
                 }
@@ -618,11 +613,7 @@ impl NyaTermApp {
                 self.remote_desktop.input.clear_session(session_id);
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
                     session.vnc_server_capabilities = None;
-                    set_rdp_view_error(
-                        session,
-                        vnc_error_as_rdp_kind(error.kind),
-                        format!("VNC connection failed: {error}"),
-                    );
+                    set_remote_view_error(session, error.into());
                 }
             }
         }
@@ -631,11 +622,19 @@ impl NyaTermApp {
     fn sync_rdp_keyboard_capture(&self, window: &Window) {
         let target = self.session.active_id().and_then(|session_id| {
             (self.remote_desktop.focus.is_focused(window)
+                && self.session.metadata(session_id).is_some_and(|metadata| {
+                    matches!(
+                        metadata.launch_config,
+                        crate::models::SessionLaunchConfig::Rdp(_)
+                    )
+                })
                 && self
                     .remote_desktop
                     .sessions
                     .get(session_id)
-                    .is_some_and(|session| matches!(session.state, RdpSessionState::Connected)))
+                    .is_some_and(|session| {
+                        matches!(session.state, RemoteDesktopViewState::Connected)
+                    }))
             .then(|| session_id.to_string())
         });
         super::keyboard_capture::set_keyboard_capture(self.remote_desktop.manager.clone(), target);
@@ -645,6 +644,7 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
         bounds: Bounds<gpui::Pixels>,
+        scale_factor: f32,
     ) {
         let fit_window = self.session.metadata(session_id).is_some_and(|metadata| {
             matches!(
@@ -661,11 +661,7 @@ impl NyaTermApp {
             session.pending_resize = None;
             return;
         }
-        self.queue_rdp_resize(
-            session_id,
-            f32::from(bounds.size.width).round().max(1.0) as u32,
-            f32::from(bounds.size.height).round().max(1.0) as u32,
-        );
+        self.queue_rdp_resize(session_id, fit_window_display_metrics(bounds, scale_factor));
     }
 
     pub(in crate::features) fn focused_remote_desktop_session_id(
@@ -705,7 +701,7 @@ impl NyaTermApp {
             .remote_desktop
             .sessions
             .get(session_id)
-            .is_some_and(|session| matches!(session.state, RdpSessionState::Connected))
+            .is_some_and(|session| matches!(session.state, RemoteDesktopViewState::Connected))
         {
             self.shell.set_status(
                 "Remote desktop text input is unavailable while disconnected".to_string(),
@@ -780,7 +776,7 @@ impl NyaTermApp {
             .remote_desktop
             .sessions
             .get(session_id)
-            .is_some_and(|session| matches!(session.state, RdpSessionState::Connected))
+            .is_some_and(|session| matches!(session.state, RemoteDesktopViewState::Connected))
         {
             return false;
         }
@@ -909,7 +905,7 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
         position: gpui::Point<gpui::Pixels>,
-        button: Option<nyaterm_remote_desktop::RdpPointerButton>,
+        button: Option<RemotePointerButton>,
         pressed: bool,
     ) -> bool {
         if self.session.metadata(session_id).is_some_and(|metadata| {
@@ -927,18 +923,20 @@ impl NyaTermApp {
         else {
             return false;
         };
-        let x = f32::from(position.x - viewport.origin.x);
-        let y = f32::from(position.y - viewport.origin.y);
-        let Some(remote) = nyaterm_remote_desktop::viewport_to_remote(
-            x,
-            y,
-            f32::from(viewport.size.width),
-            f32::from(viewport.size.height),
+        let transform = display_transform(
+            viewport,
             framebuffer.width(),
             framebuffer.height(),
-        ) else {
-            return false;
-        };
+            DisplayScaleMode::Fit,
+        );
+        let remote = transform
+            .and_then(|transform| transform.window_to_remote(logical_point(position)))
+            .or_else(|| {
+                (button.is_some() && !pressed)
+                    .then_some(session.last_pointer)
+                    .flatten()
+            });
+        let Some(remote) = remote else { return false };
         let now = Instant::now();
         if button.is_none() {
             if session.last_pointer == Some(remote) {
@@ -955,17 +953,21 @@ impl NyaTermApp {
         session.last_pointer = Some(remote);
         session.pending_pointer = None;
         session.last_pointer_sent_at = Some(now);
+        let position = RemotePoint {
+            x: remote.0,
+            y: remote.1,
+        };
+        let pointer = match button {
+            Some(button) => RemotePointerEvent::Button {
+                position,
+                button,
+                pressed,
+            },
+            None => RemotePointerEvent::Move { position },
+        };
         self.remote_desktop
             .manager
-            .send_input(
-                session_id,
-                vec![RdpInputEvent::Pointer {
-                    x: remote.0,
-                    y: remote.1,
-                    button,
-                    pressed,
-                }],
-            )
+            .send_input(session_id, vec![RdpInputEvent::Pointer(pointer)])
             .is_ok()
     }
 
@@ -992,7 +994,7 @@ impl NyaTermApp {
         &mut self,
         session_id: &str,
         position: gpui::Point<gpui::Pixels>,
-        button: Option<nyaterm_remote_desktop::RdpPointerButton>,
+        button: Option<RemotePointerButton>,
         pressed: bool,
     ) -> bool {
         if !self.vnc_input_enabled(session_id) {
@@ -1005,83 +1007,151 @@ impl NyaTermApp {
         else {
             return false;
         };
-        let x = f32::from(position.x - viewport.origin.x);
-        let y = f32::from(position.y - viewport.origin.y);
-        let Some(remote) = nyaterm_remote_desktop::viewport_to_remote(
-            x,
-            y,
-            f32::from(viewport.size.width),
-            f32::from(viewport.size.height),
+        let scale_mode = self
+            .session
+            .metadata(session_id)
+            .and_then(|metadata| match &metadata.launch_config {
+                crate::models::SessionLaunchConfig::Vnc(config) => {
+                    Some(display_scale_mode(config.display.scale_mode))
+                }
+                _ => None,
+            })
+            .unwrap_or(DisplayScaleMode::Fit);
+        let transform = display_transform(
+            viewport,
             framebuffer.width(),
             framebuffer.height(),
-        ) else {
+            scale_mode,
+        );
+        let remote = transform
+            .and_then(|transform| transform.window_to_remote(logical_point(position)))
+            .or_else(|| {
+                (button.is_some() && !pressed)
+                    .then_some(session.last_pointer)
+                    .flatten()
+            });
+        let Some(remote) = remote else { return false };
+        if matches!(
+            button,
+            Some(RemotePointerButton::X1 | RemotePointerButton::X2)
+        ) {
             return false;
-        };
-        let mut button_mask = session.vnc_button_mask;
-        match button {
-            Some(nyaterm_remote_desktop::RdpPointerButton::Left) => {
-                set_button_mask(&mut button_mask, 0x01, pressed);
-            }
-            Some(nyaterm_remote_desktop::RdpPointerButton::Middle) => {
-                set_button_mask(&mut button_mask, 0x02, pressed);
-            }
-            Some(nyaterm_remote_desktop::RdpPointerButton::Right) => {
-                set_button_mask(&mut button_mask, 0x04, pressed);
-            }
-            Some(nyaterm_remote_desktop::RdpPointerButton::WheelUp) => {
-                return self.send_vnc_pointer_wheel(session_id, remote, 0x08);
-            }
-            Some(nyaterm_remote_desktop::RdpPointerButton::WheelDown) => {
-                return self.send_vnc_pointer_wheel(session_id, remote, 0x10);
-            }
-            None => {}
         }
         if button.is_none() && session.last_pointer == Some(remote) {
             return false;
         }
         session.last_pointer = Some(remote);
-        session.vnc_button_mask = button_mask;
+        let position = RemotePoint {
+            x: remote.0,
+            y: remote.1,
+        };
+        let pointer = match button {
+            Some(button) => RemotePointerEvent::Button {
+                position,
+                button,
+                pressed,
+            },
+            None => RemotePointerEvent::Move { position },
+        };
         self.remote_desktop
             .vnc_manager
-            .send_input(
-                session_id,
-                vec![VncInputEvent::Pointer {
-                    x: remote.0,
-                    y: remote.1,
-                    button_mask,
-                }],
-            )
+            .send_input(session_id, vec![VncInputEvent::Pointer(pointer)])
             .is_ok()
     }
 
-    fn send_vnc_pointer_wheel(
+    pub(in crate::features) fn send_remote_wheel(
         &mut self,
         session_id: &str,
-        remote: (u32, u32),
-        wheel_mask: u8,
+        position: gpui::Point<gpui::Pixels>,
+        delta_lines_x: f32,
+        delta_lines_y: f32,
     ) -> bool {
-        let Some(session) = self.remote_desktop.sessions.get(session_id) else {
+        let is_vnc = self.session.metadata(session_id).is_some_and(|metadata| {
+            matches!(
+                metadata.launch_config,
+                crate::models::SessionLaunchConfig::Vnc(_)
+            )
+        });
+        if is_vnc && !self.vnc_input_enabled(session_id) {
+            return false;
+        }
+        let scale_mode = if is_vnc {
+            self.session
+                .metadata(session_id)
+                .and_then(|metadata| match &metadata.launch_config {
+                    crate::models::SessionLaunchConfig::Vnc(config) => {
+                        Some(display_scale_mode(config.display.scale_mode))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(DisplayScaleMode::Fit)
+        } else {
+            DisplayScaleMode::Fit
+        };
+        let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
             return false;
         };
-        let current = session.vnc_button_mask;
-        self.remote_desktop
-            .vnc_manager
-            .send_input(
-                session_id,
-                vec![
-                    VncInputEvent::Pointer {
-                        x: remote.0,
-                        y: remote.1,
-                        button_mask: current | wheel_mask,
-                    },
-                    VncInputEvent::Pointer {
-                        x: remote.0,
-                        y: remote.1,
-                        button_mask: current,
-                    },
-                ],
-            )
-            .is_ok()
+        let (Some(viewport), Some(framebuffer)) = (session.viewport, session.framebuffer.as_ref())
+        else {
+            return false;
+        };
+        let Some(remote) = display_transform(
+            viewport,
+            framebuffer.width(),
+            framebuffer.height(),
+            scale_mode,
+        )
+        .and_then(|transform| transform.window_to_remote(logical_point(position))) else {
+            return false;
+        };
+        session.last_pointer = Some(remote);
+        session.wheel_remainder_x += delta_lines_x;
+        session.wheel_remainder_y += delta_lines_y;
+        let steps_x = session.wheel_remainder_x.trunc() as i32;
+        let steps_y = session.wheel_remainder_y.trunc() as i32;
+        session.wheel_remainder_x -= steps_x as f32;
+        session.wheel_remainder_y -= steps_y as f32;
+        let position = RemotePoint {
+            x: remote.0,
+            y: remote.1,
+        };
+        let mut pointers = Vec::with_capacity(2);
+        if steps_y != 0 {
+            pointers.push(RemotePointerEvent::Wheel {
+                position,
+                axis: RemoteWheelAxis::Vertical,
+                rotation_units: (steps_y.saturating_mul(120))
+                    .clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            });
+        }
+        if steps_x != 0 {
+            pointers.push(RemotePointerEvent::Wheel {
+                position,
+                axis: RemoteWheelAxis::Horizontal,
+                rotation_units: (steps_x.saturating_mul(-120))
+                    .clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            });
+        }
+        if pointers.is_empty() {
+            return true;
+        }
+        if is_vnc {
+            self.remote_desktop
+                .vnc_manager
+                .send_input(
+                    session_id,
+                    pointers.into_iter().map(VncInputEvent::Pointer).collect(),
+                )
+                .is_ok()
+        } else {
+            self.remote_desktop
+                .manager
+                .send_input(
+                    session_id,
+                    pointers.into_iter().map(RdpInputEvent::Pointer).collect(),
+                )
+                .is_ok()
+        }
     }
 
     fn vnc_input_enabled(&self, session_id: &str) -> bool {
@@ -1112,12 +1182,12 @@ impl NyaTermApp {
                 .manager
                 .send_input(
                     session_id,
-                    vec![RdpInputEvent::Pointer {
-                        x: pointer.0,
-                        y: pointer.1,
-                        button: None,
-                        pressed: false,
-                    }],
+                    vec![RdpInputEvent::Pointer(RemotePointerEvent::Move {
+                        position: RemotePoint {
+                            x: pointer.0,
+                            y: pointer.1,
+                        },
+                    })],
                 )
                 .is_ok();
         }
@@ -1138,13 +1208,11 @@ impl NyaTermApp {
             active_sessions = self.remote_desktop.sessions.len(),
             control_events = self.remote_desktop.metrics_control_events,
             frame_updates = self.remote_desktop.metrics_frame_updates,
-            dropped_frames = self.remote_desktop.metrics_dropped_frames,
             "RDP runtime metrics"
         );
         self.remote_desktop.metrics_last_report = now;
         self.remote_desktop.metrics_control_events = 0;
         self.remote_desktop.metrics_frame_updates = 0;
-        self.remote_desktop.metrics_dropped_frames = 0;
     }
 
     fn apply_rdp_control_event(
@@ -1159,7 +1227,8 @@ impl NyaTermApp {
                 let server_capabilities = matches!(state, RdpSessionState::Connected)
                     .then(|| self.remote_desktop.manager.server_capabilities(session_id))
                     .flatten();
-                if remote_state_clears_input(&state) {
+                let view_state = rdp_view_state(&state);
+                if remote_state_clears_input(&view_state) {
                     self.remote_desktop.input.clear_session(session_id);
                 }
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
@@ -1172,10 +1241,10 @@ impl NyaTermApp {
                         session.pending_resize = None;
                     }
                     if let RdpSessionState::Failed(error) = &state {
-                        session.error = Some(error.clone());
+                        session.error = Some(error.clone().into());
                     }
                     session.server_capabilities = server_capabilities;
-                    session.state = state;
+                    session.state = view_state;
                 }
                 if let Some(message) = message {
                     self.shell.set_status(message);
@@ -1200,6 +1269,9 @@ impl NyaTermApp {
                 );
             }
             RdpRuntimeEvent::Frame { .. } => {}
+            RdpRuntimeEvent::Cursor { event, .. } => {
+                self.apply_remote_cursor_batch(session_id, vec![event], window);
+            }
             RdpRuntimeEvent::Clipboard { text, .. } => {
                 if self.session.active_id() != Some(session_id) {
                     return;
@@ -1238,12 +1310,12 @@ impl NyaTermApp {
                 }
                 let should_reconnect = fatal && self.schedule_rdp_reconnect(session_id, &error);
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
-                    session.error = Some(error.clone());
+                    session.error = Some(error.clone().into());
                     if fatal {
                         session.server_capabilities = None;
                     }
                     if fatal && !should_reconnect {
-                        session.state = RdpSessionState::Failed(error.clone());
+                        session.state = RemoteDesktopViewState::Failed;
                     }
                 }
                 if !should_reconnect {
@@ -1279,7 +1351,7 @@ impl NyaTermApp {
         session.reconnect_attempts += 1;
         let delay = rdp_reconnect_delay(session.reconnect_attempts, rand::random_range(0..250));
         session.reconnect_at = Some(Instant::now() + delay);
-        session.state = RdpSessionState::Reconnecting;
+        session.state = RemoteDesktopViewState::Reconnecting;
         self.shell.set_status(format!(
             "RDP reconnecting in {:.1}s (attempt {}/{})",
             delay.as_secs_f32(),
@@ -1332,7 +1404,9 @@ impl NyaTermApp {
                     Ok(texture) => {
                         session.framebuffer = Some(framebuffer);
                         session.texture = Some(texture);
-                        session.cursor = None;
+                        session.cursor_shape = None;
+                        session.cursor_position = Default::default();
+                        session.cursor_visible = true;
                     }
                     Err(error) => set_rdp_view_error(
                         session,
@@ -1360,33 +1434,6 @@ impl NyaTermApp {
         };
         let mut dirty_rects = Vec::new();
         for frame in frames {
-            if let RdpFrameEvent::Cursor(cursor) = frame {
-                if session
-                    .framebuffer
-                    .as_ref()
-                    .is_some_and(|framebuffer| framebuffer.epoch() == cursor.epoch)
-                {
-                    if let Some(texture) = session.cursor_texture.take() {
-                        window.remove_dynamic_texture(texture);
-                    }
-                    if cursor.visible
-                        && cursor.width > 0
-                        && cursor.height > 0
-                        && let Ok(texture) = window.create_dynamic_texture(
-                            size(
-                                DevicePixels(cursor.width as i32),
-                                DevicePixels(cursor.height as i32),
-                            ),
-                            &cursor.pixels,
-                            cursor.width * 4,
-                        )
-                    {
-                        session.cursor_texture = Some(texture);
-                    }
-                    session.cursor = Some(cursor);
-                }
-                continue;
-            }
             let Some(framebuffer) = session.framebuffer.as_mut() else {
                 continue;
             };
@@ -1434,6 +1481,54 @@ impl NyaTermApp {
         }
         for rect in nyaterm_remote_desktop::merge_dirty_rects(dirty_rects) {
             let _ = upload_rdp_rect(window, texture, framebuffer, rect);
+        }
+    }
+
+    fn apply_remote_cursor_batch(
+        &mut self,
+        session_id: &str,
+        cursors: Vec<RemoteCursorEvent>,
+        window: &mut Window,
+    ) {
+        let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
+            return;
+        };
+        for cursor in cursors {
+            match cursor {
+                RemoteCursorEvent::Shape(shape) => {
+                    if session
+                        .cursor_shape
+                        .as_ref()
+                        .is_some_and(|current| current.shape_id == shape.shape_id)
+                        && session.cursor_texture.is_some()
+                    {
+                        continue;
+                    }
+                    if let Some(texture) = session.cursor_texture.take() {
+                        window.remove_dynamic_texture(texture);
+                    }
+                    if shape.width > 0
+                        && shape.height > 0
+                        && let Ok(texture) = window.create_dynamic_texture(
+                            size(
+                                DevicePixels(shape.width as i32),
+                                DevicePixels(shape.height as i32),
+                            ),
+                            &shape.pixels,
+                            shape.width * 4,
+                        )
+                    {
+                        session.cursor_texture = Some(texture);
+                    }
+                    session.cursor_shape = Some(shape);
+                }
+                RemoteCursorEvent::Position(position) => {
+                    session.cursor_position = position;
+                }
+                RemoteCursorEvent::Visibility(visibility) => {
+                    session.cursor_visible = visibility.visible;
+                }
+            }
         }
     }
 
@@ -1669,22 +1764,22 @@ impl NyaTermApp {
     pub(in crate::features) fn queue_rdp_resize(
         &mut self,
         session_id: &str,
-        width: u32,
-        height: u32,
+        mut metrics: RdpDisplayMetrics,
     ) {
-        let width = width.clamp(200, 8192) & !1;
-        let height = height.clamp(200, 8192) & !1;
+        metrics.width = metrics.width.clamp(200, 8192) & !1;
+        metrics.height = metrics.height.clamp(200, 8192) & !1;
+        metrics.desktop_scale_factor = metrics.desktop_scale_factor.clamp(100, 500);
         if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
             let remote_size = session
                 .framebuffer
                 .as_ref()
                 .map(|framebuffer| (framebuffer.width(), framebuffer.height()));
             if session.dynamic_resize_disabled
-                || !rdp_resize_is_material(remote_size, session.last_resize, (width, height))
+                || !rdp_resize_is_material(remote_size, session.last_resize, metrics)
             {
                 return;
             }
-            session.pending_resize = Some((width, height, Instant::now()));
+            session.pending_resize = Some((metrics, Instant::now()));
         }
     }
 
@@ -1692,7 +1787,7 @@ impl NyaTermApp {
         let now = Instant::now();
         let mut sent = false;
         for (session_id, session) in &mut self.remote_desktop.sessions {
-            let Some((width, height, queued_at)) = session.pending_resize else {
+            let Some((metrics, queued_at)) = session.pending_resize else {
                 continue;
             };
             if now.saturating_duration_since(queued_at) < RESIZE_DEBOUNCE {
@@ -1702,10 +1797,10 @@ impl NyaTermApp {
             if self
                 .remote_desktop
                 .manager
-                .resize(session_id, width, height)
+                .resize_with_metrics(session_id, metrics)
                 .is_ok()
             {
-                session.last_resize = Some((width, height));
+                session.last_resize = Some(metrics);
                 session.last_resize_sent_at = Some(now);
                 sent = true;
             }
@@ -1724,7 +1819,7 @@ impl NyaTermApp {
             .remote_desktop
             .sessions
             .get(&session_id)
-            .is_some_and(|session| matches!(session.state, RdpSessionState::Connected))
+            .is_some_and(|session| matches!(session.state, RemoteDesktopViewState::Connected))
         {
             return false;
         }
@@ -1773,7 +1868,7 @@ impl NyaTermApp {
                     .manager
                     .set_clipboard_text(&session_id, text)
                 {
-                    session.error = Some(error);
+                    session.error = Some(error.into());
                 }
             }
             RemoteDesktopClipboardTarget::Vnc => {
@@ -1782,10 +1877,7 @@ impl NyaTermApp {
                     .vnc_manager
                     .set_clipboard_text(&session_id, text)
                 {
-                    session.error = Some(RdpError::new(
-                        vnc_error_as_rdp_kind(error.kind),
-                        error.message,
-                    ));
+                    session.error = Some(error.into());
                 }
             }
         }
@@ -1846,8 +1938,16 @@ fn set_rdp_view_error(
     message: String,
 ) {
     let error = RdpError::new(kind, message);
-    session.error = Some(error.clone());
-    session.state = RdpSessionState::Failed(error);
+    session.error = Some(error.into());
+    session.state = RemoteDesktopViewState::Failed;
+}
+
+fn set_remote_view_error(
+    session: &mut super::state::RemoteDesktopSessionState,
+    error: RemoteDesktopError,
+) {
+    session.error = Some(error);
+    session.state = RemoteDesktopViewState::Failed;
 }
 
 fn rdp_error_is_retryable(kind: RdpErrorKind) -> bool {
@@ -1861,28 +1961,41 @@ fn rdp_error_is_retryable(kind: RdpErrorKind) -> bool {
     )
 }
 
-/// Project a VNC error onto the shared remote-desktop error vocabulary.
-///
-/// The view layer renders both protocols through `RdpErrorKind`; the helper
-/// lifecycle kinds map straight across because RDP already has them.
-fn vnc_error_as_rdp_kind(kind: VncErrorKind) -> RdpErrorKind {
-    match kind {
-        VncErrorKind::Authentication => RdpErrorKind::Authentication,
-        VncErrorKind::Clipboard => RdpErrorKind::Clipboard,
-        VncErrorKind::Transport => RdpErrorKind::Transport,
-        VncErrorKind::Encoding | VncErrorKind::Protocol => RdpErrorKind::Protocol,
-        VncErrorKind::Internal => RdpErrorKind::Session,
-        VncErrorKind::HelperMissing => RdpErrorKind::HelperMissing,
-        VncErrorKind::HelperCrashed => RdpErrorKind::HelperCrashed,
-        VncErrorKind::Ipc => RdpErrorKind::Ipc,
+fn display_scale_mode(mode: VncScaleMode) -> DisplayScaleMode {
+    match mode {
+        VncScaleMode::Fit => DisplayScaleMode::Fit,
+        VncScaleMode::Stretch => DisplayScaleMode::Stretch,
+        VncScaleMode::Actual => DisplayScaleMode::Actual,
     }
 }
 
-fn set_button_mask(mask: &mut u8, bit: u8, pressed: bool) {
-    if pressed {
-        *mask |= bit;
-    } else {
-        *mask &= !bit;
+fn display_transform(
+    viewport: Bounds<gpui::Pixels>,
+    remote_width: u32,
+    remote_height: u32,
+    scale_mode: DisplayScaleMode,
+) -> Option<DisplayTransform> {
+    DisplayTransform::new(
+        LogicalRect {
+            origin: LogicalPoint {
+                x: f32::from(viewport.origin.x),
+                y: f32::from(viewport.origin.y),
+            },
+            size: LogicalSize {
+                width: f32::from(viewport.size.width),
+                height: f32::from(viewport.size.height),
+            },
+        },
+        remote_width,
+        remote_height,
+        scale_mode,
+    )
+}
+
+fn logical_point(point: gpui::Point<gpui::Pixels>) -> LogicalPoint {
+    LogicalPoint {
+        x: f32::from(point.x),
+        y: f32::from(point.y),
     }
 }
 
@@ -1976,23 +2089,27 @@ fn vnc_capabilities_for_state(
         .flatten()
 }
 
-fn remote_state_clears_input(state: &RdpSessionState) -> bool {
+fn remote_state_clears_input(state: &RemoteDesktopViewState) -> bool {
     matches!(
         state,
-        RdpSessionState::Reconnecting
-            | RdpSessionState::Disconnecting
-            | RdpSessionState::Disconnected
-            | RdpSessionState::Failed(_)
+        RemoteDesktopViewState::Reconnecting
+            | RemoteDesktopViewState::Disconnecting
+            | RemoteDesktopViewState::Disconnected
+            | RemoteDesktopViewState::Failed
     )
+}
+
+fn rdp_view_state(state: &RdpSessionState) -> RemoteDesktopViewState {
+    state.into()
 }
 
 pub(super) fn secure_attention_available(
     is_rdp: bool,
-    state: &RdpSessionState,
+    state: &RemoteDesktopViewState,
     capabilities: Option<RdpServerCapabilities>,
 ) -> bool {
     is_rdp
-        && matches!(state, RdpSessionState::Connected)
+        && matches!(state, RemoteDesktopViewState::Connected)
         && capabilities.is_some_and(|capabilities| capabilities.secure_attention)
 }
 
@@ -2064,17 +2181,45 @@ fn clear_rdp_reconnect_after_frame(session: &mut super::state::RemoteDesktopSess
 
 fn rdp_resize_is_material(
     remote_size: Option<(u32, u32)>,
-    last_resize: Option<(u32, u32)>,
-    requested: (u32, u32),
+    last_resize: Option<RdpDisplayMetrics>,
+    requested: RdpDisplayMetrics,
 ) -> bool {
     if last_resize == Some(requested) {
         return false;
     }
+    if last_resize.is_some_and(|last| {
+        last.desktop_scale_factor != requested.desktop_scale_factor
+            || last.physical_size_mm != requested.physical_size_mm
+    }) || (last_resize.is_none() && requested.desktop_scale_factor != 100)
+    {
+        return true;
+    }
     let Some((remote_width, remote_height)) = remote_size else {
         return true;
     };
-    remote_width.abs_diff(requested.0) >= RESIZE_MIN_DELTA
-        || remote_height.abs_diff(requested.1) >= RESIZE_MIN_DELTA
+    remote_width.abs_diff(requested.width) >= RESIZE_MIN_DELTA
+        || remote_height.abs_diff(requested.height) >= RESIZE_MIN_DELTA
+}
+
+fn fit_window_display_metrics(
+    bounds: Bounds<gpui::Pixels>,
+    scale_factor: f32,
+) -> RdpDisplayMetrics {
+    let scale_factor = if scale_factor.is_finite() {
+        scale_factor.max(1.0)
+    } else {
+        1.0
+    };
+    RdpDisplayMetrics {
+        width: (f32::from(bounds.size.width) * scale_factor)
+            .round()
+            .max(1.0) as u32,
+        height: (f32::from(bounds.size.height) * scale_factor)
+            .round()
+            .max(1.0) as u32,
+        desktop_scale_factor: (scale_factor * 100.0).round().clamp(100.0, 500.0) as u32,
+        physical_size_mm: None,
+    }
 }
 
 fn should_disable_dynamic_resize_after_state(
@@ -2107,6 +2252,10 @@ pub(super) fn format_rdp_error(error: &RdpError) -> String {
         RdpErrorKind::Unsupported => "RDP feature is unsupported",
     };
     format!("{category}: {}", error.message)
+}
+
+pub(super) fn format_remote_desktop_error(error: &RemoteDesktopError) -> String {
+    format!("{:?}: {}", error.category, error.message)
 }
 
 fn inline_remote_desktop_password(
@@ -2149,8 +2298,8 @@ mod tests {
 
     use nyaterm_core::ConnectionAuth;
     use nyaterm_remote_desktop::{
-        RdpError, RdpErrorKind, RdpServerCapabilities, RdpSessionState, VncServerCapabilities,
-        VncSessionState,
+        RdpDisplayMetrics, RdpError, RdpErrorKind, RdpServerCapabilities, RemoteDesktopViewState,
+        VncServerCapabilities, VncSessionState,
     };
 
     use super::{
@@ -2245,7 +2394,7 @@ mod tests {
         let mut session = RemoteDesktopSessionState {
             reconnect_attempts: 4,
             reconnect_at: Some(Instant::now()),
-            error: Some(RdpError::new(RdpErrorKind::Transport, "interrupted")),
+            error: Some(RdpError::new(RdpErrorKind::Transport, "interrupted").into()),
             ..Default::default()
         };
 
@@ -2258,18 +2407,33 @@ mod tests {
 
     #[test]
     fn resize_filter_ignores_duplicate_and_sub_threshold_changes() {
+        let metrics = |width, height, desktop_scale_factor| RdpDisplayMetrics {
+            width,
+            height,
+            desktop_scale_factor,
+            physical_size_mm: None,
+        };
         assert!(!rdp_resize_is_material(
             Some((1280, 720)),
             None,
-            (1300, 740)
+            metrics(1300, 740, 100)
         ));
-        assert!(rdp_resize_is_material(Some((1280, 720)), None, (1312, 720)));
+        assert!(rdp_resize_is_material(
+            Some((1280, 720)),
+            None,
+            metrics(1312, 720, 100)
+        ));
         assert!(!rdp_resize_is_material(
             None,
-            Some((1280, 720)),
-            (1280, 720)
+            Some(metrics(1280, 720, 100)),
+            metrics(1280, 720, 100)
         ));
-        assert!(rdp_resize_is_material(None, None, (1280, 720)));
+        assert!(rdp_resize_is_material(None, None, metrics(1280, 720, 100)));
+        assert!(rdp_resize_is_material(
+            Some((1280, 720)),
+            None,
+            metrics(1280, 720, 150)
+        ));
     }
 
     #[test]
@@ -2440,38 +2604,42 @@ mod tests {
         });
         assert!(secure_attention_available(
             true,
-            &RdpSessionState::Connected,
+            &RemoteDesktopViewState::Connected,
             supported,
         ));
         assert!(!secure_attention_available(
             false,
-            &RdpSessionState::Connected,
+            &RemoteDesktopViewState::Connected,
             supported,
         ));
         assert!(!secure_attention_available(
             true,
-            &RdpSessionState::Connecting,
+            &RemoteDesktopViewState::Connecting,
             supported,
         ));
         assert!(!secure_attention_available(
             true,
-            &RdpSessionState::Connected,
+            &RemoteDesktopViewState::Connected,
             None,
         ));
         assert!(!secure_attention_available(
             true,
-            &RdpSessionState::Connected,
+            &RemoteDesktopViewState::Connected,
             Some(RdpServerCapabilities::default()),
         ));
     }
 
     #[test]
     fn disconnecting_states_clear_local_composition_and_key_suppression() {
-        assert!(!remote_state_clears_input(&RdpSessionState::Connected));
-        assert!(remote_state_clears_input(&RdpSessionState::Reconnecting));
-        assert!(remote_state_clears_input(&RdpSessionState::Disconnected));
-        assert!(remote_state_clears_input(&RdpSessionState::Failed(
-            RdpError::new(RdpErrorKind::Session, "closed")
-        )));
+        assert!(!remote_state_clears_input(
+            &RemoteDesktopViewState::Connected
+        ));
+        assert!(remote_state_clears_input(
+            &RemoteDesktopViewState::Reconnecting
+        ));
+        assert!(remote_state_clears_input(
+            &RemoteDesktopViewState::Disconnected
+        ));
+        assert!(remote_state_clears_input(&RemoteDesktopViewState::Failed));
     }
 }

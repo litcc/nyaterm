@@ -4,7 +4,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use nyaterm_remote_desktop::{
-    PROTOCOL_VERSION, PixelFormat, RdpFrameEvent, VncClipboardConfig, VncControlMessage,
+    PROTOCOL_VERSION, PixelFormat, RemoteFrameEvent, VncClipboardConfig, VncControlMessage,
     VncDisplayConfig, VncError, VncErrorKind, VncInputEvent, VncReconnectConfig, VncSecurityConfig,
     VncServerCapabilities, VncSessionConfig, VncSessionState, decode_vnc_control,
     encode_frame_packet, encode_vnc_control, read_packet, write_packet,
@@ -80,7 +80,7 @@ fn assert_helper_rejects_frame(after_hello: bool) {
     if after_hello {
         send(&mut stdin, &client_hello());
     }
-    let frame = RdpFrameEvent::Bitmap {
+    let frame = RemoteFrameEvent::Bitmap {
         epoch: 1,
         full: true,
         x: 0,
@@ -148,7 +148,7 @@ fn non_client_hello_messages() -> Vec<VncControlMessage> {
         },
         VncControlMessage::Input {
             session_id: "test-session".to_string(),
-            events: vec![VncInputEvent::ReleaseAllKeys],
+            events: vec![VncInputEvent::ReleaseAllInputs],
         },
         VncControlMessage::Clipboard {
             session_id: "test-session".to_string(),
@@ -197,7 +197,7 @@ fn foreign_session_messages() -> Vec<VncControlMessage> {
     vec![
         VncControlMessage::Input {
             session_id: "foreign-session".to_string(),
-            events: vec![VncInputEvent::ReleaseAllKeys],
+            events: vec![VncInputEvent::ReleaseAllInputs],
         },
         VncControlMessage::Clipboard {
             session_id: "foreign-session".to_string(),

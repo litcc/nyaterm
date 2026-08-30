@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin};
+use std::process::Child;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -8,11 +8,12 @@ use uuid::Uuid;
 
 use crate::helper_process;
 use crate::{
-    FRAME_PAYLOAD_LIMIT, PROTOCOL_VERSION, PacketType, QueueWaker, RdpCertificateResponse,
-    RdpControlMessage, RdpCursorEvent, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent,
-    RdpRuntimeEvent, RdpServerCapabilities, RdpSessionConfig, RdpSessionDrain, RdpSessionState,
+    CursorPosition, CursorShape, CursorVisibility, FRAME_PAYLOAD_LIMIT, PROTOCOL_VERSION,
+    PacketType, QueueWaker, RdpCertificateResponse, RdpControlMessage, RdpDisplayMetrics, RdpError,
+    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities,
+    RdpSessionConfig, RdpSessionDrain, RdpSessionState, RemoteCursorEvent, RemotePointerEvent,
     decode_control, decode_cursor_packet_owned, decode_frame_packet_owned, encode_control,
-    read_packet, validate_committed_text, write_packet,
+    read_packet, validate_committed_text,
 };
 
 const MIN_WIDTH: u32 = 200;
@@ -38,7 +39,9 @@ struct EventQueueState {
     control_bytes: usize,
     frames: VecDeque<RdpFrameEvent>,
     frame_bytes: usize,
-    cursor: Option<RdpCursorEvent>,
+    cursor_shape: Option<CursorShape>,
+    cursor_position: Option<CursorPosition>,
+    cursor_visibility: Option<CursorVisibility>,
     current_epoch: Option<u64>,
     closed: bool,
 }
@@ -58,6 +61,13 @@ fn control_byte_cost(event: &RdpRuntimeEvent) -> usize {
             ..
         } => session_id.len() + message.as_ref().map_or(0, String::len) + 64,
         RdpRuntimeEvent::Frame { session_id, .. } => session_id.len() + 64,
+        RdpRuntimeEvent::Cursor { session_id, event } => {
+            session_id.len()
+                + match event {
+                    RemoteCursorEvent::Shape(shape) => shape.pixels.len() + 64,
+                    RemoteCursorEvent::Position(_) | RemoteCursorEvent::Visibility(_) => 32,
+                }
+        }
         RdpRuntimeEvent::Clipboard {
             session_id, text, ..
         } => session_id.len() + text.len() + 64,
@@ -153,7 +163,7 @@ impl EventQueue {
         Self::wake(&state);
     }
 
-    fn push_cursor(&self, cursor: RdpCursorEvent) -> bool {
+    fn push_cursor(&self, cursor: RemoteCursorEvent) -> bool {
         let mut state = self
             .state
             .lock()
@@ -161,7 +171,13 @@ impl EventQueue {
         if state.closed {
             return false;
         }
-        state.cursor = Some(cursor);
+        match cursor {
+            RemoteCursorEvent::Shape(shape) => state.cursor_shape = Some(shape),
+            RemoteCursorEvent::Position(position) => state.cursor_position = Some(position),
+            RemoteCursorEvent::Visibility(visibility) => {
+                state.cursor_visibility = Some(visibility);
+            }
+        }
         Self::wake(&state);
         true
     }
@@ -178,6 +194,9 @@ impl EventQueue {
             state.current_epoch = Some(epoch);
             state.frames.clear();
             state.frame_bytes = 0;
+            state.cursor_shape = None;
+            state.cursor_position = None;
+            state.cursor_visibility = None;
         }
         self.space_available.notify_all();
         self.push_control(RdpRuntimeEvent::Frame {
@@ -232,16 +251,26 @@ impl EventQueue {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut frames: Vec<RdpFrameEvent> = state.frames.drain(..).collect();
+        let frames: Vec<RdpFrameEvent> = state.frames.drain(..).collect();
         state.frame_bytes = 0;
-        if let Some(cursor) = state.cursor.take() {
-            frames.push(RdpFrameEvent::Cursor(cursor));
-        }
+        let mut cursors = Vec::with_capacity(3);
+        cursors.extend(state.cursor_shape.take().map(RemoteCursorEvent::Shape));
+        cursors.extend(
+            state
+                .cursor_position
+                .take()
+                .map(RemoteCursorEvent::Position),
+        );
+        cursors.extend(
+            state
+                .cursor_visibility
+                .take()
+                .map(RemoteCursorEvent::Visibility),
+        );
         let drain = RdpSessionDrain {
             control: state.control.drain(..).collect(),
             frames,
-            dropped_frames: 0,
-            waiting_for_full_frame: false,
+            cursors,
         };
         state.control_bytes = 0;
         drop(state);
@@ -264,7 +293,7 @@ struct SessionRecord {
     state: Arc<Mutex<RdpSessionState>>,
     capabilities: Arc<Mutex<Option<RdpServerCapabilities>>>,
     queue: Arc<EventQueue>,
-    writer: Arc<Mutex<ChildStdin>>,
+    writer: helper_process::IpcWriter,
     child: Option<Child>,
     reader: Option<JoinHandle<()>>,
 }
@@ -324,7 +353,7 @@ impl RdpSessionManager {
         }
         let helper = resolve_helper_path()?;
         let helper_process::HelperProcess {
-            child,
+            mut child,
             stdin,
             stdout,
         } = helper_process::spawn_helper(&helper).map_err(|error| {
@@ -333,7 +362,20 @@ impl RdpSessionManager {
                 format!("failed to spawn the RDP helper: {error}"),
             )
         })?;
-        let writer = Arc::new(Mutex::new(stdin));
+        let writer = match helper_process::IpcWriter::spawn(
+            stdin,
+            format!("nyaterm-rdp-writer-{session_id}"),
+        ) {
+            Ok(writer) => writer,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(RdpError::new(
+                    RdpErrorKind::Ipc,
+                    format!("failed to start the RDP IPC writer: {error}"),
+                ));
+            }
+        };
         let queue = Arc::new(EventQueue::with_waker(self.queue_waker()));
         let state = Arc::new(Mutex::new(RdpSessionState::Connecting));
         let capabilities = Arc::new(Mutex::new(None));
@@ -427,6 +469,15 @@ impl RdpSessionManager {
                 session_id: session_id.to_string(),
                 event,
             }));
+        drain.control.extend(
+            drain
+                .cursors
+                .drain(..)
+                .map(|event| RdpRuntimeEvent::Cursor {
+                    session_id: session_id.to_string(),
+                    event,
+                }),
+        );
         drain.control
     }
 
@@ -450,13 +501,39 @@ impl RdpSessionManager {
                 ));
             }
         }
-        self.send(
-            session_id,
-            RdpControlMessage::Input {
+        let move_only = !events.is_empty()
+            && events.iter().all(|event| {
+                matches!(
+                    event,
+                    RdpInputEvent::Pointer(RemotePointerEvent::Move { .. })
+                )
+            });
+        let message = RdpControlMessage::Input {
+            session_id: session_id.to_string(),
+            events,
+        };
+        let packet = encode_control(&message)
+            .map_err(|error| RdpError::new(RdpErrorKind::Ipc, error.to_string()))?;
+        let sessions = self.sessions.lock().map_err(|_| {
+            RdpError::new(RdpErrorKind::Ipc, "RDP session registry lock is poisoned")
+        })?;
+        let record = sessions.get(session_id).ok_or_else(|| {
+            RdpError::new(
+                RdpErrorKind::Protocol,
+                format!("RDP session '{session_id}' was not found"),
+            )
+        })?;
+        let result = if move_only {
+            record.writer.send_latest_move(packet)
+        } else {
+            let release = encode_control(&RdpControlMessage::Input {
                 session_id: session_id.to_string(),
-                events,
-            },
-        )
+                events: vec![RdpInputEvent::ReleaseAllInputs],
+            })
+            .map_err(|error| RdpError::new(RdpErrorKind::Ipc, error.to_string()))?;
+            record.writer.send_reliable(packet, release)
+        };
+        result.map_err(|error| RdpError::new(RdpErrorKind::Ipc, error.to_string()))
     }
 
     pub fn send_secure_attention(&self, session_id: &str) -> Result<(), RdpError> {
@@ -475,13 +552,34 @@ impl RdpSessionManager {
     }
 
     pub fn resize(&self, session_id: &str, width: u32, height: u32) -> Result<(), RdpError> {
-        validate_size(width, height)?;
+        self.resize_with_metrics(
+            session_id,
+            RdpDisplayMetrics {
+                width,
+                height,
+                desktop_scale_factor: 100,
+                physical_size_mm: None,
+            },
+        )
+    }
+
+    pub fn resize_with_metrics(
+        &self,
+        session_id: &str,
+        metrics: RdpDisplayMetrics,
+    ) -> Result<(), RdpError> {
+        validate_size(metrics.width, metrics.height)?;
+        if !(100..=500).contains(&metrics.desktop_scale_factor) {
+            return Err(RdpError::new(
+                RdpErrorKind::Protocol,
+                "RDP desktop scale factor must be between 100 and 500",
+            ));
+        }
         self.send(
             session_id,
             RdpControlMessage::Resize {
                 session_id: session_id.to_string(),
-                width,
-                height,
+                metrics,
             },
         )
     }
@@ -550,7 +648,7 @@ impl RdpSessionManager {
             &record.writer,
             &RdpControlMessage::Input {
                 session_id: session_id.to_string(),
-                events: vec![RdpInputEvent::ReleaseAllKeys],
+                events: vec![RdpInputEvent::ReleaseAllInputs],
             },
         );
         let _ = send_control(
@@ -638,18 +736,14 @@ impl Drop for RdpSessionManager {
 }
 
 fn send_control(
-    writer: &Arc<Mutex<ChildStdin>>,
+    writer: &helper_process::IpcWriter,
     message: &RdpControlMessage,
 ) -> Result<(), RdpError> {
     let packet = encode_control(message)
         .map_err(|error| RdpError::new(RdpErrorKind::Ipc, error.to_string()))?;
-    write_packet(
-        &mut *writer
-            .lock()
-            .map_err(|_| RdpError::new(RdpErrorKind::Ipc, "RDP helper writer lock is poisoned"))?,
-        &packet,
-    )
-    .map_err(|error| RdpError::new(RdpErrorKind::Ipc, error.to_string()))
+    writer
+        .send_critical(packet)
+        .map_err(|error| RdpError::new(RdpErrorKind::Ipc, error.to_string()))
 }
 
 fn spawn_reader(
@@ -911,6 +1005,7 @@ fn set_state(state: &Arc<Mutex<RdpSessionState>>, new_state: RdpSessionState) {
 fn cleanup_child(record: &mut SessionRecord) {
     record.queue.close();
     helper_process::cleanup_child(&mut record.child, &mut record.reader);
+    record.writer.shutdown();
 }
 
 fn validate_rdp_input(events: &[RdpInputEvent]) -> Result<bool, RdpError> {
@@ -964,8 +1059,9 @@ mod tests {
 
     use super::{EventQueue, handle_control, require_server_hello, validate_rdp_input};
     use crate::{
-        PROTOCOL_VERSION, PixelFormat, RdpCapability, RdpControlMessage, RdpCursorEvent,
+        CursorPosition, PROTOCOL_VERSION, PixelFormat, RdpCapability, RdpControlMessage,
         RdpFrameEvent, RdpInputEvent, RdpRuntimeEvent, RdpServerCapabilities, RdpSessionState,
+        RemoteCursorEvent,
     };
 
     #[test]
@@ -1076,7 +1172,7 @@ mod tests {
             },
         ];
         assert!(validate_rdp_input(&events).is_err());
-        assert!(!validate_rdp_input(&[RdpInputEvent::ReleaseAllKeys]).unwrap());
+        assert!(!validate_rdp_input(&[RdpInputEvent::ReleaseAllInputs]).unwrap());
     }
 
     #[test]
@@ -1135,31 +1231,19 @@ mod tests {
     }
 
     #[test]
-    fn cursor_is_latest_only_and_rides_the_frame_drain() {
+    fn cursor_components_are_coalesced_independently() {
         let queue = EventQueue::default();
         queue.push_reset("s", 1, 4, 4);
         queue.push_frame(frame(1, 0, true));
-        let cursor = |x| RdpCursorEvent {
-            epoch: 1,
-            visible: true,
-            x,
-            y: 0,
-            width: 1,
-            height: 1,
-            hotspot_x: 0,
-            hotspot_y: 0,
-            pixels: vec![0u8; 4],
-        };
-        queue.push_cursor(cursor(1));
-        queue.push_cursor(cursor(2));
-        queue.push_cursor(cursor(3));
-        // Latest-only: only the newest cursor survives, regardless of rate.
+        for x in [1, 2, 3] {
+            queue.push_cursor(RemoteCursorEvent::Position(CursorPosition { x, y: 0 }));
+        }
         let drain = queue.drain();
         let cursors: Vec<_> = drain
-            .frames
+            .cursors
             .iter()
-            .filter_map(|frame| match frame {
-                RdpFrameEvent::Cursor(cursor) => Some(cursor.x),
+            .filter_map(|event| match event {
+                RemoteCursorEvent::Position(cursor) => Some(cursor.x),
                 _ => None,
             })
             .collect();
@@ -1182,8 +1266,6 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(drain.dropped_frames, 0);
-        assert!(!drain.waiting_for_full_frame);
     }
 
     #[test]

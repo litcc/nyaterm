@@ -141,7 +141,7 @@ fn sending_input_to_an_unknown_session_is_an_error_not_a_panic() {
     use_built_helper();
     let manager = VncSessionManager::new();
     let error = manager
-        .send_input("missing", vec![VncInputEvent::ReleaseAllKeys])
+        .send_input("missing", vec![VncInputEvent::ReleaseAllInputs])
         .expect_err("no such session");
     assert_eq!(error.kind, VncErrorKind::Protocol);
     assert!(manager.drain("missing").control.is_empty());

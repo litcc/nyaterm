@@ -2,42 +2,126 @@ use std::collections::HashSet;
 
 use crate::RdpInputEvent;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LogicalPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LogicalSize {
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LogicalRect {
+    pub origin: LogicalPoint,
+    pub size: LogicalSize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DisplayScaleMode {
+    #[default]
+    Fit,
+    Stretch,
+    Actual,
+}
+
+/// Framework-neutral desktop geometry shared by painting, hit testing and
+/// remote cursor placement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DisplayTransform {
+    viewport: LogicalRect,
+    image: LogicalRect,
+    remote_width: u32,
+    remote_height: u32,
+}
+
+impl DisplayTransform {
+    pub fn new(
+        viewport: LogicalRect,
+        remote_width: u32,
+        remote_height: u32,
+        mode: DisplayScaleMode,
+    ) -> Option<Self> {
+        if viewport.size.width <= 0.0
+            || viewport.size.height <= 0.0
+            || remote_width == 0
+            || remote_height == 0
+        {
+            return None;
+        }
+        let remote_width_f = remote_width as f32;
+        let remote_height_f = remote_height as f32;
+        let (width, height) = match mode {
+            DisplayScaleMode::Fit => {
+                let scale = (viewport.size.width / remote_width_f)
+                    .min(viewport.size.height / remote_height_f);
+                (remote_width_f * scale, remote_height_f * scale)
+            }
+            DisplayScaleMode::Stretch => (viewport.size.width, viewport.size.height),
+            DisplayScaleMode::Actual => (remote_width_f, remote_height_f),
+        };
+        let image = LogicalRect {
+            origin: LogicalPoint {
+                x: viewport.origin.x + (viewport.size.width - width) * 0.5,
+                y: viewport.origin.y + (viewport.size.height - height) * 0.5,
+            },
+            size: LogicalSize { width, height },
+        };
+        Some(Self {
+            viewport,
+            image,
+            remote_width,
+            remote_height,
+        })
+    }
+
+    pub fn image_bounds(self) -> LogicalRect {
+        self.image
+    }
+
+    pub fn window_to_remote(self, point: LogicalPoint) -> Option<(u32, u32)> {
+        if !contains(self.viewport, point) || !contains(self.image, point) {
+            return None;
+        }
+        let x = ((point.x - self.image.origin.x) * self.remote_width as f32 / self.image.size.width)
+            .floor()
+            .clamp(0.0, self.remote_width.saturating_sub(1) as f32) as u32;
+        let y = ((point.y - self.image.origin.y) * self.remote_height as f32
+            / self.image.size.height)
+            .floor()
+            .clamp(0.0, self.remote_height.saturating_sub(1) as f32) as u32;
+        Some((x, y))
+    }
+
+    pub fn remote_to_window(self, point_x: f32, point_y: f32) -> LogicalPoint {
+        LogicalPoint {
+            x: self.image.origin.x + point_x * self.image.size.width / self.remote_width as f32,
+            y: self.image.origin.y + point_y * self.image.size.height / self.remote_height as f32,
+        }
+    }
+
+    pub fn remote_size_to_window(self, width: f32, height: f32) -> LogicalSize {
+        LogicalSize {
+            width: width * self.image.size.width / self.remote_width as f32,
+            height: height * self.image.size.height / self.remote_height as f32,
+        }
+    }
+}
+
+fn contains(rect: LogicalRect, point: LogicalPoint) -> bool {
+    point.x >= rect.origin.x
+        && point.y >= rect.origin.y
+        && point.x < rect.origin.x + rect.size.width
+        && point.y < rect.origin.y + rect.size.height
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct RemoteKey {
     pub scan_code: u16,
     pub extended: bool,
-}
-
-pub fn viewport_to_remote(
-    point_x: f32,
-    point_y: f32,
-    viewport_width: f32,
-    viewport_height: f32,
-    remote_width: u32,
-    remote_height: u32,
-) -> Option<(u32, u32)> {
-    if viewport_width <= 0.0 || viewport_height <= 0.0 || remote_width == 0 || remote_height == 0 {
-        return None;
-    }
-    let scale = (viewport_width / remote_width as f32).min(viewport_height / remote_height as f32);
-    let image_width = remote_width as f32 * scale;
-    let image_height = remote_height as f32 * scale;
-    let left = (viewport_width - image_width) * 0.5;
-    let top = (viewport_height - image_height) * 0.5;
-    if point_x < left
-        || point_y < top
-        || point_x >= left + image_width
-        || point_y >= top + image_height
-    {
-        return None;
-    }
-    let x = ((point_x - left) / scale)
-        .floor()
-        .clamp(0.0, remote_width.saturating_sub(1) as f32) as u32;
-    let y = ((point_y - top) / scale)
-        .floor()
-        .clamp(0.0, remote_height.saturating_sub(1) as f32) as u32;
-    Some((x, y))
 }
 
 #[derive(Debug, Default)]
@@ -182,27 +266,16 @@ impl KeyMapper {
         }
         self.pressed.clear();
         self.right_alt_pressed = false;
-        Some(RdpInputEvent::ReleaseAllKeys)
+        Some(RdpInputEvent::ReleaseAllInputs)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{KeyMapper, RdpInputEvent, viewport_to_remote};
-
-    #[test]
-    fn maps_contain_geometry_and_rejects_black_bars() {
-        assert_eq!(
-            viewport_to_remote(50.0, 25.0, 100.0, 50.0, 200, 100),
-            Some((100, 50))
-        );
-        assert_eq!(viewport_to_remote(50.0, 5.0, 100.0, 100.0, 200, 100), None);
-        assert_eq!(
-            viewport_to_remote(50.0, 50.0, 100.0, 100.0, 200, 100),
-            Some((100, 50))
-        );
-        assert_eq!(viewport_to_remote(5.0, 50.0, 100.0, 100.0, 100, 200), None);
-    }
+    use crate::{
+        DisplayScaleMode, DisplayTransform, KeyMapper, LogicalPoint, LogicalRect, LogicalSize,
+        RdpInputEvent,
+    };
 
     #[test]
     fn maps_navigation_alt_gr_repeat_and_release_all() {
@@ -222,7 +295,81 @@ mod tests {
             mapper.key_down("AltRight", false),
             Some(RdpInputEvent::KeyDown { repeat: true, .. })
         ));
-        assert_eq!(mapper.release_all(), Some(RdpInputEvent::ReleaseAllKeys));
+        assert_eq!(mapper.release_all(), Some(RdpInputEvent::ReleaseAllInputs));
         assert!(!mapper.alt_gr_active());
+    }
+
+    #[test]
+    fn display_transform_matches_fit_stretch_and_actual_painting() {
+        let viewport = LogicalRect {
+            origin: LogicalPoint { x: 10.0, y: 20.0 },
+            size: LogicalSize {
+                width: 200.0,
+                height: 200.0,
+            },
+        };
+        let fit = DisplayTransform::new(viewport, 200, 100, DisplayScaleMode::Fit).unwrap();
+        assert_eq!(fit.image_bounds().origin, LogicalPoint { x: 10.0, y: 70.0 });
+        assert_eq!(
+            fit.window_to_remote(LogicalPoint { x: 110.0, y: 120.0 }),
+            Some((100, 50))
+        );
+        assert_eq!(
+            fit.window_to_remote(LogicalPoint { x: 110.0, y: 40.0 }),
+            None
+        );
+
+        let stretch = DisplayTransform::new(viewport, 200, 100, DisplayScaleMode::Stretch).unwrap();
+        assert_eq!(stretch.image_bounds(), viewport);
+        assert_eq!(
+            stretch.window_to_remote(LogicalPoint { x: 110.0, y: 120.0 }),
+            Some((100, 50))
+        );
+
+        let actual_viewport = LogicalRect {
+            origin: LogicalPoint::default(),
+            size: LogicalSize {
+                width: 100.0,
+                height: 50.0,
+            },
+        };
+        let actual =
+            DisplayTransform::new(actual_viewport, 200, 100, DisplayScaleMode::Actual).unwrap();
+        assert_eq!(
+            actual.image_bounds().origin,
+            LogicalPoint { x: -50.0, y: -25.0 }
+        );
+        assert_eq!(
+            actual.window_to_remote(LogicalPoint { x: 0.0, y: 0.0 }),
+            Some((50, 25))
+        );
+        assert_eq!(
+            actual.window_to_remote(LogicalPoint { x: 100.0, y: 25.0 }),
+            None
+        );
+    }
+
+    #[test]
+    fn display_transform_rejects_empty_geometry_and_round_trips_cursor_points() {
+        assert!(
+            DisplayTransform::new(LogicalRect::default(), 1920, 1080, DisplayScaleMode::Fit)
+                .is_none()
+        );
+        let transform = DisplayTransform::new(
+            LogicalRect {
+                origin: LogicalPoint { x: 5.0, y: 7.0 },
+                size: LogicalSize {
+                    width: 960.0,
+                    height: 540.0,
+                },
+            },
+            1920,
+            1080,
+            DisplayScaleMode::Fit,
+        )
+        .unwrap();
+        let window = transform.remote_to_window(960.0, 540.0);
+        assert_eq!(window, LogicalPoint { x: 485.0, y: 277.0 });
+        assert_eq!(transform.window_to_remote(window), Some((960, 540)));
     }
 }

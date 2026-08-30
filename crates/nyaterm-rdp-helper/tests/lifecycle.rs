@@ -4,10 +4,10 @@ use std::time::{Duration, Instant};
 
 use nyaterm_remote_desktop::{
     PROTOCOL_VERSION, PixelFormat, RdpCapability, RdpCertificatePolicy, RdpCertificateRequest,
-    RdpCertificateResponse, RdpClipboardConfig, RdpControlMessage, RdpDisplayConfig, RdpError,
-    RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpReconnectConfig, RdpServerCapabilities,
-    RdpSessionConfig, RdpSessionState, decode_control, encode_control, encode_frame_packet,
-    read_packet, write_packet,
+    RdpCertificateResponse, RdpClipboardConfig, RdpControlMessage, RdpDisplayConfig,
+    RdpDisplayMetrics, RdpError, RdpErrorKind, RdpFrameEvent, RdpInputEvent, RdpReconnectConfig,
+    RdpServerCapabilities, RdpSessionConfig, RdpSessionState, decode_control, encode_control,
+    encode_frame_packet, read_packet, write_packet,
 };
 
 fn helper_command() -> Command {
@@ -153,15 +153,19 @@ fn non_client_hello_messages() -> Vec<RdpControlMessage> {
         },
         RdpControlMessage::Input {
             session_id: "test-session".to_string(),
-            events: vec![RdpInputEvent::ReleaseAllKeys],
+            events: vec![RdpInputEvent::ReleaseAllInputs],
         },
         RdpControlMessage::SecureAttention {
             session_id: "test-session".to_string(),
         },
         RdpControlMessage::Resize {
             session_id: "test-session".to_string(),
-            width: 800,
-            height: 600,
+            metrics: RdpDisplayMetrics {
+                width: 800,
+                height: 600,
+                desktop_scale_factor: 150,
+                physical_size_mm: None,
+            },
         },
         RdpControlMessage::Clipboard {
             session_id: "test-session".to_string(),
@@ -225,15 +229,19 @@ fn foreign_session_messages() -> Vec<RdpControlMessage> {
     vec![
         RdpControlMessage::Input {
             session_id: "foreign-session".to_string(),
-            events: vec![RdpInputEvent::ReleaseAllKeys],
+            events: vec![RdpInputEvent::ReleaseAllInputs],
         },
         RdpControlMessage::SecureAttention {
             session_id: "foreign-session".to_string(),
         },
         RdpControlMessage::Resize {
             session_id: "foreign-session".to_string(),
-            width: 800,
-            height: 600,
+            metrics: RdpDisplayMetrics {
+                width: 800,
+                height: 600,
+                desktop_scale_factor: 100,
+                physical_size_mm: None,
+            },
         },
         RdpControlMessage::Clipboard {
             session_id: "foreign-session".to_string(),

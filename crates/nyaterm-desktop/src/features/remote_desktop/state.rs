@@ -6,10 +6,10 @@ use crate::models::event_wake::{ANY_INTEREST, EventWake};
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui::{Bounds, DynamicTexture, FocusHandle, Pixels, Subscription};
 use nyaterm_remote_desktop::{
-    CertificatePromptReason, ClipboardTracker, Framebuffer, KeyMapper, RdpCapability,
-    RdpCertificateRequest, RdpCursorEvent, RdpError, RdpErrorKind, RdpServerCapabilities,
-    RdpSessionConfig, RdpSessionManager, RdpSessionState, VncError, VncServerCapabilities,
-    VncSessionConfig, VncSessionManager,
+    CertificatePromptReason, ClipboardTracker, CursorPosition, CursorShape, Framebuffer, KeyMapper,
+    RdpCapability, RdpCertificateRequest, RdpDisplayMetrics, RdpError, RdpErrorKind,
+    RdpServerCapabilities, RdpSessionConfig, RdpSessionManager, RemoteDesktopError,
+    RemoteDesktopViewState, VncError, VncServerCapabilities, VncSessionConfig, VncSessionManager,
 };
 
 pub(in crate::features) struct RemoteDesktopFeatureState {
@@ -23,7 +23,6 @@ pub(in crate::features) struct RemoteDesktopFeatureState {
     pub(super) metrics_last_report: Instant,
     pub(super) metrics_control_events: usize,
     pub(super) metrics_frame_updates: usize,
-    pub(super) metrics_dropped_frames: usize,
     pub(super) pending_texture_removals: Vec<DynamicTexture>,
     pub(super) focus_subscriptions: Vec<Subscription>,
     /// Signalled by both session managers after they enqueue. Taken once by
@@ -110,25 +109,28 @@ fn normalize_key(key: &str) -> String {
 }
 
 pub(super) struct RemoteDesktopSessionState {
-    pub(super) state: RdpSessionState,
+    pub(super) state: RemoteDesktopViewState,
     pub(super) framebuffer: Option<Framebuffer>,
     pub(super) texture: Option<DynamicTexture>,
-    pub(super) cursor: Option<RdpCursorEvent>,
+    pub(super) cursor_shape: Option<CursorShape>,
+    pub(super) cursor_position: CursorPosition,
+    pub(super) cursor_visible: bool,
     pub(super) cursor_texture: Option<DynamicTexture>,
     pub(super) certificate_request: Option<RdpCertificatePrompt>,
-    pub(super) error: Option<RdpError>,
+    pub(super) error: Option<RemoteDesktopError>,
     pub(super) capability: Option<RdpCapability>,
     pub(super) server_capabilities: Option<RdpServerCapabilities>,
     pub(super) vnc_server_capabilities: Option<VncServerCapabilities>,
     pub(super) clipboard: ClipboardTracker,
     pub(super) keys: KeyMapper,
     pub(super) last_pointer: Option<(u32, u32)>,
-    pub(super) vnc_button_mask: u8,
+    pub(super) wheel_remainder_x: f32,
+    pub(super) wheel_remainder_y: f32,
     pub(super) last_pointer_sent_at: Option<Instant>,
     pub(super) pending_pointer: Option<(u32, u32)>,
-    pub(super) last_resize: Option<(u32, u32)>,
+    pub(super) last_resize: Option<RdpDisplayMetrics>,
     pub(super) last_resize_sent_at: Option<Instant>,
-    pub(super) pending_resize: Option<(u32, u32, Instant)>,
+    pub(super) pending_resize: Option<(RdpDisplayMetrics, Instant)>,
     pub(super) dynamic_resize_disabled: bool,
     pub(super) viewport: Option<Bounds<Pixels>>,
     pub(super) reconnect_attempts: u32,
@@ -138,10 +140,12 @@ pub(super) struct RemoteDesktopSessionState {
 impl Default for RemoteDesktopSessionState {
     fn default() -> Self {
         Self {
-            state: RdpSessionState::Connecting,
+            state: RemoteDesktopViewState::Connecting,
             framebuffer: None,
             texture: None,
-            cursor: None,
+            cursor_shape: None,
+            cursor_position: CursorPosition::default(),
+            cursor_visible: true,
             cursor_texture: None,
             certificate_request: None,
             error: None,
@@ -151,7 +155,8 @@ impl Default for RemoteDesktopSessionState {
             clipboard: ClipboardTracker::default(),
             keys: KeyMapper::default(),
             last_pointer: None,
-            vnc_button_mask: 0,
+            wheel_remainder_x: 0.0,
+            wheel_remainder_y: 0.0,
             last_pointer_sent_at: None,
             pending_pointer: None,
             last_resize: None,
@@ -192,7 +197,6 @@ impl RemoteDesktopFeatureState {
             metrics_last_report: Instant::now(),
             metrics_control_events: 0,
             metrics_frame_updates: 0,
-            metrics_dropped_frames: 0,
             pending_texture_removals: Vec::new(),
             focus_subscriptions: Vec::new(),
             wake,
@@ -277,8 +281,8 @@ impl RemoteDesktopFeatureState {
     ) {
         self.insert_connecting(session_id.clone());
         if let Some(session) = self.sessions.get_mut(&session_id) {
-            let error = RdpError::new(kind, message);
-            session.state = RdpSessionState::Failed(error.clone());
+            let error = RemoteDesktopError::from(RdpError::new(kind, message));
+            session.state = RemoteDesktopViewState::Failed;
             session.error = Some(error);
             session.pending_pointer = None;
             session.pending_resize = None;
@@ -308,14 +312,14 @@ impl RemoteDesktopFeatureState {
     pub(in crate::features) fn insert_disconnected(&mut self, session_id: String) {
         self.insert_connecting(session_id.clone());
         if let Some(session) = self.sessions.get_mut(&session_id) {
-            session.state = RdpSessionState::Disconnected;
+            session.state = RemoteDesktopViewState::Disconnected;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_remote_desktop::{RdpErrorKind, RdpSessionState};
+    use nyaterm_remote_desktop::{RdpErrorKind, RemoteDesktopViewState};
 
     use super::{RemoteDesktopFeatureState, RemoteDesktopInputState};
 
@@ -358,7 +362,7 @@ mod tests {
         );
 
         let session = state.sessions.get("failed").expect("failed session");
-        assert!(matches!(session.state, RdpSessionState::Failed(_)));
+        assert!(matches!(session.state, RemoteDesktopViewState::Failed));
         assert_eq!(
             session.error.as_ref().map(|error| error.message.as_str()),
             Some("failure")

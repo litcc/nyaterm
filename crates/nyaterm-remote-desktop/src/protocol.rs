@@ -4,7 +4,7 @@ use std::sync::Arc;
 use nyaterm_core::SecretString;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Maximum UTF-8 payload accepted for a single committed-text event.
 ///
@@ -111,6 +111,16 @@ pub struct RdpDisplayConfig {
     pub color_depth: u8,
 }
 
+/// Ephemeral client display information sent to the helper. This is not part
+/// of persisted connection configuration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RdpDisplayMetrics {
+    pub width: u32,
+    pub height: u32,
+    pub desktop_scale_factor: u32,
+    pub physical_size_mm: Option<(u32, u32)>,
+}
+
 impl Default for RdpDisplayConfig {
     fn default() -> Self {
         Self {
@@ -181,22 +191,50 @@ pub enum RdpInputEvent {
     Unicode {
         text: String,
     },
-    Pointer {
-        x: u32,
-        y: u32,
-        button: Option<RdpPointerButton>,
-        pressed: bool,
-    },
-    ReleaseAllKeys,
+    Pointer(RemotePointerEvent),
+    ReleaseAllInputs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RdpPointerButton {
+pub struct RemotePoint {
+    pub x: u32,
+    pub y: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemotePointerButton {
     Left,
     Middle,
     Right,
-    WheelUp,
-    WheelDown,
+    X1,
+    X2,
+}
+
+/// Compatibility name retained for desktop call sites while pointer input is
+/// moved onto the protocol-neutral model.
+pub type RdpPointerButton = RemotePointerButton;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteWheelAxis {
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemotePointerEvent {
+    Move {
+        position: RemotePoint,
+    },
+    Button {
+        position: RemotePoint,
+        button: RemotePointerButton,
+        pressed: bool,
+    },
+    Wheel {
+        position: RemotePoint,
+        axis: RemoteWheelAxis,
+        rotation_units: i16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,7 +244,7 @@ pub enum PixelFormat {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RdpFrameEvent {
+pub enum RemoteFrameEvent {
     Reset {
         epoch: u64,
         width: u32,
@@ -223,20 +261,36 @@ pub enum RdpFrameEvent {
         format: PixelFormat,
         pixels: Vec<u8>,
     },
-    Cursor(RdpCursorEvent),
+}
+
+/// Source-compatible alias for integrations migrating to the protocol-neutral name.
+pub type RdpFrameEvent = RemoteFrameEvent;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CursorShape {
+    pub shape_id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub hotspot: RemotePoint,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CursorPosition {
+    pub x: u32,
+    pub y: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CursorVisibility {
+    pub visible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RdpCursorEvent {
-    pub epoch: u64,
-    pub visible: bool,
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-    pub hotspot_x: u32,
-    pub hotspot_y: u32,
-    pub pixels: Vec<u8>,
+pub enum RemoteCursorEvent {
+    Shape(CursorShape),
+    Position(CursorPosition),
+    Visibility(CursorVisibility),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -321,7 +375,11 @@ pub enum RdpRuntimeEvent {
     },
     Frame {
         session_id: String,
-        event: RdpFrameEvent,
+        event: RemoteFrameEvent,
+    },
+    Cursor {
+        session_id: String,
+        event: RemoteCursorEvent,
     },
     Clipboard {
         session_id: String,
@@ -358,9 +416,8 @@ pub type QueueWaker = Arc<dyn Fn() + Send + Sync>;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RdpSessionDrain {
     pub control: Vec<RdpRuntimeEvent>,
-    pub frames: Vec<RdpFrameEvent>,
-    pub dropped_frames: usize,
-    pub waiting_for_full_frame: bool,
+    pub frames: Vec<RemoteFrameEvent>,
+    pub cursors: Vec<RemoteCursorEvent>,
 }
 
 pub const MAX_VNC_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
@@ -482,12 +539,8 @@ pub enum VncInputEvent {
     Text {
         text: String,
     },
-    Pointer {
-        x: u32,
-        y: u32,
-        button_mask: u8,
-    },
-    ReleaseAllKeys,
+    Pointer(RemotePointerEvent),
+    ReleaseAllInputs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -534,6 +587,122 @@ impl VncError {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoteDesktopViewState {
+    Idle,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Disconnecting,
+    Disconnected,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoteDesktopErrorCategory {
+    Authentication,
+    Certificate,
+    Timeout,
+    ConnectionRefused,
+    Security,
+    Transport,
+    Session,
+    Clipboard,
+    Negotiation,
+    Encoding,
+    HelperMissing,
+    HelperCrashed,
+    Ipc,
+    Protocol,
+    Unsupported,
+    Internal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{category:?}: {message}")]
+pub struct RemoteDesktopError {
+    pub category: RemoteDesktopErrorCategory,
+    pub message: String,
+}
+
+impl From<RdpError> for RemoteDesktopError {
+    fn from(error: RdpError) -> Self {
+        let category = match error.kind {
+            RdpErrorKind::Authentication => RemoteDesktopErrorCategory::Authentication,
+            RdpErrorKind::CertificateRejected => RemoteDesktopErrorCategory::Certificate,
+            RdpErrorKind::Timeout => RemoteDesktopErrorCategory::Timeout,
+            RdpErrorKind::ConnectionRefused => RemoteDesktopErrorCategory::ConnectionRefused,
+            RdpErrorKind::Tls => RemoteDesktopErrorCategory::Security,
+            RdpErrorKind::Transport => RemoteDesktopErrorCategory::Transport,
+            RdpErrorKind::Session => RemoteDesktopErrorCategory::Session,
+            RdpErrorKind::Clipboard => RemoteDesktopErrorCategory::Clipboard,
+            RdpErrorKind::Negotiation => RemoteDesktopErrorCategory::Negotiation,
+            RdpErrorKind::HelperMissing => RemoteDesktopErrorCategory::HelperMissing,
+            RdpErrorKind::HelperCrashed => RemoteDesktopErrorCategory::HelperCrashed,
+            RdpErrorKind::Ipc => RemoteDesktopErrorCategory::Ipc,
+            RdpErrorKind::Protocol => RemoteDesktopErrorCategory::Protocol,
+            RdpErrorKind::Unsupported => RemoteDesktopErrorCategory::Unsupported,
+        };
+        Self {
+            category,
+            message: error.message,
+        }
+    }
+}
+
+impl From<VncError> for RemoteDesktopError {
+    fn from(error: VncError) -> Self {
+        let category = match error.kind {
+            VncErrorKind::Authentication => RemoteDesktopErrorCategory::Authentication,
+            VncErrorKind::Clipboard => RemoteDesktopErrorCategory::Clipboard,
+            VncErrorKind::Transport => RemoteDesktopErrorCategory::Transport,
+            VncErrorKind::Encoding => RemoteDesktopErrorCategory::Encoding,
+            VncErrorKind::Protocol => RemoteDesktopErrorCategory::Protocol,
+            VncErrorKind::Internal => RemoteDesktopErrorCategory::Internal,
+            VncErrorKind::HelperMissing => RemoteDesktopErrorCategory::HelperMissing,
+            VncErrorKind::HelperCrashed => RemoteDesktopErrorCategory::HelperCrashed,
+            VncErrorKind::Ipc => RemoteDesktopErrorCategory::Ipc,
+        };
+        Self {
+            category,
+            message: error.message,
+        }
+    }
+}
+
+impl From<&RdpSessionState> for RemoteDesktopViewState {
+    fn from(state: &RdpSessionState) -> Self {
+        match state {
+            RdpSessionState::Idle => Self::Idle,
+            RdpSessionState::Connecting => Self::Connecting,
+            RdpSessionState::Connected => Self::Connected,
+            RdpSessionState::Reconnecting => Self::Reconnecting,
+            RdpSessionState::Disconnecting => Self::Disconnecting,
+            RdpSessionState::Disconnected => Self::Disconnected,
+            RdpSessionState::Failed(_) => Self::Failed,
+            #[allow(deprecated)]
+            RdpSessionState::Active => Self::Connected,
+            #[allow(deprecated)]
+            RdpSessionState::Closed => Self::Disconnected,
+        }
+    }
+}
+
+impl From<&VncSessionState> for RemoteDesktopViewState {
+    fn from(state: &VncSessionState) -> Self {
+        match state {
+            VncSessionState::Connecting
+            | VncSessionState::Authenticating
+            | VncSessionState::Negotiating => Self::Connecting,
+            VncSessionState::Connected => Self::Connected,
+            VncSessionState::Reconnecting => Self::Reconnecting,
+            VncSessionState::Disconnecting => Self::Disconnecting,
+            VncSessionState::Disconnected => Self::Disconnected,
+            VncSessionState::Failed => Self::Failed,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VncRuntimeEvent {
     State {
@@ -543,7 +712,7 @@ pub enum VncRuntimeEvent {
     },
     Frame {
         session_id: String,
-        event: RdpFrameEvent,
+        event: RemoteFrameEvent,
     },
     Clipboard {
         session_id: String,
@@ -559,9 +728,7 @@ pub enum VncRuntimeEvent {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VncSessionDrain {
     pub control: Vec<VncRuntimeEvent>,
-    pub frames: Vec<RdpFrameEvent>,
-    pub dropped_frames: usize,
-    pub waiting_for_full_frame: bool,
+    pub frames: Vec<RemoteFrameEvent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -601,8 +768,7 @@ pub enum RdpControlMessage {
     },
     Resize {
         session_id: String,
-        width: u32,
-        height: u32,
+        metrics: RdpDisplayMetrics,
     },
     Clipboard {
         session_id: String,

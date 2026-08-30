@@ -4492,6 +4492,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ironrdp-input"
+version = "0.7.0"
+source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
+dependencies = [
+ "bitvec",
+ "ironrdp-pdu",
+ "smallvec",
+]
+
+[[package]]
 name = "ironrdp-mstsgu"
 version = "0.0.1"
 source = "git+https://github.com/nyakang/IronRDP?rev=75d9a3b398e22310afbc26f6dfd27eb004e96e5c#75d9a3b398e22310afbc26f6dfd27eb004e96e5c"
@@ -5768,6 +5778,7 @@ dependencies = [
  "ironrdp-client",
  "ironrdp-cliprdr",
  "ironrdp-core",
+ "ironrdp-input",
  "ironrdp-pdu",
  "ironrdp-tls",
  "nyaterm-remote-desktop",
