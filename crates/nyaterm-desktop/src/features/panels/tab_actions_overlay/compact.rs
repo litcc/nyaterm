@@ -3,8 +3,8 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use super::{
-    TabActionsMenuGeometry, TabActionsSubmenuGeometry, clamp_tab_actions_position,
-    tab_actions_submenu_position,
+    TabActionMenuGroup, TabActionPolicy, TabActionsMenuGeometry, TabActionsSubmenuGeometry,
+    clamp_tab_actions_position, tab_actions_submenu_position,
 };
 use crate::features::NyaTermApp;
 use crate::features::view_widgets::{tab_menu_item, tab_menu_item_enabled, tab_menu_separator};
@@ -18,26 +18,12 @@ use nyaterm_ui::NyaScrollable;
 
 use super::super::TAB_PRESET_COLORS;
 
-#[derive(Clone, Copy)]
-pub(super) struct TabActionCapabilities {
-    pub can_copy_ssh: bool,
-    pub can_spawn_session: bool,
-    pub can_multiplex: bool,
-    pub can_reconnect: bool,
-    pub can_disconnect: bool,
-    pub can_use_ai: bool,
-    pub can_session_info: bool,
-    pub can_close_inactive: bool,
-    pub can_close_right: bool,
-    pub can_unsplit: bool,
-}
-
 pub(super) struct CompactTabActionsMenuState {
     pub session_id: String,
     pub tab_root_id: String,
     pub active_color: Option<u32>,
     pub locked: bool,
-    pub capabilities: TabActionCapabilities,
+    pub policy: TabActionPolicy,
     pub visible_for_ai: String,
     pub buffer_for_ai: String,
 }
@@ -67,22 +53,15 @@ impl NyaTermApp {
             tab_root_id,
             active_color,
             locked,
-            capabilities:
-                TabActionCapabilities {
-                    can_copy_ssh,
-                    can_spawn_session,
-                    can_multiplex,
-                    can_reconnect,
-                    can_disconnect,
-                    can_use_ai,
-                    can_session_info,
-                    can_close_inactive,
-                    can_close_right,
-                    can_unsplit,
-                },
+            policy,
             visible_for_ai,
             buffer_for_ai,
         } = state;
+        let support = policy.support;
+        let availability = policy.availability;
+        let menu_groups = policy.menu_groups();
+        let show_session_group = menu_groups.contains(&TabActionMenuGroup::Session);
+        let show_split_group = menu_groups.contains(&TabActionMenuGroup::Split);
         let (viewport_w, viewport_h) = self.shell.viewport_size();
         let menu_max_height = (viewport_h - 16.).clamp(160., 440.);
         let (menu_x, menu_y) = if let Some((x, y)) = self.session.dialog_tab_actions_anchor() {
@@ -142,7 +121,9 @@ impl NyaTermApp {
         let explain_session_id = session_id.clone();
         let analyze_session_id = session_id.clone();
 
-        let submenu_panel = active_submenu.map(|submenu| {
+        let submenu_panel = active_submenu
+            .filter(|submenu| policy.supports_submenu(*submenu))
+            .map(|submenu| {
             let submenu_width = if submenu == TabActionsSubmenu::Color {
                 176.
             } else {
@@ -152,11 +133,7 @@ impl NyaTermApp {
                 TabActionsSubmenu::Color => 104.,
                 TabActionsSubmenu::SshAdvanced | TabActionsSubmenu::Ai => 64.,
             };
-            let trigger_offset = match submenu {
-                TabActionsSubmenu::Color => 0.,
-                TabActionsSubmenu::SshAdvanced => 168.,
-                TabActionsSubmenu::Ai => 252.,
-            };
+            let trigger_offset = policy.submenu_trigger_offset(submenu);
             let (submenu_x, submenu_y) = tab_actions_submenu_position(
                 TabActionsMenuGeometry {
                     x: menu_x,
@@ -200,7 +177,7 @@ impl NyaTermApp {
                             palette,
                             "tab-ctx-multiplex",
                             t!("tabCtx.multiplexSsh"),
-                            can_multiplex,
+                            availability.multiplex,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(multiplex_session_id.clone(), cx);
                                 this.close_tab_actions(cx);
@@ -218,7 +195,7 @@ impl NyaTermApp {
                             palette,
                             "tab-ctx-multiplex-run",
                             t!("tabCtx.multiplexSshWithCommand"),
-                            can_multiplex,
+                            availability.multiplex,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(multiplex_startup_session_id.clone(), cx);
                                 this.close_tab_actions(cx);
@@ -245,7 +222,7 @@ impl NyaTermApp {
                             palette,
                             "tab-ctx-ai-explain",
                             t!("ai.explainRecent"),
-                            can_use_ai,
+                            availability.use_ai,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(explain_session_id.clone(), cx);
                                 this.close_tab_actions(cx);
@@ -276,7 +253,7 @@ impl NyaTermApp {
                             palette,
                             "tab-ctx-ai-analyze",
                             t!("ai.analyzeError"),
-                            can_use_ai,
+                            availability.use_ai,
                             cx.listener(move |this, _, window, cx| {
                                 this.select_session(analyze_session_id.clone(), cx);
                                 this.close_tab_actions(cx);
@@ -434,192 +411,223 @@ impl NyaTermApp {
                                     this.copy_session_name(&copy_name_session_id, cx);
                                 }),
                             ))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-copy-ip",
-                                t!("tabCtx.copyIp"),
-                                can_copy_ssh,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.select_session(copy_host_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    this.copy_active_session_ssh_host(cx);
-                                }),
-                            ))
-                            .child(tab_menu_separator(palette))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-duplicate",
-                                t!("tabCtx.duplicate"),
-                                can_spawn_session,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_session(duplicate_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    if !this.tab_action_can_spawn_session(&duplicate_session_id) {
-                                        this.shell.set_status(
-                                            "active session cannot be duplicated".to_string(),
-                                        );
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.duplicate_active_session(window, cx);
-                                }),
-                            ))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-duplicate-run",
-                                t!("tabCtx.duplicateWithCommand"),
-                                can_spawn_session,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_session(startup_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    if !this.tab_action_can_spawn_session(&startup_session_id) {
-                                        this.shell.set_status(
-                                            "active session cannot be duplicated".to_string(),
-                                        );
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.open_startup_command_dialog(window, cx);
-                                }),
-                            ))
-                            .child(tab_actions_submenu_item(
-                                palette,
-                                TabActionsSubmenuItem {
-                                    id: "tab-ctx-ssh-advanced",
-                                    icon_path: "icons/menu/split.svg",
-                                    label: t!("tabCtx.sshAdvanced"),
-                                    enabled: can_multiplex,
-                                    active: active_submenu == Some(TabActionsSubmenu::SshAdvanced),
-                                },
-                                TabActionsSubmenuHandlers {
-                                    on_hover: cx.listener(move |this, hovered: &bool, _, cx| {
-                                        if *hovered && can_multiplex {
-                                            this.open_tab_actions_submenu(
-                                                TabActionsSubmenu::SshAdvanced,
-                                                cx,
-                                            );
-                                        }
+                            .when(support.copy_ssh_host, |this| {
+                                this.child(tab_menu_item(
+                                    palette,
+                                    "tab-ctx-copy-ip",
+                                    t!("tabCtx.copyIp"),
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.select_session(copy_host_session_id.clone(), cx);
+                                        this.close_tab_actions(cx);
+                                        this.copy_active_session_ssh_host(cx);
                                     }),
-                                    on_click: cx.listener(move |this, _, _, cx| {
-                                        if can_multiplex {
-                                            this.open_tab_actions_submenu(
-                                                TabActionsSubmenu::SshAdvanced,
-                                                cx,
+                                ))
+                            })
+                            .when(show_session_group, |this| {
+                                this.child(tab_menu_separator(palette))
+                            })
+                            .when(support.session_spawn, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-duplicate",
+                                    t!("tabCtx.duplicate"),
+                                    availability.spawn_session,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.select_session(duplicate_session_id.clone(), cx);
+                                        this.close_tab_actions(cx);
+                                        if !this.tab_action_can_spawn_session(&duplicate_session_id)
+                                        {
+                                            this.shell.set_status(
+                                                "active session cannot be duplicated".to_string(),
                                             );
+                                            cx.notify();
+                                            return;
                                         }
+                                        this.duplicate_active_session(window, cx);
                                     }),
-                                },
-                            ))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-reconnect",
-                                t!("tabCtx.reconnect"),
-                                can_reconnect,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_session(reconnect_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    if this.session.session_is_busy(&reconnect_session_id)
-                                        || this
-                                            .session
-                                            .start_reconnect_is_pending(&reconnect_session_id)
-                                    {
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.reconnect_active_session(window, cx);
-                                }),
-                            ))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-disconnect",
-                                t!("tabCtx.disconnect"),
-                                can_disconnect,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.close_tab_actions(cx);
-                                    if this.session.session_is_busy(&disconnect_session_id)
-                                        || this.session.is_disconnected(&disconnect_session_id)
-                                    {
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.disconnect_session(disconnect_session_id.clone(), cx);
-                                }),
-                            ))
-                            .child(tab_actions_submenu_item(
-                                palette,
-                                TabActionsSubmenuItem {
-                                    id: "tab-ctx-ai",
-                                    icon_path: "icons/ai.svg",
-                                    label: t!("ai.title"),
-                                    enabled: true,
-                                    active: active_submenu == Some(TabActionsSubmenu::Ai),
-                                },
-                                TabActionsSubmenuHandlers {
-                                    on_hover: cx.listener(|this, hovered: &bool, _, cx| {
-                                        if *hovered {
+                                ))
+                            })
+                            .when(support.session_spawn, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-duplicate-run",
+                                    t!("tabCtx.duplicateWithCommand"),
+                                    availability.spawn_session,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.select_session(startup_session_id.clone(), cx);
+                                        this.close_tab_actions(cx);
+                                        if !this.tab_action_can_spawn_session(&startup_session_id) {
+                                            this.shell.set_status(
+                                                "active session cannot be duplicated".to_string(),
+                                            );
+                                            cx.notify();
+                                            return;
+                                        }
+                                        this.open_startup_command_dialog(window, cx);
+                                    }),
+                                ))
+                            })
+                            .when(support.ssh_multiplex, |this| {
+                                this.child(tab_actions_submenu_item(
+                                    palette,
+                                    TabActionsSubmenuItem {
+                                        id: "tab-ctx-ssh-advanced",
+                                        icon_path: "icons/menu/split.svg",
+                                        label: t!("tabCtx.sshAdvanced"),
+                                        enabled: availability.multiplex,
+                                        active: active_submenu
+                                            == Some(TabActionsSubmenu::SshAdvanced),
+                                    },
+                                    TabActionsSubmenuHandlers {
+                                        on_hover: cx.listener(
+                                            move |this, hovered: &bool, _, cx| {
+                                                if *hovered && availability.multiplex {
+                                                    this.open_tab_actions_submenu(
+                                                        TabActionsSubmenu::SshAdvanced,
+                                                        cx,
+                                                    );
+                                                }
+                                            },
+                                        ),
+                                        on_click: cx.listener(move |this, _, _, cx| {
+                                            if availability.multiplex {
+                                                this.open_tab_actions_submenu(
+                                                    TabActionsSubmenu::SshAdvanced,
+                                                    cx,
+                                                );
+                                            }
+                                        }),
+                                    },
+                                ))
+                            })
+                            .when(support.reconnect, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-reconnect",
+                                    t!("tabCtx.reconnect"),
+                                    availability.reconnect,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.select_session(reconnect_session_id.clone(), cx);
+                                        this.close_tab_actions(cx);
+                                        if this.session.session_is_busy(&reconnect_session_id)
+                                            || this
+                                                .session
+                                                .start_reconnect_is_pending(&reconnect_session_id)
+                                        {
+                                            cx.notify();
+                                            return;
+                                        }
+                                        this.reconnect_active_session(window, cx);
+                                    }),
+                                ))
+                            })
+                            .when(support.disconnect, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-disconnect",
+                                    t!("tabCtx.disconnect"),
+                                    availability.disconnect,
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.close_tab_actions(cx);
+                                        if this.session.session_is_busy(&disconnect_session_id)
+                                            || this.session.is_disconnected(&disconnect_session_id)
+                                        {
+                                            cx.notify();
+                                            return;
+                                        }
+                                        this.disconnect_session(disconnect_session_id.clone(), cx);
+                                    }),
+                                ))
+                            })
+                            .when(support.ai, |this| {
+                                this.child(tab_actions_submenu_item(
+                                    palette,
+                                    TabActionsSubmenuItem {
+                                        id: "tab-ctx-ai",
+                                        icon_path: "icons/ai.svg",
+                                        label: t!("ai.title"),
+                                        enabled: true,
+                                        active: active_submenu == Some(TabActionsSubmenu::Ai),
+                                    },
+                                    TabActionsSubmenuHandlers {
+                                        on_hover: cx.listener(|this, hovered: &bool, _, cx| {
+                                            if *hovered {
+                                                this.open_tab_actions_submenu(
+                                                    TabActionsSubmenu::Ai,
+                                                    cx,
+                                                );
+                                            }
+                                        }),
+                                        on_click: cx.listener(|this, _, _, cx| {
                                             this.open_tab_actions_submenu(
                                                 TabActionsSubmenu::Ai,
                                                 cx,
                                             );
+                                        }),
+                                    },
+                                ))
+                            })
+                            .when(show_split_group, |this| {
+                                this.child(tab_menu_separator(palette))
+                            })
+                            .when(support.split, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-split-h",
+                                    t!("tabCtx.splitHorizontal"),
+                                    availability.split,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.select_session(
+                                            split_horizontal_session_id.clone(),
+                                            cx,
+                                        );
+                                        this.close_tab_actions(cx);
+                                        if !this.tab_action_can_spawn_session(
+                                            &split_horizontal_session_id,
+                                        ) {
+                                            this.shell.set_status(
+                                                "active session cannot be duplicated for split"
+                                                    .to_string(),
+                                            );
+                                            cx.notify();
+                                            return;
                                         }
-                                    }),
-                                    on_click: cx.listener(|this, _, _, cx| {
-                                        this.open_tab_actions_submenu(TabActionsSubmenu::Ai, cx);
-                                    }),
-                                },
-                            ))
-                            .child(tab_menu_separator(palette))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-split-h",
-                                t!("tabCtx.splitHorizontal"),
-                                can_spawn_session,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_session(split_horizontal_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    if !this
-                                        .tab_action_can_spawn_session(&split_horizontal_session_id)
-                                    {
-                                        this.shell.set_status(
-                                            "active session cannot be duplicated for split"
-                                                .to_string(),
+                                        this.split_workspace_with_duplicate(
+                                            WorkspaceSplitDirection::Horizontal,
+                                            window,
+                                            cx,
                                         );
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.split_workspace_with_duplicate(
-                                        WorkspaceSplitDirection::Horizontal,
-                                        window,
-                                        cx,
-                                    );
-                                }),
-                            ))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-split-v",
-                                t!("tabCtx.splitVertical"),
-                                can_spawn_session,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_session(split_vertical_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    if !this
-                                        .tab_action_can_spawn_session(&split_vertical_session_id)
-                                    {
-                                        this.shell.set_status(
-                                            "active session cannot be duplicated for split"
-                                                .to_string(),
+                                    }),
+                                ))
+                            })
+                            .when(support.split, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-split-v",
+                                    t!("tabCtx.splitVertical"),
+                                    availability.split,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.select_session(split_vertical_session_id.clone(), cx);
+                                        this.close_tab_actions(cx);
+                                        if !this.tab_action_can_spawn_session(
+                                            &split_vertical_session_id,
+                                        ) {
+                                            this.shell.set_status(
+                                                "active session cannot be duplicated for split"
+                                                    .to_string(),
+                                            );
+                                            cx.notify();
+                                            return;
+                                        }
+                                        this.split_workspace_with_duplicate(
+                                            WorkspaceSplitDirection::Vertical,
+                                            window,
+                                            cx,
                                         );
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.split_workspace_with_duplicate(
-                                        WorkspaceSplitDirection::Vertical,
-                                        window,
-                                        cx,
-                                    );
-                                }),
-                            ))
-                            .when(can_unsplit, |this| {
+                                    }),
+                                ))
+                            })
+                            .when(availability.unsplit, |this| {
                                 this.child(tab_menu_item(
                                     palette,
                                     "tab-ctx-unsplit",
@@ -635,7 +643,7 @@ impl NyaTermApp {
                                 palette,
                                 "tab-ctx-close",
                                 t!("tabCtx.close"),
-                                !locked,
+                                availability.close_tab,
                                 cx.listener(move |this, _, _, cx| {
                                     this.close_tab_actions(cx);
                                     this.close_tab_active_pane(&tab_root_id, cx);
@@ -654,7 +662,7 @@ impl NyaTermApp {
                                 palette,
                                 "tab-ctx-close-others",
                                 t!("tabCtx.closeInactive"),
-                                can_close_inactive,
+                                availability.close_inactive,
                                 cx.listener(move |this, _, _, cx| {
                                     this.close_tab_actions(cx);
                                     this.close_inactive_sessions(inactive_anchor.clone(), cx);
@@ -664,31 +672,33 @@ impl NyaTermApp {
                                 palette,
                                 "tab-ctx-close-right",
                                 t!("tabCtx.closeRight"),
-                                can_close_right,
+                                availability.close_right,
                                 cx.listener(move |this, _, _, cx| {
                                     this.close_tab_actions(cx);
                                     this.close_sessions_to_right(right_anchor.clone(), cx);
                                 }),
                             ))
-                            .child(tab_menu_item_enabled(
-                                palette,
-                                "tab-ctx-info",
-                                t!("tabCtx.sessionInfo"),
-                                can_session_info,
-                                cx.listener(move |this, _, window, cx| {
-                                    this.select_session(info_session_id.clone(), cx);
-                                    this.close_tab_actions(cx);
-                                    if !this.tab_action_can_show_session_info(&info_session_id) {
-                                        this.shell.set_status(
-                                            "active session has no saved connection info"
-                                                .to_string(),
-                                        );
-                                        cx.notify();
-                                        return;
-                                    }
-                                    this.open_active_session_info(window, cx);
-                                }),
-                            )),
+                            .when(support.session_info, |this| {
+                                this.child(tab_menu_item(
+                                    palette,
+                                    "tab-ctx-info",
+                                    t!("tabCtx.sessionInfo"),
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.select_session(info_session_id.clone(), cx);
+                                        this.close_tab_actions(cx);
+                                        if !this.tab_action_can_show_session_info(&info_session_id)
+                                        {
+                                            this.shell.set_status(
+                                                "active session has no saved connection info"
+                                                    .to_string(),
+                                            );
+                                            cx.notify();
+                                            return;
+                                        }
+                                        this.open_active_session_info(window, cx);
+                                    }),
+                                ))
+                            }),
                     ),
             )
             .when_some(submenu_panel, |this, submenu| this.child(submenu))

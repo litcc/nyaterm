@@ -1,20 +1,21 @@
 use gpui::{Context, div, prelude::*};
-use nyaterm_transport::SessionKind;
 
 use super::super::terminal_action_prompt_text;
-use super::{CompactTabActionsMenuState, TabActionCapabilities};
+use super::{
+    CompactTabActionsMenuState, TabActionPolicy, TabActionPolicyInput, TabSessionCapability,
+};
 use crate::features::NyaTermApp;
-use crate::models::SessionLaunchConfig;
 
 impl NyaTermApp {
+    fn tab_action_session_capability(&self, session_id: &str) -> Option<TabSessionCapability> {
+        self.session
+            .metadata(session_id)
+            .map(|metadata| TabSessionCapability::from_launch_config(&metadata.launch_config))
+    }
+
     pub(in crate::features) fn tab_action_can_spawn_session(&self, session_id: &str) -> bool {
-        self.session.metadata(session_id).is_some_and(|metadata| {
-            matches!(metadata.launch_config, SessionLaunchConfig::Local(_))
-                || metadata
-                    .source_connection_id
-                    .as_deref()
-                    .is_some_and(|id| !id.trim().is_empty())
-        })
+        self.tab_action_session_capability(session_id)
+            .is_some_and(TabSessionCapability::supports_terminal_actions)
     }
 
     pub(super) fn tab_action_can_show_session_info(&self, session_id: &str) -> bool {
@@ -22,6 +23,46 @@ impl NyaTermApp {
             .metadata(session_id)
             .and_then(|metadata| metadata.source_connection_id.as_deref())
             .is_some_and(|id| !id.trim().is_empty())
+    }
+
+    pub(in crate::features) fn tab_action_policy_for(
+        &self,
+        session_id: &str,
+        tab_root_id: &str,
+    ) -> Option<TabActionPolicy> {
+        let session = self.tab_action_session_capability(session_id)?;
+        let is_busy = self.session.session_is_busy(session_id);
+        let is_disconnected = self.session.is_disconnected(session_id);
+        let tab_sessions = self.ordered_tab_sessions();
+        let tab_index = tab_sessions.iter().position(|tab| tab.id == tab_root_id);
+        let tab_is_active = self
+            .session
+            .active_id()
+            .is_some_and(|active| self.tab_root_for_session(active) == tab_root_id);
+        let workspace_is_split = self
+            .shell
+            .workspace_pane_root(tab_root_id)
+            .is_some_and(|root| root.is_split())
+            || (tab_is_active && self.shell.workspace_split().is_some());
+        let terminal_available = session.supports_terminal_actions()
+            && self.terminal.session_output(session_id).is_some();
+
+        Some(TabActionPolicy::from_input(TabActionPolicyInput {
+            session,
+            has_copyable_ssh_host: self.session.ssh_host(session_id).is_some(),
+            has_source_connection: self.tab_action_can_show_session_info(session_id),
+            is_busy,
+            is_disconnected,
+            reconnect_pending: self.session.start_reconnect_is_pending(session_id),
+            // Session registration creates a terminal frame for launch configs with an
+            // encoding. Check the in-memory view so a transiently unavailable terminal keeps
+            // the AI submenu visible while its actions remain disabled.
+            terminal_available,
+            workspace_is_split,
+            locked: self.tab_tree_is_locked(tab_root_id),
+            tab_count: tab_sessions.len(),
+            tab_index,
+        }))
     }
 
     pub(in crate::features) fn tab_actions_overlay(
@@ -43,53 +84,37 @@ impl NyaTermApp {
         }
 
         let session_id = self.active_pane_for_tab_root(&tab_root_id);
-        let Some(active_session) = sessions
-            .iter()
-            .find(|session| session.id == session_id)
-            .cloned()
-        else {
+        if !sessions.iter().any(|session| session.id == session_id) {
+            self.session.dialog_close_tab_actions();
+            return div().into_any_element();
+        }
+        let Some(policy) = self.tab_action_policy_for(&session_id, &tab_root_id) else {
             self.session.dialog_close_tab_actions();
             return div().into_any_element();
         };
         let active_color = self.session.tab_color(&tab_root_id);
         let locked = self.tab_tree_is_locked(&tab_root_id);
-        let can_copy_ssh = self.session.ssh_address(&session_id).is_some();
-        let busy_action = self.session.busy_action(&session_id).map(str::to_string);
-        let is_busy = busy_action.is_some();
-        let is_disconnected = self.session.is_disconnected(&session_id);
-        let can_spawn_session = self.tab_action_can_spawn_session(&session_id);
-        let can_session_info = self.tab_action_can_show_session_info(&session_id);
-        let can_multiplex = active_session.kind == SessionKind::Ssh && !is_busy && !is_disconnected;
-        let can_reconnect = is_disconnected
-            && can_spawn_session
-            && !is_busy
-            && !self.session.start_reconnect_is_pending(&session_id);
-        let can_disconnect = !is_busy && !is_disconnected;
-        let can_use_ai = !is_busy && !is_disconnected;
-        let tab_sessions = self.ordered_tab_sessions();
-        let can_close_inactive = tab_sessions.len() > 1;
-        let can_close_right = tab_sessions
-            .iter()
-            .position(|session| session.id == tab_root_id)
-            .is_some_and(|index| index + 1 < tab_sessions.len());
-        let can_unsplit = self
-            .shell
-            .workspace_pane_root(&tab_root_id)
-            .is_some_and(|root| root.is_split())
-            || self.shell.workspace_split().is_some();
-        let scroll_offset = self.terminal.session_scroll_offset(&session_id);
-        let visible_for_ai = terminal_action_prompt_text(
-            &self
-                .terminal_snapshot_for_session(Some(session_id.as_str()), scroll_offset)
-                .rows()
-                .iter()
-                .map(|row| row.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            2_800,
-        );
-        let buffer_for_ai =
-            terminal_action_prompt_text(self.terminal_buffer_tail_for_session(&session_id), 4_000);
+
+        let (visible_for_ai, buffer_for_ai) = if policy.availability.use_ai {
+            let scroll_offset = self.terminal.session_scroll_offset(&session_id);
+            let visible = terminal_action_prompt_text(
+                &self
+                    .terminal_snapshot_for_session(Some(session_id.as_str()), scroll_offset)
+                    .rows()
+                    .iter()
+                    .map(|row| row.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                2_800,
+            );
+            let buffer = terminal_action_prompt_text(
+                self.terminal_buffer_tail_for_session(&session_id),
+                4_000,
+            );
+            (visible, buffer)
+        } else {
+            (String::new(), String::new())
+        };
 
         self.compact_tab_actions_menu(
             palette,
@@ -98,18 +123,7 @@ impl NyaTermApp {
                 tab_root_id,
                 active_color,
                 locked,
-                capabilities: TabActionCapabilities {
-                    can_copy_ssh,
-                    can_spawn_session,
-                    can_multiplex,
-                    can_reconnect,
-                    can_disconnect,
-                    can_use_ai,
-                    can_session_info,
-                    can_close_inactive,
-                    can_close_right,
-                    can_unsplit,
-                },
+                policy,
                 visible_for_ai,
                 buffer_for_ai,
             },

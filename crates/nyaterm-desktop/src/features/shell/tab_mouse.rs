@@ -360,27 +360,15 @@ impl NyaTermApp {
     fn tab_mouse_action_enabled(&self, session_id: &str, action: &str) -> bool {
         let tab_root = self.tab_root_for_session(session_id);
         let pane_id = self.active_pane_for_tab_root(&tab_root);
+        let policy = self.tab_action_policy_for(&pane_id, &tab_root);
         match action {
             "none" => false,
             "rename_tab" | "copy_tab_name" => true,
-            "copy_server_ip" => self.session.ssh_host(&pane_id).is_some(),
-            "duplicate_session" => self.tab_action_can_spawn_session(&pane_id),
-            "multiplex_ssh" => {
-                self.session
-                    .session_info(&pane_id)
-                    .is_some_and(|session| session.kind == nyaterm_transport::SessionKind::Ssh)
-                    && !self.session.session_is_busy(&pane_id)
-                    && !self.session.is_disconnected(&pane_id)
-            }
-            "reconnect_session" => {
-                self.session.is_disconnected(&pane_id)
-                    && self.tab_action_can_spawn_session(&pane_id)
-                    && !self.session.session_is_busy(&pane_id)
-                    && !self.session.start_reconnect_is_pending(&pane_id)
-            }
-            "disconnect_session" => {
-                !self.session.session_is_busy(&pane_id) && !self.session.is_disconnected(&pane_id)
-            }
+            "copy_server_ip" => policy.is_some_and(|policy| policy.support.copy_ssh_host),
+            "duplicate_session" => policy.is_some_and(|policy| policy.availability.spawn_session),
+            "multiplex_ssh" => policy.is_some_and(|policy| policy.availability.multiplex),
+            "reconnect_session" => policy.is_some_and(|policy| policy.availability.reconnect),
+            "disconnect_session" => policy.is_some_and(|policy| policy.availability.disconnect),
             "close_tab" => !self.tab_tree_is_locked(&tab_root),
             _ => false,
         }
