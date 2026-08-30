@@ -565,8 +565,30 @@ pub enum SshAgentPromptAction {
     Cancel,
 }
 
+/// 可在签名过程中更新状态的 SSH Agent 认证提示。
+pub trait SshAgentPromptRequest: Send + Sync {
+    /// 阻塞等待 UI 提供操作，或直到提示超时。
+    fn wait_action(&self) -> Result<SshAgentPromptAction, String>;
+
+    /// 将界面上显示的请求从等待状态更新为失败状态。
+    fn mark_failed(&self, prompt: &SshAgentPrompt) -> Result<(), String>;
+
+    /// 完成并从 UI 中移除该请求。
+    fn finish(&self);
+}
+
 pub trait SshAgentPromptProvider: Send + Sync {
     fn request_action(&self, prompt: &SshAgentPrompt) -> Result<SshAgentPromptAction, String>;
+
+    /// 启动一个可在 Agent 操作期间观察的请求。
+    ///
+    /// 返回 `Ok(None)` 可兼容只支持“失败后再提示”旧流程的提供者。
+    fn begin_request(
+        &self,
+        _prompt: &SshAgentPrompt,
+    ) -> Result<Option<Arc<dyn SshAgentPromptRequest>>, String> {
+        Ok(None)
+    }
 }
 
 pub trait SshOtpProvider: Send + Sync {

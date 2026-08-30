@@ -305,7 +305,10 @@ impl AppShell {
             )
         });
         let title_menu_bar = build_title_menu_bar(app.downgrade(), cx);
-        app.update(cx, |app, _| app.set_title_menu_bar(title_menu_bar));
+        app.update(cx, |app, cx| {
+            app.set_title_menu_bar(title_menu_bar);
+            app.start_shell_environment_preload(cx);
+        });
         self.app = Some(app);
         self.lifecycle = AppShellLifecycle::Ready;
         self.start_ready_app(window, cx);

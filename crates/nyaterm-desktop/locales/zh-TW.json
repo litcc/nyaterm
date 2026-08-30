@@ -2366,7 +2366,9 @@
     "x11DisplayPlaceholder": "Windows: localhost:0 / Linux/macOS: :0"
   },
   "sshAuth": {
-    "agentPromptTitle": "SSH Agent 需要處理",
+    "agentWaitingTitle": "等待 SSH Agent 授權",
+    "agentFailedTitle": "SSH Agent 認證失敗",
+    "agentApprovalWaiting": "請確認硬體金鑰、PIN 或 SSH Agent 授權請求。",
     "agentConnectFailed": "無法連線配置的 SSH Agent。請確認 Agent 正在執行，然後重試。",
     "agentIdentitiesFailed": "SSH Agent 未提供可用身份。請解鎖或載入金鑰，然後重試。",
     "agentApprovalRequired": "請確認硬體金鑰、PIN 或 SSH Agent 授權請求，然後重試。",

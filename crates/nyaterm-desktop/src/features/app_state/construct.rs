@@ -388,6 +388,21 @@ impl NyaTermApp {
         }
     }
 
+    pub(crate) fn start_shell_environment_preload(&self, cx: &mut Context<Self>) {
+        let shell_environment = self.session.manager().shell_environment();
+        cx.background_executor()
+            .spawn(async move {
+                // Preload the complete shell environment after the production window
+                // starts so features can share it without affecting test construction.
+                if let Err(error) = shell_environment.initialize().await {
+                    // Preload failure must not block local terminals; transport keeps an
+                    // inherited fallback. Never log shell stderr or environment values.
+                    tracing::error!(%error, "shell environment preload failed");
+                }
+            })
+            .detach();
+    }
+
     #[cfg(test)]
     pub fn new(
         runtime: AppRuntime,

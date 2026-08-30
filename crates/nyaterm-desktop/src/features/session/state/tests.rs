@@ -6,9 +6,9 @@ use nyaterm_core::{AiExecutionProfile, uuid};
 use nyaterm_store::{StoreConfig, StoreRuntime};
 use nyaterm_transport::{
     LocalSessionConfig, RemoteFileBackendPreference, RemoteFileBackendPreferenceStore,
-    SessionEvent, SessionKind, SessionManager, SshCredentialPrompt, SshCredentialPromptKind,
-    SshCredentialPromptReason, SshHostKey, SshKeyboardInteractivePrompt,
-    SshKeyboardInteractiveRequest, SshSessionConfig,
+    SessionEvent, SessionKind, SessionManager, SshAgentPrompt, SshAgentPromptPhase,
+    SshCredentialPrompt, SshCredentialPromptKind, SshCredentialPromptReason, SshHostKey,
+    SshKeyboardInteractivePrompt, SshKeyboardInteractiveRequest, SshSessionConfig,
 };
 
 use crate::features::runtime_jobs::SessionStartResult;
@@ -236,6 +236,52 @@ fn mismatched_host_key_resolution_preserves_active_prompt() {
             .id,
         "host-key-1"
     );
+}
+
+#[test]
+fn mismatched_agent_resolution_preserves_active_prompt() {
+    let cx = TestAppContext::single();
+    let mut prompts = prompt_state(&cx);
+    let broker = prompts.agent_broker();
+    let session = broker
+        .begin_prompt(&SshAgentPrompt {
+            host: "example.test".to_string(),
+            port: 22,
+            username: "nya".to_string(),
+            connection_name: "example".to_string(),
+            phase: SshAgentPromptPhase::Sign,
+            attempt: 1,
+            message: String::new(),
+        })
+        .expect("begin agent prompt");
+    let target = prompts
+        .activate_next_agent()
+        .expect("activate agent prompt");
+
+    assert_eq!(target, "nya@example.test:22");
+    assert!(matches!(
+        prompts.take_agent_resolution("agent-other"),
+        PromptResolution::Changed
+    ));
+    assert_eq!(
+        prompts
+            .active_agent()
+            .expect("mismatched resolution must preserve the prompt")
+            .target(),
+        "nya@example.test:22"
+    );
+
+    let active_id = prompts
+        .active_agent()
+        .expect("agent prompt remains active")
+        .id
+        .clone();
+    drop(session);
+    assert!(matches!(
+        prompts.take_agent_resolution(&active_id),
+        PromptResolution::Changed
+    ));
+    assert!(prompts.reconcile_agent());
 }
 
 /// The TOTP clock sleeps to the code's own step boundary rather than polling.

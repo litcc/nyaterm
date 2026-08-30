@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nyaterm_core::DecryptedOtpEntry;
@@ -10,9 +10,10 @@ use crate::models::event_wake::{ANY_INTEREST, EventWake};
 use nyaterm_store::{KnownHostCheck, StoreBlockingClient, StoreDomain};
 use nyaterm_transport::{
     SftpDuplicateDecision, SftpDuplicateRequest, SftpDuplicateResolver, SshAgentPrompt,
-    SshAgentPromptAction, SshAgentPromptProvider, SshCredentialPrompt, SshCredentialProvider,
-    SshHostKey, SshHostKeyDecision, SshHostKeyVerifier, SshKeyboardInteractiveRequest,
-    SshOtpProvider,
+    SshAgentPromptAction, SshAgentPromptProvider,
+    SshAgentPromptRequest as TransportSshAgentPromptRequest, SshCredentialPrompt,
+    SshCredentialProvider, SshHostKey, SshHostKeyDecision, SshHostKeyVerifier,
+    SshKeyboardInteractiveRequest, SshOtpProvider,
 };
 
 use super::{
@@ -645,20 +646,181 @@ impl SshCredentialProvider for CredentialPromptBroker {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::features) enum AgentPromptState {
+    Pending,
+    Failed,
+    Resolved,
+}
+
+#[derive(Debug, Clone)]
+pub(in crate::features) struct AgentPromptSnapshot {
+    pub(in crate::features) prompt: SshAgentPrompt,
+    pub(in crate::features) state: AgentPromptState,
+}
+
 #[derive(Debug, Clone)]
 pub(in crate::features) struct AgentPromptRequest {
     pub(in crate::features) id: String,
     pub(in crate::features) prompt: SshAgentPrompt,
     pub(in crate::features) response_tx: mpsc::Sender<SshAgentPromptAction>,
+    _ui_lease: AgentPromptUiLease,
+    state: Arc<Mutex<AgentPromptSnapshot>>,
 }
 
-#[derive(Debug, Default)]
+/// 记录 UI 侧请求是否仍有所有者。
+///
+/// 传输侧会保留一个 `Sender`，用于认证成功或取消时唤醒等待线程；仅依赖
+/// `Sender` 断开无法发现 UI 已销毁请求。因此每个 UI 请求克隆共享一个引用计数，
+/// 最后一个 UI 所有者释放时主动发送取消动作，确保后台认证不会悬挂到超时。
+#[derive(Debug)]
+struct AgentPromptUiLease {
+    owners: Arc<std::sync::atomic::AtomicUsize>,
+    cancel_tx: mpsc::Sender<SshAgentPromptAction>,
+}
+
+impl AgentPromptUiLease {
+    fn new(cancel_tx: &mpsc::Sender<SshAgentPromptAction>) -> Self {
+        Self {
+            owners: Arc::new(std::sync::atomic::AtomicUsize::new(1)),
+            cancel_tx: cancel_tx.clone(),
+        }
+    }
+}
+
+impl Clone for AgentPromptUiLease {
+    fn clone(&self) -> Self {
+        self.owners.fetch_add(1, Ordering::Relaxed);
+        Self {
+            owners: Arc::clone(&self.owners),
+            cancel_tx: self.cancel_tx.clone(),
+        }
+    }
+}
+
+impl Drop for AgentPromptUiLease {
+    fn drop(&mut self) {
+        if self.owners.fetch_sub(1, Ordering::AcqRel) == 1 {
+            let _ = self.cancel_tx.send(SshAgentPromptAction::Cancel);
+        }
+    }
+}
+
+impl AgentPromptRequest {
+    pub(in crate::features) fn snapshot(&self) -> AgentPromptSnapshot {
+        self.state
+            .lock()
+            .map(|state| state.clone())
+            .unwrap_or_else(|_| AgentPromptSnapshot {
+                prompt: self.prompt.clone(),
+                // 锁已中毒时无法再安全地等待用户操作，按已解决处理以
+                // 关闭提示并阻止认证请求永久悬挂。
+                state: AgentPromptState::Resolved,
+            })
+    }
+
+    pub(in crate::features) fn is_resolved(&self) -> bool {
+        self.snapshot().state == AgentPromptState::Resolved
+    }
+
+    pub(in crate::features) fn target(&self) -> String {
+        format!(
+            "{}@{}:{}",
+            self.prompt.username, self.prompt.host, self.prompt.port
+        )
+    }
+}
+
+pub(in crate::features) struct AgentPromptSession {
+    id: String,
+    pending: Weak<Mutex<VecDeque<AgentPromptRequest>>>,
+    state: Arc<Mutex<AgentPromptSnapshot>>,
+    response_tx: mpsc::Sender<SshAgentPromptAction>,
+    response_rx: Mutex<mpsc::Receiver<SshAgentPromptAction>>,
+    changed: Arc<AtomicBool>,
+    wake: Option<EventWake>,
+    finished: AtomicBool,
+}
+
+impl AgentPromptSession {
+    fn wait_action_with_timeout(&self, timeout: Duration) -> Result<SshAgentPromptAction, String> {
+        self.response_rx
+            .lock()
+            .map_err(|_| "SSH Agent prompt response is poisoned".to_string())?
+            .recv_timeout(timeout)
+            .map_err(|_| "SSH Agent prompt timed out".to_string())
+    }
+}
+
+impl TransportSshAgentPromptRequest for AgentPromptSession {
+    fn wait_action(&self) -> Result<SshAgentPromptAction, String> {
+        self.wait_action_with_timeout(Duration::from_secs(300))
+    }
+
+    fn mark_failed(&self, prompt: &SshAgentPrompt) -> Result<(), String> {
+        if self.finished.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "SSH Agent prompt state is poisoned".to_string())?;
+        if state.state != AgentPromptState::Resolved {
+            state.prompt = prompt.clone();
+            state.state = AgentPromptState::Failed;
+            self.changed.store(true, Ordering::Release);
+            if let Some(wake) = self.wake.as_ref() {
+                wake.signal(ANY_INTEREST);
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(&self) {
+        if self.finished.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.state = AgentPromptState::Resolved;
+        }
+        if let Some(pending) = self.pending.upgrade()
+            && let Ok(mut pending) = pending.lock()
+        {
+            pending.retain(|request| request.id != self.id);
+        }
+        self.changed.store(true, Ordering::Release);
+        if let Some(wake) = self.wake.as_ref() {
+            wake.signal(ANY_INTEREST);
+        }
+        let _ = self.response_tx.send(SshAgentPromptAction::Cancel);
+    }
+}
+
+impl Drop for AgentPromptSession {
+    fn drop(&mut self) {
+        // 丢弃传输侧请求时也必须清理队列，避免界面残留无法响应的提示。
+        self.finish();
+    }
+}
+
+#[derive(Debug)]
 pub(in crate::features) struct AgentPromptBroker {
-    pending: Mutex<VecDeque<AgentPromptRequest>>,
+    pending: Arc<Mutex<VecDeque<AgentPromptRequest>>>,
+    changed: Arc<AtomicBool>,
     /// Signalled after a transport thread enqueues, so activation does not
     /// have to be polled. `Option` because the brokers are `Default`-built,
     /// including in tests that drive them without a wake at all.
     wake: Mutex<Option<EventWake>>,
+}
+
+impl Default for AgentPromptBroker {
+    fn default() -> Self {
+        Self {
+            pending: Arc::new(Mutex::new(VecDeque::new())),
+            changed: Arc::new(AtomicBool::new(false)),
+            wake: Mutex::new(None),
+        }
+    }
 }
 
 impl AgentPromptBroker {
@@ -668,10 +830,12 @@ impl AgentPromptBroker {
         }
     }
 
+    fn wake_snapshot(&self) -> Option<EventWake> {
+        self.wake.lock().ok().and_then(|wake| wake.clone())
+    }
+
     fn signal_wake(&self) {
-        if let Ok(slot) = self.wake.lock()
-            && let Some(wake) = slot.as_ref()
-        {
+        if let Some(wake) = self.wake_snapshot() {
             wake.signal(ANY_INTEREST);
         }
     }
@@ -685,41 +849,66 @@ impl AgentPromptBroker {
         prompt: SshAgentPrompt,
         timeout: Duration,
     ) -> Result<SshAgentPromptAction, String> {
+        let session = self.begin_prompt(&prompt)?;
+        let result = session.wait_action_with_timeout(timeout);
+        session.finish();
+        result
+    }
+
+    pub(in crate::features) fn begin_prompt(
+        &self,
+        prompt: &SshAgentPrompt,
+    ) -> Result<Arc<AgentPromptSession>, String> {
         let (response_tx, response_rx) = mpsc::channel();
-        let id = agent_prompt_id(&prompt);
+        let state = Arc::new(Mutex::new(AgentPromptSnapshot {
+            prompt: prompt.clone(),
+            state: AgentPromptState::Pending,
+        }));
         let request = AgentPromptRequest {
-            id: id.clone(),
-            prompt,
-            response_tx,
+            id: agent_prompt_id(),
+            prompt: prompt.clone(),
+            response_tx: response_tx.clone(),
+            _ui_lease: AgentPromptUiLease::new(&response_tx),
+            state: Arc::clone(&state),
         };
+        let id = request.id.clone();
         self.pending
             .lock()
             .map_err(|_| "SSH Agent prompt queue is poisoned".to_string())?
             .push_back(request);
+        self.changed.store(true, Ordering::Release);
         self.signal_wake();
-        match response_rx.recv_timeout(timeout) {
-            Ok(action) => Ok(action),
-            Err(_) => {
-                if let Ok(mut pending) = self.pending.lock() {
-                    pending.retain(|request| request.id != id);
-                }
-                Err("SSH Agent prompt timed out".to_string())
-            }
-        }
+        Ok(Arc::new(AgentPromptSession {
+            id,
+            pending: Arc::downgrade(&self.pending),
+            state,
+            response_tx,
+            response_rx: Mutex::new(response_rx),
+            changed: Arc::clone(&self.changed),
+            wake: self.wake_snapshot(),
+            finished: AtomicBool::new(false),
+        }))
     }
 
     pub(in crate::features) fn pop_pending(&self) -> Option<AgentPromptRequest> {
-        self.pending
-            .lock()
-            .ok()
-            .and_then(|mut pending| pending.pop_front())
+        let mut pending = self.pending.lock().ok()?;
+        loop {
+            let request = pending.pop_front()?;
+            if !request.is_resolved() {
+                return Some(request);
+            }
+        }
     }
 
     pub(in crate::features) fn has_pending(&self) -> bool {
         self.pending
             .lock()
             .ok()
-            .is_some_and(|pending| !pending.is_empty())
+            .is_some_and(|pending| pending.iter().any(|request| !request.is_resolved()))
+    }
+
+    pub(in crate::features) fn take_changed(&self) -> bool {
+        self.changed.swap(false, Ordering::AcqRel)
     }
 }
 
@@ -727,24 +916,24 @@ impl SshAgentPromptProvider for AgentPromptBroker {
     fn request_action(&self, prompt: &SshAgentPrompt) -> Result<SshAgentPromptAction, String> {
         AgentPromptBroker::request_action(self, prompt.clone())
     }
+
+    fn begin_request(
+        &self,
+        prompt: &SshAgentPrompt,
+    ) -> Result<Option<Arc<dyn TransportSshAgentPromptRequest>>, String> {
+        Ok(Some(self.begin_prompt(prompt)?))
+    }
 }
 
-fn agent_prompt_id(prompt: &SshAgentPrompt) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    prompt.connection_name.hash(&mut hasher);
-    prompt.host.hash(&mut hasher);
-    prompt.port.hash(&mut hasher);
-    prompt.username.hash(&mut hasher);
-    prompt.phase.hash(&mut hasher);
-    prompt.attempt.hash(&mut hasher);
-    format!("agent-{:016x}", hasher.finish())
+fn agent_prompt_id() -> String {
+    format!("agent-{}", nyaterm_core::uuid())
 }
 
 #[cfg(test)]
 mod prompt_state_debug_tests {
     use super::{
-        AgentPromptBroker, CredentialPromptState, KeyboardInteractivePromptState,
-        NativeOtpProvider, TotpUseRecord,
+        AgentPromptBroker, AgentPromptState, CredentialPromptState, KeyboardInteractivePromptState,
+        NativeOtpProvider, TotpUseRecord, TransportSshAgentPromptRequest,
     };
     use nyaterm_store::{StoreConfig, StoreRuntime};
     use nyaterm_transport::{
@@ -798,6 +987,65 @@ mod prompt_state_debug_tests {
         let broker = AgentPromptBroker::default();
         let result = broker.request_action_with_timeout(agent_prompt(), Duration::from_millis(1));
         assert_eq!(result, Err("SSH Agent prompt timed out".to_string()));
+        assert!(!broker.has_pending());
+    }
+
+    #[test]
+    fn agent_prompt_request_transitions_from_pending_to_failed_and_resolved() {
+        let broker = AgentPromptBroker::default();
+        let session = broker
+            .begin_prompt(&agent_prompt())
+            .expect("begin agent prompt");
+        let request = broker.pop_pending().expect("pending agent prompt");
+        assert_eq!(request.snapshot().state, AgentPromptState::Pending);
+
+        let failed_prompt = SshAgentPrompt {
+            phase: SshAgentPromptPhase::Sign,
+            message: "SSH Agent signing failed".to_string(),
+            ..agent_prompt()
+        };
+        session
+            .mark_failed(&failed_prompt)
+            .expect("mark agent prompt failed");
+        assert_eq!(request.snapshot().state, AgentPromptState::Failed);
+        session.finish();
+        assert_eq!(request.snapshot().state, AgentPromptState::Resolved);
+    }
+
+    #[test]
+    fn dropping_the_last_ui_request_cancels_the_transport_waiter() {
+        let broker = AgentPromptBroker::default();
+        let session = broker
+            .begin_prompt(&agent_prompt())
+            .expect("begin agent prompt");
+        let request = broker.pop_pending().expect("pending agent prompt");
+        let waiter_session = Arc::clone(&session);
+        let waiter = std::thread::spawn(move || waiter_session.wait_action());
+
+        drop(request);
+
+        assert_eq!(
+            waiter.join().expect("join transport waiter"),
+            Ok(SshAgentPromptAction::Cancel)
+        );
+        session.finish();
+    }
+
+    #[test]
+    fn identical_agent_prompts_receive_unique_ids() {
+        let broker = AgentPromptBroker::default();
+        let first_session = broker
+            .begin_prompt(&agent_prompt())
+            .expect("begin first prompt");
+        let first = broker.pop_pending().expect("first pending prompt");
+        let second_session = broker
+            .begin_prompt(&agent_prompt())
+            .expect("begin second prompt");
+        let second = broker.pop_pending().expect("second pending prompt");
+
+        assert_ne!(first.id, second.id);
+        first_session.finish();
+        second_session.finish();
         assert!(!broker.has_pending());
     }
 

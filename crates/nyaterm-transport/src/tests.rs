@@ -24,6 +24,8 @@ use super::{
     run_local_command, ssh_client_config, ssh_host_identifier, supported_ssh_algorithms,
     unregister_x11_sender, validate_ssh_algorithm_preferences,
 };
+#[cfg(unix)]
+use super::{EnvironmentSnapshot, EnvironmentValue};
 
 fn wait_for_queue_state(mut predicate: impl FnMut() -> bool, description: &str) {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -215,6 +217,28 @@ fn local_session_echoes_output() {
         String::from_utf8_lossy(&output).contains("nyaterm-transport-ready"),
         "output was: {}",
         String::from_utf8_lossy(&output)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn local_command_receives_the_cached_shell_environment() {
+    let snapshot = EnvironmentSnapshot::from_test(
+        HashMap::from([(
+            "NYATERM_TEST_LOCAL_ENV".to_string(),
+            EnvironmentValue::new("from-shell-cache".to_string()),
+        )]),
+        false,
+    );
+    let mut command = CommandBuilder::new("/bin/sh");
+
+    super::configure_environment(&mut command, Some(&snapshot));
+
+    assert_eq!(
+        command
+            .get_env("NYATERM_TEST_LOCAL_ENV")
+            .and_then(|value| value.to_str()),
+        Some("from-shell-cache")
     );
 }
 
