@@ -1019,15 +1019,17 @@ mod prompt_state_debug_tests {
             .begin_prompt(&agent_prompt())
             .expect("begin agent prompt");
         let request = broker.pop_pending().expect("pending agent prompt");
-        let waiter_session = Arc::clone(&session);
-        let waiter = std::thread::spawn(move || waiter_session.wait_action());
+        std::thread::scope(|scope| {
+            let waiter_session = Arc::clone(&session);
+            let waiter = scope.spawn(move || waiter_session.wait_action());
 
-        drop(request);
+            drop(request);
 
-        assert_eq!(
-            waiter.join().expect("join transport waiter"),
-            Ok(SshAgentPromptAction::Cancel)
-        );
+            assert_eq!(
+                waiter.join().expect("join transport waiter"),
+                Ok(SshAgentPromptAction::Cancel)
+            );
+        });
         session.finish();
     }
 
