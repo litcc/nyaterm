@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use gpui::{Context, Window};
 
-use crate::features::NyaTermApp;
 use crate::features::formatting::{normalize_startup_command, short_id};
+use crate::features::{AppLifecycleEvent, NyaTermApp};
 use crate::models::StartupCommandRequest;
 use crate::terminal::INITIAL_TERMINAL_BANNER;
 use crate::terminal::initial_terminal_screen;
@@ -280,14 +280,20 @@ impl NyaTermApp {
         window.minimize_window();
     }
 
-    pub(in crate::features) fn handle_window_close_request(
+    pub(crate) fn handle_window_close_request(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let open_sessions = self.session.ordered_sessions().len();
         if self.settings.summary().confirm_on_close && open_sessions > 0 {
-            // Reuse close-all confirmation as quit-with-sessions gate (Tauri confirm_on_close).
+            // Reuse the close-all confirmation as the quit-with-sessions gate.
+            // A title-bar close control can also produce the native window-close
+            // callback, so retain the existing modal rather than stacking a
+            // second confirmation for the same close request.
+            if self.session.dialog_should_quit_after_close_all() {
+                return;
+            }
             self.session.dialog_request_quit_after_close_all();
             self.open_close_all_sessions_confirm(window, cx);
             self.shell.set_status(format!(
@@ -300,7 +306,7 @@ impl NyaTermApp {
         if self.settings.summary().startup_restore {
             self.flush_open_tabs_now(cx);
         }
-        window.remove_window();
+        cx.emit(AppLifecycleEvent::ShutdownRequested);
     }
 
     pub(in crate::features) fn open_close_all_sessions_confirm(
@@ -358,7 +364,7 @@ impl NyaTermApp {
 
     pub(in crate::features) fn confirm_close_all_sessions(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         let quit_after = self.session.dialog_take_close_all_sessions_confirm();
@@ -367,7 +373,7 @@ impl NyaTermApp {
                 self.flush_open_tabs_now(cx);
             }
             self.shell.set_status("closing window".to_string());
-            window.remove_window();
+            cx.emit(AppLifecycleEvent::ShutdownRequested);
             return true;
         }
         self.close_all_sessions(cx);

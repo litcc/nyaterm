@@ -22,7 +22,7 @@ use nyaterm_ui::{
 
 use crate::{
     entities::{OverlayStore, StartupRestoreStore, UiStoreHandles},
-    features::NyaTermApp,
+    features::{AppLifecycleEvent, NyaTermApp},
 };
 
 actions!(
@@ -309,6 +309,11 @@ impl AppShell {
             app.set_title_menu_bar(title_menu_bar);
             app.start_shell_environment_preload(cx);
         });
+        let shutdown_subscription =
+            cx.subscribe(&app, |this, _, event: &AppLifecycleEvent, cx| match event {
+                AppLifecycleEvent::ShutdownRequested => this.request_close(cx),
+            });
+        self._subscriptions.push(shutdown_subscription);
         self.app = Some(app);
         self.lifecycle = AppShellLifecycle::Ready;
         self.start_ready_app(window, cx);
@@ -436,6 +441,25 @@ impl AppShell {
             AppShellLifecycle::Loading | AppShellLifecycle::Recovery(_) => {
                 self.quit_after_worker_shutdown(cx);
             }
+        }
+    }
+
+    /// Handles a close request from the primary window or native Quit command.
+    ///
+    /// Once the application is ready, the feature layer owns the confirmation
+    /// decision. The shell begins persistence and worker shutdown only after it
+    /// receives `AppLifecycleEvent::ShutdownRequested`.
+    pub fn request_window_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.lifecycle {
+            AppShellLifecycle::Ready | AppShellLifecycle::FlushFailed(_) => {
+                if let Some(app) = &self.app {
+                    app.update(cx, |app, cx| app.handle_window_close_request(window, cx));
+                } else {
+                    self.request_close(cx);
+                }
+            }
+            AppShellLifecycle::Flushing => {}
+            AppShellLifecycle::Loading | AppShellLifecycle::Recovery(_) => self.request_close(cx),
         }
     }
 
@@ -878,8 +902,8 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &NativeManageSyncGroups, window, cx| {
                 this.perform_native_menu_command(NativeMenuCommand::ManageSyncGroups, window, cx);
             }))
-            .on_action(cx.listener(|this, _: &NativeQuit, _window, cx| {
-                this.request_close(cx);
+            .on_action(cx.listener(|this, _: &NativeQuit, window, cx| {
+                this.request_window_close(window, cx);
             }))
             .when_some(self.app.clone().filter(|_| show_app), |root, app| {
                 root.child(app)

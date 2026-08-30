@@ -76,3 +76,15 @@ pub struct NyaTermApp {
 }
 
 impl gpui::EventEmitter<NotesCatalogEvent> for NyaTermApp {}
+
+/// Requests that the application shell start its orderly shutdown sequence.
+///
+/// The shell owns persistence and worker shutdown, while `NyaTermApp` owns the
+/// user-facing close confirmation. An event keeps those responsibilities
+/// separate without allowing a window-close callback to bypass the dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AppLifecycleEvent {
+    ShutdownRequested,
+}
+
+impl gpui::EventEmitter<AppLifecycleEvent> for NyaTermApp {}

@@ -69,8 +69,8 @@ fn main() -> anyhow::Result<()> {
             move |window, cx| {
                 let shell = cx.new(|cx| AppShell::new(app_runtime, activation_rx, cx));
                 let close_shell = shell.clone();
-                window.on_window_should_close(cx, move |_, cx| {
-                    close_shell.update(cx, |shell, cx| shell.request_close(cx));
+                window.on_window_should_close(cx, move |window, cx| {
+                    close_shell.update(cx, |shell, cx| shell.request_window_close(window, cx));
                     false
                 });
                 shell.update(cx, |shell, cx| {

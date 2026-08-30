@@ -44,6 +44,7 @@ pub(crate) fn init_protection_key_bindings(cx: &mut gpui::App) {
     view_widgets::init_child_window_key_bindings(cx);
 }
 
+pub(crate) use app_state::AppLifecycleEvent;
 pub use app_state::NyaTermApp;
 pub(in crate::features) use font_catalog::{
     FontAvailability, FontAvailabilityReason, FontCatalogEntry, FontCatalogKind,
