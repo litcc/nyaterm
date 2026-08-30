@@ -72,14 +72,14 @@ impl RenderOnce for NyaHoverCard {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc};
+    use std::{cell::Cell, rc::Rc, time::Duration};
 
     use gpui::{
-        Context, InteractiveElement as _, Modifiers, Render, StatefulInteractiveElement as _,
-        Styled as _, TestAppContext, div, point, px,
+        Context, InteractiveElement as _, IntoElement, Modifiers, Render,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, Window, div, point, px,
     };
 
-    use super::*;
+    use super::NyaHoverCard;
 
     struct Harness {
         clicked: Rc<Cell<bool>>,
