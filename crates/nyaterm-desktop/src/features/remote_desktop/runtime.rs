@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
 use futures::StreamExt as _;
-use gpui::{Bounds, ClipboardItem, Context, DevicePixels, Point, Size, Window, point, size};
+use gpui::{
+    Bounds, ClipboardItem, Context, DevicePixels, Modifiers, Point, Size, Window, point, size,
+};
 use nyaterm_remote_desktop::{
     CertificateDecision, CertificateMatchState, CertificatePromptReason, ClipboardOrigin,
     DirtyRect, DisplayScaleMode, DisplayTransform, Framebuffer, FramebufferLimits, LogicalPoint,
@@ -55,12 +57,24 @@ impl NyaTermApp {
         if !self.remote_desktop.focus_subscriptions.is_empty() {
             return;
         }
-        let subscription = cx.on_focus_out(
+        let focus_in = cx.on_focus_in(&self.remote_desktop.focus, window, |this, window, _cx| {
+            if let Some(session_id) = this.session.active_id_owned()
+                && this.remote_desktop.is_session(&session_id)
+            {
+                let _ = this.send_remote_modifier_state(
+                    &session_id,
+                    window.modifiers(),
+                    Some(window.capslock().on),
+                );
+            }
+        });
+        let focus_out = cx.on_focus_out(
             &self.remote_desktop.focus,
             window,
             |this, _event, _window, _cx| {
                 super::keyboard_capture::set_keyboard_capture(
                     this.remote_desktop.manager.clone(),
+                    this.remote_desktop.vnc_manager.clone(),
                     None,
                 );
                 if let Some(session_id) = this.session.active_id_owned() {
@@ -68,7 +82,7 @@ impl NyaTermApp {
                 }
             },
         );
-        self.remote_desktop.focus_subscriptions.push(subscription);
+        self.remote_desktop.focus_subscriptions = vec![focus_in, focus_out];
     }
 
     pub(in crate::features) fn create_rdp_runtime(
@@ -347,6 +361,7 @@ impl NyaTermApp {
         if self.session.active_id() == Some(session_id) {
             super::keyboard_capture::set_keyboard_capture(
                 self.remote_desktop.manager.clone(),
+                self.remote_desktop.vnc_manager.clone(),
                 None,
             );
             self.release_remote_keys(session_id);
@@ -360,6 +375,11 @@ impl NyaTermApp {
         session_id: &str,
     ) -> Result<(), VncError> {
         if self.session.active_id() == Some(session_id) {
+            super::keyboard_capture::set_keyboard_capture(
+                self.remote_desktop.manager.clone(),
+                self.remote_desktop.vnc_manager.clone(),
+                None,
+            );
             self.release_remote_keys(session_id);
         }
         self.remote_desktop.remove_session(session_id);
@@ -367,7 +387,6 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn release_remote_keys(&mut self, session_id: &str) {
-        self.remote_desktop.input.clear_session(session_id);
         if self.session.metadata(session_id).is_some_and(|metadata| {
             matches!(
                 metadata.launch_config,
@@ -381,6 +400,7 @@ impl NyaTermApp {
                     .send_input(session_id, vec![VncInputEvent::ReleaseAllInputs]);
             }
             if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
+                session.modifiers = Default::default();
                 session.last_pointer = None;
                 session.wheel_remainder_x = 0.0;
                 session.wheel_remainder_y = 0.0;
@@ -391,6 +411,7 @@ impl NyaTermApp {
             return;
         };
         let _ = session.keys.release_all();
+        session.modifiers = Default::default();
         session.last_pointer = None;
         session.wheel_remainder_x = 0.0;
         session.wheel_remainder_y = 0.0;
@@ -465,6 +486,7 @@ impl NyaTermApp {
                 && drain.cursors.is_empty()
                 && vnc_drain.control.is_empty()
                 && vnc_drain.frames.is_empty()
+                && vnc_drain.cursors.is_empty()
             {
                 continue;
             }
@@ -472,6 +494,7 @@ impl NyaTermApp {
                 self.remote_desktop.metrics_control_events += drain.control.len();
                 self.remote_desktop.metrics_frame_updates += drain.frames.len();
                 self.remote_desktop.metrics_control_events += vnc_drain.control.len();
+                self.remote_desktop.metrics_control_events += vnc_drain.cursors.len();
                 self.remote_desktop.metrics_frame_updates += vnc_drain.frames.len();
             }
             dirty = true;
@@ -483,6 +506,7 @@ impl NyaTermApp {
             for event in vnc_drain.control {
                 self.apply_vnc_control_event(&session_id, event, window, cx);
             }
+            self.apply_remote_cursor_batch(&session_id, vnc_drain.cursors, window);
             self.apply_rdp_frame_batch(&session_id, vnc_drain.frames, window);
         }
         dirty
@@ -574,10 +598,11 @@ impl NyaTermApp {
                         .server_capabilities(session_id),
                 );
                 let state = RemoteDesktopViewState::from(&state);
-                if remote_state_clears_input(&state) {
-                    self.remote_desktop.input.clear_session(session_id);
-                }
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
+                    if remote_state_clears_input(&state) {
+                        session.keys = Default::default();
+                        session.modifiers = Default::default();
+                    }
                     session.vnc_server_capabilities = vnc_server_capabilities;
                     session.state = state;
                 }
@@ -610,8 +635,9 @@ impl NyaTermApp {
                 }
             }
             VncRuntimeEvent::Error { error, .. } => {
-                self.remote_desktop.input.clear_session(session_id);
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
+                    session.keys = Default::default();
+                    session.modifiers = Default::default();
                     session.vnc_server_capabilities = None;
                     set_remote_view_error(session, error.into());
                 }
@@ -622,12 +648,6 @@ impl NyaTermApp {
     fn sync_rdp_keyboard_capture(&self, window: &Window) {
         let target = self.session.active_id().and_then(|session_id| {
             (self.remote_desktop.focus.is_focused(window)
-                && self.session.metadata(session_id).is_some_and(|metadata| {
-                    matches!(
-                        metadata.launch_config,
-                        crate::models::SessionLaunchConfig::Rdp(_)
-                    )
-                })
                 && self
                     .remote_desktop
                     .sessions
@@ -635,9 +655,21 @@ impl NyaTermApp {
                     .is_some_and(|session| {
                         matches!(session.state, RemoteDesktopViewState::Connected)
                     }))
-            .then(|| session_id.to_string())
+            .then(|| {
+                let is_vnc = self.session.metadata(session_id).is_some_and(|metadata| {
+                    matches!(
+                        metadata.launch_config,
+                        crate::models::SessionLaunchConfig::Vnc(_)
+                    )
+                });
+                (session_id.to_string(), is_vnc)
+            })
         });
-        super::keyboard_capture::set_keyboard_capture(self.remote_desktop.manager.clone(), target);
+        super::keyboard_capture::set_keyboard_capture(
+            self.remote_desktop.manager.clone(),
+            self.remote_desktop.vnc_manager.clone(),
+            target,
+        );
     }
 
     pub(in crate::features) fn update_rdp_viewport(
@@ -664,36 +696,11 @@ impl NyaTermApp {
         self.queue_rdp_resize(session_id, fit_window_display_metrics(bounds, scale_factor));
     }
 
-    pub(in crate::features) fn focused_remote_desktop_session_id(
-        &self,
-        window: &Window,
-    ) -> Option<String> {
-        self.remote_desktop
-            .focus
-            .is_focused(window)
-            .then(|| self.session.active_id_owned())
-            .flatten()
-            .filter(|session_id| self.remote_desktop.is_session(session_id))
-    }
-
-    pub(in crate::features) fn remote_marked_text(&self, session_id: &str) -> String {
-        self.remote_desktop.marked_text(session_id)
-    }
-
-    pub(in crate::features) fn set_remote_marked_text(&mut self, session_id: &str, text: &str) {
-        self.remote_desktop.set_marked_text(session_id, text);
-    }
-
-    pub(in crate::features) fn clear_remote_marked_text(&mut self, session_id: &str) {
-        self.remote_desktop.clear_marked_text(session_id);
-    }
-
     pub(in crate::features) fn send_remote_committed_text(
         &mut self,
         session_id: &str,
         text: &str,
     ) -> bool {
-        self.remote_desktop.input.clear_marked_text(session_id);
         if text.is_empty() {
             return true;
         }
@@ -769,9 +776,8 @@ impl NyaTermApp {
         key: &str,
         key_char: Option<&str>,
         repeat: bool,
-        modifiers: (bool, bool, bool),
+        modifiers: Modifiers,
     ) -> bool {
-        let (control, alt, platform) = modifiers;
         if !self
             .remote_desktop
             .sessions
@@ -786,37 +792,8 @@ impl NyaTermApp {
                 crate::models::SessionLaunchConfig::Vnc(_)
             )
         });
-        let committed_text_supported =
-            self.remote_desktop
-                .sessions
-                .get(session_id)
-                .is_some_and(|session| {
-                    remote_committed_text_supported(
-                        is_vnc,
-                        session.server_capabilities,
-                        session.vnc_server_capabilities,
-                    )
-                });
-        let classified_for_text = remote_key_down_should_defer_to_text(
-            key_char,
-            committed_text_supported,
-            RemoteInputPlatform::current(),
-            RemoteKeyModifiers {
-                control,
-                alt,
-                platform,
-            },
-        );
-        let key_already_uses_text = self
-            .remote_desktop
-            .input
-            .is_key_up_suppressed(session_id, key);
-        if remote_key_down_uses_text_route(repeat, key_already_uses_text, classified_for_text) {
-            if is_vnc && !self.vnc_input_enabled(session_id) {
-                return false;
-            }
-            self.remote_desktop.input.suppress_key_up(session_id, key);
-            return true;
+        if !self.send_remote_modifier_state(session_id, modifiers, None) {
+            return false;
         }
         if is_vnc {
             return self.send_vnc_key(session_id, key, key_char, true);
@@ -836,13 +813,6 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn send_rdp_key_up(&mut self, session_id: &str, key: &str) -> bool {
-        if self
-            .remote_desktop
-            .input
-            .take_suppressed_key_up(session_id, key)
-        {
-            return true;
-        }
         if self.session.metadata(session_id).is_some_and(|metadata| {
             matches!(
                 metadata.launch_config,
@@ -863,6 +833,81 @@ impl NyaTermApp {
             .manager
             .send_input(session_id, vec![event])
             .is_ok()
+    }
+
+    pub(in crate::features) fn send_remote_modifier_state(
+        &mut self,
+        session_id: &str,
+        mut modifiers: Modifiers,
+        capslock: Option<bool>,
+    ) -> bool {
+        if !self
+            .remote_desktop
+            .sessions
+            .get(session_id)
+            .is_some_and(|session| matches!(session.state, RemoteDesktopViewState::Connected))
+        {
+            return false;
+        }
+        modifiers.function = false;
+        let is_vnc = self.session.metadata(session_id).is_some_and(|metadata| {
+            matches!(
+                metadata.launch_config,
+                crate::models::SessionLaunchConfig::Vnc(_)
+            )
+        });
+        if is_vnc && !self.vnc_input_enabled(session_id) {
+            return false;
+        }
+        let Some(session) = self.remote_desktop.sessions.get_mut(session_id) else {
+            return false;
+        };
+        let transitions = remote_modifier_transitions(
+            session.modifiers.modifiers,
+            modifiers,
+            session.modifiers.capslock,
+            capslock,
+        );
+        session.modifiers.modifiers = modifiers;
+        if let Some(capslock) = capslock {
+            session.modifiers.capslock = Some(capslock);
+        }
+        if transitions.is_empty() {
+            return true;
+        }
+        if is_vnc {
+            let events = transitions
+                .into_iter()
+                .filter_map(|transition| {
+                    vnc_keysym_for_key(transition.key, None).map(|keysym| VncInputEvent::Key {
+                        keysym,
+                        pressed: transition.pressed,
+                    })
+                })
+                .collect::<Vec<_>>();
+            return !events.is_empty()
+                && self
+                    .remote_desktop
+                    .vnc_manager
+                    .send_input(session_id, events)
+                    .is_ok();
+        }
+        let events = transitions
+            .into_iter()
+            .filter_map(|transition| {
+                if transition.pressed {
+                    session.keys.key_down(transition.key, false)
+                } else {
+                    session.keys.key_up(transition.key)
+                }
+            })
+            .collect::<Vec<_>>();
+        !events.is_empty()
+            && self
+                .remote_desktop
+                .manager
+                .send_input(session_id, events)
+                .is_ok()
     }
 
     pub(in crate::features) fn rdp_secure_attention_available(&self, session_id: &str) -> bool {
@@ -946,7 +991,11 @@ impl NyaTermApp {
             if session.last_pointer_sent_at.is_some_and(|sent_at| {
                 now.saturating_duration_since(sent_at) < POINTER_MOVE_INTERVAL
             }) {
-                session.pending_pointer = Some(remote);
+                defer_rdp_pointer_move(
+                    &mut session.pending_pointer,
+                    &mut session.cursor_position,
+                    remote,
+                );
                 return true;
             }
         }
@@ -965,10 +1014,12 @@ impl NyaTermApp {
             },
             None => RemotePointerEvent::Move { position },
         };
-        self.remote_desktop
+        let sent = self
+            .remote_desktop
             .manager
             .send_input(session_id, vec![RdpInputEvent::Pointer(pointer)])
-            .is_ok()
+            .is_ok();
+        record_remote_cursor_position_if_sent(&mut session.cursor_position, remote, sent)
     }
 
     fn send_vnc_key(
@@ -1053,10 +1104,12 @@ impl NyaTermApp {
             },
             None => RemotePointerEvent::Move { position },
         };
-        self.remote_desktop
+        let sent = self
+            .remote_desktop
             .vnc_manager
             .send_input(session_id, vec![VncInputEvent::Pointer(pointer)])
-            .is_ok()
+            .is_ok();
+        record_remote_cursor_position_if_sent(&mut session.cursor_position, remote, sent)
     }
 
     pub(in crate::features) fn send_remote_wheel(
@@ -1135,7 +1188,7 @@ impl NyaTermApp {
         if pointers.is_empty() {
             return true;
         }
-        if is_vnc {
+        let sent = if is_vnc {
             self.remote_desktop
                 .vnc_manager
                 .send_input(
@@ -1151,7 +1204,8 @@ impl NyaTermApp {
                     pointers.into_iter().map(RdpInputEvent::Pointer).collect(),
                 )
                 .is_ok()
-        }
+        };
+        record_remote_cursor_position_if_sent(&mut session.cursor_position, remote, sent)
     }
 
     fn vnc_input_enabled(&self, session_id: &str) -> bool {
@@ -1177,7 +1231,7 @@ impl NyaTermApp {
             }
             session.pending_pointer = None;
             session.last_pointer_sent_at = Some(now);
-            sent |= self
+            let pointer_sent = self
                 .remote_desktop
                 .manager
                 .send_input(
@@ -1190,6 +1244,12 @@ impl NyaTermApp {
                     })],
                 )
                 .is_ok();
+            record_remote_cursor_position_if_sent(
+                &mut session.cursor_position,
+                pointer,
+                pointer_sent,
+            );
+            sent |= pointer_sent;
         }
         sent
     }
@@ -1228,10 +1288,11 @@ impl NyaTermApp {
                     .then(|| self.remote_desktop.manager.server_capabilities(session_id))
                     .flatten();
                 let view_state = rdp_view_state(&state);
-                if remote_state_clears_input(&view_state) {
-                    self.remote_desktop.input.clear_session(session_id);
-                }
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
+                    if remote_state_clears_input(&view_state) {
+                        session.keys = Default::default();
+                        session.modifiers = Default::default();
+                    }
                     if should_disable_dynamic_resize_after_state(
                         &state,
                         session.last_resize_sent_at,
@@ -1305,13 +1366,12 @@ impl NyaTermApp {
                 }
             }
             RdpRuntimeEvent::Error { error, fatal, .. } => {
-                if fatal {
-                    self.remote_desktop.input.clear_session(session_id);
-                }
                 let should_reconnect = fatal && self.schedule_rdp_reconnect(session_id, &error);
                 if let Some(session) = self.remote_desktop.sessions.get_mut(session_id) {
                     session.error = Some(error.clone().into());
                     if fatal {
+                        session.keys = Default::default();
+                        session.modifiers = Default::default();
                         session.server_capabilities = None;
                     }
                     if fatal && !should_reconnect {
@@ -1999,37 +2059,82 @@ fn logical_point(point: gpui::Point<gpui::Pixels>) -> LogicalPoint {
     }
 }
 
+fn defer_rdp_pointer_move(
+    pending_pointer: &mut Option<(u32, u32)>,
+    cursor_position: &mut nyaterm_remote_desktop::CursorPosition,
+    remote: (u32, u32),
+) {
+    *pending_pointer = Some(remote);
+    *cursor_position = nyaterm_remote_desktop::CursorPosition {
+        x: remote.0,
+        y: remote.1,
+    };
+}
+
+fn record_remote_cursor_position_if_sent(
+    cursor_position: &mut nyaterm_remote_desktop::CursorPosition,
+    remote: (u32, u32),
+    sent: bool,
+) -> bool {
+    if sent {
+        *cursor_position = nyaterm_remote_desktop::CursorPosition {
+            x: remote.0,
+            y: remote.1,
+        };
+    }
+    sent
+}
+
 fn vnc_input_allowed(view_only: bool) -> bool {
     !view_only
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RemoteInputPlatform {
-    MacOs,
-    Windows,
-    Linux,
-    Other,
+struct RemoteModifierTransition {
+    key: &'static str,
+    pressed: bool,
 }
 
-impl RemoteInputPlatform {
-    fn current() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::MacOs
-        } else if cfg!(target_os = "windows") {
-            Self::Windows
-        } else if cfg!(target_os = "linux") {
-            Self::Linux
-        } else {
-            Self::Other
+fn remote_modifier_transitions(
+    previous: Modifiers,
+    current: Modifiers,
+    previous_capslock: Option<bool>,
+    current_capslock: Option<bool>,
+) -> Vec<RemoteModifierTransition> {
+    let states = [
+        ("shift", previous.shift, current.shift),
+        ("control", previous.control, current.control),
+        ("alt", previous.alt, current.alt),
+        ("platform", previous.platform, current.platform),
+    ];
+    let mut transitions = Vec::with_capacity(6);
+    for (key, was_pressed, pressed) in states {
+        if !was_pressed && pressed {
+            transitions.push(RemoteModifierTransition { key, pressed: true });
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct RemoteKeyModifiers {
-    control: bool,
-    alt: bool,
-    platform: bool,
+    for (key, was_pressed, pressed) in states.into_iter().rev() {
+        if was_pressed && !pressed {
+            transitions.push(RemoteModifierTransition {
+                key,
+                pressed: false,
+            });
+        }
+    }
+    if previous_capslock
+        .zip(current_capslock)
+        .is_some_and(|(previous, current)| previous != current)
+    {
+        transitions.push(RemoteModifierTransition {
+            key: "capslock",
+            pressed: true,
+        });
+        transitions.push(RemoteModifierTransition {
+            key: "capslock",
+            pressed: false,
+        });
+    }
+    transitions
 }
 
 fn remote_committed_text_supported(
@@ -2041,42 +2146,6 @@ fn remote_committed_text_supported(
         vnc_capabilities.is_some_and(|capabilities| capabilities.committed_unicode_keysyms)
     } else {
         rdp_capabilities.is_some_and(|capabilities| capabilities.committed_unicode_text)
-    }
-}
-
-fn remote_key_down_should_defer_to_text(
-    key_char: Option<&str>,
-    committed_text_supported: bool,
-    input_platform: RemoteInputPlatform,
-    modifiers: RemoteKeyModifiers,
-) -> bool {
-    if !committed_text_supported
-        || modifiers.platform
-        || !key_char.is_some_and(|text| {
-            !text.is_empty() && text.chars().all(|character| !character.is_control())
-        })
-    {
-        return false;
-    }
-
-    match input_platform {
-        RemoteInputPlatform::MacOs => !modifiers.control,
-        RemoteInputPlatform::Windows | RemoteInputPlatform::Linux => {
-            modifiers.control == modifiers.alt
-        }
-        RemoteInputPlatform::Other => !modifiers.control && !modifiers.alt,
-    }
-}
-
-fn remote_key_down_uses_text_route(
-    repeat: bool,
-    key_already_uses_text: bool,
-    classified_for_text: bool,
-) -> bool {
-    if repeat {
-        key_already_uses_text
-    } else {
-        classified_for_text
     }
 }
 
@@ -2131,6 +2200,7 @@ fn vnc_keysym_for_key(key: &str, key_char: Option<&str>) -> Option<u32> {
         "right" | "arrowright" | "arrow_right" => 0xff53,
         "down" | "arrowdown" | "arrow_down" => 0xff54,
         "shift" => 0xffe1,
+        "capslock" => 0xffe5,
         "control" | "ctrl" => 0xffe3,
         "alt" => 0xffe9,
         "meta" | "platform" | "command" | "super" => 0xffeb,
@@ -2296,18 +2366,19 @@ fn remote_desktop_password_id(auth: Option<&nyaterm_core::ConnectionAuth>) -> Op
 mod tests {
     use std::time::{Duration, Instant};
 
+    use gpui::Modifiers;
     use nyaterm_core::ConnectionAuth;
     use nyaterm_remote_desktop::{
-        RdpDisplayMetrics, RdpError, RdpErrorKind, RdpServerCapabilities, RemoteDesktopViewState,
-        VncServerCapabilities, VncSessionState,
+        CursorPosition, RdpDisplayMetrics, RdpError, RdpErrorKind, RdpServerCapabilities,
+        RemoteDesktopViewState, VncServerCapabilities, VncSessionState,
     };
 
     use super::{
-        MAINTENANCE_INTERVAL, POINTER_MOVE_INTERVAL, RESIZE_DEBOUNCE, RemoteInputPlatform,
-        RemoteKeyModifiers, clear_rdp_reconnect_after_frame, inline_remote_desktop_password,
+        MAINTENANCE_INTERVAL, POINTER_MOVE_INTERVAL, RESIZE_DEBOUNCE,
+        clear_rdp_reconnect_after_frame, defer_rdp_pointer_move, inline_remote_desktop_password,
         rdp_error_is_retryable, rdp_reconnect_delay, rdp_resize_is_material,
-        remote_committed_text_supported, remote_desktop_password_id, remote_desktop_periodic_delay,
-        remote_key_down_should_defer_to_text, remote_key_down_uses_text_route,
+        record_remote_cursor_position_if_sent, remote_committed_text_supported,
+        remote_desktop_password_id, remote_desktop_periodic_delay, remote_modifier_transitions,
         remote_state_clears_input, secure_attention_available,
         should_disable_dynamic_resize_after_state, vnc_capabilities_for_state, vnc_input_allowed,
         vnc_keysym_for_key,
@@ -2387,6 +2458,36 @@ mod tests {
             MAINTENANCE_INTERVAL < RESIZE_DEBOUNCE,
             "the maintenance cadence has to be finer than the shortest thing it              services, or a resize debounce resolves late"
         );
+    }
+
+    #[test]
+    fn deferred_rdp_pointer_move_tracks_locally_before_protocol_flush() {
+        let mut pending_pointer = Some((3, 4));
+        let mut cursor_position = CursorPosition { x: 1, y: 2 };
+
+        defer_rdp_pointer_move(&mut pending_pointer, &mut cursor_position, (9, 7));
+
+        assert_eq!(pending_pointer, Some((9, 7)));
+        assert_eq!(cursor_position, CursorPosition { x: 9, y: 7 });
+    }
+
+    #[test]
+    fn remote_cursor_position_advances_only_after_pointer_send_succeeds() {
+        let mut cursor_position = CursorPosition { x: 1, y: 2 };
+
+        assert!(!record_remote_cursor_position_if_sent(
+            &mut cursor_position,
+            (9, 7),
+            false,
+        ));
+        assert_eq!(cursor_position, CursorPosition { x: 1, y: 2 });
+
+        assert!(record_remote_cursor_position_if_sent(
+            &mut cursor_position,
+            (9, 7),
+            true,
+        ));
+        assert_eq!(cursor_position, CursorPosition { x: 9, y: 7 });
     }
 
     #[test]
@@ -2492,75 +2593,50 @@ mod tests {
     }
 
     #[test]
-    fn printable_keydown_uses_platform_text_service_policy() {
-        let plain = RemoteKeyModifiers::default();
-        let control = RemoteKeyModifiers {
-            control: true,
-            ..Default::default()
-        };
-        let alt = RemoteKeyModifiers {
-            alt: true,
-            ..Default::default()
-        };
-        let alt_gr = RemoteKeyModifiers {
-            control: true,
-            alt: true,
-            ..Default::default()
-        };
-        let platform = RemoteKeyModifiers {
-            platform: true,
-            ..Default::default()
-        };
-        let defers = |input_platform, modifiers| {
-            remote_key_down_should_defer_to_text(Some("é"), true, input_platform, modifiers)
-        };
-
-        for input_platform in [
-            RemoteInputPlatform::MacOs,
-            RemoteInputPlatform::Windows,
-            RemoteInputPlatform::Linux,
-        ] {
-            assert!(defers(input_platform, plain));
-            assert!(!defers(input_platform, control));
-            assert!(!defers(input_platform, platform));
-        }
-        assert!(defers(RemoteInputPlatform::MacOs, alt));
-        assert!(!defers(RemoteInputPlatform::MacOs, alt_gr));
-        for input_platform in [RemoteInputPlatform::Windows, RemoteInputPlatform::Linux] {
-            assert!(defers(input_platform, alt_gr));
-            assert!(!defers(input_platform, alt));
-        }
-    }
-
-    #[test]
-    fn repeat_keydowns_keep_the_initial_route_when_modifiers_change() {
-        assert!(!remote_key_down_uses_text_route(true, false, true));
-        assert!(remote_key_down_uses_text_route(true, true, false));
-        assert!(remote_key_down_uses_text_route(false, false, true));
-        assert!(!remote_key_down_uses_text_route(false, true, false));
-    }
-
-    #[test]
-    fn unsupported_or_non_printable_keys_stay_on_the_physical_path() {
-        let plain = RemoteKeyModifiers::default();
-        assert!(!remote_key_down_should_defer_to_text(
-            Some("a"),
-            false,
-            RemoteInputPlatform::Windows,
-            plain,
-        ));
-        assert!(!remote_key_down_should_defer_to_text(
-            Some("\r"),
-            true,
-            RemoteInputPlatform::MacOs,
-            plain,
-        ));
-        assert!(!remote_key_down_should_defer_to_text(
+    fn modifier_transitions_press_in_order_release_in_reverse_and_toggle_capslock() {
+        let pressed = remote_modifier_transitions(
+            Modifiers::default(),
+            Modifiers {
+                control: true,
+                shift: true,
+                platform: true,
+                ..Default::default()
+            },
             None,
-            true,
-            RemoteInputPlatform::Linux,
-            plain,
-        ));
+            Some(true),
+        );
+        assert_eq!(
+            pressed
+                .iter()
+                .map(|transition| (transition.key, transition.pressed))
+                .collect::<Vec<_>>(),
+            vec![("shift", true), ("control", true), ("platform", true)]
+        );
+
+        let released = remote_modifier_transitions(
+            Modifiers {
+                control: true,
+                shift: true,
+                platform: true,
+                ..Default::default()
+            },
+            Modifiers::default(),
+            Some(true),
+            Some(false),
+        );
+        assert_eq!(
+            released
+                .iter()
+                .map(|transition| (transition.key, transition.pressed))
+                .collect::<Vec<_>>(),
+            vec![
+                ("platform", false),
+                ("control", false),
+                ("shift", false),
+                ("capslock", true),
+                ("capslock", false),
+            ]
+        );
     }
 
     #[test]

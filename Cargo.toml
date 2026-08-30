@@ -48,11 +48,11 @@ digest = "0.11.0-rc.5"
 dirs = "6"
 encoding_rs = "0.8"
 futures = "0.3"
-gpui = { version = "=0.2.2", git = "https://github.com/nyakang/zed", rev = "275f31ac7293280e86763ec33933d4b6a4508847" }
+gpui = { version = "=0.2.2", git = "https://github.com/nyakang/zed", rev = "cfa3e4aa159ece93daa8bffc33416ce20fa8118e" }
 gpui-base = { git = "https://github.com/nyakang/gpui-component", rev = "626ec5fad136d652f444178c7e52a7b36854480a" }
 gpui-component = { git = "https://github.com/nyakang/gpui-component", rev = "626ec5fad136d652f444178c7e52a7b36854480a" }
 gpui-component-assets = { git = "https://github.com/nyakang/gpui-component", rev = "626ec5fad136d652f444178c7e52a7b36854480a" }
-gpui_platform = { git = "https://github.com/nyakang/zed", rev = "275f31ac7293280e86763ec33933d4b6a4508847" }
+gpui_platform = { git = "https://github.com/nyakang/zed", rev = "cfa3e4aa159ece93daa8bffc33416ce20fa8118e" }
 # Pure-Rust, `#![forbid(unsafe)]` PDF rasterizer (MIT OR Apache-2.0). Pinned
 # exactly: the crate is pre-1.0 and explicitly experimental, so a caret range
 # could pull in a breaking 0.8 without review. `embed-fonts` bundles the 14
@@ -175,9 +175,9 @@ ironrdp-tls = { git = "https://github.com/nyakang/IronRDP", rev = "75d9a3b398e22
 # repository contains a second package named `gpui` at 0.0.0,
 # tooling/lints/test_fixture/gpui, and a bare git reference is ambiguous.
 [patch."https://github.com/zed-industries/zed"]
-gpui = { version = "=0.2.2", git = "https://github.com/nyakang/zed", rev = "275f31ac7293280e86763ec33933d4b6a4508847" }
-gpui_macros = { git = "https://github.com/nyakang/zed", rev = "275f31ac7293280e86763ec33933d4b6a4508847" }
-gpui_platform = { git = "https://github.com/nyakang/zed", rev = "275f31ac7293280e86763ec33933d4b6a4508847" }
+gpui = { version = "=0.2.2", git = "https://github.com/nyakang/zed", rev = "cfa3e4aa159ece93daa8bffc33416ce20fa8118e" }
+gpui_macros = { git = "https://github.com/nyakang/zed", rev = "cfa3e4aa159ece93daa8bffc33416ce20fa8118e" }
+gpui_platform = { git = "https://github.com/nyakang/zed", rev = "cfa3e4aa159ece93daa8bffc33416ce20fa8118e" }
 
 # gpui-component takes zed-reqwest from git while this workspace uses the
 # published crate; without this both end up in the graph.

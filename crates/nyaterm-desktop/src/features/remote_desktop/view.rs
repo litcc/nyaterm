@@ -3,13 +3,15 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use gpui::{
-    Bounds, Context, ElementInputHandler, FontWeight, IntoElement, KeyDownEvent, KeyUpEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, SharedString, Size, canvas, div, prelude::*, px, rgb,
+    Bounds, Context, CursorStyle, FontWeight, IntoElement, KeyDownEvent, KeyUpEvent,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    NavigationDirection, Pixels, Point, ScrollDelta, ScrollWheelEvent, SharedString, Size, canvas,
+    div, prelude::*, px, rgb,
 };
 use nyaterm_remote_desktop::{
-    CertificatePromptReason, DisplayScaleMode, DisplayTransform, LogicalPoint, LogicalRect,
-    LogicalSize, RdpCertificateResponse, RdpPointerButton, RemoteDesktopViewState, VncScaleMode,
+    CertificatePromptReason, CursorShape, DisplayScaleMode, DisplayTransform, LogicalPoint,
+    LogicalRect, LogicalSize, RdpCertificateResponse, RdpPointerButton, RemoteDesktopViewState,
+    VncScaleMode,
 };
 
 use crate::features::NyaTermApp;
@@ -171,10 +173,13 @@ impl NyaTermApp {
         let cursor_visible = session.cursor_visible;
         let cursor_texture = session.cursor_texture;
         let app = cx.entity();
-        let input_entity = app.clone();
         let surface_focus = self.remote_desktop.focus().clone();
-        let input_focus = surface_focus.clone();
-        let input_is_active = self.session.active_id() == Some(session_id.as_str());
+        let hide_native_cursor = remote_cursor_hides_native(cursor_visible, cursor_shape.as_ref());
+        let remote_cursor_texture_visible = cursor_visible
+            && cursor_texture.is_some()
+            && cursor_shape.as_ref().is_some_and(|shape| {
+                shape.width > 0 && shape.height > 0 && !shape.pixels.is_empty()
+            });
         let viewport_session_id = session_id.clone();
         let canvas =
             canvas(
@@ -189,19 +194,7 @@ impl NyaTermApp {
                     });
                     remote_desktop_image_bounds(bounds, remote_size.0, remote_size.1, scale_mode)
                 },
-                move |bounds, image_bounds, window, cx| {
-                    if input_is_active {
-                        // GPUI input handlers must be registered during paint, not prepaint.
-                        let visible_bounds = window.content_mask().bounds.intersect(&bounds);
-                        if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.)
-                        {
-                            window.handle_input(
-                                &input_focus,
-                                ElementInputHandler::new(visible_bounds, input_entity),
-                                cx,
-                            );
-                        }
-                    }
+                move |_bounds, image_bounds, window, _cx| {
                     let _ = window.paint_dynamic_texture(image_bounds, texture);
                     if let (Some(cursor), Some(cursor_texture)) = (&cursor_shape, cursor_texture)
                         && cursor_visible
@@ -247,6 +240,7 @@ impl NyaTermApp {
         let scroll_id = session_id.clone();
         let key_down_id = session_id.clone();
         let key_up_id = session_id.clone();
+        let modifiers_id = session_id.clone();
         let secure_attention_id = session_id.clone();
         let focus = surface_focus;
         div()
@@ -255,6 +249,11 @@ impl NyaTermApp {
             .relative()
             .overflow_hidden()
             .bg(rgb(0x000000))
+            .cursor(if hide_native_cursor {
+                CursorStyle::Hidden
+            } else {
+                CursorStyle::Arrow
+            })
             .track_focus(&focus)
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                 if this.send_rdp_key_down(
@@ -262,16 +261,24 @@ impl NyaTermApp {
                     &event.keystroke.key,
                     event.keystroke.key_char.as_deref(),
                     event.is_held,
-                    (
-                        event.keystroke.modifiers.control,
-                        event.keystroke.modifiers.alt,
-                        event.keystroke.modifiers.platform,
-                    ),
+                    event.keystroke.modifiers,
                 ) {
                     cx.stop_propagation();
                     this.mark_user_activity();
                 }
             }))
+            .on_modifiers_changed(
+                cx.listener(move |this, event: &ModifiersChangedEvent, _, cx| {
+                    if this.send_remote_modifier_state(
+                        &modifiers_id,
+                        event.modifiers,
+                        Some(event.capslock.on),
+                    ) {
+                        cx.stop_propagation();
+                        this.mark_user_activity();
+                    }
+                }),
+            )
             .on_key_up(cx.listener(move |this, event: &KeyUpEvent, _, cx| {
                 if this.send_rdp_key_up(&key_up_id, &event.keystroke.key) {
                     cx.stop_propagation();
@@ -282,6 +289,9 @@ impl NyaTermApp {
                 if this.send_rdp_pointer(&move_id, event.position, None, false) {
                     cx.stop_propagation();
                     this.mark_user_activity();
+                    if remote_cursor_texture_visible {
+                        cx.notify();
+                    }
                 }
             }))
             .on_mouse_down(
@@ -696,4 +706,36 @@ fn remote_desktop_image_bounds(
             Size::new(px(image.size.width), px(image.size.height)),
         )
     })
+}
+
+fn remote_cursor_hides_native(visible: bool, shape: Option<&CursorShape>) -> bool {
+    !visible
+        || shape
+            .is_some_and(|shape| shape.width > 0 && shape.height > 0 && !shape.pixels.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use nyaterm_remote_desktop::{CursorShape, RemotePoint};
+
+    use super::remote_cursor_hides_native;
+
+    fn shape(width: u32, height: u32) -> CursorShape {
+        CursorShape {
+            shape_id: 1,
+            width,
+            height,
+            hotspot: RemotePoint { x: 0, y: 0 },
+            pixels: vec![0; width.saturating_mul(height).saturating_mul(4) as usize],
+        }
+    }
+
+    #[test]
+    fn native_cursor_tracks_remote_default_bitmap_and_hidden_states() {
+        assert!(!remote_cursor_hides_native(true, None));
+        assert!(!remote_cursor_hides_native(true, Some(&shape(0, 0))));
+        assert!(remote_cursor_hides_native(true, Some(&shape(2, 2))));
+        assert!(remote_cursor_hides_native(false, None));
+        assert!(remote_cursor_hides_native(false, Some(&shape(2, 2))));
+    }
 }

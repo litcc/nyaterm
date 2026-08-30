@@ -22,12 +22,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use nyaterm_remote_desktop::{
-    MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT, MAX_VNC_FRAMEBUFFER_WIDTH,
-    MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, Packet, PixelFormat, RemoteFrameEvent,
-    RemotePointerButton, RemotePointerEvent, RemoteWheelAxis, VncControlMessage, VncError,
-    VncErrorKind, VncInputEvent, VncSecurityMode, VncServerCapabilities, VncSessionConfig,
-    VncSessionState, decode_vnc_control, encode_frame_packet_owned, encode_vnc_control,
-    read_packet, validate_committed_text, write_packet_into,
+    CursorShape, CursorVisibility, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_FRAMEBUFFER_HEIGHT,
+    MAX_VNC_FRAMEBUFFER_WIDTH, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION, Packet, PixelFormat,
+    RemoteCursorEvent, RemoteFrameEvent, RemotePoint, RemotePointerButton, RemotePointerEvent,
+    RemoteWheelAxis, VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncSecurityMode,
+    VncServerCapabilities, VncSessionConfig, VncSessionState, decode_vnc_control,
+    encode_cursor_packet, encode_frame_packet_owned, encode_vnc_control, read_packet,
+    validate_committed_text, write_packet_into,
 };
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
@@ -578,6 +579,7 @@ struct SessionOutput {
     session_id: String,
     output_tx: mpsc::SyncSender<Outbound>,
     epoch: u64,
+    cursor_shape_id: u64,
 }
 
 impl SessionOutput {
@@ -586,6 +588,7 @@ impl SessionOutput {
             session_id,
             output_tx,
             epoch: 0,
+            cursor_shape_id: 0,
         }
     }
 
@@ -628,6 +631,12 @@ impl SessionOutput {
 
     fn frame(&self, frame: RemoteFrameEvent) -> Result<(), VncError> {
         let packet = encode_frame_packet_owned(&self.session_id, frame)
+            .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
+        self.send(Outbound::Packet(packet))
+    }
+
+    fn cursor(&self, cursor: &RemoteCursorEvent) -> Result<(), VncError> {
+        let packet = encode_cursor_packet(&self.session_id, cursor)
             .map_err(|error| VncError::new(VncErrorKind::Ipc, error.to_string()))?;
         self.send(Outbound::Packet(packet))
     }
@@ -718,6 +727,7 @@ async fn run_generation(
         .set_pixel_format(VncPixelFormat::rgba())
         .set_limits(vnc_limits())
         .add_encoding(VncEncoding::DesktopSizePseudo)
+        .add_encoding(VncEncoding::CursorPseudo)
         .add_encoding(VncEncoding::Zrle)
         .add_encoding(VncEncoding::Tight)
         .add_encoding(VncEncoding::Raw)
@@ -867,7 +877,49 @@ fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), V
                 "The server sent a Tight JPEG event instead of decoded RGBA pixels",
             ));
         }
-        VncEvent::Copy(_, _) | VncEvent::SetCursor(_, _) => {
+        VncEvent::SetCursor(rect, mut pixels) => {
+            let width = u32::from(rect.width);
+            let height = u32::from(rect.height);
+            if width == 0 || height == 0 {
+                output.cursor(&RemoteCursorEvent::Visibility(CursorVisibility {
+                    visible: false,
+                }))?;
+                return Ok(());
+            }
+            let expected = usize::try_from(width)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(height)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| {
+                    VncError::new(VncErrorKind::Encoding, "VNC cursor dimensions overflow")
+                })?;
+            if pixels.len() != expected {
+                return Err(VncError::new(
+                    VncErrorKind::Encoding,
+                    "VNC cursor pixel payload length does not match its dimensions",
+                ));
+            }
+            rgba_to_bgra(&mut pixels);
+            output.cursor_shape_id = output.cursor_shape_id.wrapping_add(1).max(1);
+            output.cursor(&RemoteCursorEvent::Shape(CursorShape {
+                shape_id: output.cursor_shape_id,
+                width,
+                height,
+                hotspot: RemotePoint {
+                    x: u32::from(rect.x),
+                    y: u32::from(rect.y),
+                },
+                pixels,
+            }))?;
+            output.cursor(&RemoteCursorEvent::Visibility(CursorVisibility {
+                visible: true,
+            }))?;
+        }
+        VncEvent::Copy(_, _) => {
             return Err(VncError::new(
                 VncErrorKind::Encoding,
                 "The server sent an unrequested VNC encoding",
@@ -877,6 +929,12 @@ fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), V
         _ => {}
     }
     Ok(())
+}
+
+fn rgba_to_bgra(pixels: &mut [u8]) {
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
 }
 
 fn unicode_scalar_to_keysym(scalar: char) -> u32 {
@@ -1226,17 +1284,18 @@ mod tests {
     use std::sync::mpsc;
 
     use nyaterm_remote_desktop::{
-        MAX_COMMITTED_TEXT_BYTES, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, RemotePoint,
-        RemotePointerEvent, VncControlMessage, VncErrorKind, VncInputEvent, VncSecurityMode,
+        CursorVisibility, MAX_COMMITTED_TEXT_BYTES, MAX_VNC_CLIPBOARD_TEXT_BYTES,
+        MAX_VNC_INPUT_BATCH, RemoteCursorEvent, RemotePoint, RemotePointerEvent, VncControlMessage,
+        VncErrorKind, VncInputEvent, VncSecurityMode, decode_cursor_packet_owned,
     };
-    use vnc::VncSecurityPolicy;
+    use vnc::{Rect, VncEvent, VncSecurityPolicy};
 
     use super::{
-        MailboxError, Outbound, RELIABLE_WORKER_COMMAND_LIMIT, ServerWriteKind,
+        MailboxError, Outbound, RELIABLE_WORKER_COMMAND_LIMIT, ServerWriteKind, SessionOutput,
         ValidatedVncInputBatch, WorkerCommand, WorkerMailbox, accumulate_wheel_steps,
-        classify_vnc_error, committed_text_key_events, is_latin1_within_limit, reconnect_delay,
-        report_panic, security_policy, server_write_allowed, unicode_scalar_to_keysym,
-        validate_active_session_id, validate_framebuffer_dimensions,
+        classify_vnc_error, committed_text_key_events, handle_vnc_event, is_latin1_within_limit,
+        reconnect_delay, report_panic, security_policy, server_write_allowed,
+        unicode_scalar_to_keysym, validate_active_session_id, validate_framebuffer_dimensions,
     };
 
     #[test]
@@ -1319,6 +1378,71 @@ mod tests {
         assert!(validate_framebuffer_dimensions(1920, 0).is_err());
         assert!(validate_framebuffer_dimensions(7681, 1080).is_err());
         assert!(validate_framebuffer_dimensions(1920, 4321).is_err());
+    }
+
+    #[test]
+    fn cursor_events_preserve_hotspot_convert_bgra_and_toggle_visibility() {
+        let (output_tx, output_rx) = mpsc::sync_channel(3);
+        let mut output = SessionOutput::new("session".to_string(), output_tx);
+        handle_vnc_event(
+            &mut output,
+            VncEvent::SetCursor(
+                Rect {
+                    x: 2,
+                    y: 3,
+                    width: 1,
+                    height: 1,
+                },
+                vec![10, 20, 30, 128],
+            ),
+        )
+        .expect("cursor shape");
+
+        let Outbound::Packet(shape_packet) = output_rx.recv().expect("shape packet") else {
+            panic!("expected cursor shape packet");
+        };
+        let (session_id, shape) =
+            decode_cursor_packet_owned(shape_packet).expect("decode cursor shape");
+        assert_eq!(session_id, "session");
+        let RemoteCursorEvent::Shape(shape) = shape else {
+            panic!("expected cursor shape");
+        };
+        assert_eq!(shape.shape_id, 1);
+        assert_eq!(shape.hotspot, RemotePoint { x: 2, y: 3 });
+        assert_eq!(shape.pixels, vec![30, 20, 10, 128]);
+
+        let Outbound::Packet(visible_packet) = output_rx.recv().expect("visibility packet") else {
+            panic!("expected cursor visibility packet");
+        };
+        assert_eq!(
+            decode_cursor_packet_owned(visible_packet)
+                .expect("decode visibility")
+                .1,
+            RemoteCursorEvent::Visibility(CursorVisibility { visible: true })
+        );
+
+        handle_vnc_event(
+            &mut output,
+            VncEvent::SetCursor(
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 0,
+                    height: 0,
+                },
+                Vec::new(),
+            ),
+        )
+        .expect("hidden cursor");
+        let Outbound::Packet(hidden_packet) = output_rx.recv().expect("hidden packet") else {
+            panic!("expected hidden cursor packet");
+        };
+        assert_eq!(
+            decode_cursor_packet_owned(hidden_packet)
+                .expect("decode hidden")
+                .1,
+            RemoteCursorEvent::Visibility(CursorVisibility { visible: false })
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use nyaterm_core::SecretString;
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Maximum UTF-8 payload accepted for a single committed-text event.
 ///
@@ -729,6 +729,7 @@ pub enum VncRuntimeEvent {
 pub struct VncSessionDrain {
     pub control: Vec<VncRuntimeEvent>,
     pub frames: Vec<RemoteFrameEvent>,
+    pub cursors: Vec<RemoteCursorEvent>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

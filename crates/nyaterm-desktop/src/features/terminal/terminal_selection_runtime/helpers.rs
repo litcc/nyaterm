@@ -14,10 +14,6 @@ fn terminal_input_selection() -> UTF16Selection {
     }
 }
 
-fn remote_candidate_anchor(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-    Bounds::new(bounds.origin, Size::new(px(1.), px(1.)))
-}
-
 fn terminal_visible_surface_bounds(
     bounds: Bounds<Pixels>,
     content_mask: Bounds<Pixels>,
@@ -101,17 +97,6 @@ impl EntityInputHandler for NyaTermApp {
             *adjusted_range = Some(utf16_range_from_bytes(text, &byte_range));
             return Some(text[byte_range].to_string());
         }
-        if let Some(session_id) = self.focused_remote_desktop_session_id(window) {
-            let text = self.remote_marked_text(&session_id);
-            if text.is_empty() {
-                return None;
-            }
-            let len = text.encode_utf16().count();
-            let range = range.start.min(len)..range.end.min(len).max(range.start.min(len));
-            let (text, range) = text_for_utf16_range(&text, &range);
-            *adjusted_range = Some(range);
-            return Some(text);
-        }
         if self.terminal.input.ime_marked_text.is_empty() {
             return None;
         }
@@ -141,9 +126,6 @@ impl EntityInputHandler for NyaTermApp {
                 reversed,
             });
         }
-        if self.focused_remote_desktop_session_id(window).is_some() {
-            return Some(terminal_input_selection());
-        }
         // GPUI's IME contract needs a valid insertion range even when there is
         // no marked text. This is also what lets CJK candidate windows anchor to
         // the terminal cursor instead of treating the surface as non-editable.
@@ -163,10 +145,6 @@ impl EntityInputHandler for NyaTermApp {
                 .as_ref()
                 .map(|range| utf16_range_from_bytes(self.terminal.paste.text(), range));
         }
-        if let Some(session_id) = self.focused_remote_desktop_session_id(window) {
-            let len = self.remote_marked_text(&session_id).encode_utf16().count();
-            return (len > 0).then_some(0..len);
-        }
         let len = self.terminal.input.ime_marked_text.encode_utf16().count();
         (len > 0).then_some(0..len)
     }
@@ -175,10 +153,6 @@ impl EntityInputHandler for NyaTermApp {
         if self.terminal.paste.draft.is_some() && self.terminal.paste.focus.is_focused(window) {
             self.terminal.paste.marked_text.clear();
             self.terminal.paste.marked_range = None;
-            return;
-        }
-        if let Some(session_id) = self.focused_remote_desktop_session_id(window) {
-            self.clear_remote_marked_text(&session_id);
             return;
         }
         self.terminal.input.ime_marked_text.clear();
@@ -200,12 +174,6 @@ impl EntityInputHandler for NyaTermApp {
             if self.terminal.paste.replace_range(range, text) {
                 cx.notify();
             }
-            return;
-        }
-        if let Some(session_id) = self.focused_remote_desktop_session_id(window) {
-            let _ = self.send_remote_committed_text(&session_id, text);
-            self.mark_user_activity();
-            cx.notify();
             return;
         }
         self.terminal.input.ime_marked_text.clear();
@@ -256,11 +224,6 @@ impl EntityInputHandler for NyaTermApp {
             cx.notify();
             return;
         }
-        if let Some(session_id) = self.focused_remote_desktop_session_id(window) {
-            self.set_remote_marked_text(&session_id, new_text);
-            cx.notify();
-            return;
-        }
         self.terminal.input.ime_marked_text = new_text.to_string();
         cx.notify();
     }
@@ -274,9 +237,6 @@ impl EntityInputHandler for NyaTermApp {
     ) -> Option<Bounds<Pixels>> {
         if self.terminal.paste.draft.is_some() && self.terminal.paste.focus.is_focused(window) {
             return Some(element_bounds);
-        }
-        if self.focused_remote_desktop_session_id(window).is_some() {
-            return Some(remote_candidate_anchor(element_bounds));
         }
         let (cell_w, cell_h) = self.terminal_cell_size();
         let insets = self.terminal_content_insets();
@@ -330,10 +290,7 @@ impl EntityInputHandler for NyaTermApp {
 mod tests {
     use gpui::{Bounds, px};
 
-    use super::{
-        remote_candidate_anchor, terminal_input_selection, terminal_visible_surface_bounds,
-        text_for_utf16_range,
-    };
+    use super::{terminal_input_selection, terminal_visible_surface_bounds};
 
     #[test]
     fn terminal_input_selection_keeps_a_valid_insertion_point() {
@@ -341,30 +298,6 @@ mod tests {
 
         assert_eq!(selection.range, 0..0);
         assert!(!selection.reversed);
-    }
-
-    #[test]
-    fn remote_candidate_anchor_stays_at_a_conservative_surface_origin() {
-        let surface = Bounds::new(
-            gpui::point(px(40.), px(60.)),
-            gpui::size(px(800.), px(600.)),
-        );
-
-        assert_eq!(
-            remote_candidate_anchor(surface),
-            Bounds::new(gpui::point(px(40.), px(60.)), gpui::size(px(1.), px(1.)))
-        );
-    }
-
-    #[test]
-    fn remote_preedit_range_returns_only_the_adjusted_utf16_slice() {
-        let (text, adjusted) = text_for_utf16_range("a😀b", &(1..3));
-        assert_eq!(text, "😀");
-        assert_eq!(adjusted, 1..3);
-
-        let (text, adjusted) = text_for_utf16_range("a😀b", &(1..2));
-        assert_eq!(text, "😀");
-        assert_eq!(adjusted, 1..3);
     }
 
     #[test]
@@ -423,12 +356,6 @@ mod tests {
 
         assert_eq!(terminal_visible_surface_bounds(bounds, content_mask), None);
     }
-}
-
-fn text_for_utf16_range(text: &str, range: &Range<usize>) -> (String, Range<usize>) {
-    let byte_range = byte_range_from_utf16(text, range);
-    let adjusted_range = utf16_range_from_bytes(text, &byte_range);
-    (text[byte_range].to_string(), adjusted_range)
 }
 
 fn byte_offset_from_utf16(text: &str, offset: usize) -> usize {

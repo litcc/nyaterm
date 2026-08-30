@@ -9,10 +9,11 @@ use uuid::Uuid;
 use crate::helper_process;
 use crate::{
     FRAME_PAYLOAD_LIMIT, MAX_VNC_CLIPBOARD_TEXT_BYTES, MAX_VNC_INPUT_BATCH, PROTOCOL_VERSION,
-    PacketType, QueueWaker, RemoteFrameEvent, RemotePointerEvent, VncControlMessage, VncError,
-    VncErrorKind, VncInputEvent, VncRuntimeEvent, VncSecurityMode, VncServerCapabilities,
-    VncSessionConfig, VncSessionDrain, VncSessionState, decode_frame_packet_owned,
-    decode_vnc_control, encode_vnc_control, read_packet, validate_committed_text,
+    PacketType, QueueWaker, RemoteCursorEvent, RemoteFrameEvent, RemotePointerEvent,
+    VncControlMessage, VncError, VncErrorKind, VncInputEvent, VncRuntimeEvent, VncSecurityMode,
+    VncServerCapabilities, VncSessionConfig, VncSessionDrain, VncSessionState,
+    decode_cursor_packet_owned, decode_frame_packet_owned, decode_vnc_control, encode_vnc_control,
+    read_packet, validate_committed_text,
 };
 
 const FRAME_QUEUE_LIMIT: usize = 64;
@@ -34,6 +35,9 @@ struct EventQueueState {
     control_bytes: usize,
     frames: VecDeque<RemoteFrameEvent>,
     frame_bytes: usize,
+    cursor_shape: Option<RemoteCursorEvent>,
+    cursor_position: Option<RemoteCursorEvent>,
+    cursor_visibility: Option<RemoteCursorEvent>,
     current_epoch: Option<u64>,
     closed: bool,
 }
@@ -147,6 +151,9 @@ impl EventQueue {
             state.current_epoch = Some(epoch);
             state.frames.clear();
             state.frame_bytes = 0;
+            state.cursor_shape = None;
+            state.cursor_position = None;
+            state.cursor_visibility = None;
         }
         self.space_available.notify_all();
         self.push_control(VncRuntimeEvent::Frame {
@@ -196,14 +203,40 @@ impl EventQueue {
         true
     }
 
+    fn push_cursor(&self, cursor: RemoteCursorEvent) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.closed {
+            return false;
+        }
+        match &cursor {
+            RemoteCursorEvent::Shape(_) => state.cursor_shape = Some(cursor),
+            RemoteCursorEvent::Position(_) => state.cursor_position = Some(cursor),
+            RemoteCursorEvent::Visibility(_) => state.cursor_visibility = Some(cursor),
+        }
+        Self::wake(&state);
+        true
+    }
+
     fn drain(&self) -> VncSessionDrain {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cursors = [
+            state.cursor_shape.take(),
+            state.cursor_position.take(),
+            state.cursor_visibility.take(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let drain = VncSessionDrain {
             control: state.control.drain(..).collect(),
             frames: state.frames.drain(..).collect(),
+            cursors,
         };
         state.control_bytes = 0;
         state.frame_bytes = 0;
@@ -684,17 +717,22 @@ fn spawn_reader(
                             }
                             queue.push_frame(frame);
                         }),
-                    // The VNC path never advertises cursor encodings.
-                    PacketType::Cursor => {
-                        if hello_received {
-                            Err(VncError::new(
-                                VncErrorKind::Protocol,
-                                "VNC helper sent an unsupported cursor packet",
-                            ))
-                        } else {
-                            require_server_hello(false, "cursor packet")
-                        }
-                    }
+                    PacketType::Cursor => require_server_hello(hello_received, "cursor packet")
+                        .and_then(|()| {
+                            decode_cursor_packet_owned(packet).map_err(|error| {
+                                VncError::new(VncErrorKind::Protocol, error.to_string())
+                            })
+                        })
+                        .and_then(|(cursor_session, cursor)| {
+                            if cursor_session != session_id {
+                                return Err(VncError::new(
+                                    VncErrorKind::Protocol,
+                                    "VNC helper cursor packet session id does not match",
+                                ));
+                            }
+                            queue.push_cursor(cursor);
+                            Ok(())
+                        }),
                 };
                 if let Err(error) = result {
                     push_reader_error(&session_id, &queue, &state, error.kind, error.message);
@@ -886,7 +924,8 @@ mod tests {
         validate_vnc_config, validate_vnc_input,
     };
     use crate::{
-        Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES, PROTOCOL_VERSION, PixelFormat, RemoteFrameEvent,
+        CursorPosition, CursorShape, CursorVisibility, Framebuffer, MAX_VNC_CLIPBOARD_TEXT_BYTES,
+        PROTOCOL_VERSION, PixelFormat, RemoteCursorEvent, RemoteFrameEvent, RemotePoint,
         VncClipboardConfig, VncControlMessage, VncDisplayConfig, VncErrorKind, VncInputEvent,
         VncReconnectConfig, VncRuntimeEvent, VncSecurityConfig, VncSecurityMode,
         VncServerCapabilities, VncSessionConfig, VncSessionState,
@@ -1104,6 +1143,43 @@ mod tests {
         assert!(queue.push_frame(frame(1, 40, false)));
         let drain = queue.drain();
         assert_eq!(drain.frames.len(), 1);
+    }
+
+    #[test]
+    fn cursor_components_are_coalesced_and_cleared_by_drain_and_reset() {
+        let queue = EventQueue::default();
+        let shape = |shape_id| {
+            RemoteCursorEvent::Shape(CursorShape {
+                shape_id,
+                width: 1,
+                height: 1,
+                hotspot: RemotePoint { x: 0, y: 0 },
+                pixels: vec![shape_id as u8; 4],
+            })
+        };
+        assert!(queue.push_cursor(shape(1)));
+        assert!(queue.push_cursor(shape(2)));
+        assert!(queue.push_cursor(RemoteCursorEvent::Position(CursorPosition { x: 9, y: 7 })));
+        assert!(
+            queue.push_cursor(RemoteCursorEvent::Visibility(CursorVisibility {
+                visible: false
+            },))
+        );
+
+        let drain = queue.drain();
+        assert_eq!(
+            drain.cursors,
+            vec![
+                shape(2),
+                RemoteCursorEvent::Position(CursorPosition { x: 9, y: 7 }),
+                RemoteCursorEvent::Visibility(CursorVisibility { visible: false }),
+            ]
+        );
+        assert!(queue.drain().cursors.is_empty());
+
+        assert!(queue.push_cursor(shape(3)));
+        assert!(queue.push_reset("s", 2, 4, 4));
+        assert!(queue.drain().cursors.is_empty());
     }
 
     #[test]
