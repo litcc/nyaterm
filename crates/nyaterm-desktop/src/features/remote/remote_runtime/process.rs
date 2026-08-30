@@ -170,19 +170,32 @@ impl NyaTermApp {
         self.remote_ops.mark_process_refresh_started();
         self.remote_ops
             .set_process_status("listing remote processes");
-        std::thread::spawn(move || {
-            let result = (|| {
-                SshProcessService::with_multiplex(config, multiplex)?
-                    .list_processes()
-                    .map(ProcessJobOutput::Listed)
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(ProcessJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
+        let job_id = ticket.job_id;
+        let tx = ticket.tx;
+        let rejected_tx = tx.clone();
+        let rejected_session_id = job_session_id.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("remote-process-list", move |_| {
+                let result = (|| {
+                    SshProcessService::with_multiplex(config, multiplex)?
+                        .list_processes()
+                        .map(ProcessJobOutput::Listed)
+                })()
+                .map_err(|error: anyhow::Error| error.to_string());
+                let _ = tx.unbounded_send(ProcessJobResult {
+                    job_id,
+                    session_id: job_session_id,
+                    result,
+                });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(ProcessJobResult {
+                job_id,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
             });
-        });
+        }
         cx.notify();
     }
 
@@ -216,24 +229,37 @@ impl NyaTermApp {
         let ticket = self.remote_ops.begin_process_job(job_session_id.clone());
         self.remote_ops
             .set_process_status(format!("sending {signal} to pid {pid}"));
-        std::thread::spawn(move || {
-            let result = (|| {
-                let service = SshProcessService::with_multiplex(config, multiplex)?;
-                service.signal_process(pid, signal)?;
-                let processes = service.list_processes()?;
-                Ok(ProcessJobOutput::Signalled {
-                    pid,
-                    signal: signal.to_string(),
-                    processes,
-                })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(ProcessJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
+        let job_id = ticket.job_id;
+        let tx = ticket.tx;
+        let rejected_tx = tx.clone();
+        let rejected_session_id = job_session_id.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("remote-process-signal", move |_| {
+                let result = (|| {
+                    let service = SshProcessService::with_multiplex(config, multiplex)?;
+                    service.signal_process(pid, signal)?;
+                    let processes = service.list_processes()?;
+                    Ok(ProcessJobOutput::Signalled {
+                        pid,
+                        signal: signal.to_string(),
+                        processes,
+                    })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string());
+                let _ = tx.unbounded_send(ProcessJobResult {
+                    job_id,
+                    session_id: job_session_id,
+                    result,
+                });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(ProcessJobResult {
+                job_id,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
             });
-        });
+        }
         cx.notify();
     }
 
@@ -267,24 +293,37 @@ impl NyaTermApp {
         let ticket = self.remote_ops.begin_process_job(job_session_id.clone());
         self.remote_ops
             .set_process_status(format!("renicing pid {pid} to {nice}"));
-        std::thread::spawn(move || {
-            let result = (|| {
-                let service = SshProcessService::with_multiplex(config, multiplex)?;
-                service.renice_process(pid, nice)?;
-                let processes = service.list_processes()?;
-                Ok(ProcessJobOutput::Reniced {
-                    pid,
-                    nice,
-                    processes,
-                })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(ProcessJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
+        let job_id = ticket.job_id;
+        let tx = ticket.tx;
+        let rejected_tx = tx.clone();
+        let rejected_session_id = job_session_id.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("remote-process-renice", move |_| {
+                let result = (|| {
+                    let service = SshProcessService::with_multiplex(config, multiplex)?;
+                    service.renice_process(pid, nice)?;
+                    let processes = service.list_processes()?;
+                    Ok(ProcessJobOutput::Reniced {
+                        pid,
+                        nice,
+                        processes,
+                    })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string());
+                let _ = tx.unbounded_send(ProcessJobResult {
+                    job_id,
+                    session_id: job_session_id,
+                    result,
+                });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(ProcessJobResult {
+                job_id,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
             });
-        });
+        }
         cx.notify();
     }
 

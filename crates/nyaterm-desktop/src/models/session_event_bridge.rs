@@ -52,9 +52,9 @@ pub(crate) struct SessionEventBridgeDrain {
     pub(crate) stats: SessionEventBridgeStats,
 }
 
-#[derive(Clone)]
 pub(crate) struct SessionEventBridge {
     state: Arc<SessionEventBridgeState>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 struct SessionEventBridgeState {
@@ -133,11 +133,14 @@ impl SessionEventBridge {
             stop: AtomicBool::new(false),
         });
         let worker_state = state.clone();
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-session-event-bridge".to_string())
             .spawn(move || run_session_event_bridge(session_manager, frame_pipeline, worker_state))
             .expect("failed to spawn session event bridge");
-        Self { state }
+        Self {
+            state,
+            worker: Some(worker),
+        }
     }
 
     /// Taken once, by the drain task that consumes this queue.
@@ -266,11 +269,20 @@ impl SessionEventBridge {
             dropped_output_bytes: 0,
         }
     }
+
+    pub(crate) fn shutdown(&mut self) {
+        self.state.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("session event bridge panicked during shutdown");
+        }
+    }
 }
 
 impl Drop for SessionEventBridge {
     fn drop(&mut self) {
-        self.state.stop.store(true, Ordering::Relaxed);
+        self.shutdown();
     }
 }
 

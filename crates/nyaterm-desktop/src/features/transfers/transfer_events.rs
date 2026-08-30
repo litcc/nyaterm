@@ -30,6 +30,7 @@ use crate::models::{
 const TRANSFER_UI_COALESCE_WINDOW: Duration = Duration::from_millis(16);
 
 type ExternalEditorSyncStart = (Option<String>, String, String, Option<String>, PathBuf);
+type ExternalEditorWatchStart = (Option<String>, String, String, Option<String>, PathBuf);
 
 use super::state::{TransferEditorSaveOutcome, TransferFeatureState};
 use super::transfer_widgets::{format_file_size, format_transfer_progress};
@@ -262,6 +263,7 @@ impl NyaTermApp {
                 snapshot
             });
         let mut external_sync_to_start: Option<ExternalEditorSyncStart> = None;
+        let mut external_watch_to_start: Option<ExternalEditorWatchStart> = None;
         let mut external_sync_prompt_to_open: Option<String> = None;
         let mut zmodem_upload_after_probe: Option<(String, Vec<PathBuf>)> = None;
         let mut open_after_create: Option<SftpFileEntry> = None;
@@ -892,6 +894,7 @@ impl NyaTermApp {
             }
             TransferJobEvent::Finished(Ok(TransferJobOutput::ExternalOpened {
                 remote_path,
+                raw_path_token,
                 local_path,
             })) => {
                 job.status = TransferJobStatus::Completed;
@@ -903,6 +906,13 @@ impl NyaTermApp {
                 self.shell.set_status(format!(
                     "remote file opened externally: {}",
                     local_path.display()
+                ));
+                external_watch_to_start = Some((
+                    job_session_id.clone(),
+                    job.id.clone(),
+                    remote_path,
+                    raw_path_token,
+                    local_path,
                 ));
             }
             TransferJobEvent::Finished(Ok(TransferJobOutput::Summary(summary))) => {
@@ -1119,6 +1129,21 @@ impl NyaTermApp {
                 raw_path_token,
                 local_path,
             );
+        }
+        if let Some((session_id, job_id, remote_path, raw_path_token, local_path)) =
+            external_watch_to_start
+            && session_id
+                .as_deref()
+                .is_none_or(|session_id| self.session.has_session(session_id))
+            && let Err(error) = self.transfer.start_external_editor_watcher(
+                session_id,
+                job_id,
+                remote_path,
+                raw_path_token,
+                local_path,
+            )
+        {
+            self.shell.set_status(error);
         }
         if let Some((session_id, files)) = zmodem_upload_after_probe {
             self.begin_zmodem_upload_after_probe(session_id, files, cx);

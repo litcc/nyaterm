@@ -305,18 +305,24 @@ impl NyaTermApp {
             control: None,
         });
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let content = load_preview_content(&service, &remote_file_path, category, max_bytes);
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(Ok(TransferJobOutput::PreviewLoaded {
-                    tab_id,
-                    remote_path,
-                    generation,
-                    content,
-                })),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-load-preview",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let content =
+                    load_preview_content(&service, &remote_file_path, category, max_bytes);
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(Ok(TransferJobOutput::PreviewLoaded {
+                        tab_id,
+                        remote_path,
+                        generation,
+                        content,
+                    })),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -369,19 +375,25 @@ impl NyaTermApp {
             control: None,
         });
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let page =
-                crate::features::transfers::preview::decode::rasterize_pdf_page(&bytes, page_index);
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(Ok(TransferJobOutput::PdfPageRendered {
-                    tab_id,
-                    generation,
-                    page_index,
-                    page,
-                })),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "pdf-render-page",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let page = crate::features::transfers::preview::decode::rasterize_pdf_page(
+                    &bytes, page_index,
+                );
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(Ok(TransferJobOutput::PdfPageRendered {
+                        tab_id,
+                        generation,
+                        page_index,
+                        page,
+                    })),
+                });
+            },
+        );
         cx.notify();
     }
 }

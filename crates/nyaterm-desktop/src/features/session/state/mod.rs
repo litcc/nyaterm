@@ -174,6 +174,15 @@ pub(in crate::features) struct SessionDisconnectUpdate {
 }
 
 impl SessionFeatureState {
+    pub(in crate::features) fn disconnect_multiplex_handle(&mut self, handle: SshMultiplexHandle) {
+        self.protocols.spawn_multiplex_disconnect(handle);
+    }
+
+    pub(in crate::features) fn shutdown_workers(&mut self) {
+        self.protocols.shutdown_workers();
+        self.event_bridge.shutdown();
+    }
+
     pub(in crate::features) fn new(
         manager: Arc<SessionManager>,
         event_bridge: SessionEventBridge,

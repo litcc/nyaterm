@@ -5,7 +5,7 @@ use gpui::{ClipboardItem, Context};
 
 use crate::features::NyaTermApp;
 use crate::http::cloud_sync::run_github_gist_device_flow;
-use crate::models::GithubGistAuthEvent;
+use crate::models::{GithubGistAuthEvent, GithubGistAuthJobEvent};
 
 impl NyaTermApp {
     pub(in crate::features) fn start_github_gist_auth(&mut self, cx: &mut Context<Self>) {
@@ -20,9 +20,18 @@ impl NyaTermApp {
         let existing_gist_id = job.existing_gist_id();
         let cancel = job.cancel();
         let tx = job.sender();
-        std::thread::spawn(move || {
-            run_github_gist_device_flow(job_id, existing_gist_id, cancel, tx);
-        });
+        let rejected_tx = tx.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("github-gist-auth", move |_| {
+                run_github_gist_device_flow(job_id, existing_gist_id, cancel, tx);
+            })
+        {
+            let _ = rejected_tx.unbounded_send(GithubGistAuthJobEvent {
+                job_id,
+                event: GithubGistAuthEvent::Failed(error.to_string()),
+            });
+        }
         cx.notify();
     }
 

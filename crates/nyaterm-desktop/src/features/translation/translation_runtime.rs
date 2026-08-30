@@ -25,10 +25,13 @@ impl NyaTermApp {
             return;
         };
         let (tx, provider, target_language, text, settings) = request.into_parts();
-        std::thread::spawn(move || {
+        let rejected_tx = tx.clone();
+        if let Err(error) = self.blocking_jobs.submit_detached("translation", move |_| {
             let result = translate_text(&provider, &text, &target_language, &settings);
             let _ = tx.unbounded_send(TranslateJobResult::new(result));
-        });
+        }) {
+            let _ = rejected_tx.unbounded_send(TranslateJobResult::new(Err(error.to_string())));
+        }
         cx.notify();
     }
 

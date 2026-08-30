@@ -274,31 +274,42 @@ impl NyaTermApp {
         );
         let tx = launch.tx;
         let command = state.command.clone();
-        std::thread::spawn(move || {
-            let started = Instant::now();
-            let result = if ai_job_cancelled(&cancel) {
-                Err("AI Agent background command cancelled".to_string())
-            } else {
-                match target {
-                    AiAgentBackgroundTarget::Ssh(config) => SshProcessService::new(*config)
-                        .run_command(&command, timeout)
-                        .map(|output| remote_command_observation(output, started))
-                        .map_err(|error| error.to_string()),
-                    AiAgentBackgroundTarget::Local { working_dir } => {
-                        run_local_command(&command, working_dir, timeout)
+        let rejected_tx = tx.clone();
+        let rejected_state = state.clone();
+        if let Err(error) = self.blocking_jobs.submit_detached(
+            "ai-agent-background-command",
+            move |scheduler_cancel| {
+                let started = Instant::now();
+                let result = if scheduler_cancel.is_cancelled() || ai_job_cancelled(&cancel) {
+                    Err("AI Agent background command cancelled".to_string())
+                } else {
+                    match target {
+                        AiAgentBackgroundTarget::Ssh(config) => SshProcessService::new(*config)
+                            .run_command(&command, timeout)
                             .map(|output| remote_command_observation(output, started))
-                            .map_err(|error| error.to_string())
+                            .map_err(|error| error.to_string()),
+                        AiAgentBackgroundTarget::Local { working_dir } => {
+                            run_local_command(&command, working_dir, timeout)
+                                .map(|output| remote_command_observation(output, started))
+                                .map_err(|error| error.to_string())
+                        }
                     }
+                };
+                if !scheduler_cancel.is_cancelled() && !ai_job_cancelled(&cancel) {
+                    let _ = tx.unbounded_send(AiChatWorkerEvent::AgentBackgroundFinished {
+                        job_id,
+                        state,
+                        result,
+                    });
                 }
-            };
-            if !ai_job_cancelled(&cancel) {
-                let _ = tx.unbounded_send(AiChatWorkerEvent::AgentBackgroundFinished {
-                    job_id,
-                    state,
-                    result,
-                });
-            }
-        });
+            },
+        ) {
+            let _ = rejected_tx.unbounded_send(AiChatWorkerEvent::AgentBackgroundFinished {
+                job_id,
+                state: rejected_state,
+                result: Err(error.to_string()),
+            });
+        }
         self.defer_ai_panel_snapshot_flush(cx);
         self.notify_root_if_ai_header_changed(before, cx);
         Ok(())
@@ -547,14 +558,29 @@ impl NyaTermApp {
         let session_id = launch.session_id;
         let job_id = launch.job_id;
         let cancel = launch.cancel;
-        std::thread::spawn(move || {
-            let result = run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id);
-            let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
+        let rejected_tx = tx.clone();
+        let rejected_session_id = session_id.clone();
+        if let Err(error) =
+            self.blocking_jobs
+                .submit_detached("ai-agent-continuation", move |scheduler_cancel| {
+                    let result = if scheduler_cancel.is_cancelled() {
+                        Err("AI Agent continuation cancelled".to_string())
+                    } else {
+                        run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id)
+                    };
+                    let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
+                        job_id,
+                        session_id,
+                        result,
+                    }));
+                })
+        {
+            let _ = rejected_tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
                 job_id,
-                session_id,
-                result,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
             }));
-        });
+        }
         self.defer_ai_panel_snapshot_flush(cx);
     }
 }

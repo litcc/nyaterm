@@ -1277,6 +1277,7 @@ pub(crate) struct TerminalFramePipeline {
     event_queue: TerminalFrameEventQueue,
     event_wake_rx: Arc<Mutex<Option<UnboundedReceiver<()>>>>,
     handle_count: Arc<AtomicUsize>,
+    worker: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 pub(crate) struct TerminalFrameOutputSubmission {
@@ -1312,7 +1313,7 @@ impl TerminalFramePipeline {
         let (event_queue, event_wake_rx) =
             TerminalFrameEventQueue::new_with_wake(TERMINAL_FRAME_EVENT_QUEUE_CAP);
         let event_queue_for_worker = event_queue.clone();
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-terminal-frame-processor".to_string())
             .spawn(move || {
                 run_terminal_frame_processor(command_rx, event_queue_for_worker, recording_writer)
@@ -1323,6 +1324,7 @@ impl TerminalFramePipeline {
             event_queue,
             event_wake_rx: Arc::new(Mutex::new(Some(event_wake_rx))),
             handle_count: Arc::new(AtomicUsize::new(1)),
+            worker: Arc::new(Mutex::new(Some(worker))),
         }
     }
 
@@ -1546,6 +1548,21 @@ impl TerminalFramePipeline {
     pub(crate) fn queued_output_bytes(&self) -> usize {
         self.command_tx.queued_output_bytes()
     }
+
+    pub(crate) fn shutdown(&mut self) {
+        self.event_queue.close();
+        self.command_tx.close();
+        let worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(worker) = worker
+            && worker.join().is_err()
+        {
+            tracing::warn!("terminal frame worker panicked during shutdown");
+        }
+    }
 }
 
 impl Clone for TerminalFramePipeline {
@@ -1556,6 +1573,7 @@ impl Clone for TerminalFramePipeline {
             event_queue: self.event_queue.clone(),
             event_wake_rx: self.event_wake_rx.clone(),
             handle_count: self.handle_count.clone(),
+            worker: self.worker.clone(),
         }
     }
 }
@@ -1563,7 +1581,7 @@ impl Clone for TerminalFramePipeline {
 impl Drop for TerminalFramePipeline {
     fn drop(&mut self) {
         if self.handle_count.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.event_queue.close();
+            self.shutdown();
         }
     }
 }
@@ -2510,6 +2528,7 @@ struct TerminalFrameCommandQueueShared {
 struct TerminalFrameCommandQueueInner {
     commands: VecDeque<TerminalFrameCommand>,
     sender_count: usize,
+    closed: bool,
 }
 
 fn terminal_frame_command_channel() -> (TerminalFrameCommandSender, TerminalFrameCommandReceiver) {
@@ -2517,6 +2536,7 @@ fn terminal_frame_command_channel() -> (TerminalFrameCommandSender, TerminalFram
         inner: Mutex::new(TerminalFrameCommandQueueInner {
             commands: VecDeque::new(),
             sender_count: 1,
+            closed: false,
         }),
         ready: Condvar::new(),
         queued_output_bytes: AtomicUsize::new(0),
@@ -2534,6 +2554,9 @@ impl TerminalFrameCommandSender {
         let Ok(mut inner) = self.shared.inner.lock() else {
             return false;
         };
+        if inner.closed {
+            return false;
+        }
         let output_bytes = terminal_frame_command_output_bytes(&command);
         push_terminal_frame_command(&mut inner.commands, command);
         self.shared
@@ -2550,6 +2573,9 @@ impl TerminalFrameCommandSender {
         let Ok(mut inner) = self.shared.inner.lock() else {
             return false;
         };
+        if inner.closed {
+            return false;
+        }
         let mut sent = false;
         for command in commands {
             let output_bytes = terminal_frame_command_output_bytes(&command);
@@ -2575,6 +2601,16 @@ impl TerminalFrameCommandSender {
 
     fn queued_output_bytes(&self) -> usize {
         self.shared.queued_output_bytes.load(Ordering::Relaxed)
+    }
+
+    fn close(&self) {
+        let Ok(mut inner) = self.shared.inner.lock() else {
+            return;
+        };
+        inner.closed = true;
+        inner.commands.clear();
+        self.shared.queued_output_bytes.store(0, Ordering::Relaxed);
+        self.shared.ready.notify_all();
     }
 }
 
@@ -2603,6 +2639,9 @@ impl TerminalFrameCommandReceiver {
     fn recv(&self) -> Option<TerminalFrameCommand> {
         let mut inner = self.shared.inner.lock().ok()?;
         loop {
+            if inner.closed {
+                return None;
+            }
             if let Some(command) = pop_terminal_frame_command(&self.shared, &mut inner) {
                 return Some(command);
             }

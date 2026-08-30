@@ -39,15 +39,29 @@ impl NyaTermApp {
         self.remote_ops.mark_stats_refresh_started();
         self.remote_ops
             .set_stats_status("loading remote system stats");
-        std::thread::spawn(move || {
-            let result = (|| RemoteStatsService::with_multiplex(config, multiplex)?.snapshot())()
-                .map_err(|error| error.to_string());
-            let _ = ticket.tx.unbounded_send(StatsJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
+        let job_id = ticket.job_id;
+        let tx = ticket.tx;
+        let rejected_tx = tx.clone();
+        let rejected_session_id = job_session_id.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("remote-stats", move |_| {
+                let result =
+                    (|| RemoteStatsService::with_multiplex(config, multiplex)?.snapshot())()
+                        .map_err(|error| error.to_string());
+                let _ = tx.unbounded_send(StatsJobResult {
+                    job_id,
+                    session_id: job_session_id,
+                    result,
+                });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(StatsJobResult {
+                job_id,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
             });
-        });
+        }
         cx.notify();
     }
 

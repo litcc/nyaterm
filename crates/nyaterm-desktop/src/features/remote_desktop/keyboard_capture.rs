@@ -6,22 +6,29 @@ use nyaterm_remote_desktop::RdpSessionManager;
 mod platform {
     use std::collections::HashSet;
     use std::ptr::null_mut;
-    use std::sync::{Arc, Mutex, OnceLock, Weak};
+    use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
     use std::thread;
 
     use nyaterm_remote_desktop::{RdpInputEvent, RdpSessionManager};
     use windows_sys::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         MAPVK_VK_TO_VSC_EX, MapVirtualKeyW, VK_LWIN, VK_RWIN,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED,
-        LLKHF_UP, MSG, SetWindowsHookExW, TranslateMessage, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
+        LLKHF_UP, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
+        TranslateMessage, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
         WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
 
     static CAPTURE: OnceLock<Arc<CaptureState>> = OnceLock::new();
-    static HOOK_THREAD: OnceLock<()> = OnceLock::new();
+    static HOOK_THREAD: OnceLock<Mutex<Option<HookThread>>> = OnceLock::new();
+
+    struct HookThread {
+        thread_id: u32,
+        worker: thread::JoinHandle<()>,
+    }
 
     struct CaptureState {
         manager: Mutex<Weak<RdpSessionManager>>,
@@ -64,14 +71,65 @@ mod platform {
             }
         }
         if session_id.is_some() {
-            HOOK_THREAD.get_or_init(|| {
-                if let Err(error) = thread::Builder::new()
-                    .name("rdp-keyboard-capture".to_string())
-                    .spawn(hook_thread)
-                {
-                    tracing::warn!(%error, "failed to start RDP keyboard capture thread");
-                }
-            });
+            ensure_hook_thread();
+        } else {
+            stop_hook_thread();
+        }
+    }
+
+    pub(super) fn shutdown_keyboard_capture() {
+        if let Some(state) = CAPTURE.get() {
+            reset_pressed_state(state);
+            if let Ok(mut session_id) = state.session_id.lock() {
+                *session_id = None;
+            }
+        }
+        stop_hook_thread();
+    }
+
+    fn ensure_hook_thread() {
+        let runtime = HOOK_THREAD.get_or_init(|| Mutex::new(None));
+        let Ok(mut runtime) = runtime.lock() else {
+            return;
+        };
+        if runtime.is_some() {
+            return;
+        }
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let worker = match thread::Builder::new()
+            .name("rdp-keyboard-capture".to_string())
+            .spawn(move || hook_thread(ready_tx))
+        {
+            Ok(worker) => worker,
+            Err(error) => {
+                tracing::warn!(%error, "failed to start RDP keyboard capture thread");
+                return;
+            }
+        };
+        match ready_rx.recv() {
+            Ok(Some(thread_id)) => {
+                *runtime = Some(HookThread { thread_id, worker });
+            }
+            Ok(None) | Err(_) => {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    fn stop_hook_thread() {
+        let Some(runtime) = HOOK_THREAD.get() else {
+            return;
+        };
+        let hook = runtime.lock().ok().and_then(|mut runtime| runtime.take());
+        let Some(hook) = hook else {
+            return;
+        };
+        let posted = unsafe { PostThreadMessageW(hook.thread_id, WM_QUIT, 0, 0) };
+        if posted == 0 {
+            tracing::warn!("failed to post shutdown to RDP keyboard capture thread");
+        }
+        if hook.worker.join().is_err() {
+            tracing::warn!("RDP keyboard capture thread panicked during shutdown");
         }
     }
 
@@ -88,7 +146,7 @@ mod platform {
         had_pressed_keys
     }
 
-    fn hook_thread() {
+    fn hook_thread(ready_tx: mpsc::SyncSender<Option<u32>>) {
         let hook = unsafe {
             SetWindowsHookExW(
                 WH_KEYBOARD_LL,
@@ -99,14 +157,22 @@ mod platform {
         };
         if hook.is_null() {
             tracing::warn!("failed to install RDP keyboard capture hook");
+            let _ = ready_tx.send(None);
             return;
         }
         let mut message = MSG::default();
+        unsafe {
+            PeekMessageW(&mut message, null_mut(), 0, 0, PM_NOREMOVE);
+        }
+        let _ = ready_tx.send(Some(unsafe { GetCurrentThreadId() }));
         while unsafe { GetMessageW(&mut message, null_mut(), 0, 0) } > 0 {
             unsafe {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+        }
+        unsafe {
+            UnhookWindowsHookEx(hook);
         }
     }
 
@@ -238,4 +304,9 @@ pub(super) fn set_keyboard_capture(manager: Arc<RdpSessionManager>, session_id: 
     platform::set_keyboard_capture(manager, session_id);
     #[cfg(not(target_os = "windows"))]
     let _ = (manager, session_id);
+}
+
+pub(super) fn shutdown_keyboard_capture() {
+    #[cfg(target_os = "windows")]
+    platform::shutdown_keyboard_capture();
 }

@@ -211,7 +211,9 @@ impl NyaTermApp {
         // first point at which the persisted shortcut map can replace the defaults.
         crate::shortcuts::rebuild_keymap(&settings.keybindings, cx);
 
+        let blocking_jobs = crate::blocking_jobs::BlockingJobScheduler::new();
         Self {
+            blocking_jobs: blocking_jobs.clone(),
             stores,
             store_ui,
             store_blocking,
@@ -245,6 +247,7 @@ impl NyaTermApp {
                     variable: cx.focus_handle(),
                 },
                 store: command_store,
+                scheduler: blocking_jobs,
             }),
             send_command: SendCommandFeatureState::new(SendCommandFeatureFocus {
                 editor: cx.focus_handle(),

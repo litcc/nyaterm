@@ -36,6 +36,10 @@ impl RecordingFeatureState {
         self.pipeline.writer()
     }
 
+    pub(in crate::features) fn shutdown_worker(&mut self) {
+        self.pipeline.shutdown();
+    }
+
     pub(in crate::features) fn set_memory_limit(&self, memory_limit_bytes: usize) {
         self.pipeline.set_memory_limit(memory_limit_bytes);
     }

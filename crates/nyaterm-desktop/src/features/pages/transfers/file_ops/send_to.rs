@@ -182,20 +182,25 @@ impl NyaTermApp {
         let target_session_id = context.target_session_id.clone();
         let cached_target_dir = context.cached_target_dir.clone();
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = run_send_to(
-                &source_service,
-                source_remote,
-                &target_service,
-                cached_target_dir.as_deref(),
-                &entry_name,
-                target_session_id,
-            );
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-send-to",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = run_send_to(
+                    &source_service,
+                    source_remote,
+                    &target_service,
+                    cached_target_dir.as_deref(),
+                    &entry_name,
+                    target_session_id,
+                );
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

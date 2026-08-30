@@ -558,7 +558,8 @@ pub(crate) enum CredentialAutofillMatchOutcome {
 }
 
 pub(crate) struct CredentialAutofillMatchPipeline {
-    command_tx: mpsc::Sender<CredentialAutofillMatchRequest>,
+    command_tx: Option<mpsc::Sender<CredentialAutofillMatchRequest>>,
+    worker: Option<thread::JoinHandle<()>>,
     event_queue: CredentialAutofillMatchEventQueue,
     /// Taken once by `NyaTermApp::start_credential_autofill_match_drain`,
     /// which owns delivery from then on.
@@ -572,12 +573,13 @@ impl CredentialAutofillMatchPipeline {
         let event_queue =
             CredentialAutofillMatchEventQueue::new(CREDENTIAL_AUTOFILL_MATCH_EVENT_CAP, wake);
         let event_queue_for_worker = event_queue.clone();
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-credential-autofill".to_string())
             .spawn(move || run_credential_autofill_matcher(command_rx, event_queue_for_worker))
             .expect("failed to spawn credential autofill matcher");
         Self {
-            command_tx,
+            command_tx: Some(command_tx),
+            worker: Some(worker),
             event_queue,
             wake_rx: Some(wake_rx),
         }
@@ -595,11 +597,28 @@ impl CredentialAutofillMatchPipeline {
     }
 
     pub(crate) fn request(&self, request: CredentialAutofillMatchRequest) {
-        let _ = self.command_tx.send(request);
+        if let Some(command_tx) = &self.command_tx {
+            let _ = command_tx.send(request);
+        }
     }
 
     pub(crate) fn try_recv_event(&self) -> Option<CredentialAutofillMatchEvent> {
         self.event_queue.try_recv()
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        self.command_tx.take();
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("credential autofill worker panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for CredentialAutofillMatchPipeline {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 

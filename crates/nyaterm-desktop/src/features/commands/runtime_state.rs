@@ -1,17 +1,17 @@
 //! Background runtime ownership shared by command history and quick commands.
 
-use std::sync::mpsc;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+use nyaterm_store::{StoreBlockingClient, StoreDomain};
 
-use futures::channel::mpsc::UnboundedReceiver;
-use nyaterm_store::StoreBlockingClient;
-
+use crate::blocking_jobs::BlockingJobScheduler;
 use crate::features::{
     runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
-    runtime_jobs::spawn_command_persistence_worker,
 };
 
 pub(in crate::features) struct CommandRuntimeState {
-    tx: mpsc::Sender<CommandPersistenceRequest>,
+    store: StoreBlockingClient,
+    scheduler: BlockingJobScheduler,
+    result_tx: UnboundedSender<CommandPersistenceResult>,
     /// Taken once by `NyaTermApp::start_command_persistence_event_drain`,
     /// which owns delivery from then on. `None` afterwards, so a second start
     /// is a no-op.
@@ -20,17 +20,53 @@ pub(in crate::features) struct CommandRuntimeState {
 }
 
 impl CommandRuntimeState {
-    pub(in crate::features) fn new(store: StoreBlockingClient) -> Self {
-        let (tx, rx) = spawn_command_persistence_worker(store);
+    pub(in crate::features) fn new(
+        store: StoreBlockingClient,
+        scheduler: BlockingJobScheduler,
+    ) -> Self {
+        let (result_tx, rx) = unbounded();
         Self {
-            tx,
+            store,
+            scheduler,
+            result_tx,
             rx: Some(rx),
             pending: 0,
         }
     }
 
     pub(in crate::features) fn queue(&mut self, request: CommandPersistenceRequest) -> bool {
-        if self.tx.send(request).is_err() {
+        let store = self.store.clone();
+        let result_tx = self.result_tx.clone();
+        if self
+            .scheduler
+            .submit_detached("command-persistence", move |_| {
+                let result = match request {
+                    CommandPersistenceRequest::AppendHistory(commands) => {
+                        CommandPersistenceResult::History(
+                            store
+                                .request_fn(StoreDomain::Commands, move |database| {
+                                    for command in commands {
+                                        database.append_command_history(&command)?;
+                                    }
+                                    database.list_command_history(64)
+                                })
+                                .map_err(|error| error.to_string()),
+                        )
+                    }
+                    CommandPersistenceRequest::IncrementQuickCommand(command_id) => {
+                        let persisted_id = command_id.clone();
+                        let result = store
+                            .request_fn(StoreDomain::Commands, move |database| {
+                                database.increment_quick_command_use_count(&persisted_id)
+                            })
+                            .map_err(|error| error.to_string());
+                        CommandPersistenceResult::QuickCommandUseCount { command_id, result }
+                    }
+                };
+                let _ = result_tx.unbounded_send(result);
+            })
+            .is_err()
+        {
             return false;
         }
         self.pending = self.pending.saturating_add(1);
@@ -64,55 +100,52 @@ impl CommandRuntimeState {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
-    use futures::channel::mpsc::unbounded;
+    use futures::StreamExt as _;
+    use nyaterm_store::{StoreConfig, StoreRuntime};
 
     use super::CommandRuntimeState;
+    use crate::blocking_jobs::BlockingJobScheduler;
     use crate::features::{
         runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
     };
 
     #[test]
     fn command_runtime_owns_pending_request_lifecycle() {
-        let (request_tx, request_rx) = mpsc::channel();
-        let (result_tx, result_rx) = unbounded();
-        let mut runtime = CommandRuntimeState {
-            tx: request_tx,
-            rx: Some(result_rx),
-            pending: 0,
-        };
+        let config_dir = std::env::temp_dir().join(format!(
+            "nyaterm-command-runtime-test-{}-{}",
+            std::process::id(),
+            nyaterm_core::uuid()
+        ));
+        let store_runtime = StoreRuntime::spawn(StoreConfig {
+            config_dir,
+            portable_key_path: None,
+        })
+        .expect("spawn test store");
+        let scheduler = BlockingJobScheduler::new();
+        let mut runtime =
+            CommandRuntimeState::new(store_runtime.blocking_client(), scheduler.clone());
 
         assert!(runtime.is_idle());
         assert!(runtime.queue(CommandPersistenceRequest::AppendHistory(vec![
             "pwd".to_string(),
         ])));
         assert!(!runtime.is_idle());
-        assert!(matches!(
-            request_rx.recv().expect("request should reach worker"),
-            CommandPersistenceRequest::AppendHistory(commands) if commands == ["pwd"]
-        ));
 
         let mut result_rx = runtime
             .take_event_receiver()
             .expect("the runtime holds its receiver until the drain starts");
-        result_tx
-            .unbounded_send(CommandPersistenceResult::History(Ok(Vec::new())))
-            .expect("result channel should stay connected");
+        let result = futures::executor::block_on(result_rx.next())
+            .expect("scheduler should return a persistence result");
         assert!(matches!(
-            result_rx
-                .try_recv()
-                .expect("the result should be queued"),
-            CommandPersistenceResult::History(Ok(history)) if history.is_empty()
+            result,
+            CommandPersistenceResult::History(Ok(history)) if history.iter().any(|entry| entry.command == "pwd")
         ));
         runtime.note_event_delivered();
         assert!(runtime.is_idle());
 
-        assert!(runtime.queue(CommandPersistenceRequest::AppendHistory(Vec::new())));
-        assert!(
-            runtime.note_worker_disconnected(),
-            "a request outstanding when the worker drops its sender is lost and must be reported"
-        );
+        scheduler.shutdown();
+        assert!(!runtime.queue(CommandPersistenceRequest::AppendHistory(Vec::new())));
+        assert!(!runtime.note_worker_disconnected());
         assert!(runtime.is_idle());
     }
 }

@@ -69,15 +69,25 @@ impl NyaTermApp {
         self.remote_ops.mark_gpu_refresh_started();
         self.remote_ops
             .set_gpu_status("loading NVIDIA GPU overview");
-        std::thread::spawn(move || {
+        let job_id = ticket.job_id;
+        let tx = ticket.tx;
+        let rejected_tx = tx.clone();
+        let rejected_session_id = job_session_id.clone();
+        if let Err(error) = self.blocking_jobs.submit_detached("remote-gpu", move |_| {
             let result = (|| RemoteGpuService::with_multiplex(config, multiplex)?.overview())()
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.unbounded_send(GpuJobResult {
-                job_id: ticket.job_id,
+            let _ = tx.unbounded_send(GpuJobResult {
+                job_id,
                 session_id: job_session_id,
                 result,
             });
-        });
+        }) {
+            let _ = rejected_tx.unbounded_send(GpuJobResult {
+                job_id,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
+            });
+        }
         cx.notify();
     }
 
@@ -182,15 +192,25 @@ impl NyaTermApp {
         self.remote_ops.mark_npu_refresh_started();
         self.remote_ops
             .set_npu_status("loading Ascend NPU overview");
-        std::thread::spawn(move || {
+        let job_id = ticket.job_id;
+        let tx = ticket.tx;
+        let rejected_tx = tx.clone();
+        let rejected_session_id = job_session_id.clone();
+        if let Err(error) = self.blocking_jobs.submit_detached("remote-npu", move |_| {
             let result = (|| RemoteNpuService::with_multiplex(config, multiplex)?.overview())()
                 .map_err(|error| error.to_string());
-            let _ = ticket.tx.unbounded_send(NpuJobResult {
-                job_id: ticket.job_id,
+            let _ = tx.unbounded_send(NpuJobResult {
+                job_id,
                 session_id: job_session_id,
                 result,
             });
-        });
+        }) {
+            let _ = rejected_tx.unbounded_send(NpuJobResult {
+                job_id,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
+            });
+        }
         cx.notify();
     }
 

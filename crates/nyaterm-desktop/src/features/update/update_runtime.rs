@@ -44,10 +44,16 @@ impl NyaTermApp {
             cx.notify();
             return;
         };
-        std::thread::spawn(move || {
-            let result = check_native_update();
-            let _ = tx.unbounded_send(UpdateJobResult::new(result));
-        });
+        let rejected_tx = tx.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("update-check", move |_| {
+                let result = check_native_update();
+                let _ = tx.unbounded_send(UpdateJobResult::new(result));
+            })
+        {
+            let _ = rejected_tx.unbounded_send(UpdateJobResult::new(Err(error.to_string())));
+        }
         cx.notify();
     }
 

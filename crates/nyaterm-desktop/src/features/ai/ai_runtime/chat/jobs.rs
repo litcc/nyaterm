@@ -99,14 +99,29 @@ impl NyaTermApp {
         let job_id = launch.job_id;
         let cancel = launch.cancel;
         let tx = launch.tx;
-        std::thread::spawn(move || {
-            let result = run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id);
-            let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
+        let rejected_tx = tx.clone();
+        let rejected_session_id = session_id.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("ai-chat", move |scheduler_cancel| {
+                let result = if scheduler_cancel.is_cancelled() {
+                    Err("AI chat cancelled".to_string())
+                } else {
+                    run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id)
+                };
+                let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
+                    job_id,
+                    session_id,
+                    result,
+                }));
+            })
+        {
+            let _ = rejected_tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
                 job_id,
-                session_id,
-                result,
+                session_id: rejected_session_id,
+                result: Err(error.to_string()),
             }));
-        });
+        }
         self.defer_ai_panel_snapshot_flush(cx);
         self.notify_root_if_ai_header_changed(before, cx);
     }

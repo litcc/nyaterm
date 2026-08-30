@@ -24,7 +24,8 @@ pub(super) struct ZmodemSessionState {
 
 struct ZmodemWorker {
     command_tx: mpsc::Sender<ZmodemWorkerCommand>,
-    event_rx: mpsc::Receiver<ZmodemWorkerEvent>,
+    event_rx: Option<mpsc::Receiver<ZmodemWorkerEvent>>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 enum ZmodemWorkerCommand {
@@ -44,13 +45,14 @@ impl ZmodemWorker {
     fn spawn(transfer: ZmodemTransfer) -> Self {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::sync_channel(ZMODEM_WORKER_EVENT_CHANNEL_CAP);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-zmodem-transfer".to_string())
             .spawn(move || run_zmodem_worker(transfer, command_rx, event_tx))
             .expect("failed to spawn zmodem worker");
         Self {
             command_tx,
-            event_rx,
+            event_rx: Some(event_rx),
+            worker: Some(worker),
         }
     }
 
@@ -79,14 +81,30 @@ impl ZmodemWorker {
     }
 
     fn try_recv_event(&self) -> Option<ZmodemWorkerEvent> {
-        match self.event_rx.try_recv() {
+        match self.event_rx.as_ref()?.try_recv() {
             Ok(event) => Some(event),
             Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => None,
         }
     }
 
-    fn stop(self) {
+    fn stop(mut self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
+        self.event_rx.take();
         let _ = self.command_tx.send(ZmodemWorkerCommand::Stop);
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("ZMODEM worker panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for ZmodemWorker {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -241,22 +259,32 @@ impl NyaTermApp {
         ));
         let transfer_tx = self.transfer.transfer_event_sender();
         let probe_session_id = session_id.clone();
-        std::thread::spawn(move || {
-            let result =
-                probe_zmodem_remote_conflicts(config, remote_dir, files, policy, resolver.as_ref())
-                    .map(
-                        |(resolved, probe_skipped)| TransferJobOutput::ZmodemProbeReady {
-                            session_id: probe_session_id,
-                            files: resolved,
-                            probe_skipped,
-                        },
-                    )
-                    .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "zmodem-conflict-probe",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = probe_zmodem_remote_conflicts(
+                    config,
+                    remote_dir,
+                    files,
+                    policy,
+                    resolver.as_ref(),
+                )
+                .map(
+                    |(resolved, probe_skipped)| TransferJobOutput::ZmodemProbeReady {
+                        session_id: probe_session_id,
+                        files: resolved,
+                        probe_skipped,
+                    },
+                )
+                .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 

@@ -519,6 +519,7 @@ pub(crate) enum TransferJobOutput {
     },
     ExternalOpened {
         remote_path: String,
+        raw_path_token: Option<String>,
         local_path: PathBuf,
     },
     AiFileActionLoaded {

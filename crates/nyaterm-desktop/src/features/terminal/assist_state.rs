@@ -90,6 +90,10 @@ impl TerminalAssistState {
     pub(super) fn credential_prompt_input_mode(&self, now_ms: u64) -> bool {
         self.credential_prompt_input_until_ms > now_ms
     }
+
+    pub(super) fn shutdown_workers(&mut self) {
+        self.credential_autofill_match_pipeline.shutdown();
+    }
 }
 
 impl TerminalFeatureState {

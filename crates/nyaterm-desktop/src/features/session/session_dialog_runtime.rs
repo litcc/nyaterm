@@ -285,7 +285,7 @@ impl NyaTermApp {
                 .session
                 .take_multiplex_handle_if_unreferenced(&multiplex_key)
         {
-            super::disconnect_multiplex_handle(handle);
+            self.session.disconnect_multiplex_handle(handle);
         }
     }
 }

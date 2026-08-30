@@ -2,6 +2,7 @@
 
 mod cwd_sync_clock;
 mod editor_window;
+mod external_sync_runtime;
 mod external_sync_window;
 pub(in crate::features) mod preview;
 mod remote_text_editor;
@@ -80,6 +81,22 @@ impl RemoteFileBackendPreferenceStore for ConnectionStoreBackendPreferences {
 }
 
 impl NyaTermApp {
+    pub(in crate::features) fn submit_transfer_blocking_job(
+        &self,
+        name: &'static str,
+        rejection_job_id: String,
+        rejection_tx: futures::channel::mpsc::UnboundedSender<crate::models::TransferJobResult>,
+        run: impl FnOnce() + Send + 'static,
+    ) {
+        transfer_jobs::submit_transfer_blocking_job(
+            &self.blocking_jobs,
+            name,
+            rejection_job_id,
+            rejection_tx,
+            run,
+        );
+    }
+
     pub(in crate::features) fn remote_file_service_for_session(
         &mut self,
         session_id: &str,

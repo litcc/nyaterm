@@ -147,22 +147,27 @@ impl NyaTermApp {
         self.shell
             .set_status(format!("remote symlink creation started: {link_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .create_symlink_path(&link_path, &target_path)
-                .and_then(|_| service.list_dir(&parent_path))
-                .map(|entries| TransferJobOutput::CreatedSymlink {
-                    link_path,
-                    target_path,
-                    parent_path,
-                    entries,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-create-symlink",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .create_symlink_path(&link_path, &target_path)
+                    .and_then(|_| service.list_dir(&parent_path))
+                    .map(|entries| TransferJobOutput::CreatedSymlink {
+                        link_path,
+                        target_path,
+                        parent_path,
+                        entries,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -383,22 +388,27 @@ impl NyaTermApp {
             "remote rename started: {old_display_path} -> {new_path}"
         ));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .rename_remote_paths(&old_path, &RemoteFilePath::new(&new_path))
-                .and_then(|_| service.list_dir(&parent_path))
-                .map(|entries| TransferJobOutput::Renamed {
-                    old_path: old_display_path,
-                    new_path,
-                    parent_path,
-                    entries,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-rename",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .rename_remote_paths(&old_path, &RemoteFilePath::new(&new_path))
+                    .and_then(|_| service.list_dir(&parent_path))
+                    .map(|entries| TransferJobOutput::Renamed {
+                        old_path: old_display_path,
+                        new_path,
+                        parent_path,
+                        entries,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

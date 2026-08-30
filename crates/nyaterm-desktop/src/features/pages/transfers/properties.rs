@@ -191,19 +191,24 @@ impl NyaTermApp {
         self.transfer
             .set_browser_status(format!("Loading properties for {remote_display_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .remote_file_properties(&remote_path)
-                .map(|properties| TransferJobOutput::PropertiesLoaded {
-                    remote_path: remote_display_path,
-                    properties,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-load-properties",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .remote_file_properties(&remote_path)
+                    .map(|properties| TransferJobOutput::PropertiesLoaded {
+                        remote_path: remote_display_path,
+                        properties,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -313,24 +318,29 @@ impl NyaTermApp {
         self.transfer
             .set_browser_status(format!("Updating properties for {remote_display_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = (|| {
-                service.update_remote_path_attributes(&remote_path, update)?;
-                let properties = service.remote_file_properties(&remote_path)?;
-                let entries = service.list_dir(&parent_path)?;
-                Ok(TransferJobOutput::PropertiesUpdated {
-                    remote_path: remote_display_path,
-                    parent_path,
-                    properties,
-                    entries,
-                })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-update-properties",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = (|| {
+                    service.update_remote_path_attributes(&remote_path, update)?;
+                    let properties = service.remote_file_properties(&remote_path)?;
+                    let entries = service.list_dir(&parent_path)?;
+                    Ok(TransferJobOutput::PropertiesUpdated {
+                        remote_path: remote_display_path,
+                        parent_path,
+                        properties,
+                        entries,
+                    })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

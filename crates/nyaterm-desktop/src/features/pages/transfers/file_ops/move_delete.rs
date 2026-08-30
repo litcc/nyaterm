@@ -272,22 +272,27 @@ impl NyaTermApp {
             .to_string(),
         );
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .rename_remote_paths(&old_path, &RemoteFilePath::new(&new_path))
-                .and_then(|_| service.list_dir(&parent_path))
-                .map(|entries| TransferJobOutput::Moved {
-                    old_path: old_display_path,
-                    new_path,
-                    parent_path,
-                    entries,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-move",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .rename_remote_paths(&old_path, &RemoteFilePath::new(&new_path))
+                    .and_then(|_| service.list_dir(&parent_path))
+                    .map(|entries| TransferJobOutput::Moved {
+                        old_path: old_display_path,
+                        new_path,
+                        parent_path,
+                        entries,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -411,21 +416,26 @@ impl NyaTermApp {
             .to_string(),
         );
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .delete_remote_path(&remote_path)
-                .and_then(|_| service.list_dir(&parent_path))
-                .map(|entries| TransferJobOutput::Deleted {
-                    remote_path: remote_display_path,
-                    parent_path,
-                    entries,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-delete",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .delete_remote_path(&remote_path)
+                    .and_then(|_| service.list_dir(&parent_path))
+                    .map(|entries| TransferJobOutput::Deleted {
+                        remote_path: remote_display_path,
+                        parent_path,
+                        entries,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

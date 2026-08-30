@@ -772,7 +772,10 @@ mod prompt_state_debug_tests {
         let broker = Arc::new(AgentPromptBroker::default());
         let worker = {
             let broker = Arc::clone(&broker);
-            std::thread::spawn(move || broker.request_action(agent_prompt()))
+            std::thread::Builder::new()
+                .name("nyaterm-agent-prompt-test".to_string())
+                .spawn(move || broker.request_action(agent_prompt()))
+                .expect("spawn agent prompt test worker")
         };
         let request = loop {
             if let Some(request) = broker.pop_pending() {

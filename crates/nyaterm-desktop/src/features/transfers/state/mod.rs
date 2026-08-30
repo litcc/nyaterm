@@ -38,6 +38,8 @@ use crate::models::{
     TransferUnknownFileState,
 };
 
+use super::external_sync_runtime::ExternalEditorWatcher;
+
 pub(in crate::features) struct TransferFeatureState {
     queue: TransferQueueState,
     paths: TransferPathState,
@@ -251,7 +253,13 @@ struct TransferExternalSyncState {
     /// several prompt windows can be open at once.
     windows: HashMap<String, ChildWindowSlot>,
     always_uploads: HashSet<String>,
+    watchers: HashMap<String, ExternalEditorWatcherEntry>,
     focus: FocusHandle,
+}
+
+struct ExternalEditorWatcherEntry {
+    session_id: Option<String>,
+    _watcher: ExternalEditorWatcher,
 }
 
 /// Panel chrome: focus routing and height.
@@ -886,7 +894,47 @@ impl TransferFeatureState {
         self.external_sync
             .windows
             .retain(|prompt_id, _| prompts.contains_key(prompt_id));
+        let watcher_ids: Vec<String> = self
+            .external_sync
+            .watchers
+            .iter()
+            .filter(|(_, entry)| entry.session_id.as_deref() == Some(session_id))
+            .map(|(job_id, _)| job_id.clone())
+            .collect();
+        for job_id in watcher_ids {
+            self.external_sync.watchers.remove(&job_id);
+        }
         before.saturating_sub(self.external_sync.prompts.len())
+    }
+
+    pub(in crate::features) fn start_external_editor_watcher(
+        &mut self,
+        session_id: Option<String>,
+        job_id: String,
+        remote_path: String,
+        raw_path_token: Option<String>,
+        local_path: std::path::PathBuf,
+    ) -> Result<(), String> {
+        let watcher = ExternalEditorWatcher::spawn(
+            job_id.clone(),
+            remote_path,
+            raw_path_token,
+            local_path,
+            self.transfer_event_sender(),
+        )
+        .map_err(|error| format!("failed to start external editor watcher: {error}"))?;
+        self.external_sync.watchers.insert(
+            job_id,
+            ExternalEditorWatcherEntry {
+                session_id,
+                _watcher: watcher,
+            },
+        );
+        Ok(())
+    }
+
+    pub(in crate::features) fn shutdown_external_editor_watchers(&mut self) {
+        self.external_sync.watchers.clear();
     }
 
     /// The window slot for one prompt, if that prompt still exists.
@@ -1135,8 +1183,15 @@ impl TransferExternalSyncState {
             prompts: HashMap::new(),
             windows: HashMap::new(),
             always_uploads: HashSet::new(),
+            watchers: HashMap::new(),
             focus,
         }
+    }
+}
+
+impl Drop for TransferFeatureState {
+    fn drop(&mut self) {
+        self.shutdown_external_editor_watchers();
     }
 }
 

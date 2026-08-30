@@ -216,17 +216,22 @@ impl NyaTermApp {
         };
         let transfer_tx = self.transfer.transfer_event_sender();
         let transfer_options = self.sftp_transfer_options();
-        std::thread::spawn(move || {
-            upload_external_editor_file(
-                service,
-                &job_id,
-                &remote_path,
-                raw_path_token,
-                &local_path,
-                transfer_options,
-                &transfer_tx,
-            );
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-external-editor-upload",
+            job_id.clone(),
+            transfer_tx.clone(),
+            move || {
+                upload_external_editor_file(
+                    service,
+                    &job_id,
+                    &remote_path,
+                    raw_path_token,
+                    &local_path,
+                    transfer_options,
+                    &transfer_tx,
+                );
+            },
+        );
     }
 
     pub(in crate::features) fn active_external_editor_sync_prompt(

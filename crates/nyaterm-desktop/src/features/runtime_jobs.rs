@@ -1,19 +1,18 @@
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::time::Instant;
 
-use futures::channel::mpsc::{UnboundedReceiver, unbounded};
+use futures::channel::mpsc::UnboundedSender;
 
 use nyaterm_core::{
     AiCommandCard, AiMode, AiModelDiscovery, CommandHistoryEntry, CommandObservation,
 };
-use nyaterm_store::{StoreBlockingClient, StoreDomain};
 use nyaterm_transport::{
     DockerComposeService, DockerContainerDetails, RemoteDockerOverview, RemoteGpuOverview,
     RemoteNpuOverview, RemoteProcess, RemoteStats, SessionInfo, SessionKind, SshMultiplexHandle,
     SshSessionConfig, SshTunnelInfo,
 };
 
+use crate::blocking_jobs::BlockingJobScheduler;
 use crate::models::SessionLaunchConfig;
 
 pub(in crate::features) struct SessionStartResult {
@@ -29,6 +28,43 @@ pub(in crate::features) struct SessionStartSuccess {
     pub(in crate::features) session_info: SessionInfo,
     pub(in crate::features) multiplex_handle: Option<SshMultiplexHandle>,
     pub(in crate::features) launch_config: Option<SessionLaunchConfig>,
+}
+
+pub(in crate::features) fn submit_session_start_job(
+    scheduler: &BlockingJobScheduler,
+    name: &'static str,
+    request_id: String,
+    connection_name: String,
+    kind: SessionKind,
+    tx: UnboundedSender<SessionStartResult>,
+    run: impl FnOnce() -> Result<SessionStartSuccess, String> + Send + 'static,
+) {
+    let rejected_tx = tx.clone();
+    let rejected_request_id = request_id.clone();
+    let rejected_connection_name = connection_name.clone();
+    if let Err(error) = scheduler.submit_detached(name, move |_| {
+        let worker_started_at = Instant::now();
+        let result = run();
+        let worker_finished_at = Instant::now();
+        let _ = tx.unbounded_send(SessionStartResult {
+            request_id,
+            connection_name,
+            kind,
+            worker_started_at,
+            worker_finished_at,
+            result,
+        });
+    }) {
+        let now = Instant::now();
+        let _ = rejected_tx.unbounded_send(SessionStartResult {
+            request_id: rejected_request_id,
+            connection_name: rejected_connection_name,
+            kind,
+            worker_started_at: now,
+            worker_finished_at: now,
+            result: Err(error.to_string()),
+        });
+    }
 }
 
 #[derive(Debug)]
@@ -240,49 +276,4 @@ pub(in crate::features) enum DockerJobOutput {
 pub(in crate::features) enum ActivitySide {
     Left,
     Right,
-}
-
-pub(in crate::features) fn spawn_command_persistence_worker(
-    store: StoreBlockingClient,
-) -> (
-    mpsc::Sender<CommandPersistenceRequest>,
-    UnboundedReceiver<CommandPersistenceResult>,
-) {
-    // The request side stays a blocking channel: the worker thread parks on
-    // `recv`. Only the result side is read from the GPUI thread.
-    let (request_tx, request_rx) = mpsc::channel();
-    let (result_tx, result_rx) = unbounded();
-    let _ = std::thread::Builder::new()
-        .name("nyaterm-command-persistence".to_string())
-        .spawn(move || {
-            while let Ok(request) = request_rx.recv() {
-                let result = match request {
-                    CommandPersistenceRequest::AppendHistory(commands) => {
-                        CommandPersistenceResult::History(
-                            store
-                                .request_fn(StoreDomain::Commands, move |database| {
-                                    for command in commands {
-                                        database.append_command_history(&command)?;
-                                    }
-                                    database.list_command_history(64)
-                                })
-                                .map_err(|error| error.to_string()),
-                        )
-                    }
-                    CommandPersistenceRequest::IncrementQuickCommand(command_id) => {
-                        let persisted_id = command_id.clone();
-                        let result = store
-                            .request_fn(StoreDomain::Commands, move |database| {
-                                database.increment_quick_command_use_count(&persisted_id)
-                            })
-                            .map_err(|error| error.to_string());
-                        CommandPersistenceResult::QuickCommandUseCount { command_id, result }
-                    }
-                };
-                if result_tx.unbounded_send(result).is_err() {
-                    break;
-                }
-            }
-        });
-    (request_tx, result_rx)
 }

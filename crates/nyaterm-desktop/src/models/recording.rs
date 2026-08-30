@@ -17,6 +17,7 @@ const RECORDING_WRITE_QUEUE_BYTE_LIMIT: u64 = 4 * 1024 * 1024;
 
 pub(crate) struct RecordingWritePipeline {
     command_tx: mpsc::Sender<RecordingWriteCommand>,
+    worker: Option<thread::JoinHandle<()>>,
     queued_bytes: Arc<AtomicU64>,
     dropped: Arc<Mutex<DroppedPayloads>>,
     /// Taken once by `NyaTermApp::start_recording_event_drain`, which owns
@@ -53,7 +54,7 @@ impl RecordingWritePipeline {
         let worker_event_tx = event_tx.clone();
         let worker_queued_bytes = Arc::clone(&queued_bytes);
         let worker_dropped = Arc::clone(&dropped);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-recording-writer".to_string())
             .spawn(move || {
                 run_recording_writer(
@@ -67,6 +68,7 @@ impl RecordingWritePipeline {
             .expect("failed to spawn recording writer");
         Self {
             command_tx,
+            worker: Some(worker),
             queued_bytes,
             dropped,
             event_rx: Some(event_rx),
@@ -116,6 +118,24 @@ impl RecordingWritePipeline {
             queued_bytes: Arc::clone(&self.queued_bytes),
             dropped: Arc::clone(&self.dropped),
         }
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        if self.worker.is_none() {
+            return;
+        }
+        let _ = self.command_tx.send(RecordingWriteCommand::Shutdown);
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("recording writer panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for RecordingWritePipeline {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -340,6 +360,7 @@ impl RecordingHistorySearchKey {
 
 #[derive(Debug)]
 enum RecordingWriteCommand {
+    Shutdown,
     Start {
         session_id: String,
         context: Box<RecordingContext>,
@@ -429,6 +450,7 @@ fn run_recording_writer(
     recording_manager.set_memory_limit(memory_limit_bytes);
     while let Ok(command) = command_rx.recv() {
         match command {
+            RecordingWriteCommand::Shutdown => break,
             RecordingWriteCommand::Start {
                 session_id,
                 context,

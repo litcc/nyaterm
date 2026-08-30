@@ -267,7 +267,7 @@ impl NyaTermApp {
                 .session
                 .take_multiplex_handle_if_no_other_live_reference(session_id, &multiplex_key)
         {
-            super::disconnect_multiplex_handle(handle);
+            self.session.disconnect_multiplex_handle(handle);
         }
 
         let banner = "\r\n\x1b[31m[Session disconnected]\x1b[0m\r\n\x1b[33m[Press Enter to reconnect]\x1b[0m\r\n";

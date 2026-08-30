@@ -33,25 +33,34 @@ impl NyaTermApp {
         };
         self.request_settings_panel_refresh(cx);
         self.defer_ai_panel_snapshot_flush(cx);
-        std::thread::spawn(move || {
-            let mut discoveries = Vec::new();
-            let mut errors = Vec::new();
-            for credential in credentials {
-                match discover_openai_compatible_models(&settings, &credential) {
-                    Ok(models) => discoveries.extend(models),
-                    Err(error) => errors.push(format!("{}: {error}", credential.name)),
+        let rejected_tx = tx.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("ai-model-discovery", move |_| {
+                let mut discoveries = Vec::new();
+                let mut errors = Vec::new();
+                for credential in credentials {
+                    match discover_openai_compatible_models(&settings, &credential) {
+                        Ok(models) => discoveries.extend(models),
+                        Err(error) => errors.push(format!("{}: {error}", credential.name)),
+                    }
                 }
-            }
-            let result = if discoveries.is_empty() && !errors.is_empty() {
-                Err(errors.join("; "))
-            } else {
-                Ok(discoveries)
-            };
-            let _ = tx.unbounded_send(AiDiscoveryJobResult {
+                let result = if discoveries.is_empty() && !errors.is_empty() {
+                    Err(errors.join("; "))
+                } else {
+                    Ok(discoveries)
+                };
+                let _ = tx.unbounded_send(AiDiscoveryJobResult {
+                    profile_id: String::new(),
+                    result,
+                });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(AiDiscoveryJobResult {
                 profile_id: String::new(),
-                result,
+                result: Err(error.to_string()),
             });
-        });
+        }
         self.defer_ai_panel_snapshot_flush(cx);
     }
 

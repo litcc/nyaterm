@@ -9,6 +9,7 @@ mod temporary_ssh_link;
 mod test_support;
 
 pub mod app_shell;
+pub mod blocking_jobs;
 pub mod entities;
 pub mod features;
 pub mod http;

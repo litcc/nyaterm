@@ -118,6 +118,16 @@ def main() -> int:
     )
     errors.extend(check_budget("desktop_feature_thread_spawn", thread_spawns, allowlist))
 
+    desktop_files = tuple(
+        path
+        for path in RUST_FILES
+        if relative(path).startswith("crates/nyaterm-desktop/src/")
+    )
+    thread_builders = matching_counts(
+        re.compile(r"\b(?:std::)?thread::Builder::new\s*\(\s*\)"), desktop_files
+    )
+    errors.extend(check_budget("desktop_thread_builder", thread_builders, allowlist))
+
     raw_scrolls = matching_counts(
         re.compile(r"\.overflow_(?:x_|y_)?scroll\s*\(\s*\)"), RUST_FILES
     )

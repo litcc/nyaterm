@@ -19,7 +19,7 @@ use crate::models::{
 use super::super::helpers::remote_file_name;
 use super::helpers::{
     RemoteFileTextKind, is_known_binary_file, open_local_path_with_editor, remote_file_text_kind,
-    sanitize_local_open_segment, watch_external_editor_file,
+    sanitize_local_open_segment,
 };
 
 impl NyaTermApp {
@@ -125,22 +125,27 @@ impl NyaTermApp {
         self.shell
             .set_status(format!("remote file AI action started: {remote_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .read_text_file_path(&remote_file_path, max_bytes)
-                .map(|file| TransferJobOutput::AiFileActionLoaded {
-                    remote_path,
-                    action_id,
-                    action_name,
-                    prompt,
-                    file,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-ai-file-load",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .read_text_file_path(&remote_file_path, max_bytes)
+                    .map(|file| TransferJobOutput::AiFileActionLoaded {
+                        remote_path,
+                        action_id,
+                        action_name,
+                        prompt,
+                        file,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -444,39 +449,41 @@ impl NyaTermApp {
 
         let progress_tx = self.transfer.transfer_event_sender();
         let finished_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let progress_id = id.clone();
-            let result = service
-                .download_remote_file_with_progress_and_control_options(
-                    &remote_file_path,
-                    local_path.clone(),
-                    control,
-                    transfer_options,
-                    move |progress| {
-                        let _ = progress_tx.unbounded_send(TransferJobResult {
-                            id: progress_id.clone(),
-                            event: TransferJobEvent::Progress(progress),
-                        });
-                    },
-                )
-                .map_err(|error| error.to_string())
-                .and_then(|_| {
-                    open_local_path_with_editor(&local_path, &default_editor).map(|_| {
-                        TransferJobOutput::ExternalOpened {
-                            remote_path: remote_path.clone(),
-                            local_path: local_path.clone(),
-                        }
-                    })
+        self.submit_transfer_blocking_job(
+            "sftp-open-external",
+            id.clone(),
+            finished_tx.clone(),
+            move || {
+                let progress_id = id.clone();
+                let result = service
+                    .download_remote_file_with_progress_and_control_options(
+                        &remote_file_path,
+                        local_path.clone(),
+                        control,
+                        transfer_options,
+                        move |progress| {
+                            let _ = progress_tx.unbounded_send(TransferJobResult {
+                                id: progress_id.clone(),
+                                event: TransferJobEvent::Progress(progress),
+                            });
+                        },
+                    )
+                    .map_err(|error| error.to_string())
+                    .and_then(|_| {
+                        open_local_path_with_editor(&local_path, &default_editor).map(|_| {
+                            TransferJobOutput::ExternalOpened {
+                                remote_path: remote_path.clone(),
+                                raw_path_token: remote_file_path.raw_path_token.clone(),
+                                local_path: local_path.clone(),
+                            }
+                        })
+                    });
+                let _ = finished_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
                 });
-            let opened = result.is_ok();
-            let _ = finished_tx.unbounded_send(TransferJobResult {
-                id: id.clone(),
-                event: TransferJobEvent::Finished(result),
-            });
-            if opened {
-                watch_external_editor_file(id, remote_file_path, local_path, finished_tx);
-            }
-        });
+            },
+        );
         cx.notify();
     }
 

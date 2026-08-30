@@ -138,29 +138,34 @@ impl NyaTermApp {
         self.shell
             .set_status(format!("remote folder creation started: {remote_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = {
-                let list_path = if open_after_create {
-                    remote_path.clone()
-                } else {
-                    parent_path.clone()
-                };
-                service
-                    .create_dir_path(&remote_path, Some(mode))
-                    .and_then(|_| service.list_dir(&list_path))
-            }
-            .map(|entries| TransferJobOutput::CreatedDirectory {
-                remote_path,
-                parent_path,
-                entries,
-                open_after_create,
-            })
-            .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-create-directory",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = {
+                    let list_path = if open_after_create {
+                        remote_path.clone()
+                    } else {
+                        parent_path.clone()
+                    };
+                    service
+                        .create_dir_path(&remote_path, Some(mode))
+                        .and_then(|_| service.list_dir(&list_path))
+                }
+                .map(|entries| TransferJobOutput::CreatedDirectory {
+                    remote_path,
+                    parent_path,
+                    entries,
+                    open_after_create,
+                })
+                .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -287,22 +292,27 @@ impl NyaTermApp {
         self.shell
             .set_status(format!("remote file creation started: {remote_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .create_file_path(&remote_path, Some(mode))
-                .and_then(|_| service.list_dir(&parent_path))
-                .map(|entries| TransferJobOutput::CreatedFile {
-                    remote_path,
-                    parent_path,
-                    entries,
-                    open_after_create,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-create-file",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .create_file_path(&remote_path, Some(mode))
+                    .and_then(|_| service.list_dir(&parent_path))
+                    .map(|entries| TransferJobOutput::CreatedFile {
+                        remote_path,
+                        parent_path,
+                        entries,
+                        open_after_create,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

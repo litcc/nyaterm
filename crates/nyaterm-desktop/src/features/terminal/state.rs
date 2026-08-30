@@ -188,6 +188,11 @@ pub(in crate::features) struct TerminalOverlayVisibility {
 }
 
 impl TerminalFeatureState {
+    pub(in crate::features) fn shutdown_workers(&mut self) {
+        self.assist.shutdown_workers();
+        self.view.frame_pipeline.shutdown();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::features) fn new(
         screen: TerminalScreen,

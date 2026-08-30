@@ -13,8 +13,8 @@ use super::{MultiplexSshStartRequest, PendingSessionStartRegistration};
 use crate::features::formatting::{session_kind_label, short_id};
 use crate::features::{
     NyaTermApp, runtime_jobs::SessionStartResult, runtime_jobs::SessionStartSuccess,
-    session::PendingSessionStart, session::SavedConnectionStartOptions,
-    session::SessionStartEventRequest,
+    runtime_jobs::submit_session_start_job, session::PendingSessionStart,
+    session::SavedConnectionStartOptions, session::SessionStartEventRequest,
 };
 use crate::models::{NavItem, SessionLaunchConfig, SessionRuntimeMetadata};
 
@@ -227,24 +227,22 @@ impl NyaTermApp {
         let session_manager = self.session.manager_handle();
         let session_start_tx = self.session.start.sender();
         let request_id_for_worker = request_id.clone();
-        std::thread::spawn(move || {
-            let worker_started_at = Instant::now();
-            let result = create_session_from_launch_config(&session_manager, launch_config.clone())
-                .map(|success| SessionStartSuccess {
-                    launch_config: Some(launch_config),
-                    ..success
-                })
-                .map_err(|error| error.to_string());
-            let worker_finished_at = Instant::now();
-            let _ = session_start_tx.unbounded_send(SessionStartResult {
-                request_id: request_id_for_worker,
-                connection_name,
-                kind,
-                worker_started_at,
-                worker_finished_at,
-                result,
-            });
-        });
+        submit_session_start_job(
+            &self.blocking_jobs,
+            "session-start",
+            request_id_for_worker,
+            connection_name,
+            kind,
+            session_start_tx,
+            move || {
+                create_session_from_launch_config(&session_manager, launch_config.clone())
+                    .map(|success| SessionStartSuccess {
+                        launch_config: Some(launch_config),
+                        ..success
+                    })
+                    .map_err(|error| error.to_string())
+            },
+        );
     }
 
     pub(in crate::features) fn begin_background_ssh_start(
@@ -309,9 +307,14 @@ impl NyaTermApp {
         let session_manager = self.session.manager_handle();
         let session_start_tx = self.session.start.sender();
         let request_id_for_worker = request_id.clone();
-        std::thread::spawn(move || {
-            let worker_started_at = Instant::now();
-            let result = (|| {
+        submit_session_start_job(
+            &self.blocking_jobs,
+            "ssh-session-start",
+            request_id_for_worker,
+            connection_name,
+            SessionKind::Ssh,
+            session_start_tx,
+            move || {
                 let multiplex =
                     open_ssh_multiplex_handle(config.clone()).map_err(|error| error.to_string())?;
                 match session_manager
@@ -332,17 +335,8 @@ impl NyaTermApp {
                         Err(error.to_string())
                     }
                 }
-            })();
-            let worker_finished_at = Instant::now();
-            let _ = session_start_tx.unbounded_send(SessionStartResult {
-                request_id: request_id_for_worker,
-                connection_name,
-                kind: SessionKind::Ssh,
-                worker_started_at,
-                worker_finished_at,
-                result,
-            });
-        });
+            },
+        );
     }
 
     pub(in crate::features) fn begin_background_multiplex_ssh_start(
@@ -414,9 +408,14 @@ impl NyaTermApp {
         let session_manager = self.session.manager_handle();
         let session_start_tx = self.session.start.sender();
         let request_id_for_worker = request_id.clone();
-        std::thread::spawn(move || {
-            let worker_started_at = Instant::now();
-            let result = (|| {
+        submit_session_start_job(
+            &self.blocking_jobs,
+            "ssh-multiplex-session-start",
+            request_id_for_worker,
+            connection_name,
+            SessionKind::Ssh,
+            session_start_tx,
+            move || {
                 let (multiplex, reused_multiplex) = match existing_multiplex {
                     Some(handle) if !handle.is_closed() => (handle, true),
                     _ => (
@@ -443,17 +442,8 @@ impl NyaTermApp {
                         Err(error.to_string())
                     }
                 }
-            })();
-            let worker_finished_at = Instant::now();
-            let _ = session_start_tx.unbounded_send(SessionStartResult {
-                request_id: request_id_for_worker,
-                connection_name,
-                kind: SessionKind::Ssh,
-                worker_started_at,
-                worker_finished_at,
-                result,
-            });
-        });
+            },
+        );
     }
 
     pub(in crate::features) fn send_probe_command(&mut self, cx: &mut Context<Self>) {
@@ -577,7 +567,7 @@ impl NyaTermApp {
                     .is_some_and(|stale_id| !self.session.has_session(stale_id))
                 {
                     if let Some(handle) = success.multiplex_handle {
-                        super::super::disconnect_multiplex_handle(handle);
+                        self.session.disconnect_multiplex_handle(handle);
                     }
                     if let Err(error) = self.session.manager().close(&session_id) {
                         tracing::warn!(

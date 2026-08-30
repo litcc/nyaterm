@@ -26,6 +26,15 @@ struct ShutdownSessionSnapshot {
 }
 
 impl NyaTermApp {
+    pub(crate) fn shutdown_blocking_jobs(&mut self) {
+        self.shutdown_remote_desktop_workers();
+        self.session.shutdown_workers();
+        self.terminal.shutdown_workers();
+        self.recording.shutdown_worker();
+        self.transfer.shutdown_external_editor_watchers();
+        self.blocking_jobs.shutdown();
+    }
+
     pub(crate) fn report_shutdown_retry_required(&mut self, cx: &mut Context<Self>) {
         let message =
             "storage is available again; retry the failed save, then close NyaTerm".to_string();

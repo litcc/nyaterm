@@ -1,6 +1,7 @@
 //! Session lifecycle, prompts, recording and file-transfer session runtimes.
 
 use std::collections::HashMap;
+use std::thread::JoinHandle;
 
 use nyaterm_transport::{RemoteFileService, SshMultiplexHandle};
 
@@ -24,26 +25,57 @@ struct SessionProtocolRuntimeState {
     trzsz: HashMap<String, trzsz_runtime::TrzszSessionState>,
     remote_files: HashMap<String, RemoteFileService>,
     multiplex_handles: HashMap<String, SshMultiplexHandle>,
+    multiplex_disconnect_workers: Vec<JoinHandle<()>>,
 }
 
-impl Drop for SessionProtocolRuntimeState {
-    fn drop(&mut self) {
+impl SessionProtocolRuntimeState {
+    fn shutdown_workers(&mut self) {
+        for state in self.zmodem.values_mut() {
+            state.stop_worker();
+        }
+        for state in self.trzsz.values_mut() {
+            state.stop_workers();
+        }
         for (_, handle) in std::mem::take(&mut self.multiplex_handles) {
-            disconnect_multiplex_handle(handle);
+            self.spawn_multiplex_disconnect(handle);
+        }
+        for worker in self.multiplex_disconnect_workers.drain(..) {
+            if worker.join().is_err() {
+                tracing::warn!("SSH multiplex disconnect worker panicked during shutdown");
+            }
+        }
+    }
+
+    fn spawn_multiplex_disconnect(&mut self, handle: SshMultiplexHandle) {
+        let mut still_running = Vec::new();
+        for worker in self.multiplex_disconnect_workers.drain(..) {
+            if worker.is_finished() {
+                if worker.join().is_err() {
+                    tracing::warn!("SSH multiplex disconnect worker panicked");
+                }
+            } else {
+                still_running.push(worker);
+            }
+        }
+        self.multiplex_disconnect_workers = still_running;
+        match std::thread::Builder::new()
+            .name("nyaterm-ssh-multiplex-disconnect".to_string())
+            .spawn(move || {
+                if let Err(error) = handle.disconnect() {
+                    tracing::warn!(error = %error, "failed to disconnect SSH multiplex handle");
+                }
+            }) {
+            Ok(worker) => self.multiplex_disconnect_workers.push(worker),
+            Err(error) => {
+                tracing::warn!(error = %error, "failed to spawn SSH multiplex disconnect worker");
+            }
         }
     }
 }
 
-fn disconnect_multiplex_handle(handle: SshMultiplexHandle) {
-    if let Err(error) = std::thread::Builder::new()
-        .name("nyaterm-ssh-multiplex-disconnect".to_string())
-        .spawn(move || {
-            if let Err(error) = handle.disconnect() {
-                tracing::warn!(error = %error, "failed to disconnect SSH multiplex handle");
-            }
-        })
-    {
-        tracing::warn!(error = %error, "failed to spawn SSH multiplex disconnect worker");
+impl Drop for SessionProtocolRuntimeState {
+    fn drop(&mut self) {
+        self.shutdown_workers();
     }
 }
 

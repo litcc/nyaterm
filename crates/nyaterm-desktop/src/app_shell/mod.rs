@@ -430,8 +430,17 @@ impl AppShell {
         match self.lifecycle {
             AppShellLifecycle::Ready | AppShellLifecycle::FlushFailed(_) => self.begin_shutdown(cx),
             AppShellLifecycle::Flushing => {}
-            AppShellLifecycle::Loading | AppShellLifecycle::Recovery(_) => cx.quit(),
+            AppShellLifecycle::Loading | AppShellLifecycle::Recovery(_) => {
+                self.quit_after_worker_shutdown(cx);
+            }
         }
+    }
+
+    fn quit_after_worker_shutdown(&mut self, cx: &mut Context<Self>) {
+        if let Some(app) = &self.app {
+            app.update(cx, |app, _| app.shutdown_blocking_jobs());
+        }
+        cx.quit();
     }
 
     fn begin_shutdown(&mut self, cx: &mut Context<Self>) {
@@ -476,7 +485,9 @@ impl AppShell {
         cx.spawn(async move |this, cx| {
             let event = task.await;
             let _ = this.update(cx, |this, cx| match event.outcome {
-                Ok(()) => cx.quit(),
+                Ok(()) => {
+                    this.quit_after_worker_shutdown(cx);
+                }
                 Err(error) => {
                     this.lifecycle = AppShellLifecycle::FlushFailed(error.to_string());
                     cx.notify();
@@ -574,7 +585,9 @@ impl AppShell {
                                     .child(
                                         NyaButton::new("recovery-quit", "Quit")
                                             .variant(NyaButtonVariant::Danger)
-                                            .on_click(|_, _, cx| cx.quit()),
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.quit_after_worker_shutdown(cx);
+                                            })),
                                     ),
                             ),
                     )
@@ -636,7 +649,9 @@ impl AppShell {
                                 .child(
                                     NyaButton::new("shutdown-force", "Force Quit")
                                         .variant(NyaButtonVariant::Danger)
-                                        .on_click(|_, _, cx| cx.quit()),
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.quit_after_worker_shutdown(cx);
+                                        })),
                                 ),
                         ),
                 )

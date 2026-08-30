@@ -11,6 +11,7 @@ use nyaterm_core::{
 use nyaterm_store::StoreBlockingClient;
 use nyaterm_ui::{ChildWindowSlot, NyaWindowHandle};
 
+use crate::blocking_jobs::BlockingJobScheduler;
 use crate::features::{
     runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
 };
@@ -38,6 +39,7 @@ pub(in crate::features) struct CommandFeatureInit {
     pub view_mode: QuickCommandViewMode,
     pub focus: QuickCommandFeatureFocus,
     pub store: StoreBlockingClient,
+    pub scheduler: BlockingJobScheduler,
 }
 
 struct CommandCatalogState {
@@ -59,7 +61,7 @@ impl CommandFeatureState {
             catalog: CommandCatalogState::new(init.commands, init.categories),
             quick: QuickCommandFeatureState::new(init.sort_mode, init.view_mode, init.focus),
             history: Arc::from(init.history),
-            runtime: CommandRuntimeState::new(init.store),
+            runtime: CommandRuntimeState::new(init.store, init.scheduler),
         }
     }
 
@@ -965,6 +967,7 @@ mod tests {
     use nyaterm_core::{QuickCommand, QuickCommandCategory};
     use nyaterm_store::{StoreConfig, StoreRuntime};
 
+    use crate::blocking_jobs::BlockingJobScheduler;
     use crate::models::{
         QuickCommandEditorState, QuickCommandImportPathPromptKind, QuickCommandSortMode,
         QuickCommandVariableDef, QuickCommandVariablePromptState, QuickCommandViewMode,
@@ -1020,6 +1023,7 @@ mod tests {
                 variable: focus(),
             },
             store,
+            scheduler: BlockingJobScheduler::new(),
         })
     }
 

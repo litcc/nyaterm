@@ -10,6 +10,8 @@ use crate::models::{
     TransferJobOutput, TransferJobResult, TransferJobState, TransferJobStatus,
 };
 
+use super::helpers::submit_transfer_blocking_job;
+
 impl NyaTermApp {
     pub(in crate::features) fn start_transfer_browser_children_job(
         &mut self,
@@ -73,19 +75,25 @@ impl NyaTermApp {
             control: None,
         });
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .list_dir(&remote_path)
-                .map(|entries| TransferJobOutput::ChildEntries {
-                    remote_path,
-                    entries,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        submit_transfer_blocking_job(
+            &self.blocking_jobs,
+            "sftp-list-children",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .list_dir(&remote_path)
+                    .map(|entries| TransferJobOutput::ChildEntries {
+                        remote_path,
+                        entries,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -149,16 +157,22 @@ impl NyaTermApp {
         self.shell
             .set_status(format!("remote file list started for {remote_path}"));
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .list_dir_path(&remote_file_path)
-                .map(TransferJobOutput::Entries)
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        submit_transfer_blocking_job(
+            &self.blocking_jobs,
+            "sftp-list-directory",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .list_dir_path(&remote_file_path)
+                    .map(TransferJobOutput::Entries)
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -249,53 +263,61 @@ impl NyaTermApp {
             }
         };
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = (|| {
-                let remote_path = match shell_cwd {
-                    Some(cwd) => cwd,
-                    None => {
-                        let timeout = Duration::from_millis(
-                            config.sftp.shell_detection_timeout_ms.clamp(100, 60_000),
-                        );
-                        let output =
-                            SshProcessService::with_multiplex(config.clone(), multiplex.clone())
-                                .map_err(|error| error.to_string())?
-                                .run_command("pwd -P", timeout)
-                                .map_err(|error| error.to_string())?;
-                        if output.exit_status.is_some_and(|status| status != 0) {
-                            let detail = output
-                                .stderr
-                                .trim()
+        submit_transfer_blocking_job(
+            &self.blocking_jobs,
+            "sftp-sync-cwd",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = (|| {
+                    let remote_path = match shell_cwd {
+                        Some(cwd) => cwd,
+                        None => {
+                            let timeout = Duration::from_millis(
+                                config.sftp.shell_detection_timeout_ms.clamp(100, 60_000),
+                            );
+                            let output = SshProcessService::with_multiplex(
+                                config.clone(),
+                                multiplex.clone(),
+                            )
+                            .map_err(|error| error.to_string())?
+                            .run_command("pwd -P", timeout)
+                            .map_err(|error| error.to_string())?;
+                            if output.exit_status.is_some_and(|status| status != 0) {
+                                let detail = output
+                                    .stderr
+                                    .trim()
+                                    .lines()
+                                    .next()
+                                    .or_else(|| output.stdout.trim().lines().next())
+                                    .unwrap_or("remote pwd failed");
+                                return Err(detail.to_string());
+                            }
+                            output
+                                .stdout
                                 .lines()
-                                .next()
-                                .or_else(|| output.stdout.trim().lines().next())
-                                .unwrap_or("remote pwd failed");
-                            return Err(detail.to_string());
+                                .map(str::trim)
+                                .find(|line| line.starts_with('/'))
+                                .ok_or_else(|| {
+                                    "remote pwd did not return an absolute path".to_string()
+                                })?
+                                .to_string()
                         }
-                        output
-                            .stdout
-                            .lines()
-                            .map(str::trim)
-                            .find(|line| line.starts_with('/'))
-                            .ok_or_else(|| {
-                                "remote pwd did not return an absolute path".to_string()
-                            })?
-                            .to_string()
-                    }
-                };
-                let entries = service
-                    .list_dir(&remote_path)
-                    .map_err(|error| error.to_string())?;
-                Ok(TransferJobOutput::CwdSynced {
-                    remote_path,
-                    entries,
-                })
-            })();
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+                    };
+                    let entries = service
+                        .list_dir(&remote_path)
+                        .map_err(|error| error.to_string())?;
+                    Ok(TransferJobOutput::CwdSynced {
+                        remote_path,
+                        entries,
+                    })
+                })();
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -348,16 +370,22 @@ impl NyaTermApp {
         });
         self.transfer.browser.status = "Resolving remote home...".to_string();
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = (|| {
-                let home_dir = service.home_dir().map_err(|error| error.to_string())?;
-                Ok(TransferJobOutput::HomeDir(home_dir))
-            })();
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        submit_transfer_blocking_job(
+            &self.blocking_jobs,
+            "sftp-resolve-home",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = (|| {
+                    let home_dir = service.home_dir().map_err(|error| error.to_string())?;
+                    Ok(TransferJobOutput::HomeDir(home_dir))
+                })();
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

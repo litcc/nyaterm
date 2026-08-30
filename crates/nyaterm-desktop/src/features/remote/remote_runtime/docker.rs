@@ -4,15 +4,43 @@ use rust_i18n::t;
 use gpui::{Context, Window};
 use nyaterm_transport::DockerService;
 
+use crate::blocking_jobs::BlockingJobScheduler;
 use crate::features::NyaTermApp;
 use crate::features::formatting::{compact_id, docker_compose_project_key};
 use crate::features::runtime_jobs::{DockerJobOutput, DockerJobResult};
 use crate::models::{DockerConfirmAction, DockerConfirmState, NavItem};
 
+use super::super::state::RemoteJobTicket;
 use super::helpers::{
     ActiveSshRuntimeContext, DOCKER_SHELL_SELECTOR, docker_compose_terminal_base,
     docker_overview_status, shell_quote,
 };
+
+fn submit_docker_job(
+    scheduler: &BlockingJobScheduler,
+    name: &'static str,
+    ticket: RemoteJobTicket<DockerJobResult>,
+    session_id: String,
+    run: impl FnOnce() -> Result<DockerJobOutput, String> + Send + 'static,
+) {
+    let job_id = ticket.job_id;
+    let tx = ticket.tx;
+    let rejected_tx = tx.clone();
+    let rejected_session_id = session_id.clone();
+    if let Err(error) = scheduler.submit_detached(name, move |_| {
+        let _ = tx.unbounded_send(DockerJobResult {
+            job_id,
+            session_id,
+            result: run(),
+        });
+    }) {
+        let _ = rejected_tx.unbounded_send(DockerJobResult {
+            job_id,
+            session_id: rejected_session_id,
+            result: Err(error.to_string()),
+        });
+    }
+}
 
 impl NyaTermApp {
     fn active_docker_runtime_context(
@@ -49,19 +77,20 @@ impl NyaTermApp {
         let ticket = self.remote_ops.begin_docker_job(job_session_id.clone());
         self.remote_ops.mark_docker_refresh_started();
         self.remote_ops.set_docker_status("loading Docker overview");
-        std::thread::spawn(move || {
-            let result = (|| {
-                DockerService::with_multiplex(config, multiplex)?
-                    .overview()
-                    .map(DockerJobOutput::Overview)
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-overview",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    DockerService::with_multiplex(config, multiplex)?
+                        .overview()
+                        .map(DockerJobOutput::Overview)
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 
@@ -90,23 +119,24 @@ impl NyaTermApp {
             "Docker {action} {}",
             compact_id(&container_id)
         ));
-        std::thread::spawn(move || {
-            let result = (|| {
-                let service = DockerService::with_multiplex(config, multiplex)?;
-                service.container_action(&container_id, action)?;
-                let overview = service.overview()?;
-                Ok(DockerJobOutput::RefreshedAfterAction {
-                    label: format!("Docker {action} {}", compact_id(&container_id)),
-                    overview,
-                })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-container-action",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    let service = DockerService::with_multiplex(config, multiplex)?;
+                    service.container_action(&container_id, action)?;
+                    let overview = service.overview()?;
+                    Ok(DockerJobOutput::RefreshedAfterAction {
+                        label: format!("Docker {action} {}", compact_id(&container_id)),
+                        overview,
+                    })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 
@@ -133,22 +163,23 @@ impl NyaTermApp {
             container_id.clone(),
             format!("loading details for {}", compact_id(&container_id)),
         );
-        std::thread::spawn(move || {
-            let result = (|| {
-                DockerService::with_multiplex(config, multiplex)?
-                    .container_details(&container_id)
-                    .map(|details| DockerJobOutput::Details {
-                        container_id,
-                        details,
-                    })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-details",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    DockerService::with_multiplex(config, multiplex)?
+                        .container_details(&container_id)
+                        .map(|details| DockerJobOutput::Details {
+                            container_id,
+                            details,
+                        })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 
@@ -275,23 +306,24 @@ impl NyaTermApp {
         self.remote_ops
             .set_docker_status(format!("loading compose services for {project_name}"));
         self.remote_ops.clear_compose_service_error(&key);
-        std::thread::spawn(move || {
-            let result = (|| {
-                DockerService::with_multiplex(config, multiplex)?
-                    .compose_services(&project_name, config_files.as_deref())
-                    .map(|services| DockerJobOutput::ComposeServices {
-                        key,
-                        project_name,
-                        services,
-                    })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-compose-services",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    DockerService::with_multiplex(config, multiplex)?
+                        .compose_services(&project_name, config_files.as_deref())
+                        .map(|services| DockerJobOutput::ComposeServices {
+                            key,
+                            project_name,
+                            services,
+                        })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 
@@ -322,32 +354,34 @@ impl NyaTermApp {
         let ticket = self.remote_ops.begin_docker_job(job_session_id.clone());
         self.remote_ops
             .set_docker_status(format!("compose {action} {service_name}"));
-        std::thread::spawn(move || {
-            let result = (|| {
-                let service = DockerService::with_multiplex(config, multiplex)?;
-                service.compose_service_action(
-                    &project_name,
-                    config_files.as_deref(),
-                    &service_name,
-                    action,
-                )?;
-                let overview = service.overview()?;
-                let services = service.compose_services(&project_name, config_files.as_deref())?;
-                Ok(DockerJobOutput::ComposeServiceAction {
-                    key,
-                    service_name,
-                    action: action.to_string(),
-                    overview,
-                    services,
-                })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-compose-service-action",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    let service = DockerService::with_multiplex(config, multiplex)?;
+                    service.compose_service_action(
+                        &project_name,
+                        config_files.as_deref(),
+                        &service_name,
+                        action,
+                    )?;
+                    let overview = service.overview()?;
+                    let services =
+                        service.compose_services(&project_name, config_files.as_deref())?;
+                    Ok(DockerJobOutput::ComposeServiceAction {
+                        key,
+                        service_name,
+                        action: action.to_string(),
+                        overview,
+                        services,
+                    })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 
@@ -378,33 +412,34 @@ impl NyaTermApp {
         self.remote_ops
             .set_docker_status(format!("compose {action} {project_name}"));
         self.remote_ops.clear_compose_service_error(&key);
-        std::thread::spawn(move || {
-            let result = (|| {
-                let service = DockerService::with_multiplex(config, multiplex)?;
-                service.compose_action(&project_name, config_files.as_deref(), action)?;
-                let overview = service.overview()?;
-                let service_result =
-                    service.compose_services(&project_name, config_files.as_deref());
-                let (services, service_error) = match service_result {
-                    Ok(services) => (Some(services), None),
-                    Err(error) => (None, Some(error.to_string())),
-                };
-                Ok(DockerJobOutput::ComposeProjectAction {
-                    key,
-                    project_name,
-                    action: action.to_string(),
-                    overview,
-                    services,
-                    service_error,
-                })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-compose-action",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    let service = DockerService::with_multiplex(config, multiplex)?;
+                    service.compose_action(&project_name, config_files.as_deref(), action)?;
+                    let overview = service.overview()?;
+                    let service_result =
+                        service.compose_services(&project_name, config_files.as_deref());
+                    let (services, service_error) = match service_result {
+                        Ok(services) => (Some(services), None),
+                        Err(error) => (None, Some(error.to_string())),
+                    };
+                    Ok(DockerJobOutput::ComposeProjectAction {
+                        key,
+                        project_name,
+                        action: action.to_string(),
+                        overview,
+                        services,
+                        service_error,
+                    })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 
@@ -455,64 +490,69 @@ impl NyaTermApp {
         let ticket = self.remote_ops.begin_docker_job(job_session_id.clone());
         self.remote_ops
             .set_docker_status(format!("running {}", confirm.title));
-        std::thread::spawn(move || {
-            let result = (|| {
-                let label = confirm.title.clone();
-                let service = DockerService::with_multiplex(config, multiplex)?;
-                match confirm.action {
-                    DockerConfirmAction::ContainerAction {
-                        container_id,
-                        action,
-                    } => {
-                        service.container_action(&container_id, action)?;
-                    }
-                    DockerConfirmAction::ImageRemove { image_id, force } => {
-                        service.image_remove(&image_id, force)?;
-                    }
-                    DockerConfirmAction::VolumeRemove { volume_name, force } => {
-                        service.volume_remove(&volume_name, force)?;
-                    }
-                    DockerConfirmAction::NetworkRemove { network_id } => {
-                        service.network_remove(&network_id)?;
-                    }
-                    DockerConfirmAction::ComposeAction {
-                        project_name,
-                        config_files,
-                        action,
-                    } => {
-                        service.compose_action(&project_name, config_files.as_deref(), action)?;
-                        let key =
-                            docker_compose_project_key(&project_name, config_files.as_deref());
-                        let overview = service.overview()?;
-                        let service_result =
-                            service.compose_services(&project_name, config_files.as_deref());
-                        let (services, service_error) = match service_result {
-                            Ok(services) => (Some(services), None),
-                            Err(error) => (None, Some(error.to_string())),
-                        };
-                        return Ok(DockerJobOutput::ComposeProjectAction {
-                            key,
+        submit_docker_job(
+            &self.blocking_jobs,
+            "docker-confirmed-action",
+            ticket,
+            job_session_id,
+            move || {
+                (|| {
+                    let label = confirm.title.clone();
+                    let service = DockerService::with_multiplex(config, multiplex)?;
+                    match confirm.action {
+                        DockerConfirmAction::ContainerAction {
+                            container_id,
+                            action,
+                        } => {
+                            service.container_action(&container_id, action)?;
+                        }
+                        DockerConfirmAction::ImageRemove { image_id, force } => {
+                            service.image_remove(&image_id, force)?;
+                        }
+                        DockerConfirmAction::VolumeRemove { volume_name, force } => {
+                            service.volume_remove(&volume_name, force)?;
+                        }
+                        DockerConfirmAction::NetworkRemove { network_id } => {
+                            service.network_remove(&network_id)?;
+                        }
+                        DockerConfirmAction::ComposeAction {
                             project_name,
-                            action: action.to_string(),
-                            overview,
-                            services,
-                            service_error,
-                        });
+                            config_files,
+                            action,
+                        } => {
+                            service.compose_action(
+                                &project_name,
+                                config_files.as_deref(),
+                                action,
+                            )?;
+                            let key =
+                                docker_compose_project_key(&project_name, config_files.as_deref());
+                            let overview = service.overview()?;
+                            let service_result =
+                                service.compose_services(&project_name, config_files.as_deref());
+                            let (services, service_error) = match service_result {
+                                Ok(services) => (Some(services), None),
+                                Err(error) => (None, Some(error.to_string())),
+                            };
+                            return Ok(DockerJobOutput::ComposeProjectAction {
+                                key,
+                                project_name,
+                                action: action.to_string(),
+                                overview,
+                                services,
+                                service_error,
+                            });
+                        }
+                        DockerConfirmAction::Prune { volumes } => {
+                            service.system_prune(volumes)?;
+                        }
                     }
-                    DockerConfirmAction::Prune { volumes } => {
-                        service.system_prune(volumes)?;
-                    }
-                }
-                let overview = service.overview()?;
-                Ok(DockerJobOutput::RefreshedAfterAction { label, overview })
-            })()
-            .map_err(|error: anyhow::Error| error.to_string());
-            let _ = ticket.tx.unbounded_send(DockerJobResult {
-                job_id: ticket.job_id,
-                session_id: job_session_id,
-                result,
-            });
-        });
+                    let overview = service.overview()?;
+                    Ok(DockerJobOutput::RefreshedAfterAction { label, overview })
+                })()
+                .map_err(|error: anyhow::Error| error.to_string())
+            },
+        );
         cx.notify();
     }
 

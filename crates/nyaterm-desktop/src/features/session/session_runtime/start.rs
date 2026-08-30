@@ -1,8 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use futures::channel::oneshot;
-use gpui::{AppContext as _, Context, Window};
+use gpui::{Context, Window};
 use nyaterm_core::{
     AiExecutionProfile, ConnectionAuth, ConnectionType, SavedConnection, SftpCwdFollowMode,
     SftpSettings, SshAgentForwardingConfig as CoreSshAgentForwardingConfig, SshAlgorithmMode,
@@ -27,7 +26,7 @@ use super::super::NativeHostKeyVerifier;
 use super::PendingSessionStartRegistration;
 use crate::features::formatting::{non_empty_string, parse_telnet_enter_mode, split_shell_args};
 use crate::features::{
-    NyaTermApp, runtime_jobs::SessionStartResult, runtime_jobs::SessionStartSuccess,
+    NyaTermApp, runtime_jobs::SessionStartSuccess, runtime_jobs::submit_session_start_job,
     session::AgentPromptBroker, session::CredentialPromptBroker, session::HostKeyPromptBroker,
     session::NativeOtpProvider, session::SavedConnectionStartOptions,
 };
@@ -633,9 +632,14 @@ impl NyaTermApp {
         let session_manager = self.session.manager_handle();
         let session_start_tx = self.session.start.sender();
         let request_id_for_worker = request_id.clone();
-        std::thread::spawn(move || {
-            let worker_started_at = Instant::now();
-            let result = (|| {
+        submit_session_start_job(
+            &self.blocking_jobs,
+            "ssh-session-start",
+            request_id_for_worker,
+            connection_name,
+            SessionKind::Ssh,
+            session_start_tx,
+            move || {
                 let mut config = build_ssh_session_config_with_context(
                     &connection,
                     &mut Vec::new(),
@@ -669,17 +673,8 @@ impl NyaTermApp {
                     multiplex_handle: Some(multiplex),
                     launch_config: Some(SessionLaunchConfig::Ssh(Box::new(config))),
                 })
-            })();
-            let worker_finished_at = Instant::now();
-            let _ = session_start_tx.unbounded_send(SessionStartResult {
-                request_id: request_id_for_worker,
-                connection_name,
-                kind: SessionKind::Ssh,
-                worker_started_at,
-                worker_finished_at,
-                result,
-            });
-        });
+            },
+        );
     }
 
     pub(in crate::features) fn ssh_session_config_build_context(
@@ -761,25 +756,25 @@ impl NyaTermApp {
             store: self.store_blocking_client(),
         });
         cx.notify();
-        let task = cx.background_spawn(async move {
-            let (sender, receiver) = oneshot::channel();
-            let worker = std::thread::Builder::new()
-                .name("nyaterm-ssh-agent-preview".to_string())
-                .spawn(move || {
-                    let preview = nyaterm_transport::preview_identities_blocking(
-                        &runtime_config,
-                        Some(provider),
-                    );
-                    let _ = sender.send(preview);
-                });
-            if let Err(error) = worker {
-                tracing::error!(%error, "failed to start SSH Agent preview worker");
-                return nyaterm_transport::SshAgentIdentityPreviewResponse::default();
-            }
-            receiver.await.unwrap_or_default()
-        });
+        let (sender, receiver) = oneshot::channel();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("ssh-agent-preview", move |_| {
+                let preview =
+                    nyaterm_transport::preview_identities_blocking(&runtime_config, Some(provider));
+                let _ = sender.send(preview);
+            })
+        {
+            tracing::error!(%error, "failed to queue SSH Agent preview job");
+            self.connection_state.set_editor_agent_preview(
+                generation,
+                nyaterm_transport::SshAgentIdentityPreviewResponse::default(),
+            );
+            cx.notify();
+            return;
+        }
         cx.spawn(async move |this, cx| {
-            let preview = task.await;
+            let preview = receiver.await.unwrap_or_default();
             let _ = this.update(cx, |this, cx| {
                 if this
                     .connection_state

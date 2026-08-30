@@ -1,18 +1,11 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::time::{Instant, SystemTime};
 
 use nyaterm_transport::{
     RemoteFilePath, RemoteFileService, SftpTransferControl, SftpTransferOptions,
 };
 
 use crate::models::{TransferJobEvent, TransferJobOutput, TransferJobResult};
-
-use super::{
-    EXTERNAL_EDITOR_STARTUP_SUPPRESSION, EXTERNAL_EDITOR_UPLOAD_SETTLE,
-    EXTERNAL_EDITOR_WATCH_INTERVAL,
-};
 
 pub(super) fn sanitize_local_open_segment(input: &str) -> String {
     let sanitized: String = input
@@ -288,83 +281,6 @@ pub(super) fn is_known_text_file(name: &str) -> bool {
         || base_name.ends_with(".nginx.conf")
         || base_name == "docker-compose.yml"
         || base_name == "docker-compose.yaml"
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct LocalFileFingerprint {
-    len: u64,
-    modified: Option<SystemTime>,
-}
-
-impl LocalFileFingerprint {
-    fn from_path(path: &Path) -> std::io::Result<Self> {
-        let metadata = fs::metadata(path)?;
-        Ok(Self {
-            len: metadata.len(),
-            modified: metadata.modified().ok(),
-        })
-    }
-
-    fn is_content_change_from(&self, previous: &Self, within_startup_window: bool) -> bool {
-        if self.len != previous.len {
-            return true;
-        }
-        self.modified != previous.modified && !within_startup_window
-    }
-}
-
-pub(super) fn watch_external_editor_file(
-    job_id: String,
-    remote_path: RemoteFilePath,
-    local_path: PathBuf,
-    transfer_tx: futures::channel::mpsc::UnboundedSender<TransferJobResult>,
-) {
-    let watch_started = Instant::now();
-    let mut baseline = match LocalFileFingerprint::from_path(&local_path) {
-        Ok(fingerprint) => fingerprint,
-        Err(error) => {
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id: job_id,
-                event: TransferJobEvent::Finished(Err(format!(
-                    "external editor watch failed for {}: {error}",
-                    local_path.display()
-                ))),
-            });
-            return;
-        }
-    };
-
-    loop {
-        std::thread::sleep(EXTERNAL_EDITOR_WATCH_INTERVAL);
-        let current = match LocalFileFingerprint::from_path(&local_path) {
-            Ok(fingerprint) => fingerprint,
-            Err(_) => break,
-        };
-        if !current.is_content_change_from(
-            &baseline,
-            watch_started.elapsed() <= EXTERNAL_EDITOR_STARTUP_SUPPRESSION,
-        ) {
-            if current != baseline {
-                baseline = current;
-            }
-            continue;
-        }
-
-        std::thread::sleep(EXTERNAL_EDITOR_UPLOAD_SETTLE);
-        let settled = LocalFileFingerprint::from_path(&local_path).unwrap_or(current);
-        baseline = settled;
-        let _ = transfer_tx.unbounded_send(TransferJobResult {
-            id: job_id.clone(),
-            event: TransferJobEvent::ExternalModified {
-                remote_path: remote_path.display_path.clone(),
-                raw_path_token: remote_path.raw_path_token.clone(),
-                local_path: local_path.clone(),
-            },
-        });
-        if let Ok(after_upload) = LocalFileFingerprint::from_path(&local_path) {
-            baseline = after_upload;
-        }
-    }
 }
 
 pub(super) fn external_editor_watch_key(remote_path: &str, local_path: &Path) -> String {

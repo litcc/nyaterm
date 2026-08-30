@@ -55,7 +55,8 @@ struct TrzszDownloadFile {
 
 struct TrzszDownloadWorker {
     command_tx: mpsc::Sender<TrzszDownloadWorkerCommand>,
-    event_rx: mpsc::Receiver<TrzszDownloadWorkerEvent>,
+    event_rx: Option<mpsc::Receiver<TrzszDownloadWorkerEvent>>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 enum TrzszDownloadWorkerCommand {
@@ -91,7 +92,8 @@ struct TrzszUploadRuntime {
 
 struct TrzszUploadWorker {
     command_tx: mpsc::Sender<TrzszUploadWorkerCommand>,
-    event_rx: mpsc::Receiver<TrzszUploadWorkerEvent>,
+    event_rx: Option<mpsc::Receiver<TrzszUploadWorkerEvent>>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 enum TrzszUploadWorkerCommand {
@@ -126,7 +128,8 @@ struct TrzszUploadProgressUpdate {
 }
 
 struct TrzszUploadPrepareWorker {
-    event_rx: mpsc::Receiver<TrzszUploadPrepareEvent>,
+    event_rx: Option<mpsc::Receiver<TrzszUploadPrepareEvent>>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
 struct TrzszUploadPrepareEvent {
@@ -139,7 +142,7 @@ impl TrzszDownloadWorker {
     fn spawn(download: TrzszDownloadRuntime, remote_is_windows: bool) -> Self {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::sync_channel(TRZSZ_DOWNLOAD_WORKER_EVENT_CHANNEL_CAP);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-trzsz-download".to_string())
             .spawn(move || {
                 run_trzsz_download_worker(download, remote_is_windows, command_rx, event_tx)
@@ -147,7 +150,8 @@ impl TrzszDownloadWorker {
             .expect("failed to spawn trzsz download worker");
         Self {
             command_tx,
-            event_rx,
+            event_rx: Some(event_rx),
+            worker: Some(worker),
         }
     }
 
@@ -161,21 +165,37 @@ impl TrzszDownloadWorker {
     }
 
     fn try_recv_event(&self) -> Option<TrzszDownloadWorkerEvent> {
-        match self.event_rx.try_recv() {
+        match self.event_rx.as_ref()?.try_recv() {
             Ok(event) => Some(event),
             Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => None,
         }
     }
 
-    fn stop(self) {
+    fn stop(mut self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
+        self.event_rx.take();
         let _ = self.command_tx.send(TrzszDownloadWorkerCommand::Stop);
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("trzsz download worker panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for TrzszDownloadWorker {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
 impl TrzszUploadPrepareWorker {
     fn spawn(paths: Vec<PathBuf>, directory_mode: bool, remote_is_windows: bool) -> Self {
         let (event_tx, event_rx) = mpsc::sync_channel(1);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-trzsz-upload-prepare".to_string())
             .spawn(move || {
                 let result = prepare_trzsz_upload_entries(paths, directory_mode);
@@ -186,14 +206,32 @@ impl TrzszUploadPrepareWorker {
                 });
             })
             .expect("failed to spawn trzsz upload prepare worker");
-        Self { event_rx }
+        Self {
+            event_rx: Some(event_rx),
+            worker: Some(worker),
+        }
     }
 
     fn try_recv_event(&self) -> Option<TrzszUploadPrepareEvent> {
-        match self.event_rx.try_recv() {
+        match self.event_rx.as_ref()?.try_recv() {
             Ok(event) => Some(event),
             Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => None,
         }
+    }
+
+    fn shutdown(&mut self) {
+        self.event_rx.take();
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("trzsz upload preparation worker panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for TrzszUploadPrepareWorker {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -201,13 +239,14 @@ impl TrzszUploadWorker {
     fn spawn(upload: TrzszUploadRuntime, remote_is_windows: bool) -> Self {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::sync_channel(TRZSZ_UPLOAD_WORKER_EVENT_CHANNEL_CAP);
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("nyaterm-trzsz-upload".to_string())
             .spawn(move || run_trzsz_upload_worker(upload, remote_is_windows, command_rx, event_tx))
             .expect("failed to spawn trzsz upload worker");
         Self {
             command_tx,
-            event_rx,
+            event_rx: Some(event_rx),
+            worker: Some(worker),
         }
     }
 
@@ -220,14 +259,30 @@ impl TrzszUploadWorker {
     }
 
     fn try_recv_event(&self) -> Option<TrzszUploadWorkerEvent> {
-        match self.event_rx.try_recv() {
+        match self.event_rx.as_ref()?.try_recv() {
             Ok(event) => Some(event),
             Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => None,
         }
     }
 
-    fn stop(self) {
+    fn stop(mut self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&mut self) {
+        self.event_rx.take();
         let _ = self.command_tx.send(TrzszUploadWorkerCommand::Stop);
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::warn!("trzsz upload worker panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for TrzszUploadWorker {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 

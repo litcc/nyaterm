@@ -361,7 +361,9 @@ impl NyaTermApp {
             .set_status(format!("opening tunnel {}", tunnel_name(&tunnel)));
         let tunnel_manager = self.tunnel_state.manager_for_job();
         let tunnel_tx = self.tunnel_state.job_sender();
-        std::thread::spawn(move || {
+        let rejected_tx = tunnel_tx.clone();
+        let rejected_tunnel_id = tunnel.id.clone();
+        if let Err(error) = self.blocking_jobs.submit_detached("tunnel-open", move |_| {
             let result = tunnel_manager
                 .open(config)
                 .map(TunnelJobOutput::Opened)
@@ -370,7 +372,12 @@ impl NyaTermApp {
                 tunnel_id: tunnel.id,
                 result,
             });
-        });
+        }) {
+            let _ = rejected_tx.unbounded_send(TunnelJobResult {
+                tunnel_id: rejected_tunnel_id,
+                result: Err(error.to_string()),
+            });
+        }
         cx.notify();
     }
 
@@ -401,13 +408,23 @@ impl NyaTermApp {
         self.shell.set_status(format!("closing tunnel {tunnel_id}"));
         let tunnel_manager = self.tunnel_state.manager_for_job();
         let tunnel_tx = self.tunnel_state.job_sender();
-        std::thread::spawn(move || {
-            let result = tunnel_manager
-                .close(&tunnel_id)
-                .map(|_| TunnelJobOutput::Closed)
-                .map_err(|error| error.to_string());
-            let _ = tunnel_tx.unbounded_send(TunnelJobResult { tunnel_id, result });
-        });
+        let rejected_tx = tunnel_tx.clone();
+        let rejected_tunnel_id = tunnel_id.clone();
+        if let Err(error) = self
+            .blocking_jobs
+            .submit_detached("tunnel-close", move |_| {
+                let result = tunnel_manager
+                    .close(&tunnel_id)
+                    .map(|_| TunnelJobOutput::Closed)
+                    .map_err(|error| error.to_string());
+                let _ = tunnel_tx.unbounded_send(TunnelJobResult { tunnel_id, result });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(TunnelJobResult {
+                tunnel_id: rejected_tunnel_id,
+                result: Err(error.to_string()),
+            });
+        }
         cx.notify();
     }
 

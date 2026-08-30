@@ -34,6 +34,7 @@ mod types;
 pub(in crate::features) use types::SettingsDraftSnapshot;
 
 pub struct NyaTermApp {
+    pub(in crate::features) blocking_jobs: crate::blocking_jobs::BlockingJobScheduler,
     pub(in crate::features) stores: crate::entities::UiStoreHandles,
     pub(in crate::features) store_ui: StoreUiClient,
     pub(in crate::features) store_blocking: StoreBlockingClient,

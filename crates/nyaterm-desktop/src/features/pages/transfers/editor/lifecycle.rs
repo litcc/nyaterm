@@ -178,21 +178,26 @@ impl NyaTermApp {
             control: None,
         });
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .read_text_document_path(&remote_file_path, NATIVE_EDITOR_MAX_BYTES)
-                .map(|file| TransferJobOutput::EditorLoaded {
-                    tab_id,
-                    remote_path,
-                    generation,
-                    file,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-editor-load",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .read_text_document_path(&remote_file_path, NATIVE_EDITOR_MAX_BYTES)
+                    .map(|file| TransferJobOutput::EditorLoaded {
+                        tab_id,
+                        remote_path,
+                        generation,
+                        file,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 
@@ -327,26 +332,31 @@ impl NyaTermApp {
             control: None,
         });
         let transfer_tx = self.transfer.transfer_event_sender();
-        std::thread::spawn(move || {
-            let result = service
-                .write_text_document_path(
-                    &remote_file_path,
-                    &content,
-                    expected_revision.as_ref(),
-                    force,
-                )
-                .map(|result| TransferJobOutput::EditorSaved {
-                    tab_id,
-                    remote_path,
-                    generation,
-                    result,
-                })
-                .map_err(|error| error.to_string());
-            let _ = transfer_tx.unbounded_send(TransferJobResult {
-                id,
-                event: TransferJobEvent::Finished(result),
-            });
-        });
+        self.submit_transfer_blocking_job(
+            "sftp-editor-save",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .write_text_document_path(
+                        &remote_file_path,
+                        &content,
+                        expected_revision.as_ref(),
+                        force,
+                    )
+                    .map(|result| TransferJobOutput::EditorSaved {
+                        tab_id,
+                        remote_path,
+                        generation,
+                        result,
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
         cx.notify();
     }
 }

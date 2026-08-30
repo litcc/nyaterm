@@ -4,9 +4,25 @@ use std::time::{Duration, Instant};
 
 use nyaterm_transport::SftpTransferProgress;
 
+use crate::blocking_jobs::BlockingJobScheduler;
 use crate::models::{TransferJobEvent, TransferJobKind, TransferJobResult, TransferJobState};
 
 const TRANSFER_PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(50);
+
+pub(in crate::features) fn submit_transfer_blocking_job(
+    scheduler: &BlockingJobScheduler,
+    name: &'static str,
+    rejection_job_id: String,
+    rejection_tx: UnboundedSender<TransferJobResult>,
+    run: impl FnOnce() + Send + 'static,
+) {
+    if let Err(error) = scheduler.submit_detached(name, move |_| run()) {
+        let _ = rejection_tx.unbounded_send(TransferJobResult {
+            id: rejection_job_id,
+            event: TransferJobEvent::Finished(Err(error.to_string())),
+        });
+    }
+}
 
 pub(super) struct TransferProgressEventSender {
     id: String,
