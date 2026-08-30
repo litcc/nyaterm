@@ -2757,6 +2757,7 @@
     "reject": "Reject",
     "replaceCertificate": "Replace Trusted Certificate",
     "retry": "Retry",
+    "secureAttention": "Ctrl+Alt+Delete",
     "trustAndRemember": "Trust And Remember",
     "trustOnce": "Trust Once",
     "waitingFrame": "Waiting for the first desktop frame..."

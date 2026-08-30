@@ -2757,6 +2757,7 @@
     "reject": "Rejeter",
     "replaceCertificate": "Remplacer le certificat approuvé",
     "retry": "Réessayer",
+    "secureAttention": "Séquence de sécurité (Ctrl+Alt+Suppr)",
     "trustAndRemember": "Approuver et se souvenir",
     "trustOnce": "Approuver une fois",
     "waitingFrame": "En attente de la première trame du bureau…"

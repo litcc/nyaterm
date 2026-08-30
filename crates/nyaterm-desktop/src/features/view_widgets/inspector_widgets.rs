@@ -101,6 +101,7 @@ pub(in crate::features) fn tab_menu_item_enabled(
         "tab-ctx-multiplex" | "tab-ctx-smart-split" => Some("icons/menu/split.svg"),
         "tab-ctx-reconnect" => Some("icons/session/reconnect.svg"),
         "tab-ctx-disconnect" => Some("icons/session/disconnect.svg"),
+        "tab-ctx-rdp-secure-attention" => Some("icons/security.svg"),
         "tab-ctx-ai-explain" | "tab-ctx-ai-analyze" => Some("icons/ai.svg"),
         "tab-ctx-split-h" | "tab-ctx-window-below" | "tab-ctx-tile-h" => {
             Some("icons/menu/horizontal.svg")

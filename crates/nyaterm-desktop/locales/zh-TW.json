@@ -2757,6 +2757,7 @@
     "reject": "拒絕",
     "replaceCertificate": "替換受信任證書",
     "retry": "重試",
+    "secureAttention": "Ctrl+Alt+Delete",
     "trustAndRemember": "信任並記住",
     "trustOnce": "僅本次信任",
     "waitingFrame": "正在等待首個桌面畫面…"

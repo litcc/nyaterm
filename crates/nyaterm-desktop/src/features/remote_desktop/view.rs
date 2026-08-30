@@ -17,7 +17,7 @@ use nyaterm_remote_desktop::{
 use crate::features::NyaTermApp;
 use crate::widgets::small_button;
 
-use super::runtime::{format_remote_desktop_error, secure_attention_available};
+use super::runtime::format_remote_desktop_error;
 use super::state::RdpCertificatePrompt;
 
 impl NyaTermApp {
@@ -35,14 +35,6 @@ impl NyaTermApp {
                 )
                 .into_any_element();
         };
-        let is_rdp = self.session.metadata(&session_id).is_some_and(|metadata| {
-            matches!(
-                metadata.launch_config,
-                crate::models::SessionLaunchConfig::Rdp(_)
-            )
-        });
-        let secure_attention_is_available =
-            secure_attention_available(is_rdp, &session.state, session.server_capabilities);
         if let Some(request) = session.certificate_request.clone() {
             return self
                 .rdp_certificate_view(session_id, request, cx)
@@ -241,7 +233,6 @@ impl NyaTermApp {
         let key_down_id = session_id.clone();
         let key_up_id = session_id.clone();
         let modifiers_id = session_id.clone();
-        let secure_attention_id = session_id.clone();
         let focus = surface_focus;
         div()
             .id(format!("rdp-surface-{session_id}"))
@@ -498,25 +489,6 @@ impl NyaTermApp {
                 }),
             )
             .child(canvas)
-            .when(secure_attention_is_available, |surface| {
-                surface.child(
-                    div()
-                        .absolute()
-                        .top(px(8.))
-                        .right(px(8.))
-                        .child(small_button(
-                            palette,
-                            format!("rdp-secure-attention-{session_id}"),
-                            "Secure Attention (Ctrl+Alt+Delete)",
-                            cx.listener(move |this, _, _, cx| {
-                                if this.send_rdp_secure_attention(&secure_attention_id) {
-                                    this.mark_user_activity();
-                                }
-                                cx.notify();
-                            }),
-                        )),
-                )
-            })
             .into_any_element()
     }
 

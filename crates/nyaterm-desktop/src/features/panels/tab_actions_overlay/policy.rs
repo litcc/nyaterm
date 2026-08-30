@@ -35,6 +35,7 @@ pub(in crate::features) struct TabActionSupport {
     pub reconnect: bool,
     pub disconnect: bool,
     pub ai: bool,
+    pub rdp_secure_attention: bool,
     pub split: bool,
     pub session_info: bool,
 }
@@ -46,6 +47,7 @@ pub(in crate::features) struct TabActionAvailability {
     pub reconnect: bool,
     pub disconnect: bool,
     pub use_ai: bool,
+    pub rdp_secure_attention: bool,
     pub split: bool,
     pub unsplit: bool,
     pub close_tab: bool,
@@ -68,6 +70,7 @@ pub(in crate::features) struct TabActionPolicyInput {
     pub is_disconnected: bool,
     pub reconnect_pending: bool,
     pub terminal_available: bool,
+    pub rdp_secure_attention_available: bool,
     pub workspace_is_split: bool,
     pub locked: bool,
     pub tab_count: usize,
@@ -93,6 +96,7 @@ impl TabActionPolicy {
             reconnect: supports_terminal_actions,
             disconnect: supports_terminal_actions,
             ai: supports_terminal_actions,
+            rdp_secure_attention: input.session == TabSessionCapability::Rdp,
             split: supports_terminal_actions,
             session_info: input.has_source_connection,
         };
@@ -110,6 +114,8 @@ impl TabActionPolicy {
                 && input.terminal_available
                 && !input.is_busy
                 && !input.is_disconnected,
+            rdp_secure_attention: support.rdp_secure_attention
+                && input.rdp_secure_attention_available,
             split: support.split,
             unsplit: support.split && input.workspace_is_split,
             close_tab: !input.locked,
@@ -142,6 +148,7 @@ impl TabActionPolicy {
             || self.support.reconnect
             || self.support.disconnect
             || self.support.ai
+            || self.support.rdp_secure_attention
     }
 
     pub(in crate::features) fn supports_submenu(self, submenu: TabActionsSubmenu) -> bool {
@@ -197,6 +204,7 @@ mod tests {
             is_disconnected: false,
             reconnect_pending: false,
             terminal_available: true,
+            rdp_secure_attention_available: false,
             workspace_is_split: false,
             locked: false,
             tab_count: 1,
@@ -261,26 +269,49 @@ mod tests {
     }
 
     #[test]
-    fn remote_desktop_omits_terminal_groups_but_can_show_connection_info() {
-        for session in [TabSessionCapability::Rdp, TabSessionCapability::Vnc] {
-            let mut context = input(session);
-            context.has_source_connection = true;
-            context.workspace_is_split = true;
-            let policy = TabActionPolicy::from_input(context);
+    fn rdp_shows_secure_attention_with_runtime_capability_controlling_availability() {
+        let mut context = input(TabSessionCapability::Rdp);
+        context.has_source_connection = true;
+        context.workspace_is_split = true;
+        let unavailable = TabActionPolicy::from_input(context);
 
-            assert!(!policy.support.session_spawn);
-            assert!(!policy.support.ssh_multiplex);
-            assert!(!policy.support.reconnect);
-            assert!(!policy.support.disconnect);
-            assert!(!policy.support.ai);
-            assert!(!policy.support.split);
-            assert!(!policy.availability.unsplit);
-            assert!(policy.support.session_info);
-            assert_eq!(
-                policy.menu_groups(),
-                vec![TabActionMenuGroup::General, TabActionMenuGroup::Close]
-            );
-        }
+        assert!(!unavailable.support.session_spawn);
+        assert!(!unavailable.support.ssh_multiplex);
+        assert!(!unavailable.support.reconnect);
+        assert!(!unavailable.support.disconnect);
+        assert!(!unavailable.support.ai);
+        assert!(!unavailable.support.split);
+        assert!(!unavailable.availability.unsplit);
+        assert!(unavailable.support.rdp_secure_attention);
+        assert!(!unavailable.availability.rdp_secure_attention);
+        assert!(unavailable.support.session_info);
+        assert_eq!(
+            unavailable.menu_groups(),
+            vec![
+                TabActionMenuGroup::General,
+                TabActionMenuGroup::Session,
+                TabActionMenuGroup::Close,
+            ]
+        );
+
+        context.rdp_secure_attention_available = true;
+        let available = TabActionPolicy::from_input(context);
+        assert!(available.availability.rdp_secure_attention);
+    }
+
+    #[test]
+    fn vnc_omits_terminal_and_rdp_session_actions() {
+        let mut context = input(TabSessionCapability::Vnc);
+        context.has_source_connection = true;
+        let policy = TabActionPolicy::from_input(context);
+
+        assert!(!policy.support.session_spawn);
+        assert!(!policy.support.rdp_secure_attention);
+        assert!(policy.support.session_info);
+        assert_eq!(
+            policy.menu_groups(),
+            vec![TabActionMenuGroup::General, TabActionMenuGroup::Close]
+        );
     }
 
     #[test]
@@ -362,7 +393,7 @@ mod tests {
 
     #[test]
     fn menu_groups_never_create_empty_or_adjacent_separator_slots() {
-        let remote = TabActionPolicy::from_input(input(TabSessionCapability::Rdp));
+        let remote = TabActionPolicy::from_input(input(TabSessionCapability::Vnc));
         assert_eq!(
             remote.menu_groups(),
             vec![TabActionMenuGroup::General, TabActionMenuGroup::Close]

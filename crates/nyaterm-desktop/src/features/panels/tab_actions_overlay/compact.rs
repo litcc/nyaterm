@@ -120,6 +120,7 @@ impl NyaTermApp {
         let lock_session_id = tab_root_id.clone();
         let explain_session_id = session_id.clone();
         let analyze_session_id = session_id.clone();
+        let secure_attention_session_id = session_id.clone();
 
         let submenu_panel = active_submenu
             .filter(|submenu| policy.supports_submenu(*submenu))
@@ -565,6 +566,27 @@ impl NyaTermApp {
                                             );
                                         }),
                                     },
+                                ))
+                            })
+                            .when(support.rdp_secure_attention, |this| {
+                                this.child(tab_menu_item_enabled(
+                                    palette,
+                                    "tab-ctx-rdp-secure-attention",
+                                    t!("remoteDesktop.secureAttention"),
+                                    availability.rdp_secure_attention,
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.select_session(
+                                            secure_attention_session_id.clone(),
+                                            cx,
+                                        );
+                                        this.close_tab_actions(cx);
+                                        if this
+                                            .send_rdp_secure_attention(&secure_attention_session_id)
+                                        {
+                                            this.mark_user_activity();
+                                        }
+                                        cx.notify();
+                                    }),
                                 ))
                             })
                             .when(show_split_group, |this| {

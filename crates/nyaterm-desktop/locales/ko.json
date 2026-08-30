@@ -2757,6 +2757,7 @@
     "reject": "거부",
     "replaceCertificate": "신뢰할 인증서 교체",
     "retry": "재시도",
+    "secureAttention": "Ctrl+Alt+Delete",
     "trustAndRemember": "신뢰하고 기억",
     "trustOnce": "한 번만 신뢰",
     "waitingFrame": "첫 데스크톱 프레임을 기다리는 중..."

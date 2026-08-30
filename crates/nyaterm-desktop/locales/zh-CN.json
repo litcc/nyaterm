@@ -2757,6 +2757,7 @@
     "reject": "拒绝",
     "replaceCertificate": "替换受信任证书",
     "retry": "重试",
+    "secureAttention": "Ctrl+Alt+Delete",
     "trustAndRemember": "信任并记住",
     "trustOnce": "仅本次信任",
     "waitingFrame": "正在等待首个桌面画面…"

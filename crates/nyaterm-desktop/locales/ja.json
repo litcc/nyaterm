@@ -2766,6 +2766,7 @@
     "reject": "拒否",
     "replaceCertificate": "信頼された証明書を置き換え",
     "retry": "再試行",
+    "secureAttention": "Ctrl+Alt+Delete",
     "trustAndRemember": "信頼して記憶",
     "trustOnce": "今回のみ信頼",
     "waitingFrame": "最初のデスクトップフレームを待機中..."

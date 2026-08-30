@@ -58,6 +58,7 @@ impl NyaTermApp {
             // encoding. Check the in-memory view so a transiently unavailable terminal keeps
             // the AI submenu visible while its actions remain disabled.
             terminal_available,
+            rdp_secure_attention_available: self.rdp_secure_attention_available(session_id),
             workspace_is_split,
             locked: self.tab_tree_is_locked(tab_root_id),
             tab_count: tab_sessions.len(),
