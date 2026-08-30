@@ -2,7 +2,7 @@ use gpui::{
     ClickEvent, ClipboardItem, Context, FontWeight, InteractiveElement as _, IntoElement,
     MouseButton, MouseDownEvent, ParentElement as _, Render, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
-    rgb, rgba,
+    rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
 
@@ -13,6 +13,12 @@ pub(in crate::features) struct SessionTabDragPayload {
     pub session_id: String,
     pub display_name: String,
     pub kind_label: &'static str,
+    pub kind_icon: &'static str,
+    pub preview_background: u32,
+    pub preview_border: u32,
+    pub preview_text: u32,
+    pub preview_text_muted: u32,
+    pub preview_accent: u32,
 }
 
 pub(in crate::features) struct SessionTabDragPreview {
@@ -42,12 +48,26 @@ impl Render for SessionTabDragPreview {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .rounded_sm()
                     .border_1()
-                    .border_color(rgb(0x334155))
-                    .bg(rgba(0x151b24dd))
+                    .border_color(rgb(self.payload.preview_border))
+                    .bg(rgb(self.payload.preview_background))
                     .shadow_lg()
-                    .child(div().size(px(8.)).rounded_full().bg(rgb(0x6ee7b7)))
+                    .relative()
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(2.))
+                            .bg(rgb(self.payload.preview_accent)),
+                    )
+                    .child(
+                        svg()
+                            .size(px(13.))
+                            .path(self.payload.kind_icon)
+                            .text_color(rgb(self.payload.preview_accent)),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -58,14 +78,16 @@ impl Render for SessionTabDragPreview {
                                 div()
                                     .text_xs()
                                     .font_weight(FontWeight(700.))
-                                    .text_color(rgb(0xe5edf7))
+                                    .text_color(rgb(self.payload.preview_text))
                                     .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
                                     .child(truncate_preview(&self.payload.display_name, 28)),
                             )
                             .child(
                                 div()
                                     .text_size(px(10.))
-                                    .text_color(rgb(0x8f98aa))
+                                    .text_color(rgb(self.payload.preview_text_muted))
                                     .child(self.payload.kind_label),
                             ),
                     ),
@@ -296,6 +318,7 @@ impl NyaTermApp {
         self.session
             .move_session_group_relative(&source_ids, &target_ids, insert_after);
         self.session.clear_tab_drag();
+        self.shell.request_session_tab_scroll_into_view();
         self.shell.set_status(format!(
             "moved tab {} {}",
             if insert_after { "after" } else { "before" },
@@ -321,12 +344,14 @@ impl NyaTermApp {
         {
             self.shell
                 .set_status("dragged session no longer exists".to_string());
+            self.session.clear_tab_drag();
             cx.notify();
             return;
         }
         let source_ids = self.tab_tree_session_ids(&dragged_session_id);
         self.session.move_session_group_to_end(&source_ids);
         self.session.clear_tab_drag();
+        self.shell.request_session_tab_scroll_into_view();
         self.shell.set_status("moved tab to end".to_string());
         if self.session.restore_is_complete() {
             self.persist_open_tabs();

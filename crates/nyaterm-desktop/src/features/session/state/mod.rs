@@ -1468,7 +1468,7 @@ impl SessionFeatureState {
     pub(in crate::features) fn tab_drop_after(&self, session_id: &str) -> Option<bool> {
         self.tab_drag
             .as_ref()
-            .filter(|drag| drag.target_id == session_id)
+            .filter(|drag| drag.target_id == session_id && drag.source_id != session_id)
             .map(|drag| drag.insert_after)
     }
 

@@ -1013,6 +1013,8 @@ fn tab_lock_and_drag_state_have_single_owner() {
     assert!(!sessions.set_tab_drag_target("tab-a".to_string(), "tab-b".to_string(), false,));
     assert!(sessions.set_tab_drag_target("tab-a".to_string(), "tab-b".to_string(), true,));
     assert_eq!(sessions.tab_drop_after("tab-b"), Some(true));
+    assert!(sessions.set_tab_drag_target("tab-a".to_string(), "tab-a".to_string(), false,));
+    assert_eq!(sessions.tab_drop_after("tab-a"), None);
     assert!(sessions.clear_tab_drag());
     assert!(!sessions.clear_tab_drag());
 }

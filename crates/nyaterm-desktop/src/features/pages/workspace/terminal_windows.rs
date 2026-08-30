@@ -140,17 +140,18 @@ impl NyaTermApp {
                         self.sync_input.broadcast_to_all() || sync_group.is_some();
                     let sync_indicator_color =
                         sync_group.map(|group| group.color).unwrap_or(palette.link);
-                    let accent = if let Some(custom_color) = custom_color {
-                        rgb(custom_color)
+                    let accent_color = if let Some(custom_color) = custom_color {
+                        custom_color
                     } else if is_disconnected {
-                        rgb(palette.danger)
+                        palette.danger
                     } else if is_active_tab {
-                        rgb(palette.success)
+                        palette.success
                     } else if has_unread {
-                        rgb(palette.warning)
+                        palette.warning
                     } else {
-                        rgb(palette.text_dimmed)
+                        palette.text_dimmed
                     };
+                    let accent = rgb(accent_color);
                     let bg = if let Some(custom_color) = custom_color {
                         rgba((custom_color << 8) | if is_active_tab { 0x24 } else { 0x14 })
                     } else if is_active_tab {
@@ -162,6 +163,12 @@ impl NyaTermApp {
                         session_id: tab_id.clone(),
                         display_name: title.clone(),
                         kind_label,
+                        kind_icon,
+                        preview_background: palette.surface,
+                        preview_border: palette.border,
+                        preview_text: palette.text,
+                        preview_text_muted: palette.text_muted,
+                        preview_accent: accent_color,
                     };
                     let tab_title = truncate_preview(&title, 18);
                     let tooltip_title = title.clone();

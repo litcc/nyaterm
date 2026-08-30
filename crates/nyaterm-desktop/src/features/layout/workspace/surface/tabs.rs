@@ -1,11 +1,11 @@
 use rust_i18n::t;
 
 use gpui::{
-    ClickEvent, Context, FontWeight, IntoElement, MouseButton, ScrollDelta, ScrollWheelEvent,
-    SharedString, div, point, prelude::*, px, rgb, rgba, svg,
+    Anchor, ClickEvent, Context, FontWeight, IntoElement, MouseButton, ScrollDelta,
+    ScrollWheelEvent, SharedString, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::NyaScrollable;
+use nyaterm_ui::NyaPopover;
 
 use crate::features::NyaTermApp;
 use crate::features::formatting::session_kind_label;
@@ -14,6 +14,12 @@ use crate::features::shell::{SessionTabDragPayload, SessionTabDragPreview, Sessi
 use crate::features::view_widgets::{connection_spinner, themed_icon};
 
 use super::super::super::view_helpers::session_kind_icon_path;
+
+const SESSION_TAB_MIN_WIDTH: f32 = 118.;
+const SESSION_TAB_MAX_WIDTH: f32 = 236.;
+const SESSION_TAB_ACTION_SIZE: f32 = 36.;
+const SESSION_TAB_END_DROP_TARGET_MIN_WIDTH: f32 = 28.;
+const TAB_STRIP_OVERFLOW_TOLERANCE: f32 = 2.;
 
 fn pending_tab_insert_index(
     session_count: usize,
@@ -37,6 +43,24 @@ fn tab_scroll_x(current_x: f32, max_x: f32, delta_x: f32, delta_y: f32) -> f32 {
         delta_y
     };
     (current_x + dominant).clamp(-max_x.max(0.), 0.)
+}
+
+fn tab_strip_overflows(
+    max_offset: f32,
+    overflow_control_is_rendered: bool,
+    end_drop_target_is_rendered: bool,
+) -> bool {
+    let occupied_control_width = if overflow_control_is_rendered {
+        SESSION_TAB_ACTION_SIZE
+    } else {
+        0.
+    };
+    let end_drop_target_width = if end_drop_target_is_rendered {
+        SESSION_TAB_END_DROP_TARGET_MIN_WIDTH
+    } else {
+        0.
+    };
+    max_offset > occupied_control_width + end_drop_target_width + TAB_STRIP_OVERFLOW_TOLERANCE
 }
 
 type TransientSessionTab = (usize, u64, String, String, String, Option<String>);
@@ -67,8 +91,9 @@ impl NyaTermApp {
                 "pending-session-tab-{request_id}"
             )))
             .h_full()
-            .min_w(px(118.))
-            .max_w(px(236.))
+            .min_w(px(SESSION_TAB_MIN_WIDTH))
+            .max_w(px(SESSION_TAB_MAX_WIDTH))
+            .flex_none()
             .px_3()
             .flex()
             .items_center()
@@ -130,6 +155,8 @@ impl NyaTermApp {
                         rgb(palette.text_muted)
                     })
                     .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
                     .child(truncate_preview(&pending_name, 28)),
             )
             .child(
@@ -187,8 +214,9 @@ impl NyaTermApp {
                 "failed-session-tab-{request_id}"
             )))
             .h_full()
-            .min_w(px(118.))
-            .max_w(px(236.))
+            .min_w(px(SESSION_TAB_MIN_WIDTH))
+            .max_w(px(SESSION_TAB_MAX_WIDTH))
+            .flex_none()
             .px_3()
             .flex()
             .items_center()
@@ -247,6 +275,8 @@ impl NyaTermApp {
                     })
                     .text_color(rgb(palette.danger))
                     .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
                     .child(truncate_preview(&failed_name, 28)),
             )
             .child(
@@ -507,15 +537,13 @@ impl NyaTermApp {
             if is_locked {
                 tooltip_lines.push(t!("tabCtx.locked").to_string());
             }
-            let drag_payload = SessionTabDragPayload {
-                session_id: session.id.clone(),
-                display_name: display_name.clone(),
-                kind_label: session_kind_label(session.kind),
-            };
             let drop_target_session_id = session.id.clone();
             let drag_move_target_session_id = session.id.clone();
             let is_drag_source = self.session.tab_drag_source_is(&session.id);
-            let drop_after = self.session.tab_drop_after(&session.id);
+            let drop_after = self
+                .session
+                .tab_drop_after(&session.id)
+                .filter(|_| !is_drag_source);
             let custom_color = self.session.tab_color(&session.id);
             // Active when any leaf under this tab root is focused.
             let is_active = self
@@ -545,17 +573,18 @@ impl NyaTermApp {
             let sync_indicator_color = sync_group
                 .map(|group| group.color)
                 .unwrap_or(palette.primary);
-            let accent = if let Some(custom_color) = custom_color {
-                rgb(custom_color)
+            let accent_color = if let Some(custom_color) = custom_color {
+                custom_color
             } else if is_disconnected {
-                rgb(palette.danger)
+                palette.danger
             } else if is_active {
-                rgb(palette.primary)
+                palette.primary
             } else if has_unread {
-                rgb(palette.warning)
+                palette.warning
             } else {
-                rgb(palette.text_dimmed)
+                palette.text_dimmed
             };
+            let accent = rgb(accent_color);
             let bg = if let Some(custom_color) = custom_color {
                 rgba((custom_color << 8) | if is_active { 0x24 } else { 0x14 })
             } else if is_active {
@@ -568,13 +597,31 @@ impl NyaTermApp {
             } else {
                 self.shell_surface_color(palette.hover)
             };
+            let drag_target_bg = rgba((palette.primary << 8) | 0x24);
+            let effective_hover_bg = if drop_after.is_some() {
+                drag_target_bg
+            } else {
+                hover_bg
+            };
+            let drag_payload = SessionTabDragPayload {
+                session_id: session.id.clone(),
+                display_name: display_name.clone(),
+                kind_label: session_kind_label(session.kind),
+                kind_icon,
+                preview_background: palette.surface,
+                preview_border: palette.border,
+                preview_text: palette.text,
+                preview_text_muted: palette.text_muted,
+                preview_accent: accent_color,
+            };
             tabs = tabs.child(
                 div()
                     .id(SharedString::from(format!("session-tab-{session_id}")))
                     .group(tab_group_name.clone())
                     .h_full()
-                    .min_w(px(118.))
-                    .max_w(px(236.))
+                    .min_w(px(SESSION_TAB_MIN_WIDTH))
+                    .max_w(px(SESSION_TAB_MAX_WIDTH))
+                    .flex_none()
                     .px_3()
                     .flex()
                     .items_center()
@@ -592,16 +639,19 @@ impl NyaTermApp {
                         )
                     })
                     .border_r_1()
-                    .border_color(if is_active {
+                    .border_color(if drop_after.is_some() {
+                        rgb(palette.primary)
+                    } else if is_active {
                         custom_color.map(rgb).unwrap_or_else(|| rgb(palette.border))
                     } else {
                         rgb(palette.border)
                     })
                     .bg(bg)
+                    .when(drop_after.is_some(), |this| this.bg(drag_target_bg))
                     .when(is_disconnected, |this| this.opacity(0.78))
                     .when(is_drag_source, |this| this.opacity(0.55))
                     .cursor_pointer()
-                    .hover(move |this| this.bg(hover_bg))
+                    .hover(move |this| this.bg(effective_hover_bg))
                     .cursor_move()
                     .on_drag(drag_payload, |payload, position, _, cx| {
                         cx.new(|_| SessionTabDragPreview::new(payload.clone(), position))
@@ -850,11 +900,16 @@ impl NyaTermApp {
                 div()
                     .id("session-tab-drop-end")
                     .h_full()
-                    .min_w(px(28.))
-                    .flex_none()
+                    .min_w(px(SESSION_TAB_END_DROP_TARGET_MIN_WIDTH))
+                    .flex_1()
                     .border_l_1()
                     .border_color(rgb(palette.border))
                     .hover(move |this| this.bg(shell_hover_bg))
+                    .drag_over::<SessionTabDragPayload>(move |this, _, _, _| {
+                        this.bg(rgba((palette.primary << 8) | 0x24))
+                            .border_l_2()
+                            .border_color(rgb(palette.primary))
+                    })
                     .on_drop(cx.listener(|this, payload: &SessionTabDragPayload, _, cx| {
                         this.reorder_session_to_end(payload.session_id.clone(), cx);
                     })),
@@ -866,8 +921,7 @@ impl NyaTermApp {
         let new_session_menu = self.shell.new_session_menu_is_open();
         let open_tabs_label = t!("terminal.openTabs").to_string();
         let new_session_label = t!("terminal.newSession").to_string();
-        let tab_strip_has_overflow = self.shell.session_tab_strip_scroll().max_offset().x > px(0.);
-        // Tauri shows Open Tabs only when the strip actually overflows.
+        let tab_strip_has_overflow = self.shell.session_tab_strip_has_overflow();
         let show_open_tabs_menu = tab_strip_has_overflow || open_tabs_menu;
 
         let mut session_actions = div()
@@ -879,52 +933,59 @@ impl NyaTermApp {
             .border_color(rgb(palette.border));
 
         if show_open_tabs_menu {
+            let open_tabs_trigger = div()
+                .id("workspace-open-tabs-menu")
+                .size(px(SESSION_TAB_ACTION_SIZE))
+                .flex()
+                .items_center()
+                .justify_center()
+                .border_r_1()
+                .border_color(rgb(palette.border))
+                .bg(if open_tabs_menu {
+                    self.shell_surface_color(palette.hover)
+                } else {
+                    rgba(0x00000000)
+                })
+                .text_color(rgb(palette.text_muted))
+                .cursor_pointer()
+                .hover(move |this| this.bg(shell_hover_bg).text_color(rgb(palette.text)))
+                .child(
+                    svg()
+                        .size(px(16.))
+                        .flex_none()
+                        .path("icons/chevron-down.svg")
+                        .text_color(rgb(palette.text_muted)),
+                )
+                .tooltip(move |window, cx| {
+                    nyaterm_ui::NyaTooltip::new(open_tabs_label.clone()).build(window, cx)
+                });
+            let open_tabs_popover = NyaPopover::new(
+                "workspace-open-tabs-popover",
+                open_tabs_trigger,
+                self.render_open_tabs_menu(cx),
+            )
+            .anchor(Anchor::TopRight)
+            .appearance(false)
+            .open(open_tabs_menu)
+            .on_open_change(cx.listener(|this, open, _, cx| {
+                if *open {
+                    if !this.shell.open_tabs_menu_is_open() {
+                        this.toggle_open_tabs_menu(cx);
+                    }
+                } else {
+                    this.close_open_tabs_menu(cx);
+                }
+            }));
             session_actions = session_actions.child(
                 div()
-                    .relative()
                     .h_full()
+                    .flex()
+                    .items_center()
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|_, _, _, cx| cx.stop_propagation()),
                     )
-                    .child(
-                        div()
-                            .id("workspace-open-tabs-menu")
-                            .h_full()
-                            .w(px(32.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .border_r_1()
-                            .border_color(rgb(palette.border))
-                            .bg(if open_tabs_menu {
-                                self.shell_surface_color(palette.hover)
-                            } else {
-                                rgba(0x00000000)
-                            })
-                            .text_color(rgb(palette.text_muted))
-                            .cursor_pointer()
-                            .hover(move |this| {
-                                this.bg(shell_hover_bg).text_color(rgb(palette.text))
-                            })
-                            .child(
-                                svg()
-                                    .size(px(16.))
-                                    .flex_none()
-                                    .path("icons/chevron-down.svg")
-                                    .text_color(rgb(palette.text_muted)),
-                            )
-                            .tooltip(move |window, cx| {
-                                nyaterm_ui::NyaTooltip::new(open_tabs_label.clone())
-                                    .build(window, cx)
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_open_tabs_menu(cx);
-                            })),
-                    )
-                    .when(open_tabs_menu, |this| {
-                        this.child(self.render_open_tabs_menu(cx))
-                    }),
+                    .child(open_tabs_popover),
             );
         }
 
@@ -939,8 +1000,7 @@ impl NyaTermApp {
                 .child(
                     div()
                         .id("workspace-new-session-menu")
-                        .h_full()
-                        .w(px(36.))
+                        .size(px(SESSION_TAB_ACTION_SIZE))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -973,6 +1033,46 @@ impl NyaTermApp {
                 }),
         );
 
+        let tracked_app = cx.weak_entity();
+        let tab_scroll_for_layout = tab_scroll.clone();
+        let tab_strip_viewport = div()
+            .h_full()
+            .min_w_0()
+            .flex_1()
+            .overflow_hidden()
+            .on_children_prepainted(move |_, _, cx| {
+                let viewport_width = tab_scroll_for_layout.bounds().size.width;
+                if viewport_width <= px(0.) {
+                    return;
+                }
+                let has_overflow = tab_strip_overflows(
+                    f32::from(tab_scroll_for_layout.max_offset().x),
+                    show_open_tabs_menu,
+                    session_count > 1,
+                );
+                let Some(app) = tracked_app.upgrade() else {
+                    return;
+                };
+                if app
+                    .read(cx)
+                    .shell
+                    .session_tab_strip_layout_is_current(has_overflow, viewport_width)
+                {
+                    return;
+                }
+                cx.defer(move |cx| {
+                    app.update(cx, |this, cx| {
+                        if this
+                            .shell
+                            .update_session_tab_strip_layout(has_overflow, viewport_width)
+                        {
+                            cx.notify();
+                        }
+                    });
+                });
+            })
+            .child(tabs);
+
         div()
             .h(px(36.)) // Tauri TabBar: h-9
             .flex()
@@ -980,15 +1080,7 @@ impl NyaTermApp {
             .border_b_1()
             .border_color(rgb(palette.border))
             .bg(self.shell_surface_color(palette.surface))
-            .child(
-                div()
-                    .h_full()
-                    .min_w_0()
-                    .flex_1()
-                    .overflow_hidden()
-                    .child(tabs)
-                    .horizontal_scrollbar(&tab_scroll),
-            )
+            .child(tab_strip_viewport)
             .child(session_actions)
     }
 }
@@ -997,7 +1089,7 @@ impl NyaTermApp {
 mod tests {
     use super::{
         SessionTabOrderKey, TransientSessionTab, pending_tab_insert_index, tab_drop_insert_after,
-        tab_scroll_x, transient_tab_precedes_session,
+        tab_scroll_x, tab_strip_overflows, transient_tab_precedes_session,
     };
 
     fn merged_tab_order(
@@ -1060,6 +1152,18 @@ mod tests {
         assert_eq!(tab_scroll_x(-110., 120., 0., -40.), -120.);
         assert_eq!(tab_scroll_x(-10., 120., 0., 40.), 0.);
         assert_eq!(tab_scroll_x(-10., 0., 0., -40.), 0.);
+    }
+
+    #[test]
+    fn overflow_detection_ignores_tolerance_and_the_rendered_control_width() {
+        assert!(!tab_strip_overflows(2., false, false));
+        assert!(tab_strip_overflows(2.1, false, false));
+
+        assert!(!tab_strip_overflows(38., true, false));
+        assert!(tab_strip_overflows(38.1, true, false));
+
+        assert!(!tab_strip_overflows(66., true, true));
+        assert!(tab_strip_overflows(66.1, true, true));
     }
 
     #[test]

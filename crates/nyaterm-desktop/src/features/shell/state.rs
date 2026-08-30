@@ -166,6 +166,8 @@ pub(super) struct ShellChromeState {
     pub(super) new_session_group_menu_path: Vec<String>,
     pub(super) session_tab_strip_scroll: ScrollHandle,
     pub(super) session_tab_scroll_into_view_pending: bool,
+    pub(super) session_tab_strip_has_overflow: bool,
+    pub(super) session_tab_strip_viewport_width: Option<Pixels>,
     pub(super) last_connect_failure_name: Option<String>,
     pub(super) last_connect_failure_error: Option<String>,
 }
@@ -241,6 +243,8 @@ impl ShellFeatureState {
                 new_session_group_menu_path: Vec::new(),
                 session_tab_strip_scroll: ScrollHandle::new(),
                 session_tab_scroll_into_view_pending: false,
+                session_tab_strip_has_overflow: false,
+                session_tab_strip_viewport_width: None,
                 last_connect_failure_name: None,
                 last_connect_failure_error: None,
             },
@@ -696,6 +700,38 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn session_tab_strip_scroll(&self) -> &ScrollHandle {
         &self.chrome.session_tab_strip_scroll
+    }
+
+    pub(in crate::features) fn session_tab_strip_has_overflow(&self) -> bool {
+        self.chrome.session_tab_strip_has_overflow
+    }
+
+    pub(in crate::features) fn session_tab_strip_layout_is_current(
+        &self,
+        has_overflow: bool,
+        viewport_width: Pixels,
+    ) -> bool {
+        self.chrome.session_tab_strip_has_overflow == has_overflow
+            && self.chrome.session_tab_strip_viewport_width == Some(viewport_width)
+    }
+
+    pub(in crate::features) fn update_session_tab_strip_layout(
+        &mut self,
+        has_overflow: bool,
+        viewport_width: Pixels,
+    ) -> bool {
+        let width_changed = self.chrome.session_tab_strip_viewport_width != Some(viewport_width);
+        let overflow_changed = self.chrome.session_tab_strip_has_overflow != has_overflow;
+        self.chrome.session_tab_strip_has_overflow = has_overflow;
+        self.chrome.session_tab_strip_viewport_width = Some(viewport_width);
+        if width_changed {
+            self.chrome.session_tab_scroll_into_view_pending = true;
+        }
+        width_changed || overflow_changed
+    }
+
+    pub(in crate::features) fn request_session_tab_scroll_into_view(&mut self) {
+        self.chrome.session_tab_scroll_into_view_pending = true;
     }
 
     pub(in crate::features) fn last_connect_failure_name(&self) -> Option<&str> {
@@ -1318,6 +1354,25 @@ mod tests {
         assert!(!shell.new_session_all_sessions_is_open());
         assert!(shell.new_session_group_menu_path().is_empty());
         assert!(!shell.close_root_menus());
+    }
+
+    #[test]
+    fn tab_strip_layout_tracks_overflow_and_reveals_active_tab_after_resize() {
+        let mut shell = shell(BottomPanelMode::Hidden);
+
+        assert!(shell.update_session_tab_strip_layout(false, px(640.)));
+        assert!(shell.session_tab_scroll_into_view_pending());
+        assert!(shell.consume_session_tab_scroll_into_view());
+        assert!(!shell.session_tab_scroll_into_view_pending());
+        assert!(shell.session_tab_strip_layout_is_current(false, px(640.)));
+
+        assert!(shell.update_session_tab_strip_layout(true, px(640.)));
+        assert!(shell.session_tab_strip_has_overflow());
+        assert!(!shell.session_tab_scroll_into_view_pending());
+
+        assert!(shell.update_session_tab_strip_layout(true, px(480.)));
+        assert!(shell.session_tab_scroll_into_view_pending());
+        assert!(!shell.session_tab_strip_layout_is_current(true, px(640.)));
     }
 
     #[test]

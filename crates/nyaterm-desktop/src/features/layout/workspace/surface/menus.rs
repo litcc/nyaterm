@@ -10,9 +10,10 @@ use gpui::{
 use nyaterm_core::{ConnectionType, Group, SavedConnection, truncate_preview};
 
 use crate::features::NyaTermApp;
+use crate::features::icons::resolve_connection_icon;
+use crate::features::shell::SessionTabTooltip;
+use crate::features::view_widgets::themed_icon;
 use crate::theme::ThemePalette;
-
-use super::super::super::view_helpers::session_kind_icon_path;
 
 const NEW_SESSION_MENU_WIDTH: f32 = 300.;
 const NEW_SESSION_SUBMENU_WIDTH: f32 = 260.;
@@ -108,22 +109,6 @@ fn new_session_connections_for_group(
     matches
 }
 
-fn connection_group_path(groups: &[Group], group_id: &str) -> Option<String> {
-    let mut parts = Vec::new();
-    let mut next = Some(group_id);
-    let mut seen = HashSet::new();
-    while let Some(id) = next {
-        if !seen.insert(id.to_string()) {
-            break;
-        }
-        let group = groups.iter().find(|group| group.id == id)?;
-        parts.push(group.name.clone());
-        next = group.parent_id.as_deref();
-    }
-    parts.reverse();
-    Some(parts.join(" / "))
-}
-
 impl NyaTermApp {
     pub(in crate::features) fn render_open_tabs_menu(
         &mut self,
@@ -141,25 +126,10 @@ impl NyaTermApp {
         let mut sessions = ordered;
         sessions.reverse();
         let active_id = self.session.active_id_owned();
-        let mut menu = div()
-            .max_h(px(360.))
-            .overflow_y_scrollbar()
-            .py_1()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .px_3()
-                    .py_1()
-                    .text_size(px(10.))
-                    .font_weight(FontWeight(700.))
-                    .text_color(rgb(palette.text_dimmed))
-                    .child(t!("terminal.openTabs")),
-            )
-            .child(div().mx_2().my_1().h(px(1.)).bg(rgb(palette.border)));
+        let mut rows = div().max_h(px(320.)).overflow_y_scrollbar().py_1();
 
         if sessions.is_empty() {
-            menu = menu.child(
+            rows = rows.child(
                 div()
                     .px_3()
                     .py_2()
@@ -178,12 +148,8 @@ impl NyaTermApp {
                     .workspace_pane_root(&session_id)
                     .map(|root| root.session_ids())
                     .unwrap_or_else(|| vec![session_id.clone()]);
-                let has_unread = leaf_ids
-                    .iter()
-                    .any(|id| self.terminal.session_has_unread(id));
                 let is_disconnected = leaf_ids.iter().any(|id| self.session.is_disconnected(id));
                 let title = self.session.display_name_by_info(&session);
-                let kind_icon = session_kind_icon_path(session.kind);
                 let is_locked = self.tab_tree_is_locked(&session_id);
                 let active_pane = self.active_pane_for_tab_root(&session_id);
                 let connection = self
@@ -196,31 +162,42 @@ impl NyaTermApp {
                             .iter()
                             .find(|connection| connection.id == connection_id)
                     });
-                let group_path = connection
-                    .and_then(|connection| connection.group_id.as_deref())
-                    .and_then(|group_id| {
-                        connection_group_path(self.connection_state.groups(), group_id)
-                    });
-                let detail = self
-                    .session
-                    .tab_tooltip_lines(&active_pane)
-                    .into_iter()
-                    .take(2)
-                    .collect::<Vec<_>>()
-                    .join(" / ");
-                menu = menu.child(
+                let icon_kind = connection.map_or_else(
+                    || match session.kind {
+                        nyaterm_transport::SessionKind::LocalPty => "Local",
+                        nyaterm_transport::SessionKind::Ssh => "SSH",
+                        nyaterm_transport::SessionKind::Telnet => "Telnet",
+                        nyaterm_transport::SessionKind::Serial => "Serial",
+                        nyaterm_transport::SessionKind::RawTcp => "SSH",
+                        nyaterm_transport::SessionKind::Rdp => "RDP",
+                        nyaterm_transport::SessionKind::Vnc => "VNC",
+                    },
+                    SavedConnection::kind_label,
+                );
+                let icon = resolve_connection_icon(
+                    connection
+                        .and_then(|connection| connection.icon.as_deref())
+                        .filter(|icon| !icon.trim().is_empty()),
+                    icon_kind,
+                );
+                let mut tooltip_lines = self.session.tab_tooltip_lines(&active_pane);
+                if is_locked {
+                    tooltip_lines.push(t!("tabCtx.locked").to_string());
+                }
+                let tooltip_title = title.clone();
+                rows = rows.child(
                     div()
                         .id(SharedString::from(format!("open-tabs-menu-{session_id}")))
-                        .min_h(px(42.))
+                        .h(px(32.))
                         .px_3()
                         .flex()
                         .items_center()
-                        .gap_2()
                         .cursor_pointer()
-                        .bg(if is_active {
-                            self.shell_surface_color(palette.hover)
-                        } else {
-                            rgba(0x00000000)
+                        .tooltip(move |_, cx| {
+                            cx.new(|_| {
+                                SessionTabTooltip::new(tooltip_title.clone(), tooltip_lines.clone())
+                            })
+                            .into()
                         })
                         .hover(move |this| this.bg(hover_bg))
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -230,41 +207,35 @@ impl NyaTermApp {
                         }))
                         .child(
                             div()
-                                .size(px(16.))
+                                .w(px(20.))
+                                .h_full()
+                                .flex_none()
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .child(if is_active {
                                     svg()
-                                        .size(px(14.))
+                                        .size(px(13.))
                                         .path("icons/check.svg")
                                         .text_color(rgb(palette.primary))
                                         .into_any_element()
-                                } else if has_unread {
-                                    div()
-                                        .size(px(8.))
-                                        .rounded_full()
-                                        .bg(rgb(palette.success))
-                                        .into_any_element()
                                 } else {
-                                    div().size(px(8.)).into_any_element()
+                                    div().size(px(13.)).into_any_element()
                                 }),
                         )
                         .child(
                             div()
                                 .size(px(16.))
+                                .ml(px(2.))
+                                .flex_none()
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(
-                                    svg()
-                                        .size(px(14.))
-                                        .path(kind_icon)
-                                        .text_color(rgb(palette.text_dimmed)),
-                                ),
+                                .child(themed_icon(palette, icon, false, 14.)),
                         )
                         .child(
                             div()
+                                .ml(px(8.))
                                 .min_w_0()
                                 .flex_1()
                                 .text_size(px(12.))
@@ -275,84 +246,54 @@ impl NyaTermApp {
                                     div()
                                         .flex_none()
                                         .text_color(rgb(palette.text_dimmed))
-                                        .child(format!(
-                                            "{}",
-                                            ordinals.get(&session.id).copied().unwrap_or(index + 1)
-                                        )),
+                                        .child(
+                                            ordinals
+                                                .get(&session.id)
+                                                .copied()
+                                                .unwrap_or(index + 1)
+                                                .to_string(),
+                                        ),
                                 )
                                 .child(
                                     div()
                                         .min_w_0()
                                         .flex_1()
-                                        .flex()
-                                        .flex_col()
                                         .overflow_hidden()
-                                        .child(
-                                            div()
-                                                .text_color(if is_disconnected {
-                                                    rgb(palette.text_dimmed)
-                                                } else {
-                                                    rgb(palette.text)
-                                                })
-                                                .child(truncate_preview(&title, 28)),
-                                        )
-                                        .when(group_path.is_some() || !detail.is_empty(), |this| {
-                                            let subtitle = [
-                                                group_path.as_deref().unwrap_or(""),
-                                                detail.as_str(),
-                                            ]
-                                            .into_iter()
-                                            .filter(|part| !part.is_empty())
-                                            .collect::<Vec<_>>()
-                                            .join(" / ");
-                                            this.child(
-                                                div()
-                                                    .text_size(px(10.))
-                                                    .text_color(rgb(palette.text_dimmed))
-                                                    .child(truncate_preview(&subtitle, 38)),
-                                            )
-                                        }),
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_color(if is_disconnected {
+                                            rgb(palette.text_dimmed)
+                                        } else {
+                                            rgb(palette.text)
+                                        })
+                                        .child(truncate_preview(&title, 40)),
                                 ),
-                        )
-                        .when(is_locked, |this| {
-                            let locked_label = t!("tabCtx.locked").to_string();
-                            this.child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "open-tabs-locked-{}",
-                                        session.id
-                                    )))
-                                    .size(px(16.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .tooltip(move |window, cx| {
-                                        nyaterm_ui::NyaTooltip::new(locked_label.clone())
-                                            .build(window, cx)
-                                    })
-                                    .child(
-                                        svg()
-                                            .size(px(12.))
-                                            .path("icons/lock.svg")
-                                            .text_color(rgb(palette.warning)),
-                                    ),
-                            )
-                        }),
+                        ),
                 );
             }
         }
         div()
             .id("workspace-open-tabs-dropdown")
-            .absolute()
-            .top(px(36.))
-            .right_0()
             .w(px(256.))
             .rounded_md()
             .border_1()
             .border_color(rgb(palette.border))
             .bg(self.shell_surface_color(palette.surface))
             .shadow_lg()
-            .child(menu)
+            .overflow_hidden()
+            .child(
+                div()
+                    .h(px(40.))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .text_size(px(12.))
+                    .font_weight(FontWeight(600.))
+                    .text_color(rgb(palette.text_muted))
+                    .child(t!("terminal.openTabs")),
+            )
+            .child(div().h(px(1.)).bg(rgb(palette.border)))
+            .child(rows)
     }
 
     pub(in crate::features) fn render_new_session_menu(
