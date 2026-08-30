@@ -932,7 +932,7 @@ fn handle_vnc_event(output: &mut SessionOutput, event: VncEvent) -> Result<(), V
 }
 
 fn rgba_to_bgra(pixels: &mut [u8]) {
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
 }
