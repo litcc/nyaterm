@@ -90,6 +90,7 @@ pub struct NyaPopover {
     open: Option<bool>,
     appearance: bool,
     overlay_closable: bool,
+    trigger_click: bool,
     on_open_change: Option<NyaPopoverOpenHandler>,
     on_click_outside: Option<NyaPopoverOutsideHandler>,
 }
@@ -111,6 +112,7 @@ impl NyaPopover {
             open: None,
             appearance: true,
             overlay_closable: true,
+            trigger_click: true,
             on_open_change: None,
             on_click_outside: None,
         }
@@ -155,6 +157,13 @@ impl NyaPopover {
         self
     }
 
+    /// Control whether pressing the trigger toggles the popover. Disable this
+    /// for hover-owned or otherwise externally controlled open state.
+    pub fn trigger_click(mut self, enabled: bool) -> Self {
+        self.trigger_click = enabled;
+        self
+    }
+
     pub fn on_open_change(
         mut self,
         handler: impl Fn(&bool, &mut Window, &mut App) + 'static,
@@ -195,16 +204,18 @@ impl RenderOnce for NyaPopover {
             .id(id)
             .relative()
             .child(self.trigger)
-            .on_mouse_down(MouseButton::Left, {
-                let state = state.clone();
-                move |_, window, cx| {
-                    cx.stop_propagation();
-                    state.update(cx, |state, cx| {
-                        state.set_open(open, cx);
-                        state.toggle_open(window, cx);
-                    });
-                    cx.notify(parent_view_id);
-                }
+            .when(self.trigger_click, |this| {
+                this.on_mouse_down(MouseButton::Left, {
+                    let state = state.clone();
+                    move |_, window, cx| {
+                        cx.stop_propagation();
+                        state.update(cx, |state, cx| {
+                            state.set_open(open, cx);
+                            state.toggle_open(window, cx);
+                        });
+                        cx.notify(parent_view_id);
+                    }
+                })
             })
             .child(
                 canvas(

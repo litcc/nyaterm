@@ -1,9 +1,10 @@
 use gpui::{
-    Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, relative, rgb, rgba, svg,
+    Anchor, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, relative, rgb,
+    rgba, svg,
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{SessionInfo, SessionKind};
-use nyaterm_ui::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
+use nyaterm_ui::{NyaHoverCard, NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -11,9 +12,7 @@ use super::super::super::NyaTermApp;
 use super::PaneBorderEdges;
 use crate::features::formatting::{session_kind_label, short_id};
 use crate::features::perf::record_gpui_perf_sample;
-use crate::features::shell::{
-    NewSessionMenuAnchor, SessionTabDragPayload, SessionTabDragPreview, SessionTabTooltip,
-};
+use crate::features::shell::{NewSessionMenuAnchor, SessionTabDragPayload, SessionTabDragPreview};
 use crate::models::{
     TabDockEdge, TabDockZone, TerminalWindowNode, WorkspacePaneNode, WorkspaceSplitDirection,
 };
@@ -98,8 +97,6 @@ impl NyaTermApp {
                     .h(px(36.))
                     .flex()
                     .items_center()
-                    .border_b_1()
-                    .border_color(rgb(palette.border))
                     .bg(self.shell_surface_color(palette.surface));
                 for tab_id in &tab_ids {
                     let is_active_tab = active.as_str() == tab_id.as_str()
@@ -143,12 +140,12 @@ impl NyaTermApp {
                         self.sync_input.broadcast_to_all() || sync_group.is_some();
                     let sync_indicator_color =
                         sync_group.map(|group| group.color).unwrap_or(palette.link);
-                    let accent_color = if let Some(custom_color) = custom_color {
+                    let accent_color = if is_active_tab {
+                        custom_color.unwrap_or(palette.primary)
+                    } else if let Some(custom_color) = custom_color {
                         custom_color
                     } else if is_disconnected {
                         palette.danger
-                    } else if is_active_tab {
-                        palette.success
                     } else if has_unread {
                         palette.warning
                     } else {
@@ -164,6 +161,7 @@ impl NyaTermApp {
                     };
                     let drag_payload = SessionTabDragPayload {
                         session_id: tab_id.clone(),
+                        order_index: tab_number.saturating_sub(1),
                         display_name: title.clone(),
                         kind_label,
                         kind_icon,
@@ -174,193 +172,178 @@ impl NyaTermApp {
                         preview_accent: accent_color,
                     };
                     let tab_title = truncate_preview(&title, 18);
-                    let tooltip_title = title.clone();
-                    let tooltip_lines = self.session.tab_tooltip_lines(tab_id);
-                    strip = strip.child(
-                        div()
-                            .id(SharedString::from(format!("tw-tab-{leaf_id}-{select_id}")))
-                            .h_full()
-                            .min_w(px(118.))
-                            .max_w(px(236.))
-                            .pl_3()
-                            .pr_2()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .relative()
-                            .cursor_pointer()
-                            .cursor_move()
-                            .bg(bg)
-                            .when(is_disconnected, |this| this.opacity(0.78))
-                            .border_r_1()
-                            .border_color(rgb(palette.border))
-                            .when(is_active_tab, |this| {
-                                this.child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .left_0()
-                                        .right_0()
-                                        .h(px(2.))
-                                        .bg(accent),
-                                )
-                                .child(
-                                    div()
-                                        .absolute()
-                                        .bottom_0()
-                                        .left_0()
-                                        .right_0()
-                                        .h(px(1.))
-                                        .bg(self.shell_surface_color(palette.bg)),
-                                )
-                            })
-                            .when(custom_color.is_some(), |this| {
-                                this.child(
-                                    div()
-                                        .absolute()
-                                        .top_0()
-                                        .bottom_0()
-                                        .left_0()
-                                        .w(px(3.))
-                                        .bg(accent),
-                                )
-                            })
-                            .tooltip(move |_, cx| {
-                                cx.new(|_| {
-                                    SessionTabTooltip::new(
-                                        tooltip_title.clone(),
-                                        tooltip_lines.clone(),
-                                    )
-                                })
-                                .into()
-                            })
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.activate_terminal_window_tab(
-                                    leaf_id.clone(),
-                                    select_id.clone(),
-                                    cx,
-                                );
-                                window.focus(this.terminal.input_focus(), cx);
-                            }))
-                            .on_mouse_down(
-                                gpui::MouseButton::Middle,
-                                cx.listener({
-                                    let actions_id = actions_id.clone();
-                                    move |this, event, window, cx| {
-                                        this.handle_session_tab_mouse_down(
-                                            actions_id.clone(),
-                                            event,
-                                            window,
-                                            cx,
-                                        );
-                                    }
-                                }),
+                    let hover_card = self.session_tab_hover_card(tab_id, palette);
+                    let tab = div()
+                        .id(SharedString::from(format!("tw-tab-{leaf_id}-{select_id}")))
+                        // HoverCard inserts trigger-host elements, so an
+                        // inherited percentage height would shrink to the
+                        // tab's text content instead of filling this strip.
+                        .h(px(36.))
+                        .min_w(px(118.))
+                        .max_w(px(236.))
+                        .pl_3()
+                        .pr_2()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .relative()
+                        .cursor_pointer()
+                        .cursor_move()
+                        .bg(bg)
+                        .when(is_disconnected, |this| this.opacity(0.78))
+                        .border_r_1()
+                        .border_color(rgb(palette.border))
+                        .when(!is_active_tab, |this| this.border_b_1())
+                        .when(is_active_tab, |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .right_0()
+                                    .h(px(2.))
+                                    .bg(accent),
                             )
-                            .on_mouse_down(
-                                gpui::MouseButton::Right,
-                                cx.listener(move |this, event, window, cx| {
+                        })
+                        .when(custom_color.is_some(), |this| {
+                            this.child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .bottom_0()
+                                    .left_0()
+                                    .w(px(3.))
+                                    .bg(accent),
+                            )
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.activate_terminal_window_tab(
+                                leaf_id.clone(),
+                                select_id.clone(),
+                                cx,
+                            );
+                            window.focus(this.terminal.input_focus(), cx);
+                        }))
+                        .on_mouse_down(
+                            gpui::MouseButton::Middle,
+                            cx.listener({
+                                let actions_id = actions_id.clone();
+                                move |this, event, window, cx| {
                                     this.handle_session_tab_mouse_down(
                                         actions_id.clone(),
                                         event,
                                         window,
                                         cx,
                                     );
-                                }),
-                            )
-                            .on_drag(drag_payload, |payload, position, _, cx| {
-                                cx.new(|_| SessionTabDragPreview::new(payload.clone(), position))
-                            })
-                            .on_drop(cx.listener(
-                                move |this, payload: &SessionTabDragPayload, _, cx| {
-                                    this.place_tab_before_in_terminal_windows(
-                                        payload.session_id.clone(),
-                                        drop_before_id.clone(),
-                                        cx,
-                                    );
-                                },
-                            ))
-                            .child(
+                                }
+                            }),
+                        )
+                        .on_mouse_down(
+                            gpui::MouseButton::Right,
+                            cx.listener(move |this, event, window, cx| {
+                                this.handle_session_tab_mouse_down(
+                                    actions_id.clone(),
+                                    event,
+                                    window,
+                                    cx,
+                                );
+                            }),
+                        )
+                        .on_drag(drag_payload, |payload, position, _, cx| {
+                            cx.new(|_| SessionTabDragPreview::new(payload.clone(), position))
+                        })
+                        .on_drop(cx.listener(
+                            move |this, payload: &SessionTabDragPayload, _, cx| {
+                                this.place_tab_before_in_terminal_windows(
+                                    payload.session_id.clone(),
+                                    drop_before_id.clone(),
+                                    cx,
+                                );
+                            },
+                        ))
+                        .child(
+                            div()
+                                .size(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(svg().size(px(14.)).path(kind_icon).text_color(accent)),
+                        )
+                        .when(tab_number > 0, |this| {
+                            this.child(
                                 div()
-                                    .size(px(14.))
+                                    .min_w(px(12.))
+                                    .text_size(px(12.))
+                                    .font_weight(FontWeight(700.))
+                                    .text_color(rgb(palette.text_dimmed))
+                                    .child(format!("{tab_number}")),
+                            )
+                        })
+                        .child(
+                            div()
+                                .min_w_0()
+                                .max_w(px(160.))
+                                .text_xs()
+                                .font_weight(FontWeight(if is_active_tab { 700. } else { 500. }))
+                                .text_color(if is_disconnected {
+                                    rgb(palette.text_dimmed)
+                                } else if is_active_tab {
+                                    rgb(palette.text)
+                                } else {
+                                    rgb(palette.text_muted)
+                                })
+                                .child(tab_title),
+                        )
+                        .when(show_sync_indicator, |this| {
+                            this.child(
+                                div()
+                                    .size(px(12.))
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .child(svg().size(px(14.)).path(kind_icon).text_color(accent)),
-                            )
-                            .when(tab_number > 0, |this| {
-                                this.child(
-                                    div()
-                                        .min_w(px(12.))
-                                        .text_size(px(12.))
-                                        .font_weight(FontWeight(700.))
-                                        .text_color(rgb(palette.text_dimmed))
-                                        .child(format!("{tab_number}")),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .max_w(px(160.))
-                                    .text_xs()
-                                    .font_weight(FontWeight(if is_active_tab {
-                                        700.
-                                    } else {
-                                        500.
-                                    }))
-                                    .text_color(if is_disconnected {
-                                        rgb(palette.text_dimmed)
-                                    } else if is_active_tab {
-                                        rgb(palette.text)
-                                    } else {
-                                        rgb(palette.text_muted)
-                                    })
-                                    .child(tab_title),
-                            )
-                            .when(show_sync_indicator, |this| {
-                                this.child(
-                                    div()
-                                        .size(px(12.))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .opacity(if sync_paused { 0.4 } else { 1. })
-                                        .child(
-                                            svg()
-                                                .size(px(10.))
-                                                .path("icons/sync.svg")
-                                                .text_color(rgb(sync_indicator_color)),
-                                        ),
-                                )
-                            })
-                            .when(has_unread && !is_active_tab, |this| {
-                                this.child(
-                                    div().size(px(7.)).rounded_full().bg(rgb(palette.success)),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!("tw-tab-close-{id}-{close_id}")))
-                                    .size(px(18.))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded_sm()
-                                    .text_size(px(10.))
-                                    .text_color(rgb(palette.text_muted))
-                                    .hover(|this| {
-                                        this.bg(rgb(palette.border)).text_color(rgb(palette.danger))
-                                    })
+                                    .opacity(if sync_paused { 0.4 } else { 1. })
                                     .child(
                                         svg()
-                                            .size(px(13.))
-                                            .path("icons/window/close.svg")
-                                            .text_color(rgb(palette.text_muted)),
-                                    )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.close_session(close_id.clone(), cx);
-                                    })),
-                            ),
+                                            .size(px(10.))
+                                            .path("icons/sync.svg")
+                                            .text_color(rgb(sync_indicator_color)),
+                                    ),
+                            )
+                        })
+                        .when(has_unread && !is_active_tab, |this| {
+                            this.child(div().size(px(7.)).rounded_full().bg(rgb(palette.success)))
+                        })
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("tw-tab-close-{id}-{close_id}")))
+                                .size(px(18.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_sm()
+                                .text_size(px(10.))
+                                .text_color(rgb(palette.text_muted))
+                                .hover(|this| {
+                                    this.bg(rgb(palette.border)).text_color(rgb(palette.danger))
+                                })
+                                .child(
+                                    svg()
+                                        .size(px(13.))
+                                        .path("icons/window/close.svg")
+                                        .text_color(rgb(palette.text_muted)),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.close_session(close_id.clone(), cx);
+                                })),
+                        );
+                    strip = strip.child(
+                        NyaHoverCard::new(
+                            format!("terminal-window-tab-hover-card-{id}-{tab_id}"),
+                            tab,
+                            hover_card,
+                        )
+                        .anchor(Anchor::TopLeft),
                     );
                 }
                 let menu_anchor = NewSessionMenuAnchor::TerminalLeaf(id.clone());
@@ -422,8 +405,17 @@ impl NyaTermApp {
                         .h_full()
                         .flex()
                         .items_center()
+                        .border_b_1()
+                        .border_color(rgb(palette.border))
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(popover),
+                );
+                strip = strip.child(
+                    div()
+                        .h_full()
+                        .flex_1()
+                        .border_b_1()
+                        .border_color(rgb(palette.border)),
                 );
                 let canvas = if active.is_empty() {
                     div().flex_1().into_any_element()

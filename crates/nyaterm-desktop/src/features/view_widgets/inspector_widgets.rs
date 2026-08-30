@@ -97,39 +97,40 @@ pub(in crate::features) fn tab_menu_item_enabled(
         "tab-ctx-color-reset" => Some("icons/window/close.svg"),
         "tab-ctx-copy-name" | "tab-ctx-copy-ip" | "tab-ctx-copy-ssh" => Some("icons/copy.svg"),
         "tab-ctx-duplicate" => Some("icons/transfer/play.svg"),
-        "tab-ctx-duplicate-run" | "tab-ctx-multiplex-run" => Some("icons/commands.svg"),
-        "tab-ctx-multiplex" | "tab-ctx-smart-split" => Some("icons/menu/split.svg"),
+        "tab-ctx-duplicate-run" | "tab-ctx-multiplex-run" => Some("icons/menu/input.svg"),
+        "tab-ctx-multiplex" | "tab-ctx-smart-split" => Some("icons/menu/call-split.svg"),
         "tab-ctx-reconnect" => Some("icons/session/reconnect.svg"),
         "tab-ctx-disconnect" => Some("icons/session/disconnect.svg"),
         "tab-ctx-rdp-secure-attention" => Some("icons/security.svg"),
-        "tab-ctx-ai-explain" | "tab-ctx-ai-analyze" => Some("icons/ai.svg"),
         "tab-ctx-split-h" | "tab-ctx-window-below" | "tab-ctx-tile-h" => {
             Some("icons/menu/horizontal.svg")
         }
-        "tab-ctx-split-v" | "tab-ctx-window-right" | "tab-ctx-tile-v" | "tab-ctx-close-right" => {
+        "tab-ctx-split-v" | "tab-ctx-window-right" | "tab-ctx-tile-v" => {
             Some("icons/menu/vertical.svg")
         }
-        "tab-ctx-unsplit" | "tab-ctx-window-flat" => Some("icons/menu/fit.svg"),
+        "tab-ctx-unsplit" => Some("icons/menu/merge.svg"),
+        "tab-ctx-window-flat" => Some("icons/menu/fit.svg"),
         "tab-ctx-close" => Some("icons/window/close.svg"),
-        "tab-ctx-close-all" => Some("icons/transfer/clear-all.svg"),
-        "tab-ctx-close-others" => Some("icons/sessions.svg"),
+        "tab-ctx-close-all" => Some("icons/menu/close-fullscreen.svg"),
+        "tab-ctx-close-others" => Some("icons/menu/circle-dot-filled.svg"),
+        "tab-ctx-close-right" => Some("icons/menu/arrow-bar-to-right.svg"),
         "tab-ctx-info" => Some("icons/menu/info.svg"),
         _ => None,
     };
-    let text_color = if enabled {
-        rgb(palette.text)
-    } else {
-        rgb(palette.text_dimmed)
-    };
+    let text_color = rgb(palette.text);
+    let icon_color = rgb(palette.text_muted);
     div()
         .id(SharedString::from(id))
         .h(px(28.))
-        .px_3()
+        .flex_none()
+        .px_2()
         .flex()
         .items_center()
         .gap_2()
+        .rounded_sm()
         .text_size(px(12.))
         .text_color(text_color)
+        .opacity(if enabled { 1. } else { 0.5 })
         .when(enabled, |this| {
             this.cursor_pointer()
                 .hover(|this| this.bg(rgb(palette.hover)))
@@ -137,18 +138,20 @@ pub(in crate::features) fn tab_menu_item_enabled(
         })
         .when_some(icon_path, |this, icon_path| {
             this.child(
-                svg()
-                    .size(px(14.))
+                div()
+                    .w(px(24.))
+                    .h_full()
                     .flex_none()
-                    .path(icon_path)
-                    .text_color(text_color),
+                    .flex()
+                    .items_center()
+                    .child(svg().size(px(16.)).path(icon_path).text_color(icon_color)),
             )
         })
         .child(div().min_w_0().flex_1().child(label))
 }
 
 pub(in crate::features) fn tab_menu_separator(palette: ThemePalette) -> impl IntoElement {
-    div().h(px(1.)).my_1().mx_2().bg(rgb(palette.border))
+    div().h(px(1.)).flex_none().my_1().bg(rgb(palette.border))
 }
 
 pub(in crate::features) fn tab_action_button(

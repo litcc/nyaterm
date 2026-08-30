@@ -72,8 +72,6 @@ pub(in crate::features) struct SessionFeatureState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SessionTabDragState {
     source_id: String,
-    target_id: String,
-    insert_after: bool,
 }
 
 #[derive(Default)]
@@ -1441,17 +1439,8 @@ impl SessionFeatureState {
         }
     }
 
-    pub(in crate::features) fn set_tab_drag_target(
-        &mut self,
-        source_id: String,
-        target_id: String,
-        insert_after: bool,
-    ) -> bool {
-        let next = SessionTabDragState {
-            source_id,
-            target_id,
-            insert_after,
-        };
+    pub(in crate::features) fn set_tab_drag_source(&mut self, source_id: String) -> bool {
+        let next = SessionTabDragState { source_id };
         if self.tab_drag.as_ref() == Some(&next) {
             return false;
         }
@@ -1465,11 +1454,8 @@ impl SessionFeatureState {
             .is_some_and(|drag| drag.source_id == session_id)
     }
 
-    pub(in crate::features) fn tab_drop_after(&self, session_id: &str) -> Option<bool> {
-        self.tab_drag
-            .as_ref()
-            .filter(|drag| drag.target_id == session_id && drag.source_id != session_id)
-            .map(|drag| drag.insert_after)
+    pub(in crate::features) fn tab_drag_is_pending(&self) -> bool {
+        self.tab_drag.is_some()
     }
 
     pub(in crate::features) fn clear_tab_drag(&mut self) -> bool {
@@ -1537,7 +1523,7 @@ impl SessionFeatureState {
         if self
             .tab_drag
             .as_ref()
-            .is_some_and(|drag| drag.source_id == session_id || drag.target_id == session_id)
+            .is_some_and(|drag| drag.source_id == session_id)
         {
             self.tab_drag = None;
         }

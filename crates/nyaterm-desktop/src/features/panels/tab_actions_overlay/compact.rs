@@ -3,18 +3,18 @@ use rust_i18n::t;
 use std::borrow::Cow;
 
 use super::{
-    TabActionMenuGroup, TabActionPolicy, TabActionsMenuGeometry, TabActionsSubmenuGeometry,
-    clamp_tab_actions_position, tab_actions_submenu_position,
+    TAB_ACTIONS_MENU_WIDTH, TabActionMenuGroup, TabActionPolicy, clamp_tab_actions_position,
+    tab_actions_menu_visible_height,
 };
 use crate::features::NyaTermApp;
 use crate::features::view_widgets::{tab_menu_item, tab_menu_item_enabled, tab_menu_separator};
 use crate::models::{StartupCommandAction, TabActionsSubmenu, WorkspaceSplitDirection};
 use crate::theme::ThemePalette;
 use gpui::{
-    App, ClickEvent, Context, IntoElement, KeyDownEvent, MouseButton, SharedString, Window, div,
-    prelude::*, px, rgb, rgba, svg,
+    AnyElement, App, ClickEvent, Context, IntoElement, KeyDownEvent, MouseButton, SharedString,
+    Window, div, prelude::*, px, rgb, rgba, svg,
 };
-use nyaterm_ui::NyaScrollable;
+use nyaterm_ui::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement, NyaScrollable};
 
 use super::super::TAB_PRESET_COLORS;
 
@@ -63,32 +63,73 @@ impl NyaTermApp {
         let show_session_group = menu_groups.contains(&TabActionMenuGroup::Session);
         let show_split_group = menu_groups.contains(&TabActionMenuGroup::Split);
         let (viewport_w, viewport_h) = self.shell.viewport_size();
-        let menu_max_height = (viewport_h - 16.).clamp(160., 440.);
+        let menu_visible_height = tab_actions_menu_visible_height(policy, viewport_h);
         let (menu_x, menu_y) = if let Some((x, y)) = self.session.dialog_tab_actions_anchor() {
-            clamp_tab_actions_position(x, y, 240., menu_max_height, viewport_w, viewport_h)
+            clamp_tab_actions_position(
+                x,
+                y,
+                TAB_ACTIONS_MENU_WIDTH,
+                menu_visible_height,
+                viewport_w,
+                viewport_h,
+            )
         } else {
-            (((viewport_w - 240.).max(16.) * 0.5).max(8.), 74.0)
+            (
+                ((viewport_w - TAB_ACTIONS_MENU_WIDTH).max(16.) * 0.5).max(8.),
+                74.0,
+            )
         };
         let active_submenu = self.session.dialog_tab_actions_submenu();
 
-        let mut color_row = div().p_2().flex().flex_wrap().gap_1().items_center();
+        let mut color_row = div().flex_none().p_2().grid().grid_cols(6).gap_1();
         for (name, color) in TAB_PRESET_COLORS {
             let selected = active_color == Some(color);
             let color_session_id = tab_root_id.clone();
+            let color_group = SharedString::from(format!("tab-ctx-color-group-{name}"));
             color_row = color_row.child(
                 div()
                     .id(SharedString::from(format!("tab-ctx-color-{name}")))
+                    .group(color_group.clone())
+                    .relative()
                     .size(px(20.))
                     .rounded_full()
-                    .border_1()
-                    .border_color(if selected {
-                        rgb(0xffffff)
-                    } else {
-                        rgb(palette.border)
-                    })
-                    .bg(rgb(color))
                     .cursor_pointer()
-                    .hover(|this| this.border_color(rgb(palette.text)))
+                    .when(selected, |this| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .top(px(-4.))
+                                .left(px(-4.))
+                                .size(px(28.))
+                                .rounded_full()
+                                .border_2()
+                                .border_color(rgb(color)),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top(px(-2.))
+                                .left(px(-2.))
+                                .size(px(24.))
+                                .rounded_full()
+                                .border_2()
+                                .border_color(rgb(palette.surface)),
+                        )
+                    })
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .size(px(20.))
+                            .rounded_full()
+                            .bg(rgb(color))
+                            .when(!selected, |this| {
+                                this.group_hover(color_group, |style| {
+                                    style.top(px(-2.)).left(px(-2.)).size(px(24.))
+                                })
+                            }),
+                    )
                     .tooltip({
                         let label = name.to_string();
                         move |window, cx| {
@@ -126,32 +167,14 @@ impl NyaTermApp {
             .filter(|submenu| policy.supports_submenu(*submenu))
             .map(|submenu| {
             let submenu_width = if submenu == TabActionsSubmenu::Color {
-                176.
+                160.
             } else {
                 240.
             };
-            let submenu_height = match submenu {
-                TabActionsSubmenu::Color => 104.,
-                TabActionsSubmenu::SshAdvanced | TabActionsSubmenu::Ai => 64.,
-            };
-            let trigger_offset = policy.submenu_trigger_offset(submenu);
-            let (submenu_x, submenu_y) = tab_actions_submenu_position(
-                TabActionsMenuGeometry {
-                    x: menu_x,
-                    y: menu_y,
-                    width: 240.,
-                },
-                TabActionsSubmenuGeometry {
-                    width: submenu_width,
-                    trigger_offset,
-                    height: submenu_height,
-                },
-                (viewport_w, viewport_h),
-            );
             let mut panel = div()
                 .max_h(px((viewport_h - 16.).max(80.)))
                 .overflow_y_scrollbar()
-                .py_1()
+                .p_1()
                 .flex()
                 .flex_col();
 
@@ -284,9 +307,6 @@ impl NyaTermApp {
             }
             div()
                 .id(SharedString::from("tab-actions-submenu"))
-                .absolute()
-                .left(px(submenu_x))
-                .top(px(submenu_y))
                 .w(px(submenu_width))
                 .rounded_md()
                 .border_1()
@@ -298,7 +318,14 @@ impl NyaTermApp {
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .on_click(|_, _, cx| cx.stop_propagation())
                 .child(panel)
+                .into_any_element()
         });
+        let (color_submenu, ssh_submenu, ai_submenu) = match (active_submenu, submenu_panel) {
+            (Some(TabActionsSubmenu::Color), panel) => (panel, None, None),
+            (Some(TabActionsSubmenu::SshAdvanced), panel) => (None, panel, None),
+            (Some(TabActionsSubmenu::Ai), panel) => (None, None, panel),
+            (None, _) => (None, None, None),
+        };
 
         div()
             .id(SharedString::from("tab-actions-overlay"))
@@ -338,7 +365,7 @@ impl NyaTermApp {
                     .absolute()
                     .left(px(menu_x))
                     .top(px(menu_y))
-                    .w(px(240.))
+                    .w(px(TAB_ACTIONS_MENU_WIDTH))
                     .rounded_md()
                     .border_1()
                     .border_color(rgb(palette.border))
@@ -349,33 +376,40 @@ impl NyaTermApp {
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .child(
                         div()
-                            .max_h(px(menu_max_height))
+                            .max_h(px(menu_visible_height))
                             .overflow_y_scrollbar()
-                            .py_1()
+                            .p_1()
                             .flex()
                             .flex_col()
-                            .child(tab_actions_submenu_item(
-                                palette,
-                                TabActionsSubmenuItem {
-                                    id: "tab-ctx-set-color",
-                                    icon_path: "icons/menu/palette.svg",
-                                    label: t!("tabCtx.setColor"),
-                                    enabled: true,
-                                    active: active_submenu == Some(TabActionsSubmenu::Color),
-                                },
-                                TabActionsSubmenuHandlers {
-                                    on_hover: cx.listener(|this, hovered: &bool, _, cx| {
-                                        if *hovered {
+                            .child(tab_actions_submenu_host(
+                                "tab-actions-color-submenu",
+                                tab_actions_submenu_item(
+                                    palette,
+                                    TabActionsSubmenuItem {
+                                        id: "tab-ctx-set-color",
+                                        icon_path: "icons/menu/palette.svg",
+                                        label: t!("tabCtx.setColor"),
+                                        enabled: true,
+                                        active: active_submenu == Some(TabActionsSubmenu::Color),
+                                    },
+                                    TabActionsSubmenuHandlers {
+                                        on_hover: cx.listener(|this, hovered: &bool, _, cx| {
+                                            if *hovered {
+                                                this.open_tab_actions_submenu(
+                                                    TabActionsSubmenu::Color,
+                                                    cx,
+                                                );
+                                            }
+                                        }),
+                                        on_click: cx.listener(|this, _, _, cx| {
                                             this.open_tab_actions_submenu(
                                                 TabActionsSubmenu::Color,
                                                 cx,
                                             );
-                                        }
-                                    }),
-                                    on_click: cx.listener(|this, _, _, cx| {
-                                        this.open_tab_actions_submenu(TabActionsSubmenu::Color, cx);
-                                    }),
-                                },
+                                        }),
+                                    },
+                                ),
+                                color_submenu,
                             ))
                             .child(tab_menu_item(
                                 palette,
@@ -469,36 +503,40 @@ impl NyaTermApp {
                                 ))
                             })
                             .when(support.ssh_multiplex, |this| {
-                                this.child(tab_actions_submenu_item(
-                                    palette,
-                                    TabActionsSubmenuItem {
-                                        id: "tab-ctx-ssh-advanced",
-                                        icon_path: "icons/menu/split.svg",
-                                        label: t!("tabCtx.sshAdvanced"),
-                                        enabled: availability.multiplex,
-                                        active: active_submenu
-                                            == Some(TabActionsSubmenu::SshAdvanced),
-                                    },
-                                    TabActionsSubmenuHandlers {
-                                        on_hover: cx.listener(
-                                            move |this, hovered: &bool, _, cx| {
-                                                if *hovered && availability.multiplex {
+                                this.child(tab_actions_submenu_host(
+                                    "tab-actions-ssh-submenu",
+                                    tab_actions_submenu_item(
+                                        palette,
+                                        TabActionsSubmenuItem {
+                                            id: "tab-ctx-ssh-advanced",
+                                            icon_path: "icons/menu/call-split.svg",
+                                            label: t!("tabCtx.sshAdvanced"),
+                                            enabled: availability.multiplex,
+                                            active: active_submenu
+                                                == Some(TabActionsSubmenu::SshAdvanced),
+                                        },
+                                        TabActionsSubmenuHandlers {
+                                            on_hover: cx.listener(
+                                                move |this, hovered: &bool, _, cx| {
+                                                    if *hovered && availability.multiplex {
+                                                        this.open_tab_actions_submenu(
+                                                            TabActionsSubmenu::SshAdvanced,
+                                                            cx,
+                                                        );
+                                                    }
+                                                },
+                                            ),
+                                            on_click: cx.listener(move |this, _, _, cx| {
+                                                if availability.multiplex {
                                                     this.open_tab_actions_submenu(
                                                         TabActionsSubmenu::SshAdvanced,
                                                         cx,
                                                     );
                                                 }
-                                            },
-                                        ),
-                                        on_click: cx.listener(move |this, _, _, cx| {
-                                            if availability.multiplex {
-                                                this.open_tab_actions_submenu(
-                                                    TabActionsSubmenu::SshAdvanced,
-                                                    cx,
-                                                );
-                                            }
-                                        }),
-                                    },
+                                            }),
+                                        },
+                                    ),
+                                    ssh_submenu,
                                 ))
                             })
                             .when(support.reconnect, |this| {
@@ -541,31 +579,35 @@ impl NyaTermApp {
                                 ))
                             })
                             .when(support.ai, |this| {
-                                this.child(tab_actions_submenu_item(
-                                    palette,
-                                    TabActionsSubmenuItem {
-                                        id: "tab-ctx-ai",
-                                        icon_path: "icons/ai.svg",
-                                        label: t!("ai.title"),
-                                        enabled: true,
-                                        active: active_submenu == Some(TabActionsSubmenu::Ai),
-                                    },
-                                    TabActionsSubmenuHandlers {
-                                        on_hover: cx.listener(|this, hovered: &bool, _, cx| {
-                                            if *hovered {
+                                this.child(tab_actions_submenu_host(
+                                    "tab-actions-ai-submenu",
+                                    tab_actions_submenu_item(
+                                        palette,
+                                        TabActionsSubmenuItem {
+                                            id: "tab-ctx-ai",
+                                            icon_path: "icons/ai.svg",
+                                            label: t!("ai.title"),
+                                            enabled: true,
+                                            active: active_submenu == Some(TabActionsSubmenu::Ai),
+                                        },
+                                        TabActionsSubmenuHandlers {
+                                            on_hover: cx.listener(|this, hovered: &bool, _, cx| {
+                                                if *hovered {
+                                                    this.open_tab_actions_submenu(
+                                                        TabActionsSubmenu::Ai,
+                                                        cx,
+                                                    );
+                                                }
+                                            }),
+                                            on_click: cx.listener(|this, _, _, cx| {
                                                 this.open_tab_actions_submenu(
                                                     TabActionsSubmenu::Ai,
                                                     cx,
                                                 );
-                                            }
-                                        }),
-                                        on_click: cx.listener(|this, _, _, cx| {
-                                            this.open_tab_actions_submenu(
-                                                TabActionsSubmenu::Ai,
-                                                cx,
-                                            );
-                                        }),
-                                    },
+                                            }),
+                                        },
+                                    ),
+                                    ai_submenu,
                                 ))
                             })
                             .when(support.rdp_secure_attention, |this| {
@@ -649,7 +691,7 @@ impl NyaTermApp {
                                     }),
                                 ))
                             })
-                            .when(availability.unsplit, |this| {
+                            .when(support.split, |this| {
                                 this.child(tab_menu_item(
                                     palette,
                                     "tab-ctx-unsplit",
@@ -706,24 +748,30 @@ impl NyaTermApp {
                                     "tab-ctx-info",
                                     t!("tabCtx.sessionInfo"),
                                     cx.listener(move |this, _, window, cx| {
-                                        this.select_session(info_session_id.clone(), cx);
                                         this.close_tab_actions(cx);
-                                        if !this.tab_action_can_show_session_info(&info_session_id)
-                                        {
+                                        let Some(connection_id) = this
+                                            .tab_action_source_connection_id(&info_session_id)
+                                            .map(ToOwned::to_owned)
+                                        else {
                                             this.shell.set_status(
-                                                "active session has no saved connection info"
+                                                "session has no saved connection to edit"
                                                     .to_string(),
                                             );
                                             cx.notify();
                                             return;
-                                        }
-                                        this.open_active_session_info(window, cx);
+                                        };
+                                        this.open_connection_editor(
+                                            Some(connection_id),
+                                            None,
+                                            false,
+                                            window,
+                                            cx,
+                                        );
                                     }),
                                 ))
                             }),
                     ),
             )
-            .when_some(submenu_panel, |this, submenu| this.child(submenu))
             .into_any_element()
     }
 
@@ -732,6 +780,33 @@ impl NyaTermApp {
             cx.notify();
         }
     }
+}
+
+fn tab_actions_submenu_host(
+    id: &'static str,
+    trigger: impl IntoElement,
+    content: Option<AnyElement>,
+) -> AnyElement {
+    let trigger = trigger.into_any_element();
+    let hosted = if let Some(content) = content {
+        NyaPopover::new(id, trigger, content)
+            .placement(NyaPopoverPlacement::Right)
+            .align(NyaPopoverAlign::Start)
+            .offset(px(4.))
+            .appearance(false)
+            .overlay_closable(false)
+            .trigger_click(false)
+            .open(true)
+            .into_any_element()
+    } else {
+        trigger
+    };
+    div()
+        .h(px(28.))
+        .w_full()
+        .flex_none()
+        .child(hosted)
+        .into_any_element()
 }
 
 fn tab_actions_submenu_item<OnHover, OnClick>(
@@ -751,20 +826,20 @@ where
         active,
     } = item;
     let TabActionsSubmenuHandlers { on_hover, on_click } = handlers;
-    let text_color = if enabled {
-        rgb(palette.text)
-    } else {
-        rgb(palette.text_dimmed)
-    };
+    let text_color = rgb(palette.text);
+    let icon_color = rgb(palette.text_muted);
     div()
         .id(SharedString::from(id))
         .h(px(28.))
-        .px_3()
+        .flex_none()
+        .px_2()
         .flex()
         .items_center()
         .gap_2()
+        .rounded_sm()
         .text_size(px(12.))
         .text_color(text_color)
+        .opacity(if enabled { 1. } else { 0.5 })
         .when(active, |this| this.bg(rgb(palette.hover)))
         .when(enabled, |this| {
             this.cursor_pointer()
@@ -773,18 +848,20 @@ where
                 .on_click(on_click)
         })
         .child(
-            svg()
-                .size(px(14.))
+            div()
+                .w(px(24.))
+                .h_full()
                 .flex_none()
-                .path(icon_path)
-                .text_color(text_color),
+                .flex()
+                .items_center()
+                .child(svg().size(px(16.)).path(icon_path).text_color(icon_color)),
         )
         .child(div().min_w_0().flex_1().child(label))
         .child(
             svg()
-                .size(px(12.))
+                .size(px(16.))
                 .flex_none()
                 .path("icons/fe/forward.svg")
-                .text_color(text_color),
+                .text_color(icon_color),
         )
 }

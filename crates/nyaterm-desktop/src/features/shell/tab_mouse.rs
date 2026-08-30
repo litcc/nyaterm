@@ -1,16 +1,21 @@
+use rust_i18n::t;
+
 use gpui::{
     ClickEvent, ClipboardItem, Context, FontWeight, InteractiveElement as _, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement as _, Render, SharedString,
+    MouseButton, MouseDownEvent, ParentElement as _, Render, RenderOnce, SharedString,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _, px,
     rgb, rgba, svg,
 };
-use nyaterm_core::truncate_preview;
+use nyaterm_core::{group_path_label, truncate_preview};
+use nyaterm_ui::NyaIconButton;
 
 use crate::features::{NyaTermApp, formatting::short_id, view_widgets::mono_icon};
+use crate::theme::ThemePalette;
 
 #[derive(Clone, Debug)]
 pub(in crate::features) struct SessionTabDragPayload {
     pub session_id: String,
+    pub order_index: usize,
     pub display_name: String,
     pub kind_label: &'static str,
     pub kind_icon: &'static str,
@@ -93,6 +98,98 @@ impl Render for SessionTabDragPreview {
                     ),
             )
     }
+}
+
+/// Interactive connection summary shown when hovering a live session tab.
+#[derive(IntoElement)]
+pub(in crate::features) struct SessionTabHoverCard {
+    session_id: String,
+    group: String,
+    ip: Option<String>,
+    ssh_command: Option<String>,
+    palette: ThemePalette,
+}
+
+impl RenderOnce for SessionTabHoverCard {
+    fn render(self, _window: &mut Window, _cx: &mut gpui::App) -> impl IntoElement {
+        let palette = self.palette;
+        let mut body = div().w(px(320.)).flex().flex_col().gap_2();
+
+        body = body.child(session_tab_hover_card_row(
+            palette,
+            t!("tabCtx.connectionGroup").to_string(),
+            self.group,
+            None,
+        ));
+        if let Some(ip) = self.ip {
+            body = body.child(session_tab_hover_card_row(
+                palette,
+                t!("tabCtx.ipAddress").to_string(),
+                ip.clone(),
+                Some((
+                    format!("session-tab-card-copy-ip-{}", self.session_id),
+                    t!("tabCtx.copyIp").to_string(),
+                    ip,
+                )),
+            ));
+        }
+        if let Some(ssh_command) = self.ssh_command {
+            body = body.child(session_tab_hover_card_row(
+                palette,
+                t!("tabCtx.sshCommand").to_string(),
+                ssh_command.clone(),
+                Some((
+                    format!("session-tab-card-copy-ssh-{}", self.session_id),
+                    t!("tabCtx.copySshAddress").to_string(),
+                    ssh_command,
+                )),
+            ));
+        }
+        body
+    }
+}
+
+fn session_tab_hover_card_row(
+    palette: ThemePalette,
+    label: String,
+    value: String,
+    copy: Option<(String, String, String)>,
+) -> impl IntoElement {
+    div()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .w(px(88.))
+                .flex_none()
+                .text_size(px(12.))
+                .text_color(rgb(palette.text_muted))
+                .child(label),
+        )
+        .child(
+            div()
+                .min_w_0()
+                .flex_1()
+                .text_size(px(12.))
+                .text_color(rgb(palette.text))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(value),
+        )
+        .when_some(copy, |this, (id, tooltip, value)| {
+            this.child(
+                NyaIconButton::new(id, "icons/copy.svg")
+                    .icon_size(px(13.))
+                    .tooltip(tooltip)
+                    .on_click(move |_, _, cx| {
+                        cx.stop_propagation();
+                        cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+                    }),
+            )
+        })
 }
 
 /// Hover tooltip for session tabs (Tauri TabBar host / SSH address).
@@ -194,6 +291,41 @@ pub(in crate::features) enum TabMouseActionTarget {
 }
 
 impl NyaTermApp {
+    pub(in crate::features) fn session_tab_hover_card(
+        &self,
+        session_id: &str,
+        palette: ThemePalette,
+    ) -> SessionTabHoverCard {
+        let connection = self
+            .session
+            .metadata(session_id)
+            .and_then(|metadata| metadata.source_connection_id.as_deref())
+            .and_then(|connection_id| {
+                self.connection_state
+                    .connections()
+                    .iter()
+                    .find(|connection| connection.id == connection_id)
+            });
+        let ungrouped = t!("savedConnections.ungroupedConnections").to_string();
+        let group = connection.map_or_else(
+            || ungrouped.clone(),
+            |connection| {
+                group_path_label(
+                    self.connection_state.groups(),
+                    connection.group_id.as_deref(),
+                    &ungrouped,
+                )
+            },
+        );
+        SessionTabHoverCard {
+            session_id: session_id.to_string(),
+            group,
+            ip: self.session.ssh_host(session_id),
+            ssh_command: self.session.ssh_address(session_id),
+            palette,
+        }
+    }
+
     pub(in crate::features) fn set_tab_mouse_action(
         &mut self,
         target: TabMouseActionTarget,
@@ -315,8 +447,13 @@ impl NyaTermApp {
         }
         let source_ids = self.tab_tree_session_ids(&dragged_session_id);
         let target_ids = self.tab_tree_session_ids(&target_session_id);
-        self.session
-            .move_session_group_relative(&source_ids, &target_ids, insert_after);
+        if !self
+            .session
+            .move_session_group_relative(&source_ids, &target_ids, insert_after)
+        {
+            self.clear_session_tab_drag(cx);
+            return;
+        }
         self.session.clear_tab_drag();
         self.shell.request_session_tab_scroll_into_view();
         self.shell.set_status(format!(
@@ -338,18 +475,25 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         let sessions = self.ordered_tab_sessions();
-        if !sessions
+        let Some(source_index) = sessions
             .iter()
-            .any(|session| session.id == dragged_session_id)
-        {
+            .position(|session| session.id == dragged_session_id)
+        else {
             self.shell
                 .set_status("dragged session no longer exists".to_string());
             self.session.clear_tab_drag();
             cx.notify();
             return;
+        };
+        if source_index + 1 == sessions.len() {
+            self.clear_session_tab_drag(cx);
+            return;
         }
         let source_ids = self.tab_tree_session_ids(&dragged_session_id);
-        self.session.move_session_group_to_end(&source_ids);
+        if !self.session.move_session_group_to_end(&source_ids) {
+            self.clear_session_tab_drag(cx);
+            return;
+        }
         self.session.clear_tab_drag();
         self.shell.request_session_tab_scroll_into_view();
         self.shell.set_status("moved tab to end".to_string());
@@ -364,16 +508,12 @@ impl NyaTermApp {
     pub(in crate::features) fn update_session_tab_drag(
         &mut self,
         source_id: String,
-        target_id: String,
-        insert_after: bool,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .session
-            .set_tab_drag_target(source_id, target_id, insert_after)
-        {
+        if self.session.set_tab_drag_source(source_id) {
             cx.notify();
         }
+        self.ensure_drop_hover_clock(cx);
     }
 
     pub(in crate::features) fn clear_session_tab_drag(&mut self, cx: &mut Context<Self>) {

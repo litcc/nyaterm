@@ -18,11 +18,16 @@ impl NyaTermApp {
             .is_some_and(TabSessionCapability::supports_terminal_actions)
     }
 
-    pub(super) fn tab_action_can_show_session_info(&self, session_id: &str) -> bool {
+    pub(super) fn tab_action_source_connection_id(&self, session_id: &str) -> Option<&str> {
         self.session
             .metadata(session_id)
             .and_then(|metadata| metadata.source_connection_id.as_deref())
-            .is_some_and(|id| !id.trim().is_empty())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+    }
+
+    pub(super) fn tab_action_can_show_session_info(&self, session_id: &str) -> bool {
+        self.tab_action_source_connection_id(session_id).is_some()
     }
 
     pub(in crate::features) fn tab_action_policy_for(
@@ -35,15 +40,6 @@ impl NyaTermApp {
         let is_disconnected = self.session.is_disconnected(session_id);
         let tab_sessions = self.ordered_tab_sessions();
         let tab_index = tab_sessions.iter().position(|tab| tab.id == tab_root_id);
-        let tab_is_active = self
-            .session
-            .active_id()
-            .is_some_and(|active| self.tab_root_for_session(active) == tab_root_id);
-        let workspace_is_split = self
-            .shell
-            .workspace_pane_root(tab_root_id)
-            .is_some_and(|root| root.is_split())
-            || (tab_is_active && self.shell.workspace_split().is_some());
         let terminal_available = session.supports_terminal_actions()
             && self.terminal.session_output(session_id).is_some();
 
@@ -59,7 +55,6 @@ impl NyaTermApp {
             // the AI submenu visible while its actions remain disabled.
             terminal_available,
             rdp_secure_attention_available: self.rdp_secure_attention_available(session_id),
-            workspace_is_split,
             locked: self.tab_tree_is_locked(tab_root_id),
             tab_count: tab_sessions.len(),
             tab_index,

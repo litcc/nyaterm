@@ -1007,16 +1007,16 @@ fn tab_lock_and_drag_state_have_single_owner() {
     assert!(sessions.set_tab_locked("tab-a", false));
     assert!(!sessions.tab_is_locked("tab-a"));
 
-    assert!(sessions.set_tab_drag_target("tab-a".to_string(), "tab-b".to_string(), false,));
+    assert!(sessions.set_tab_drag_source("tab-a".to_string()));
     assert!(sessions.tab_drag_source_is("tab-a"));
-    assert_eq!(sessions.tab_drop_after("tab-b"), Some(false));
-    assert!(!sessions.set_tab_drag_target("tab-a".to_string(), "tab-b".to_string(), false,));
-    assert!(sessions.set_tab_drag_target("tab-a".to_string(), "tab-b".to_string(), true,));
-    assert_eq!(sessions.tab_drop_after("tab-b"), Some(true));
-    assert!(sessions.set_tab_drag_target("tab-a".to_string(), "tab-a".to_string(), false,));
-    assert_eq!(sessions.tab_drop_after("tab-a"), None);
+    assert!(sessions.tab_drag_is_pending());
+    assert!(!sessions.set_tab_drag_source("tab-a".to_string()));
     assert!(sessions.clear_tab_drag());
     assert!(!sessions.clear_tab_drag());
+
+    sessions.set_tab_drag_source("tab-a".to_string());
+    sessions.remove_session_catalog("tab-a");
+    assert!(!sessions.tab_drag_is_pending());
 }
 
 #[test]

@@ -5,7 +5,7 @@ use gpui::{
     ScrollWheelEvent, SharedString, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::truncate_preview;
-use nyaterm_ui::{NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
+use nyaterm_ui::{NyaHoverCard, NyaPopover, NyaPopoverAlign, NyaPopoverPlacement};
 
 use crate::features::NyaTermApp;
 use crate::features::formatting::session_kind_label;
@@ -34,8 +34,12 @@ fn pending_tab_insert_index(
         .min(session_count)
 }
 
-fn tab_drop_insert_after(pointer_x: f32, origin_x: f32, width: f32) -> bool {
-    pointer_x >= origin_x + width.max(0.) / 2.
+fn tab_drop_insert_after(source_index: usize, target_index: usize) -> Option<bool> {
+    match target_index.cmp(&source_index) {
+        std::cmp::Ordering::Less => Some(false),
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Greater => Some(true),
+    }
 }
 
 fn tab_scroll_x(current_x: f32, max_x: f32, delta_x: f32, delta_y: f32) -> f32 {
@@ -103,6 +107,7 @@ impl NyaTermApp {
             .relative()
             .border_r_1()
             .border_color(rgb(palette.border))
+            .when(!active, |this| this.border_b_1())
             .bg(if active {
                 self.shell_surface_color(palette.hover)
             } else {
@@ -226,6 +231,7 @@ impl NyaTermApp {
             .relative()
             .border_r_1()
             .border_color(rgb(palette.border))
+            .when(!active, |this| this.border_b_1())
             .bg(if active {
                 rgba((palette.danger << 8) | 0x24)
             } else {
@@ -533,19 +539,10 @@ impl NyaTermApp {
                     };
                     resolve_connection_icon(Some(icon), kind)
                 });
-            let tooltip_title = display_name.clone();
             let is_locked = self.tab_tree_is_locked(&session.id);
-            let mut tooltip_lines = self.session.tab_tooltip_lines(&session.id);
-            if is_locked {
-                tooltip_lines.push(t!("tabCtx.locked").to_string());
-            }
             let drop_target_session_id = session.id.clone();
-            let drag_move_target_session_id = session.id.clone();
+            let drag_over_target_session_id = session.id.clone();
             let is_drag_source = self.session.tab_drag_source_is(&session.id);
-            let drop_after = self
-                .session
-                .tab_drop_after(&session.id)
-                .filter(|_| !is_drag_source);
             let custom_color = self.session.tab_color(&session.id);
             // Active when any leaf under this tab root is focused.
             let is_active = self
@@ -562,9 +559,6 @@ impl NyaTermApp {
             let has_unread = leaf_ids
                 .iter()
                 .any(|id| self.terminal.session_has_unread(id));
-            if has_unread && !is_active {
-                tooltip_lines.push(t!("tabCtx.unreadOutput").to_string());
-            }
             let sync_group = leaf_ids
                 .iter()
                 .find_map(|id| self.sync_input.active_group_for_session(id));
@@ -572,15 +566,13 @@ impl NyaTermApp {
                 .iter()
                 .any(|id| self.sync_input.session_is_paused_in_active_group(id));
             let show_sync_indicator = self.sync_input.broadcast_to_all() || sync_group.is_some();
-            let sync_indicator_color = sync_group
-                .map(|group| group.color)
-                .unwrap_or(palette.primary);
-            let accent_color = if let Some(custom_color) = custom_color {
+            let sync_indicator_color = sync_group.map(|group| group.color).unwrap_or(palette.link);
+            let accent_color = if is_active {
+                custom_color.unwrap_or(palette.primary)
+            } else if let Some(custom_color) = custom_color {
                 custom_color
             } else if is_disconnected {
                 palette.danger
-            } else if is_active {
-                palette.primary
             } else if has_unread {
                 palette.warning
             } else {
@@ -590,23 +582,22 @@ impl NyaTermApp {
             let bg = if let Some(custom_color) = custom_color {
                 rgba((custom_color << 8) | if is_active { 0x24 } else { 0x14 })
             } else if is_active {
-                self.shell_surface_color(palette.hover)
-            } else {
                 self.shell_surface_color(palette.bg)
+            } else {
+                rgba(0x00000000)
             };
             let hover_bg = if let Some(custom_color) = custom_color {
                 rgba((custom_color << 8) | if is_active { 0x32 } else { 0x22 })
             } else {
                 self.shell_surface_color(palette.hover)
             };
-            let drag_target_bg = rgba((palette.primary << 8) | 0x24);
-            let effective_hover_bg = if drop_after.is_some() {
-                drag_target_bg
-            } else {
-                hover_bg
-            };
+            // Match the Zed tab affordance through NyaTerm's theme projection:
+            // the whole target uses the theme hover surface and the insertion
+            // edge uses the focus/drag border color.
+            let drag_target_bg = self.shell_surface_color(palette.hover);
             let drag_payload = SessionTabDragPayload {
                 session_id: session.id.clone(),
+                order_index: tab_index,
                 display_name: display_name.clone(),
                 kind_label: session_kind_label(session.kind),
                 kind_icon,
@@ -616,271 +607,243 @@ impl NyaTermApp {
                 preview_text_muted: palette.text_muted,
                 preview_accent: accent_color,
             };
-            tabs = tabs.child(
-                div()
-                    .id(SharedString::from(format!("session-tab-{session_id}")))
-                    .group(tab_group_name.clone())
-                    .h_full()
-                    .min_w(px(SESSION_TAB_MIN_WIDTH))
-                    .max_w(px(SESSION_TAB_MAX_WIDTH))
-                    .flex_none()
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .relative()
-                    .when(is_active, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .h(px(2.))
-                                .w_full()
-                                .bg(accent),
-                        )
-                    })
-                    .border_r_1()
-                    .border_color(if drop_after.is_some() {
-                        rgb(palette.primary)
-                    } else if is_active {
-                        custom_color.map(rgb).unwrap_or_else(|| rgb(palette.border))
+            let hover_card = self.session_tab_hover_card(&session.id, palette);
+            let hover_card_id = format!("session-tab-hover-card-{session_id}");
+            let tab = div()
+                .id(SharedString::from(format!("session-tab-{session_id}")))
+                .group(tab_group_name.clone())
+                // HoverCard adds trigger-host elements between this tab and
+                // the 36px strip. Keep the tab's old explicit strip height so
+                // those hosts cannot collapse `h_full()` to content height.
+                .h(px(36.))
+                .min_w(px(SESSION_TAB_MIN_WIDTH))
+                .max_w(px(SESSION_TAB_MAX_WIDTH))
+                .flex_none()
+                .pl_3()
+                .pr_2()
+                .flex()
+                .items_center()
+                .gap_2()
+                .relative()
+                .border_r_1()
+                .border_color(rgb(palette.border))
+                .when(!is_active, |this| this.border_b_1())
+                .bg(bg)
+                .when(is_disconnected, |this| this.opacity(0.78))
+                .when(is_drag_source, |this| this.opacity(0.55))
+                .cursor_pointer()
+                .hover(move |this| this.bg(hover_bg))
+                .cursor_move()
+                .on_drag(drag_payload, |payload, position, _, cx| {
+                    cx.new(|_| SessionTabDragPreview::new(payload.clone(), position))
+                })
+                .drag_over::<SessionTabDragPayload>(move |this, payload, _, _| {
+                    let Some(insert_after) = tab_drop_insert_after(payload.order_index, tab_index)
+                    else {
+                        return this;
+                    };
+                    if payload.session_id == drag_over_target_session_id {
+                        return this;
+                    }
+                    let target = this
+                        .bg(drag_target_bg)
+                        .border_0()
+                        .border_color(rgb(palette.focus_ring));
+                    if insert_after {
+                        target.border_r_2()
                     } else {
-                        rgb(palette.border)
-                    })
-                    .bg(bg)
-                    .when(drop_after.is_some(), |this| this.bg(drag_target_bg))
-                    .when(is_disconnected, |this| this.opacity(0.78))
-                    .when(is_drag_source, |this| this.opacity(0.55))
-                    .cursor_pointer()
-                    .hover(move |this| this.bg(effective_hover_bg))
-                    .cursor_move()
-                    .on_drag(drag_payload, |payload, position, _, cx| {
-                        cx.new(|_| SessionTabDragPreview::new(payload.clone(), position))
-                    })
-                    .on_drag_move(cx.listener(
-                        move |this, event: &gpui::DragMoveEvent<SessionTabDragPayload>, _, cx| {
-                            let payload = event.drag(cx);
-                            let insert_after = tab_drop_insert_after(
-                                f32::from(event.event.position.x),
-                                f32::from(event.bounds.origin.x),
-                                f32::from(event.bounds.size.width),
-                            );
-                            this.update_session_tab_drag(
-                                payload.session_id.clone(),
-                                drag_move_target_session_id.clone(),
-                                insert_after,
-                                cx,
-                            );
-                        },
-                    ))
-                    .on_drop(
-                        cx.listener(move |this, payload: &SessionTabDragPayload, _, cx| {
-                            let insert_after = this
-                                .session
-                                .tab_drop_after(&drop_target_session_id)
-                                .unwrap_or(false);
-                            this.reorder_session_relative(
-                                payload.session_id.clone(),
-                                drop_target_session_id.clone(),
-                                insert_after,
-                                cx,
-                            );
-                        }),
-                    )
-                    .when_some(drop_after, |this, insert_after| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .bottom_0()
-                                .when(insert_after, |line| line.right_0())
-                                .when(!insert_after, |line| line.left_0())
-                                .w(px(2.))
-                                .bg(rgb(palette.primary)),
-                        )
-                    })
-                    .when(custom_color.is_some(), move |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .bottom_0()
-                                .left_0()
-                                .w(px(3.))
-                                .bg(accent),
-                        )
-                    })
-                    // Tauri tab: top accent when active, icon + name + close.
-                    .when(is_active, |this| {
-                        this.child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .right_0()
-                                .h(px(2.))
-                                .bg(accent),
-                        )
-                        .child(
-                            // Cover tab strip bottom border so the active tab blends into the terminal.
-                            div()
-                                .absolute()
-                                .bottom_0()
-                                .left_0()
-                                .right_0()
-                                .h(px(1.))
-                                .bg(self.shell_surface_color(palette.bg)),
-                        )
-                    })
-                    .child(
+                        target.border_l_2()
+                    }
+                })
+                .on_drag_move(cx.listener(
+                    move |this, event: &gpui::DragMoveEvent<SessionTabDragPayload>, _, cx| {
+                        let payload = event.drag(cx);
+                        this.update_session_tab_drag(payload.session_id.clone(), cx);
+                    },
+                ))
+                .on_drop(
+                    cx.listener(move |this, payload: &SessionTabDragPayload, _, cx| {
+                        let Some(insert_after) =
+                            tab_drop_insert_after(payload.order_index, tab_index)
+                        else {
+                            this.clear_session_tab_drag(cx);
+                            return;
+                        };
+                        this.reorder_session_relative(
+                            payload.session_id.clone(),
+                            drop_target_session_id.clone(),
+                            insert_after,
+                            cx,
+                        );
+                    }),
+                )
+                .when(custom_color.is_some(), move |this| {
+                    this.child(
                         div()
-                            .size(px(14.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(if let Some(icon) = saved_icon {
-                                themed_icon(palette, icon, is_active, 12.)
-                            } else {
-                                svg()
-                                    .size(px(12.))
-                                    .path(kind_icon)
-                                    .text_color(accent)
-                                    .into_any_element()
-                            }),
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left_0()
+                            .w(px(3.))
+                            .bg(accent),
                     )
-                    .child(
+                })
+                // Tauri tab: top accent when active, icon + name + close.
+                .when(is_active, |this| {
+                    this.child(
                         div()
-                            .min_w(px(12.))
-                            .text_size(px(11.))
-                            .font_weight(FontWeight(700.))
-                            .text_color(rgb(palette.text_dimmed))
-                            .child(format!("{tab_number}")),
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(2.))
+                            .bg(accent),
                     )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(px(12.))
-                            .font_weight(if is_active {
-                                FontWeight(600.)
-                            } else {
-                                FontWeight(500.)
-                            })
-                            .text_color(if is_disconnected {
-                                rgb(palette.text_dimmed)
-                            } else if is_active {
-                                rgb(palette.text)
-                            } else {
-                                rgb(palette.text_muted)
-                            })
-                            .overflow_hidden()
-                            // Without this the title wraps inside the tab and the
-                            // strip shows whichever line happens to land on the
-                            // one row of height it has — "ste", out of "System32".
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(tab_title.clone()),
-                    )
-                    .when(show_sync_indicator, |this| {
-                        this.child(
-                            div()
+                })
+                .child(
+                    div()
+                        .size(px(14.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(if let Some(icon) = saved_icon {
+                            themed_icon(palette, icon, is_active, 14.)
+                        } else {
+                            svg()
                                 .size(px(14.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .opacity(if sync_paused { 0.4 } else { 1. })
-                                .child(
-                                    svg()
-                                        .size(px(11.))
-                                        .path("icons/sync.svg")
-                                        .text_color(rgb(sync_indicator_color)),
-                                ),
-                        )
-                    })
-                    .when(has_unread && !is_active, |this| {
-                        this.child(div().size(px(8.)).rounded_full().bg(rgb(palette.success)))
-                    })
-                    .child(
+                                .path(kind_icon)
+                                .text_color(accent)
+                                .into_any_element()
+                        }),
+                )
+                .child(
+                    div()
+                        .min_w(px(12.))
+                        .text_size(px(12.))
+                        .font_weight(FontWeight(700.))
+                        .text_color(rgb(palette.text_dimmed))
+                        .child(format!("{tab_number}")),
+                )
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex_1()
+                        .max_w(px(160.))
+                        .text_size(px(12.))
+                        .font_weight(if is_active {
+                            FontWeight(700.)
+                        } else {
+                            FontWeight(500.)
+                        })
+                        .text_color(if is_disconnected {
+                            rgb(palette.text_dimmed)
+                        } else if is_active {
+                            rgb(palette.text)
+                        } else {
+                            rgb(palette.text_muted)
+                        })
+                        .overflow_hidden()
+                        // Without this the title wraps inside the tab and the
+                        // strip shows whichever line happens to land on the
+                        // one row of height it has — "ste", out of "System32".
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(tab_title.clone()),
+                )
+                .when(show_sync_indicator, |this| {
+                    this.child(
                         div()
-                            .id(SharedString::from(format!(
-                                "session-tab-close-{close_session_id}"
-                            )))
-                            .size(px(18.))
+                            .size(px(12.))
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded_sm()
-                            .text_xs()
-                            .text_color(rgb(palette.text_muted))
-                            .when(!is_active && !is_locked, |this| {
-                                this.opacity(0.)
-                                    .group_hover(tab_group_name.clone(), |style| style.opacity(1.))
-                            })
-                            .hover(|this| {
-                                this.bg(rgb(palette.border)).text_color(if is_locked {
-                                    rgb(palette.warning)
-                                } else {
-                                    rgb(palette.danger)
-                                })
-                            })
+                            .opacity(if sync_paused { 0.4 } else { 1. })
                             .child(
                                 svg()
-                                    .size(px(13.))
-                                    .path(if is_locked {
-                                        "icons/lock.svg"
-                                    } else {
-                                        "icons/window/close.svg"
-                                    })
-                                    .text_color(rgb(palette.text_muted)),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                if is_locked {
-                                    this.notify_locked_tab_close_blocked(cx);
-                                } else {
-                                    this.close_session(close_session_id.clone(), cx);
-                                }
-                            })),
+                                    .size(px(10.))
+                                    .path("icons/sync.svg")
+                                    .text_color(rgb(sync_indicator_color)),
+                            ),
                     )
-                    .tooltip(move |_, cx| {
-                        cx.new(|_| {
-                            SessionTabTooltip::new(tooltip_title.clone(), tooltip_lines.clone())
+                })
+                .when(has_unread && !is_active, |this| {
+                    this.child(div().size(px(7.)).rounded_full().bg(rgb(palette.success)))
+                })
+                .child(
+                    div()
+                        .id(SharedString::from(format!(
+                            "session-tab-close-{close_session_id}"
+                        )))
+                        .size(px(18.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .text_size(px(10.))
+                        .text_color(rgb(palette.text_muted))
+                        .when(!is_active && !is_locked, |this| {
+                            this.opacity(0.)
+                                .group_hover(tab_group_name.clone(), |style| style.opacity(1.))
                         })
-                        .into()
-                    })
-                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                        this.handle_session_tab_click(session_id.clone(), event, window, cx);
-                    }))
-                    .on_mouse_down(
-                        MouseButton::Middle,
-                        cx.listener({
-                            let session_id = session.id.clone();
-                            move |this, event, window, cx| {
-                                this.handle_session_tab_mouse_down(
-                                    session_id.clone(),
-                                    event,
-                                    window,
-                                    cx,
-                                );
+                        .hover(|this| {
+                            this.bg(rgb(palette.border)).text_color(if is_locked {
+                                rgb(palette.warning)
+                            } else {
+                                rgb(palette.danger)
+                            })
+                        })
+                        .child(
+                            svg()
+                                .size(px(13.))
+                                .path(if is_locked {
+                                    "icons/lock.svg"
+                                } else {
+                                    "icons/window/close.svg"
+                                })
+                                .text_color(rgb(palette.text_muted)),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            if is_locked {
+                                this.notify_locked_tab_close_blocked(cx);
+                            } else {
+                                this.close_session(close_session_id.clone(), cx);
                             }
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener({
-                            let session_id = session.id.clone();
-                            move |this, event, window, cx| {
-                                this.handle_session_tab_mouse_down(
-                                    session_id.clone(),
-                                    event,
-                                    window,
-                                    cx,
-                                );
-                            }
-                        }),
-                    ),
-            );
+                        })),
+                )
+                .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                    this.handle_session_tab_click(session_id.clone(), event, window, cx);
+                }))
+                .on_mouse_down(
+                    MouseButton::Middle,
+                    cx.listener({
+                        let session_id = session.id.clone();
+                        move |this, event, window, cx| {
+                            this.handle_session_tab_mouse_down(
+                                session_id.clone(),
+                                event,
+                                window,
+                                cx,
+                            );
+                        }
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener({
+                        let session_id = session.id.clone();
+                        move |this, event, window, cx| {
+                            this.handle_session_tab_mouse_down(
+                                session_id.clone(),
+                                event,
+                                window,
+                                cx,
+                            );
+                        }
+                    }),
+                );
+            tabs = tabs
+                .child(NyaHoverCard::new(hover_card_id, tab, hover_card).anchor(Anchor::TopLeft));
         }
         while transient_cursor < transient_tabs.len() {
             let (_, _, _, request_id, name, error) = transient_tabs[transient_cursor].clone();
@@ -904,17 +867,34 @@ impl NyaTermApp {
                     .h_full()
                     .min_w(px(SESSION_TAB_END_DROP_TARGET_MIN_WIDTH))
                     .flex_1()
-                    .border_l_1()
+                    .border_b_1()
                     .border_color(rgb(palette.border))
                     .hover(move |this| this.bg(shell_hover_bg))
-                    .drag_over::<SessionTabDragPayload>(move |this, _, _, _| {
-                        this.bg(rgba((palette.primary << 8) | 0x24))
-                            .border_l_2()
-                            .border_color(rgb(palette.primary))
+                    .drag_over::<SessionTabDragPayload>(move |this, payload, _, _| {
+                        if payload.order_index + 1 >= session_count {
+                            this
+                        } else {
+                            this.bg(shell_hover_bg)
+                                .border_l_2()
+                                .border_color(rgb(palette.focus_ring))
+                        }
                     })
+                    .on_drag_move(cx.listener(
+                        |this, event: &gpui::DragMoveEvent<SessionTabDragPayload>, _, cx| {
+                            this.update_session_tab_drag(event.drag(cx).session_id.clone(), cx);
+                        },
+                    ))
                     .on_drop(cx.listener(|this, payload: &SessionTabDragPayload, _, cx| {
                         this.reorder_session_to_end(payload.session_id.clone(), cx);
                     })),
+            );
+        } else {
+            tabs = tabs.child(
+                div()
+                    .h_full()
+                    .flex_1()
+                    .border_b_1()
+                    .border_color(rgb(palette.border)),
             );
         }
 
@@ -934,6 +914,7 @@ impl NyaTermApp {
             .items_center()
             .gap_0()
             .border_l_1()
+            .border_b_1()
             .border_color(rgb(palette.border));
 
         if show_open_tabs_menu {
@@ -1094,8 +1075,6 @@ impl NyaTermApp {
             .h(px(36.)) // Tauri TabBar: h-9
             .flex()
             .items_center()
-            .border_b_1()
-            .border_color(rgb(palette.border))
             .bg(self.shell_surface_color(palette.surface))
             .child(tab_strip_viewport)
             .child(session_actions)
@@ -1156,10 +1135,10 @@ mod tests {
     }
 
     #[test]
-    fn tab_drop_uses_target_half_for_insertion_side() {
-        assert!(!tab_drop_insert_after(119., 100., 40.));
-        assert!(tab_drop_insert_after(120., 100., 40.));
-        assert!(tab_drop_insert_after(140., 100., 40.));
+    fn tab_drop_uses_source_and_target_order_for_insertion_side() {
+        assert_eq!(tab_drop_insert_after(2, 1), Some(false));
+        assert_eq!(tab_drop_insert_after(1, 1), None);
+        assert_eq!(tab_drop_insert_after(1, 2), Some(true));
     }
 
     #[test]

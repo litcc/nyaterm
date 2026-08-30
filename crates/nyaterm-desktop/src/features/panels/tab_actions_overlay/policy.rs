@@ -49,7 +49,6 @@ pub(in crate::features) struct TabActionAvailability {
     pub use_ai: bool,
     pub rdp_secure_attention: bool,
     pub split: bool,
-    pub unsplit: bool,
     pub close_tab: bool,
     pub close_inactive: bool,
     pub close_right: bool,
@@ -71,7 +70,6 @@ pub(in crate::features) struct TabActionPolicyInput {
     pub reconnect_pending: bool,
     pub terminal_available: bool,
     pub rdp_secure_attention_available: bool,
-    pub workspace_is_split: bool,
     pub locked: bool,
     pub tab_count: usize,
     pub tab_index: Option<usize>,
@@ -105,10 +103,9 @@ impl TabActionPolicy {
             // launch config. Their execution paths do not use the per-session busy guard.
             spawn_session: support.session_spawn,
             multiplex: support.ssh_multiplex && !input.is_busy && !input.is_disconnected,
-            reconnect: support.reconnect
-                && input.is_disconnected
-                && !input.is_busy
-                && !input.reconnect_pending,
+            // Tauri allows reconnecting both live and disconnected sessions. A live
+            // reconnect intentionally closes and recreates the backend in place.
+            reconnect: support.reconnect && !input.is_busy && !input.reconnect_pending,
             disconnect: support.disconnect && !input.is_busy && !input.is_disconnected,
             use_ai: support.ai
                 && input.terminal_available
@@ -117,7 +114,6 @@ impl TabActionPolicy {
             rdp_secure_attention: support.rdp_secure_attention
                 && input.rdp_secure_attention_available,
             split: support.split,
-            unsplit: support.split && input.workspace_is_split,
             close_tab: !input.locked,
             close_inactive: input.tab_count > 1,
             close_right: input
@@ -158,37 +154,6 @@ impl TabActionPolicy {
             TabActionsSubmenu::Ai => self.support.ai,
         }
     }
-
-    pub(in crate::features) fn submenu_trigger_offset(self, submenu: TabActionsSubmenu) -> f32 {
-        const MENU_PADDING: f32 = 4.;
-        const ITEM_HEIGHT: f32 = 28.;
-        const SEPARATOR_HEIGHT: f32 = 9.;
-
-        let general_rows = 4 + usize::from(self.support.copy_ssh_host);
-        match submenu {
-            TabActionsSubmenu::Color => MENU_PADDING,
-            TabActionsSubmenu::SshAdvanced => {
-                MENU_PADDING
-                    + general_rows as f32 * ITEM_HEIGHT
-                    + SEPARATOR_HEIGHT
-                    + if self.support.session_spawn {
-                        2. * ITEM_HEIGHT
-                    } else {
-                        0.
-                    }
-            }
-            TabActionsSubmenu::Ai => {
-                let preceding_session_rows = if self.support.session_spawn { 2 } else { 0 }
-                    + usize::from(self.support.ssh_multiplex)
-                    + usize::from(self.support.reconnect)
-                    + usize::from(self.support.disconnect);
-                MENU_PADDING
-                    + general_rows as f32 * ITEM_HEIGHT
-                    + SEPARATOR_HEIGHT
-                    + preceding_session_rows as f32 * ITEM_HEIGHT
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -205,7 +170,6 @@ mod tests {
             reconnect_pending: false,
             terminal_available: true,
             rdp_secure_attention_available: false,
-            workspace_is_split: false,
             locked: false,
             tab_count: 1,
             tab_index: Some(0),
@@ -272,7 +236,6 @@ mod tests {
     fn rdp_shows_secure_attention_with_runtime_capability_controlling_availability() {
         let mut context = input(TabSessionCapability::Rdp);
         context.has_source_connection = true;
-        context.workspace_is_split = true;
         let unavailable = TabActionPolicy::from_input(context);
 
         assert!(!unavailable.support.session_spawn);
@@ -281,7 +244,6 @@ mod tests {
         assert!(!unavailable.support.disconnect);
         assert!(!unavailable.support.ai);
         assert!(!unavailable.support.split);
-        assert!(!unavailable.availability.unsplit);
         assert!(unavailable.support.rdp_secure_attention);
         assert!(!unavailable.availability.rdp_secure_attention);
         assert!(unavailable.support.session_info);
@@ -315,7 +277,11 @@ mod tests {
     }
 
     #[test]
-    fn disconnected_terminal_keeps_supported_actions_visible_with_runtime_states() {
+    fn live_and_disconnected_terminals_allow_reconnect_when_idle() {
+        let live = TabActionPolicy::from_input(input(TabSessionCapability::Ssh));
+        assert!(live.support.reconnect);
+        assert!(live.availability.reconnect);
+
         let mut context = input(TabSessionCapability::Ssh);
         context.is_disconnected = true;
         let policy = TabActionPolicy::from_input(context);
@@ -339,6 +305,7 @@ mod tests {
 
         assert!(policy.support.ssh_multiplex);
         assert!(!policy.availability.multiplex);
+        assert!(!policy.availability.reconnect);
         assert!(policy.support.disconnect);
         assert!(!policy.availability.disconnect);
         assert!(policy.support.ai);
@@ -357,16 +324,10 @@ mod tests {
     }
 
     #[test]
-    fn split_group_and_unsplit_follow_terminal_and_pane_tree_support() {
+    fn split_group_is_available_for_terminal_sessions() {
         let plain = TabActionPolicy::from_input(input(TabSessionCapability::Local));
         assert!(plain.support.split);
         assert!(plain.availability.split);
-        assert!(!plain.availability.unsplit);
-
-        let mut split_context = input(TabSessionCapability::Local);
-        split_context.workspace_is_split = true;
-        let split = TabActionPolicy::from_input(split_context);
-        assert!(split.availability.unsplit);
     }
 
     #[test]

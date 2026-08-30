@@ -1,10 +1,11 @@
 //! Clearing a drop-target highlight when the drag goes away.
 //!
-//! A drag over the terminal or the transfer browser sets a hover highlight. Dropping
-//! clears it through the drop handler, but a drag can also end *without* a drop on our
-//! element -- dragged back out of the window, or cancelled -- and GPUI reports that only
-//! as `has_active_drag` becoming false. There is no drag-end event to hang this on, so
-//! it stays a poll.
+//! A drag over the terminal or the transfer browser sets a hover highlight, while a
+//! session-tab drag records its source so the source tab can be dimmed. Dropping clears
+//! that transient state through the drop handler, but a drag can also end *without* a
+//! drop on our element -- dragged back out of the window, or cancelled -- and GPUI
+//! reports that only as `has_active_drag` becoming false. There is no drag-end event to
+//! hang this on, so it stays a poll.
 //!
 //! What changes is the scope. The runtime tick's visual plane checked
 //! `has_active_drag` on every tick regardless, and both hover flags had to be named in
@@ -52,16 +53,22 @@ impl NyaTermApp {
     pub(in crate::features) fn has_drop_hover(&self) -> bool {
         self.terminal.terminal_file_drop_hover_is_pending()
             || self.transfer.browser_external_drop_hover_is_pending()
+            || self.session.tab_drag_is_pending()
     }
 
     /// Returns whether the clock should keep running.
     fn tick_drop_hover(&mut self, cx: &mut Context<Self>) -> bool {
         if cx.has_active_drag() {
             // Still dragging: the highlight is correct, so keep watching.
-            return self.has_drop_hover();
+            let running = self.has_drop_hover();
+            if !running {
+                self.shell.set_drop_hover_clock_armed(false);
+            }
+            return running;
         }
         let mut dirty = self.terminal.clear_terminal_file_drop_hover();
         dirty |= self.transfer.set_browser_external_drop_hover(false);
+        dirty |= self.session.clear_tab_drag();
         if dirty {
             cx.notify();
         }
