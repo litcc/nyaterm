@@ -15,7 +15,7 @@ use super::panels::{PanelChrome, RemoteMonitorPanel};
 use crate::features::remote::ProcessPresentationState;
 use crate::features::text_inputs::number_input_box_from_state;
 use crate::models::RemoteProcessSortKey;
-use crate::widgets::empty_panel;
+use crate::widgets::empty_panel_with_icon;
 use gpui::Entity;
 use nyaterm_ui::{NyaInputState, NyaNumberInputState, NyaSearchInput};
 
@@ -50,7 +50,11 @@ pub(in crate::features::pages::remote) fn processes_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(t!("processManager.noSession"), palette))
+            .child(empty_panel_with_icon(
+                t!("processManager.noSession"),
+                palette,
+                "icons/processes.svg",
+            ))
             .into_any_element();
     }
     if !process_state.snapshot_loaded {
@@ -67,7 +71,11 @@ pub(in crate::features::pages::remote) fn processes_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(message, palette))
+            .child(empty_panel_with_icon(
+                message,
+                palette,
+                "icons/processes.svg",
+            ))
             .into_any_element();
     }
     let menu_bg = chrome.surface;
@@ -153,7 +161,11 @@ pub(in crate::features::pages::remote) fn processes_panel(
 
     let mut rows = div().flex().flex_col();
     if filtered_processes.is_empty() {
-        rows = rows.child(empty_panel(t!("processManager.noMatches"), palette));
+        rows = rows.child(empty_panel_with_icon(
+            t!("processManager.noMatches"),
+            palette,
+            "icons/processes.svg",
+        ));
     } else {
         if pad_top > 0. {
             rows = rows.child(div().h(px(pad_top)).w_full().flex_none());

@@ -21,7 +21,6 @@ use crate::features::remote::{
     ACCELERATOR_PROCESS_VIEWPORT_ROWS, GpuPresentationState, NpuPresentationState, max_list_offset,
 };
 use crate::features::{shell::gpui_code_font_family, view_widgets::stats_progress_bar};
-use crate::widgets::empty_panel;
 use gpui::Entity;
 use nyaterm_ui::{NyaInputState, NyaSearchInput};
 
@@ -38,6 +37,26 @@ struct ResourceRowPosition {
 /// Takes no `NyaTermApp`. GPUI records every entity read during a view's render as a
 /// dependency of that view, so a single app read here would re-dirty this panel on every
 /// unrelated `app.notify()` -- which is exactly what the snapshot exists to prevent.
+fn stats_empty_panel(
+    text: impl Into<SharedString>,
+    palette: crate::theme::ThemePalette,
+) -> impl IntoElement {
+    nyaterm_ui::empty_panel_with_icon(text, palette, "icons/resources.svg")
+}
+
+fn gpu_empty_panel(
+    text: impl Into<SharedString>,
+    palette: crate::theme::ThemePalette,
+) -> impl IntoElement {
+    nyaterm_ui::empty_panel_with_icon(text, palette, "icons/gpu.svg")
+}
+
+fn npu_empty_panel(
+    text: impl Into<SharedString>,
+    palette: crate::theme::ThemePalette,
+) -> impl IntoElement {
+    nyaterm_ui::empty_panel_with_icon(text, palette, "icons/npu.svg")
+}
 pub(in crate::features::pages::remote) fn stats_panel(
     chrome: PanelChrome,
     has_session: bool,
@@ -49,7 +68,10 @@ pub(in crate::features::pages::remote) fn stats_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(t!("panel.resourceMonitorNoSession"), palette))
+            .child(stats_empty_panel(
+                t!("panel.resourceMonitorNoSession"),
+                palette,
+            ))
             .into_any_element();
     }
     let Some(stats) = stats_state.data else {
@@ -63,7 +85,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(message, palette))
+            .child(stats_empty_panel(message, palette))
             .into_any_element();
     };
 
@@ -391,7 +413,7 @@ pub(in crate::features::pages::remote) fn gpu_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(t!("gpuMonitor.noSession"), palette))
+            .child(gpu_empty_panel(t!("gpuMonitor.noSession"), palette))
             .into_any_element();
     }
     let content = match gpu_state.data.as_ref() {
@@ -404,16 +426,16 @@ pub(in crate::features::pages::remote) fn gpu_panel(
             cx,
         ),
         Some(overview) if !overview.available => {
-            empty_panel(t!("gpuMonitor.unavailable"), palette).into_any_element()
+            gpu_empty_panel(t!("gpuMonitor.unavailable"), palette).into_any_element()
         }
-        Some(_) => empty_panel(t!("gpuMonitor.noGpus"), palette).into_any_element(),
+        Some(_) => gpu_empty_panel(t!("gpuMonitor.noGpus"), palette).into_any_element(),
         None => {
             let message = if gpu_state.pending || !gpu_state.status.contains("failed") {
                 t!("common.loading")
             } else {
                 t!("gpuMonitor.error")
             };
-            empty_panel(message, palette).into_any_element()
+            gpu_empty_panel(message, palette).into_any_element()
         }
     };
     div()
@@ -439,7 +461,7 @@ pub(in crate::features::pages::remote) fn npu_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(t!("ascendNpuMonitor.noSession"), palette))
+            .child(npu_empty_panel(t!("ascendNpuMonitor.noSession"), palette))
             .into_any_element();
     }
     let content = match npu_state.data.as_ref() {
@@ -452,16 +474,16 @@ pub(in crate::features::pages::remote) fn npu_panel(
             cx,
         ),
         Some(overview) if !overview.available => {
-            empty_panel(t!("ascendNpuMonitor.unavailable"), palette).into_any_element()
+            npu_empty_panel(t!("ascendNpuMonitor.unavailable"), palette).into_any_element()
         }
-        Some(_) => empty_panel(t!("ascendNpuMonitor.noNpus"), palette).into_any_element(),
+        Some(_) => npu_empty_panel(t!("ascendNpuMonitor.noNpus"), palette).into_any_element(),
         None => {
             let message = if npu_state.pending || !npu_state.status.contains("failed") {
                 t!("common.loading")
             } else {
                 t!("ascendNpuMonitor.error")
             };
-            empty_panel(message, palette).into_any_element()
+            npu_empty_panel(message, palette).into_any_element()
         }
     };
     div()

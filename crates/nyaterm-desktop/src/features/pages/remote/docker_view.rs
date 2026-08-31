@@ -8,7 +8,7 @@ use nyaterm_ui::{NyaInputState, NyaSearchInput};
 use super::panels::{PanelChrome, RemoteMonitorPanel};
 use crate::features::remote::{DockerDerivedItems, DockerPresentationState};
 use crate::models::DockerTab;
-use crate::widgets::empty_panel;
+use crate::widgets::empty_panel_with_icon;
 
 use super::docker::{
     DockerComposePanelState, DockerContainersPanelState, DockerLabels, DockerRenderContext,
@@ -104,7 +104,11 @@ pub(in crate::features::pages::remote) fn docker_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(labels.no_session.clone(), palette))
+            .child(empty_panel_with_icon(
+                labels.no_session.clone(),
+                palette,
+                "icons/docker.svg",
+            ))
             .into_any_element();
     }
     let Some(overview) = docker.overview.take() else {
@@ -116,14 +120,18 @@ pub(in crate::features::pages::remote) fn docker_panel(
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(message, palette))
+            .child(empty_panel_with_icon(message, palette, "icons/docker.svg"))
             .into_any_element();
     };
     if !overview.available {
         return div()
             .size_full()
             .bg(chrome.transparent_surface)
-            .child(empty_panel(labels.unavailable.clone(), palette))
+            .child(empty_panel_with_icon(
+                labels.unavailable.clone(),
+                palette,
+                "icons/docker.svg",
+            ))
             .into_any_element();
     }
     // Both the effective tab and the filtered list are resolved by
