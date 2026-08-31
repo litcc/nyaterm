@@ -654,9 +654,7 @@ impl NyaTermApp {
         let summary = self.settings.summary();
         let shown = self.panel_is_rendered(kind.nav_item());
         match kind {
-            RemoteMonitorKind::Stats => {
-                (shown || self.header_status_needs_remote_stats()) && summary.ui_show_remote_stats
-            }
+            RemoteMonitorKind::Stats => summary.ui_show_remote_stats,
             RemoteMonitorKind::Gpu => {
                 (shown || self.header_status_needs_gpu()) && summary.ui_show_gpu_monitor
             }
@@ -952,7 +950,10 @@ mod tests {
 
         activate_ssh_session(&app, &mut cx);
         cx.update_entity(&app, |app, cx| app.sync_remote_panel_demand(cx));
-        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Gpu]);
+        assert_eq!(
+            polling(&app, &mut cx),
+            vec![RemoteMonitorKind::Stats, RemoteMonitorKind::Gpu]
+        );
     }
 
     /// Closing the panel must drop the clock, not merely mark it unwanted.
@@ -972,7 +973,10 @@ mod tests {
             app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
             app.sync_remote_panel_demand(cx);
         });
-        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Gpu]);
+        assert_eq!(
+            polling(&app, &mut cx),
+            vec![RemoteMonitorKind::Stats, RemoteMonitorKind::Gpu]
+        );
 
         cx.update_entity(&app, |app, cx| {
             // Toggling the same panel again closes it, which is what the activity bar
@@ -980,7 +984,7 @@ mod tests {
             app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
             app.sync_remote_panel_demand(cx);
         });
-        assert_eq!(polling(&app, &mut cx), Vec::new());
+        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Stats]);
     }
 
     /// The header status bar keeps stats polling with the Stats panel closed.
@@ -1012,7 +1016,7 @@ mod tests {
         );
         assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Stats]);
 
-        // Switch the header away and the last consumer is gone.
+        // Switching the header away does not stop Tauri-compatible background stats polling.
         cx.update_entity(&app, |app, cx| {
             let mut summary = app.settings.summary().clone();
             summary.ui_header_status_mode = crate::models::HeaderStatusMode::Session
@@ -1021,7 +1025,7 @@ mod tests {
             app.settings.replace_summary(summary);
             app.sync_remote_panel_demand(cx);
         });
-        assert_eq!(polling(&app, &mut cx), Vec::new());
+        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Stats]);
     }
 
     /// A panel switched off in settings renders a placeholder, and a placeholder must
@@ -1038,7 +1042,7 @@ mod tests {
             app.open_or_toggle_panel(crate::models::NavItem::GpuMonitor, cx);
             app.sync_remote_panel_demand(cx);
         });
-        assert_eq!(polling(&app, &mut cx), Vec::new());
+        assert_eq!(polling(&app, &mut cx), vec![RemoteMonitorKind::Stats]);
     }
 
     /// A paint must arm the clock, with nothing calling the reconcile by hand.
@@ -1087,8 +1091,8 @@ mod tests {
         });
         assert_eq!(
             armed,
-            vec![RemoteMonitorKind::Gpu],
-            "a paint with the GPU panel open must arm exactly that panel's clock"
+            vec![RemoteMonitorKind::Stats, RemoteMonitorKind::Gpu],
+            "a paint arms persistent stats plus the open GPU panel"
         );
     }
 }

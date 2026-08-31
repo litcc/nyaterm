@@ -192,7 +192,8 @@ use ssh_shell_integration::{
     build_ssh_ready_marker, build_ssh_shell_integration_script, detect_ssh_shell_type,
 };
 pub use stats::{
-    CpuInfo, DiskInfo, LoadInfo, MemoryInfo, NetworkInfo, RemoteStats, RemoteStatsService,
+    CpuCoreUsage, CpuInfo, CpuUsageSource, DiskInfo, LoadInfo, MemoryInfo, NetworkInfo,
+    NetworkSummaryInfo, ParsedRemoteStats, RemoteStats, RemoteStatsSampler, RemoteStatsService,
     SYSINFO_SCRIPT, SystemInfo, parse_stats_output,
 };
 

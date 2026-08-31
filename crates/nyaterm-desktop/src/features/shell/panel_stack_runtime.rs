@@ -903,13 +903,18 @@ impl NyaTermApp {
             }
             NavItem::Stats => {
                 let palette = self.theme_palette();
+                let manual_refreshing = self.remote_ops.stats_manual_refreshing();
                 let can_refresh = self.session.active_ssh_config().is_some()
                     && !self.remote_ops.stats_is_pending();
                 Some(
                     header_svg_icon_button(
                         palette,
                         "stats-header-refresh",
-                        "icons/fe/refresh.svg",
+                        if manual_refreshing {
+                            "icons/conn/spinner-arc.svg"
+                        } else {
+                            "icons/fe/refresh.svg"
+                        },
                         t!("resourceMonitor.refresh"),
                         can_refresh,
                         cx.listener(|this, _, _window, cx| {

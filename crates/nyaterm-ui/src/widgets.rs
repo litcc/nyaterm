@@ -155,16 +155,38 @@ pub fn status_pill(
 }
 
 pub fn empty_panel(text: impl Into<SharedString>, palette: ThemePalette) -> impl IntoElement {
+    empty_panel_with_icon(text, palette, "icons/eye-off.svg")
+}
+
+pub fn empty_panel_with_icon(
+    text: impl Into<SharedString>,
+    palette: ThemePalette,
+    icon_path: &'static str,
+) -> impl IntoElement {
     let text: SharedString = text.into();
     div()
-        .rounded_md()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.input))
-        .p_4()
-        .text_sm()
-        .text_color(rgb(palette.text_muted))
-        .child(text)
+        .size_full()
+        .min_h_0()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .px_4()
+        .text_center()
+        .child(
+            gpui::svg()
+                .size(px(24.))
+                .path(icon_path)
+                .text_color(rgb(palette.text_dimmed)),
+        )
+        .child(
+            div()
+                .text_sm()
+                .line_height(px(20.))
+                .text_color(rgb(palette.text_muted))
+                .child(text),
+        )
 }
 
 pub fn section_header(

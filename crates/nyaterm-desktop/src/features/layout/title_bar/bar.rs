@@ -672,7 +672,11 @@ impl NyaTermApp {
             .iter()
             .map(|network| network.rx_bytes_per_sec.max(0.))
             .sum::<f64>();
-        let cpu_text = format!("CPU {:.0}%", stats.cpu.usage.clamp(0., 100.));
+        let cpu_text = stats
+            .cpu
+            .usage
+            .map(|usage| format!("CPU {:.0}%", usage.clamp(0., 100.)))
+            .unwrap_or_else(|| "CPU --".to_string());
         let memory_text = format!(
             "RAM {}/{}",
             format_binary_bytes(stats.memory.used),
@@ -687,7 +691,7 @@ impl NyaTermApp {
                 HeaderStatusPart {
                     icon: IconDef::mono("icons/resources.svg", 0x38bdf8),
                     text: cpu_text,
-                    text_color: pressure_color(Some(stats.cpu.usage)),
+                    text_color: pressure_color(stats.cpu.usage),
                 },
                 HeaderStatusPart {
                     icon: IconDef::mono("icons/processes.svg", 0xa78bfa),
@@ -850,12 +854,6 @@ impl NyaTermApp {
         } else {
             self.persist_ui_layout();
         }
-    }
-
-    pub(in crate::features) fn header_status_needs_remote_stats(&self) -> bool {
-        self.settings.summary().ui_header_status_visible
-            && HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode)
-                .needs_remote_stats()
     }
 
     pub(in crate::features) fn header_status_clock_refresh_due(&self) -> bool {

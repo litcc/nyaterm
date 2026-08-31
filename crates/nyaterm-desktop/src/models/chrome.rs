@@ -53,10 +53,6 @@ impl HeaderStatusMode {
             Self::DateTime => "headerStatus.datetime",
         }
     }
-
-    pub(crate) const fn needs_remote_stats(self) -> bool {
-        matches!(self, Self::Resources | Self::Host)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

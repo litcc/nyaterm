@@ -8,6 +8,14 @@ use crate::features::runtime_jobs::StatsJobResult;
 
 impl NyaTermApp {
     pub(in crate::features) fn refresh_stats(&mut self, cx: &mut Context<Self>) {
+        self.start_stats_refresh(true, cx);
+    }
+
+    pub(in crate::features) fn refresh_stats_auto(&mut self, cx: &mut Context<Self>) {
+        self.start_stats_refresh(false, cx);
+    }
+
+    fn start_stats_refresh(&mut self, manual: bool, cx: &mut Context<Self>) {
         let context = match self.active_ssh_runtime_context("inspecting stats") {
             Ok(context) => context,
             Err(message) => {
@@ -36,7 +44,9 @@ impl NyaTermApp {
             return;
         }
 
-        let ticket = self.remote_ops.begin_stats_job(job_session_id.clone());
+        let ticket = self
+            .remote_ops
+            .begin_stats_job(job_session_id.clone(), manual);
         self.remote_ops.mark_stats_refresh_started();
         self.remote_ops
             .set_stats_status("loading remote system stats");
@@ -44,12 +54,16 @@ impl NyaTermApp {
         let tx = ticket.tx;
         let rejected_tx = tx.clone();
         let rejected_session_id = job_session_id.clone();
+        let sampling_session_id = job_session_id.clone();
+        let sampler = self.remote_ops.stats_sampler();
         if let Err(error) = self
             .blocking_jobs
             .submit_detached("remote-stats", move |_| {
-                let result =
-                    (|| RemoteStatsService::with_multiplex(config, multiplex)?.snapshot())()
-                        .map_err(|error| error.to_string());
+                let result = (|| {
+                    RemoteStatsService::with_multiplex(config, multiplex)?
+                        .snapshot(sampler.as_ref(), &sampling_session_id)
+                })()
+                .map_err(|error| error.to_string());
                 let _ = tx.unbounded_send(StatsJobResult {
                     job_id,
                     session_id: job_session_id,

@@ -40,14 +40,16 @@ pub(in crate::features) fn remote_refresh_due(
 
 impl NyaTermApp {
     pub(in crate::features) fn refresh_stats_if_due(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.settings.summary().ui_show_remote_stats
-            && !self.remote_ops.stats_is_pending()
-            && remote_refresh_due(
+        if !self.settings.summary().ui_show_remote_stats || self.remote_ops.stats_is_pending() {
+            return false;
+        }
+        if self.remote_ops.take_stats_warmup_retry_due()
+            || remote_refresh_due(
                 self.remote_ops.stats_last_refresh_at(),
                 self.settings.summary().ui_remote_stats_interval.max(1),
             )
         {
-            self.refresh_stats(cx);
+            self.refresh_stats_auto(cx);
             return true;
         }
         false

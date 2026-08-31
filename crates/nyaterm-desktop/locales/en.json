@@ -1526,6 +1526,7 @@
     "power": "Power",
     "processes": "Processes",
     "receive": "Receive",
+    "sampling": "Sampling...",
     "refresh": "Refresh",
     "send": "Send",
     "system": "System",

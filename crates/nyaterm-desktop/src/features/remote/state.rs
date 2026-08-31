@@ -12,9 +12,10 @@ use futures::channel::mpsc::UnboundedReceiver;
 use std::time::Instant;
 
 use nyaterm_transport::{
-    DockerComposeProject, DockerComposeService, DockerContainer, DockerContainerDetails,
-    DockerImage, DockerNetwork, DockerVolume, RemoteDockerOverview, RemoteGpuOverview,
-    RemoteGpuProcess, RemoteNpuOverview, RemoteNpuProcess, RemoteProcess, RemoteStats,
+    CpuUsageSource, DockerComposeProject, DockerComposeService, DockerContainer,
+    DockerContainerDetails, DockerImage, DockerNetwork, DockerVolume, RemoteDockerOverview,
+    RemoteGpuOverview, RemoteGpuProcess, RemoteNpuOverview, RemoteNpuProcess, RemoteProcess,
+    RemoteStats, RemoteStatsSampler,
 };
 
 use crate::features::formatting::docker_compose_project_key;
@@ -52,6 +53,7 @@ pub(in crate::features) struct RemoteOpsFeatureState {
     docker: DockerPaneState,
     process: ProcessPaneState,
     stats: StatsPaneState,
+    stats_sampler: Arc<RemoteStatsSampler>,
     gpu: AcceleratorPaneState<RemoteGpuOverview, GpuJobResult>,
     npu: AcceleratorPaneState<RemoteNpuOverview, NpuJobResult>,
 }
@@ -165,6 +167,9 @@ struct StatsPaneState {
     pub data: Option<RemoteStats>,
     pub status: String,
     pub cpu_expanded: bool,
+    manual_job_id: Option<u64>,
+    warmup_retry_pending: bool,
+    warmup_retry_attempted: bool,
     /// Bumped by every mutation that changes what `stats_presentation` returns.
     revision: u64,
 }
@@ -245,9 +250,9 @@ pub(in crate::features) struct ProcessPresentationState {
 #[derive(Clone)]
 pub(in crate::features) struct StatsPresentationState {
     pub data: Option<RemoteStats>,
-    pub status: String,
     pub cpu_expanded: bool,
     pub pending: bool,
+    pub error: bool,
     pub consecutive_refresh_failures: u8,
 }
 
@@ -320,8 +325,12 @@ impl RemoteOpsFeatureState {
                 data: None,
                 status: "start an SSH session to inspect remote stats".to_string(),
                 cpu_expanded: false,
+                manual_job_id: None,
+                warmup_retry_pending: false,
+                warmup_retry_attempted: false,
                 revision: 0,
             },
+            stats_sampler: Arc::new(RemoteStatsSampler::default()),
             gpu: AcceleratorPaneState::new("start an SSH session to inspect NVIDIA GPU"),
             npu: AcceleratorPaneState::new("start an SSH session to inspect Ascend NPU"),
         }
@@ -335,6 +344,14 @@ impl RemoteOpsFeatureState {
             .reset_for_session_switch("start an SSH session to inspect NVIDIA GPU");
         self.npu
             .reset_for_session_switch("start an SSH session to inspect Ascend NPU");
+    }
+
+    pub(in crate::features) fn stats_sampler(&self) -> Arc<RemoteStatsSampler> {
+        self.stats_sampler.clone()
+    }
+
+    pub(in crate::features) fn clear_stats_sample(&self, session_id: &str) {
+        self.stats_sampler.clear_session(session_id);
     }
 
     pub(in crate::features) fn docker_presentation(&self) -> DockerPresentationState {
@@ -439,9 +456,9 @@ impl RemoteOpsFeatureState {
     pub(in crate::features) fn stats_presentation(&self) -> StatsPresentationState {
         StatsPresentationState {
             data: self.stats.data.clone(),
-            status: self.stats.status.clone(),
             cpu_expanded: self.stats.cpu_expanded,
             pending: self.stats.is_pending(),
+            error: self.stats.consecutive_refresh_failures() > 0,
             consecutive_refresh_failures: self.stats.consecutive_refresh_failures(),
         }
     }
@@ -547,6 +564,10 @@ impl RemoteOpsFeatureState {
 
     pub(in crate::features) fn process_is_pending(&self) -> bool {
         self.process.is_pending()
+    }
+
+    pub(in crate::features) fn stats_manual_refreshing(&self) -> bool {
+        self.stats.manual_job_id.is_some()
     }
 
     pub(in crate::features) fn stats_is_pending(&self) -> bool {
@@ -920,8 +941,13 @@ impl RemoteOpsFeatureState {
     pub(in crate::features) fn begin_stats_job(
         &mut self,
         session_id: String,
+        manual: bool,
     ) -> RemoteJobTicket<StatsJobResult> {
-        self.stats.begin_job(session_id)
+        self.stats.begin_job(session_id, manual)
+    }
+
+    pub(in crate::features) fn take_stats_warmup_retry_due(&mut self) -> bool {
+        self.stats.take_warmup_retry_due()
     }
 
     pub(in crate::features) fn mark_stats_refresh_started(&mut self) {
@@ -1790,6 +1816,12 @@ impl StatsPaneState {
     }
 
     fn apply_data(&mut self, stats: RemoteStats) {
+        if stats.cpu.usage_source == CpuUsageSource::WarmingUp {
+            self.warmup_retry_pending = !self.warmup_retry_attempted;
+        } else {
+            self.warmup_retry_pending = false;
+            self.warmup_retry_attempted = false;
+        }
         self.data = Some(stats);
         self.touch();
     }
@@ -1820,13 +1852,17 @@ impl StatsPaneState {
         self.job.is_pending_for(session_id)
     }
 
-    pub(super) fn begin_job(&mut self, session_id: String) -> RemoteJobTicket<StatsJobResult> {
-        // `pending` is part of the presentation, so starting and finishing a job
-        // moves the revision. Today a status change always accompanies both, which
-        // masked this; relying on that is exactly the fragility the counter exists
-        // to remove.
+    pub(super) fn begin_job(
+        &mut self,
+        session_id: String,
+        manual: bool,
+    ) -> RemoteJobTicket<StatsJobResult> {
         self.touch();
-        self.job.begin(session_id)
+        let ticket = self.job.begin(session_id);
+        if manual {
+            self.manual_job_id = Some(ticket.job_id);
+        }
+        ticket
     }
 
     pub(super) fn mark_refresh_started(&mut self) {
@@ -1838,8 +1874,28 @@ impl StatsPaneState {
     }
 
     pub(super) fn complete_event(&mut self, job_id: u64, session_id: &str) -> bool {
+        let matched = self.job.complete_if_matches(job_id, session_id);
+        if matched {
+            if self.manual_job_id == Some(job_id) {
+                self.manual_job_id = None;
+            }
+            self.touch();
+        }
+        matched
+    }
+
+    fn take_warmup_retry_due(&mut self) -> bool {
+        if !self.warmup_retry_pending
+            || self
+                .last_refresh_at()
+                .is_none_or(|started| started.elapsed() < std::time::Duration::from_secs(1))
+        {
+            return false;
+        }
+        self.warmup_retry_pending = false;
+        self.warmup_retry_attempted = true;
         self.touch();
-        self.job.complete_if_matches(job_id, session_id)
+        true
     }
 
     pub(super) fn reset_refresh_failures(&mut self) {
@@ -1864,6 +1920,9 @@ impl StatsPaneState {
 
     fn reset_for_session_switch(&mut self) {
         self.job.reset_for_session_switch();
+        self.manual_job_id = None;
+        self.warmup_retry_pending = false;
+        self.warmup_retry_attempted = false;
         // Through the touching methods, not the fields: a session switch changes the
         // presentation, so it has to move the revision like any other mutation.
         self.clear_data();
@@ -2486,7 +2545,7 @@ mod tests {
     fn stats_owner_resets_session_runtime_without_losing_expansion_preference() {
         let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
         state.toggle_stats_cpu_expanded();
-        state.begin_stats_job("session-a".to_string());
+        state.begin_stats_job("session-a".to_string(), false);
 
         state.reset_for_session_switch();
 
@@ -2495,7 +2554,7 @@ mod tests {
         assert!(presentation.data.is_none());
         assert!(presentation.cpu_expanded);
         assert_eq!(
-            presentation.status,
+            state.stats_status(),
             "start an SSH session to inspect remote stats"
         );
     }
@@ -2503,7 +2562,7 @@ mod tests {
     #[test]
     fn stats_owner_reduces_matching_success_failure_and_stale_events() {
         let mut state = RemoteOpsFeatureState::new(RemoteOpsFeatureFocus {});
-        let ticket = state.begin_stats_job("session-a".to_string());
+        let ticket = state.begin_stats_job("session-a".to_string(), false);
         let mut stats = RemoteStats::default();
         stats.system.hostname = "host-a".to_string();
         let outcome = state.apply_stats_event(
@@ -2533,7 +2592,7 @@ mod tests {
         ));
 
         for failure in 1..=3 {
-            let ticket = state.begin_stats_job("session-a".to_string());
+            let ticket = state.begin_stats_job("session-a".to_string(), false);
             let outcome = state.apply_stats_event(
                 StatsJobResult {
                     job_id: ticket.job_id,

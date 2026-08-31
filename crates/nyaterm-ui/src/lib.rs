@@ -59,7 +59,8 @@ pub use theme_bridge::apply_component_theme;
 pub use tooltip::NyaTooltip;
 pub use widgets::{
     NyaHorizontalScrollbar, NyaScrollArea, NyaUniformListScrollbar, capability_line, empty_panel,
-    mode_button, section_header, session_info_row, small_button, status_pill, svg_icon_button,
+    empty_panel_with_icon, mode_button, section_header, session_info_row, small_button, status_pill,
+    svg_icon_button,
 };
 
 #[cfg(test)]

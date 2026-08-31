@@ -8,7 +8,8 @@ use gpui::{
 };
 use nyaterm_core::truncate_preview;
 use nyaterm_transport::{
-    RemoteGpu, RemoteGpuOverview, RemoteGpuProcess, RemoteNpu, RemoteNpuOverview, RemoteNpuProcess,
+    CpuCoreUsage, RemoteGpu, RemoteGpuOverview, RemoteGpuProcess, RemoteNpu, RemoteNpuOverview,
+    RemoteNpuProcess,
 };
 use nyaterm_ui::NyaScrollable;
 
@@ -19,10 +20,7 @@ use crate::features::remote::StatsPresentationState;
 use crate::features::remote::{
     ACCELERATOR_PROCESS_VIEWPORT_ROWS, GpuPresentationState, NpuPresentationState, max_list_offset,
 };
-use crate::features::{
-    formatting::format_rate, formatting::format_uptime, shell::gpui_code_font_family,
-    transfers::format_file_size, view_widgets::stats_progress_bar,
-};
+use crate::features::{shell::gpui_code_font_family, view_widgets::stats_progress_bar};
 use crate::widgets::empty_panel;
 use gpui::Entity;
 use nyaterm_ui::{NyaInputState, NyaSearchInput};
@@ -57,7 +55,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
     let Some(stats) = stats_state.data else {
         let message = if stats_state.pending {
             t!("common.loading")
-        } else if stats_state.status.contains("failed") {
+        } else if stats_state.error {
             t!("panel.resourceMonitorError")
         } else {
             t!("common.loading")
@@ -75,6 +73,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
     } else {
         0.
     };
+    let cpu_usage = stats.cpu.usage;
     let system_label = t!("resourceMonitor.system").to_string();
     let hostname_label = t!("resourceMonitor.hostname").to_string();
     let arch_label = t!("resourceMonitor.arch").to_string();
@@ -132,20 +131,22 @@ pub(in crate::features::pages::remote) fn stats_panel(
     }
 
     div()
-            .size_full()
-            .overflow_hidden()
-            .bg(chrome.transparent_surface)
-            .child(
-                div()
-                    .id(SharedString::from("stats-scroll"))
-                    .size_full()
-                    .overflow_scrollbar()
-                    .p(px(10.))
-                    .flex()
-                    .flex_col()
-                    .gap_2()
+        .size_full()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
+        .bg(chrome.transparent_surface)
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .p(px(10.))
+                .flex()
+                .flex_col()
+                .gap_2()
                     .child(resource_section_card(
                         palette,
+                        "icons/conn/server.svg",
                         system_label,
                         div()
                             .grid()
@@ -161,20 +162,27 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                     stats.system.hostname.clone()
                                 },
                             ))
-                            .child(resource_info_cell(
-                                palette,
-                                arch_label,
-                                stats.system.arch.clone(),
-                            ))
+                            .child(
+                                resource_info_cell(
+                                    palette,
+                                    arch_label,
+                                    stats.system.arch.clone(),
+                                )
+                                .text_right(),
+                            )
                             .child(resource_info_cell(palette, os_label, stats.system.os.clone()))
-                            .child(resource_info_cell(
-                                palette,
-                                uptime_label,
-                                format_uptime(stats.system.uptime_sec),
-                            )),
+                            .child(
+                                resource_info_cell(
+                                    palette,
+                                    uptime_label,
+                                    format_resource_uptime(stats.system.uptime_sec),
+                                )
+                                .text_right(),
+                            ),
                     ))
                     .child(resource_section_card(
                         palette,
+                        "icons/resources.svg",
                         cpu_label.clone(),
                         div()
                             .flex()
@@ -188,7 +196,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                     .child(resource_ring_gauge(
                                         palette,
                                         stats.cpu.usage,
-                                        format!("{:.0}%", stats.cpu.usage.clamp(0., 100.)),
+                                        format_resource_percent(cpu_usage),
                                     ))
                                     .child(
                                         div()
@@ -218,14 +226,14 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                                             .font_weight(FontWeight(700.))
                                                             .text_color(usage_color(
                                                                 palette,
-                                                                stats.cpu.usage / 100.,
+                                                                cpu_usage.unwrap_or(0.) / 100.,
                                                             ))
-                                                            .child(format!("{:.1}%", stats.cpu.usage)),
+                                                            .child(format_optional_percent_decimal(cpu_usage)),
                                                     ),
                                             )
                                             .child(resource_progress_bar(
                                                 palette,
-                                                stats.cpu.usage / 100.,
+                                                cpu_usage.unwrap_or(0.) / 100.,
                                             ))
                                             .child(
                                                 div()
@@ -235,7 +243,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                                     )
                                                     .text_size(px(10.))
                                                     .text_color(rgb(palette.text_dimmed))
-                                                    .child(format!("{}C", stats.cpu.cores)),
+                                                    .child(if cpu_usage.is_some() { format!("{}C", stats.cpu.cores) } else { t!("resourceMonitor.sampling").to_string() }),
                                             ),
                                     ),
                             )
@@ -272,6 +280,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
                     ))
                     .child(resource_section_card(
                         palette,
+                        "icons/processes.svg",
                         memory_label,
                         div()
                             .flex()
@@ -284,7 +293,7 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                     .gap_3()
                                     .child(resource_ring_gauge(
                                         palette,
-                                        memory_percent,
+                                        Some(memory_percent),
                                         format!("{memory_percent:.0}%"),
                                     ))
                                     .child(
@@ -333,8 +342,8 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                                     .text_color(rgb(palette.text_muted))
                                                     .child(format!(
                                                         "{} / {}",
-                                                        format_file_size(Some(stats.memory.used)),
-                                                        format_file_size(Some(memory_total))
+                                                        format_resource_bytes(stats.memory.used),
+                                                        format_resource_bytes(memory_total)
                                                     )),
                                             ),
                                     ),
@@ -348,17 +357,19 @@ pub(in crate::features::pages::remote) fn stats_panel(
                                     .child(resource_metric_chip(
                                         palette,
                                         available_label,
-                                        format_file_size(Some(stats.memory.available)),
+                                        format_resource_bytes(stats.memory.available),
                                     ))
                                     .child(resource_metric_chip(
                                         palette,
                                         cached_label,
-                                        format_file_size(Some(stats.memory.cached)),
+                                        format_resource_bytes(stats.memory.cached),
                                     )),
                             ),
                     ))
-                    .child(resource_section_card(palette, network_label, network_rows))
-                    .child(resource_section_card(palette, disk_label, disk_rows)),
+                .child(resource_section_card(palette, "icons/network.svg", network_label, network_rows))
+                .child(resource_section_card(palette, "icons/file/storage.svg", disk_label, disk_rows))
+                .overflow_y_scrollbar()
+                .id(SharedString::from("stats-scroll")),
             )
             .into_any_element()
 }
@@ -1488,8 +1499,67 @@ fn format_watts(value: Option<f64>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn format_resource_bytes(bytes: u64) -> String {
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024. && unit + 1 < UNITS.len() {
+        value /= 1024.;
+        unit += 1;
+    }
+    if value < 10. {
+        format!("{value:.2} {}", UNITS[unit])
+    } else if value < 100. {
+        format!("{value:.1} {}", UNITS[unit])
+    } else {
+        format!("{value:.0} {}", UNITS[unit])
+    }
+}
+
+fn format_resource_rate(bytes_per_sec: f64) -> String {
+    if bytes_per_sec <= 0. {
+        return "0 B/s".to_string();
+    }
+    const UNITS: [&str; 4] = ["B/s", "KB/s", "MB/s", "GB/s"];
+    let mut value = bytes_per_sec;
+    let mut unit = 0;
+    while value >= 1024. && unit + 1 < UNITS.len() {
+        value /= 1024.;
+        unit += 1;
+    }
+    if value < 10. {
+        format!("{value:.1} {}", UNITS[unit])
+    } else {
+        format!("{value:.0} {}", UNITS[unit])
+    }
+}
+
+fn format_resource_uptime(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    if days == 1 {
+        t!("resourceMonitor.day", count = days).to_string()
+    } else {
+        t!("resourceMonitor.days", count = days).to_string()
+    }
+}
+
+fn format_resource_percent(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{:.0}%", value.clamp(0., 100.)))
+        .unwrap_or_else(|| "--".to_string())
+}
+
+fn format_optional_percent_decimal(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{:.1}%", value.clamp(0., 100.)))
+        .unwrap_or_else(|| "--".to_string())
+}
 fn resource_section_card(
     palette: crate::theme::ThemePalette,
+    icon_path: &'static str,
     title: String,
     child: impl IntoElement,
 ) -> gpui::Div {
@@ -1508,12 +1578,11 @@ fn resource_section_card(
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(
-                    div()
-                        .size(px(6.))
-                        .rounded_full()
-                        .bg(rgb(palette.text_muted)),
-                )
+                .child(crate::features::view_widgets::mono_icon(
+                    icon_path,
+                    rgb(palette.text_muted).into(),
+                    14.,
+                ))
                 .child(
                     div()
                         .text_size(px(11.))
@@ -1551,10 +1620,10 @@ fn resource_info_cell(
 
 fn resource_ring_gauge(
     palette: crate::theme::ThemePalette,
-    percent: f64,
+    percent: Option<f64>,
     label: String,
 ) -> gpui::Div {
-    let ratio = (percent / 100.).clamp(0., 1.);
+    let ratio = (percent.unwrap_or(0.) / 100.).clamp(0., 1.);
     let track = rgb(palette.border);
     let accent = usage_color(palette, ratio);
     div()
@@ -1787,12 +1856,12 @@ fn resource_disk_row(
                         .font_family(crate::features::shell::gpui_code_font_family())
                         .text_size(px(10.))
                         .text_color(rgb(palette.text_dimmed))
-                        .child(format_file_size(Some(total))),
+                        .child(format_resource_bytes(total)),
                 )
                 .child(resource_metric_chip(
                     palette,
                     available_label,
-                    format_file_size(Some(available)),
+                    format_resource_bytes(available),
                 )),
         )
 }
@@ -1811,7 +1880,7 @@ fn rate_value(
         .text_size(px(11.))
         .text_color(rgb(palette.text_muted))
         .child(crate::features::view_widgets::mono_icon(arrow, color, 11.))
-        .child(format_rate(value))
+        .child(format_resource_rate(value))
 }
 
 fn resource_empty_value(palette: crate::theme::ThemePalette) -> gpui::Div {
@@ -1828,22 +1897,12 @@ fn resource_progress_bar(palette: crate::theme::ThemePalette, ratio: f64) -> imp
 
 fn cpu_core_summary(
     palette: crate::theme::ThemePalette,
-    per_core: &[f64],
+    per_core: &[CpuCoreUsage],
     expanded: bool,
     cpu_label: String,
     cx: &mut Context<RemoteMonitorPanel>,
 ) -> gpui::Div {
-    let visible_count = if expanded {
-        per_core.len()
-    } else {
-        per_core.len().min(8)
-    };
-    let overflow = per_core.len().saturating_sub(visible_count);
-    let summary = if overflow > 0 {
-        format!("{} {cpu_label} +{overflow}", per_core.len())
-    } else {
-        format!("{} {cpu_label}", per_core.len())
-    };
+    let summary = format!("{} {cpu_label}", per_core.len());
 
     let mut rows = div().flex().flex_col().gap_1().child(
         div()
@@ -1863,7 +1922,11 @@ fn cpu_core_summary(
             .child(
                 svg()
                     .size(px(13.))
-                    .path("icons/chevron-down.svg")
+                    .path(if expanded {
+                        "icons/chevron-up.svg"
+                    } else {
+                        "icons/chevron-down.svg"
+                    })
                     .text_color(rgb(palette.text_muted)),
             )
             .child(summary),
@@ -1871,8 +1934,8 @@ fn cpu_core_summary(
 
     if expanded {
         let mut core_rows = div().flex().flex_col().gap_1().pt_1();
-        for (index, usage) in per_core.iter().copied().enumerate() {
-            core_rows = core_rows.child(cpu_core_row(palette, index + 1, usage));
+        for core in per_core {
+            core_rows = core_rows.child(cpu_core_row(palette, core.id, core.usage));
         }
         rows = rows.child(core_rows);
     }
@@ -1880,7 +1943,7 @@ fn cpu_core_summary(
     rows
 }
 
-fn cpu_core_row(palette: crate::theme::ThemePalette, index: usize, usage: f64) -> gpui::Div {
+fn cpu_core_row(palette: crate::theme::ThemePalette, index: u32, usage: f64) -> gpui::Div {
     let ratio = (usage / 100.).clamp(0., 1.);
     div()
         .h(px(22.))
@@ -1894,7 +1957,7 @@ fn cpu_core_row(palette: crate::theme::ThemePalette, index: usize, usage: f64) -
                 .font_family(crate::features::shell::gpui_code_font_family())
                 .text_size(px(10.))
                 .text_color(rgb(palette.text_muted))
-                .child(index.to_string()),
+                .child(format!("cpu{index}")),
         )
         .child(
             div()
@@ -1918,7 +1981,10 @@ fn cpu_core_row(palette: crate::theme::ThemePalette, index: usize, usage: f64) -
 mod tests {
     use nyaterm_transport::{RemoteGpu, RemoteGpuOverview, RemoteNpu, RemoteNpuOverview};
 
-    use super::{build_gpu_summary, build_npu_summary, format_memory_mb, format_temperature};
+    use super::{
+        build_gpu_summary, build_npu_summary, format_memory_mb, format_resource_bytes,
+        format_resource_percent, format_resource_rate, format_temperature,
+    };
 
     fn gpu(index: u32, used: u64, total: u64, temp: Option<f64>, util: Option<f64>) -> RemoteGpu {
         RemoteGpu {
@@ -2000,5 +2066,16 @@ mod tests {
         assert_eq!(format_memory_mb(512), "512 MiB");
         assert_eq!(format_memory_mb(1536), "1.5 GiB");
         assert_eq!(format_temperature(None), "-");
+    }
+
+    #[test]
+    fn resource_formatters_match_tauri_precision_and_warmup_placeholders() {
+        assert_eq!(format_resource_bytes(0), "0 B");
+        assert_eq!(format_resource_bytes(95_596_000_000), "89.0 GB");
+        assert_eq!(format_resource_bytes(135_291_469_824), "126 GB");
+        assert_eq!(format_resource_rate(0.), "0 B/s");
+        assert_eq!(format_resource_rate(4.6 * 1024.), "4.6 KB/s");
+        assert_eq!(format_resource_percent(None), "--");
+        assert_eq!(format_resource_percent(Some(23.2)), "23%");
     }
 }

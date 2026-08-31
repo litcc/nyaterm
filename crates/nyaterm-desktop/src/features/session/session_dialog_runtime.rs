@@ -259,6 +259,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.flush_session_asset_monitoring(session_id, cx);
+        self.remote_ops.clear_stats_sample(session_id);
         self.clear_terminal_selection_state_for_session(session_id);
         self.clear_terminal_mouse_report_for_session(session_id);
         self.session.start.clear_reconnect_failure(session_id);
