@@ -155,7 +155,9 @@ pub(in crate::features::pages::transfers) fn format_sftp_modified(value: Option<
 
 #[cfg(test)]
 mod tests {
-    use super::{remote_child_path, transfer_browser_path_is_root};
+    use super::remote_child_path;
+    #[cfg(windows)]
+    use super::transfer_browser_path_is_root;
 
     #[test]
     fn remote_child_path_preserves_filesystem_root() {
