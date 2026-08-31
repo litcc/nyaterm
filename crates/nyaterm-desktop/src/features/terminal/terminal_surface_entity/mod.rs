@@ -9,7 +9,7 @@ use crate::features::formatting::{
     TerminalTimestampFormatter, terminal_gutter_labels, terminal_timestamp_format_width_chars,
 };
 use crate::features::terminal::terminal_runtime::{
-    TerminalScrollVisualState, terminal_display_offset_from_state,
+    TerminalScrollVisualState, TerminalScrollWheelStateResult, terminal_display_offset_from_state,
     terminal_local_scroll_delta_lines_from_state, terminal_scroll_needs_text_first_repaint,
     terminal_visual_scroll_active_for_state,
 };
@@ -1813,16 +1813,41 @@ impl TerminalSurface {
             cx.stop_propagation();
             return;
         }
-        let result = app.update(cx, |this, cx| {
-            this.terminal_scroll_wheel_state_for_session(
-                session_id.as_str(),
-                raw_lines,
-                event.position,
-                event.modifiers,
-                cx,
-            )
-        });
 
+        // Protocol-owned wheel handling needs the surface's hit-test geometry. The
+        // current callback still holds the TerminalSurface update lease, so the
+        // parent app must not be entered until that lease is released; otherwise
+        // GPUI detects entity reentrancy at `surface.read(cx)` and panics.
+        if !raw_lines.is_finite() || raw_lines == 0.0 {
+            return;
+        }
+        let surface = cx.entity();
+        let position = event.position;
+        let modifiers = event.modifiers;
+        cx.stop_propagation();
+        cx.defer(move |cx| {
+            let result = app.update(cx, |this, cx| {
+                this.terminal_scroll_wheel_state_for_session(
+                    session_id.as_str(),
+                    raw_lines,
+                    position,
+                    modifiers,
+                    cx,
+                )
+            });
+            surface.update(cx, |surface, cx| {
+                surface.apply_scroll_wheel_result(app, session_id, result, cx);
+            });
+        });
+    }
+
+    fn apply_scroll_wheel_result(
+        &mut self,
+        app: Entity<NyaTermApp>,
+        session_id: String,
+        result: TerminalScrollWheelStateResult,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(state) = result.visual_state {
             let repaint_needed = self.scroll_visual_state_needs_repaint(&state);
             let text_updated = self.apply_scroll_visual_state(state.clone());
@@ -1832,16 +1857,17 @@ impl TerminalSurface {
                 cx.notify();
             }
             if needs_text_first_repaint {
-                app.update(cx, |this, cx| {
-                    this.notify_terminal_scroll_position_only(session_id.as_str(), cx);
+                let session_id = session_id.clone();
+                let app = app.clone();
+                cx.defer(move |cx| {
+                    app.update(cx, |this, cx| {
+                        this.notify_terminal_scroll_position_only(session_id.as_str(), cx);
+                    });
                 });
             }
         }
         if result.defer_repaint {
             Self::defer_surface_repaint(app, Some(session_id), cx);
-        }
-        if result.handled {
-            cx.stop_propagation();
         }
     }
 
