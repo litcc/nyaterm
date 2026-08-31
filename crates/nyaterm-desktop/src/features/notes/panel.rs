@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use gpui::{
-    AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, ListSizingBehavior,
-    MouseButton, ParentElement as _, Render, ScrollStrategy, SharedString, Styled as _,
-    Subscription, UniformListScrollHandle, WeakEntity, Window, div, prelude::*, px, rgb,
-    uniform_list,
+    AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, MouseButton,
+    ParentElement as _, Render, ScrollStrategy, SharedString, Styled as _, Subscription,
+    UniformListScrollHandle, WeakEntity, Window, div, prelude::*, px, rgb, uniform_list,
 };
+
 use nyaterm_core::{NoteFolder, NoteNodeKind};
 use nyaterm_ui::{
     NyaButton, NyaButtonVariant, NyaContextMenu, NyaDropdownMenu, NyaInputEvent, NyaInputShell,
@@ -55,6 +55,8 @@ pub(in crate::features) struct NotesPanel {
     renaming_id: Option<String>,
     scroll: UniformListScrollHandle,
     focus: FocusHandle,
+    #[cfg(test)]
+    rows_built: usize,
     _app_subscription: Subscription,
     _search_subscription: Subscription,
     _rename_subscription: Subscription,
@@ -88,6 +90,8 @@ impl NotesPanel {
             renaming_id: None,
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
+            #[cfg(test)]
+            rows_built: 0,
             _app_subscription: app_subscription,
             _search_subscription: search_subscription,
             _rename_subscription: rename_subscription,
@@ -213,7 +217,7 @@ impl Render for NotesPanel {
             "notes-tree-rows",
             row_count,
             cx.processor(move |panel, range: std::ops::Range<usize>, _, cx| {
-                range
+                let items = range
                     .filter_map(|index| rows.get(index).cloned())
                     .map(|row| {
                         let folders = move_targets.get(&row.id).cloned().unwrap_or_default();
@@ -227,11 +231,16 @@ impl Render for NotesPanel {
                             cx,
                         )
                     })
-                    .collect()
+                    .collect::<Vec<_>>();
+                #[cfg(test)]
+                {
+                    panel.rows_built = panel.rows_built.saturating_add(items.len());
+                }
+                items
             }),
         )
-        .flex_grow(1.)
-        .with_sizing_behavior(ListSizingBehavior::Auto)
+        .flex_1()
+        .min_h_0()
         .track_scroll(&self.scroll);
 
         let search_state = self.search.clone();
@@ -389,6 +398,9 @@ impl Render for NotesPanel {
                     .flex_1()
                     .min_h_0()
                     .relative()
+                    .flex()
+                    .flex_col()
+                    .overflow_hidden()
                     .on_drop(cx.listener(|panel, payload: &NotesDragPayload, _, cx| {
                         cx.stop_propagation();
                         let id = payload.id.clone();
@@ -676,4 +688,115 @@ fn note_row(
         }),
     ];
     NyaContextMenu::new(base, items).into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, path::PathBuf};
+
+    use gpui::{
+        AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+        TestAppContext, VisualTestContext, div, px,
+    };
+    use nyaterm_core::{
+        AppRuntime, NoteFolder, NoteSummary, NoteTreePayload, NotesUiState, RuntimeMode, uuid,
+    };
+
+    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+    use crate::features::NyaTermApp;
+
+    struct NotesHost {
+        app: Entity<NyaTermApp>,
+    }
+
+    impl Render for NotesHost {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let panel = self.app.read(cx).notes_panel.clone();
+            div().w(px(360.)).h(px(600.)).child(panel)
+        }
+    }
+
+    fn test_app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
+        let root = PathBuf::from(std::env::temp_dir()).join(format!(
+            "nyaterm-notes-panel-{}-{}",
+            std::process::id(),
+            uuid()
+        ));
+        let runtime = AppRuntime::from_parts_for_test(
+            RuntimeMode::Portable,
+            root.clone(),
+            root.join("config"),
+            root.join("logs"),
+            root.join("cache"),
+            None,
+        );
+        let stores = UiStoreHandles {
+            startup_restore: cx.new(|_| StartupRestoreStore::default()),
+            overlays: cx.new(|_| OverlayStore::default()),
+        };
+        cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
+    }
+
+    fn draw(app: &Entity<NyaTermApp>, cx: &mut VisualTestContext) {
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            app.update(cx, |_, cx| cx.notify());
+            _ = window.draw(cx);
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn loaded_tauri_note_tree_builds_visible_rows(cx: &mut TestAppContext) {
+        let app = test_app(cx);
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            let generation = app.notes.begin_load().expect("begin notes load");
+            assert!(app.notes.apply_load(
+                generation,
+                NoteTreePayload {
+                    folders: vec![NoteFolder {
+                        id: "folder-1".into(),
+                        parent_id: None,
+                        name: "NyaTerm".into(),
+                        sort_order: 0,
+                        created_at_ms: 1,
+                        updated_at_ms: 1,
+                        extra: BTreeMap::new(),
+                    }],
+                    notes: vec![NoteSummary {
+                        id: "note-1".into(),
+                        parent_id: Some("folder-1".into()),
+                        title: "v1.1.19".into(),
+                        sort_order: 0,
+                        revision: 1,
+                        created_at_ms: 1,
+                        updated_at_ms: 1,
+                        extra: BTreeMap::new(),
+                    }],
+                    ui: NotesUiState {
+                        expanded_folder_ids: vec!["folder-1".into()],
+                        last_selected_node_id: None,
+                    },
+                }
+            ));
+        });
+
+        let host_app = app.clone();
+        let (_, cx) = cx.add_window_view(move |_, _| NotesHost { app: host_app });
+        let cx: &mut VisualTestContext = cx;
+        draw(&app, cx);
+
+        cx.update(|_, cx| {
+            let rows_built = app.read(cx).notes_panel.read(cx).rows_built;
+            assert!(
+                rows_built >= 2,
+                "the expanded Tauri folder and its child note must enter the paint pipeline"
+            );
+        });
+    }
 }
