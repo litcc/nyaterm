@@ -103,23 +103,23 @@ impl NyaTermApp {
             div()
                 .id(SharedString::from("active-sessions-list"))
                 .flex_1()
-                .px_2()
-                .py_4()
-                .text_center()
-                .text_size(px(11.))
-                .text_color(rgb(palette.text_dimmed))
-                .child(t!("panel.noActiveSessions"))
+                .min_h_0()
+                .child(crate::widgets::empty_panel_with_icon(
+                    t!("panel.noActiveSessions"),
+                    palette,
+                    "icons/sessions.svg",
+                ))
                 .into_any_element()
         } else if rows.is_empty() {
             div()
                 .id(SharedString::from("active-sessions-list"))
                 .flex_1()
-                .px_2()
-                .py_4()
-                .text_center()
-                .text_size(px(11.))
-                .text_color(rgb(palette.text_dimmed))
-                .child(t!("activeSessions.noMatches"))
+                .min_h_0()
+                .child(crate::widgets::empty_panel_with_icon(
+                    t!("activeSessions.noMatches"),
+                    palette,
+                    "icons/sessions.svg",
+                ))
                 .into_any_element()
         } else {
             uniform_list(

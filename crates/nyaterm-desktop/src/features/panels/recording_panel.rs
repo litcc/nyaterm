@@ -98,23 +98,23 @@ impl NyaTermApp {
             div()
                 .id(SharedString::from("recording-session-list"))
                 .flex_1()
-                .px_2()
-                .py_4()
-                .text_center()
-                .text_size(px(11.))
-                .text_color(rgb(palette.text_dimmed))
-                .child(no_sessions_label)
+                .min_h_0()
+                .child(crate::widgets::empty_panel_with_icon(
+                    no_sessions_label,
+                    palette,
+                    "icons/record.svg",
+                ))
                 .into_any_element()
         } else if rows.is_empty() {
             div()
                 .id(SharedString::from("recording-session-list"))
                 .flex_1()
-                .px_2()
-                .py_4()
-                .text_center()
-                .text_size(px(11.))
-                .text_color(rgb(palette.text_dimmed))
-                .child(no_matches_label)
+                .min_h_0()
+                .child(crate::widgets::empty_panel_with_icon(
+                    no_matches_label,
+                    palette,
+                    "icons/record.svg",
+                ))
                 .into_any_element()
         } else {
             uniform_list(

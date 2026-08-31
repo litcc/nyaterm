@@ -14,17 +14,19 @@ impl NyaTermApp {
         let palette = self.theme_palette();
         // Tauri CommandHistory: a double-click sends the command; a single click only focuses it.
         let history = self.session.active_command_history_snapshot();
-        let mut rows = div().flex().flex_col().gap_0().p_2();
-        if history.is_empty() {
-            rows = rows.child(
-                div()
-                    .py_4()
-                    .text_center()
-                    .text_size(px(11.))
-                    .text_color(rgb(palette.text_dimmed))
-                    .child(t!("panel.noCommandsYet")),
-            );
+        let mut rows = if history.is_empty() {
+            div()
+                .size_full()
+                .min_h_0()
+                .child(crate::widgets::empty_panel_with_icon(
+                    t!("panel.noCommandsYet"),
+                    palette,
+                    "icons/history.svg",
+                ))
         } else {
+            div().flex().flex_col().gap_0().p_2()
+        };
+        if !history.is_empty() {
             for (index, command) in history.into_iter().enumerate() {
                 let run_index = index;
                 rows = rows.child(
