@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
+use crate::features::NyaTermApp;
 use crate::features::terminal::terminal_surface::{
     TerminalOverviewMarker, TerminalOverviewMarkerKind,
 };
@@ -11,8 +13,10 @@ use crate::terminal::{
 };
 use gpui::prelude::*;
 use gpui::{
-    AppContext, Context, Entity, Render, TestAppContext, Window, bounds, div, point, px, size,
+    AppContext, Context, Entity, Render, ScrollDelta, ScrollWheelEvent, TestAppContext, Window,
+    bounds, div, point, px, size,
 };
+use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
 use nyaterm_terminal::{TerminalScreen, TerminalSnapshot};
 use nyaterm_terminal_gpui::{NyaTerminalLayoutCache, precompute_terminal_keyword_highlights};
 
@@ -1948,6 +1952,106 @@ fn local_surface_wheel_respects_protocol_scroll_modes() {
     };
     surface.set_protocol_state(alternate_scroll);
     assert!(!surface.can_handle_scroll_wheel_locally());
+}
+
+#[test]
+fn protocol_scroll_wheel_defers_parent_update_until_surface_lease_is_released() {
+    let mut cx = TestAppContext::single();
+    let root = std::env::temp_dir().join(format!(
+        "nyaterm-terminal-scroll-wheel-{}-{}",
+        std::process::id(),
+        uuid()
+    ));
+    let runtime = AppRuntime::from_parts_for_test(
+        RuntimeMode::Portable,
+        root.clone(),
+        root.join("config"),
+        root.join("logs"),
+        root.join("cache"),
+        None,
+    );
+    let stores = UiStoreHandles {
+        startup_restore: cx.new(|_| StartupRestoreStore::default()),
+        overlays: cx.new(|_| OverlayStore::default()),
+    };
+    let app = cx.new(|cx| NyaTermApp::new(runtime, stores, cx));
+    let session_id = "session";
+    let output = terminal_test_output_lines(80);
+    let surface = cx.update_entity(&app, |app, cx| {
+        app.session.select_active_session(session_id);
+        app.terminal
+            .seed_session_view(session_id.to_string(), output.clone(), "UTF-8");
+        let bounds = bounds(point(px(0.), px(0.)), size(px(400.), px(240.)));
+        assert!(app.remember_terminal_surface_bounds_for_session(Some(session_id), bounds,));
+        app.ensure_terminal_surface(session_id, cx)
+    });
+
+    let mut screen = TerminalScreen::default();
+    screen.advance_decoded_text(&output);
+    let snapshot = Arc::new(screen.viewport_snapshot(0));
+    let viewport_rows = snapshot.row_count().max(1);
+    let scrollback_len = snapshot.scrollback_len;
+    let bounds = bounds(point(px(0.), px(0.)), size(px(400.), px(240.)));
+    let protocol = TerminalProtocolState {
+        mouse_reporting: true,
+        ..TerminalProtocolState::default()
+    };
+    cx.update_entity(&surface, |surface, _| {
+        surface.set_protocol_state(protocol);
+        surface.apply_frame_snapshot(TerminalSurfaceFrameSnapshot::new(
+            snapshot.clone(),
+            TerminalScrollVisualState {
+                session_id: session_id.to_string(),
+                scroll_offset: 0,
+                scroll_residual_lines: 0.0,
+                display_offset: 0,
+                scrollback_len,
+                viewport_rows,
+                has_new_while_scrolled: false,
+                performance_overlay: None,
+                skipped_output_chars: 0,
+            },
+        ));
+        surface.painted_hit_test_geometry = Some(TerminalPaintedHitTestGeometry {
+            grid_bounds: Some(bounds),
+            display_offset: 0,
+            viewport_anchor_row: 0,
+            snapshot_rows: snapshot.row_count(),
+            viewport_rows,
+            visual_y_offset: 0.0,
+            cell_width: 8.0,
+            cell_height: 16.0,
+            revision: surface.revision,
+        });
+        surface.painted_hit_test_snapshot = Some(snapshot);
+    });
+    cx.update_entity(&app, |app, _| {
+        app.terminal
+            .view
+            .views
+            .get_mut(session_id)
+            .expect("seeded terminal view")
+            .protocol_state = protocol;
+    });
+
+    // The event callback holds the surface update lease; protocol wheel handling
+    // must wait until the callback returns before reading the geometry.
+    cx.update_entity(&surface, |surface, cx| {
+        surface.handle_scroll_wheel(
+            &ScrollWheelEvent {
+                position: point(px(8.), px(8.)),
+                delta: ScrollDelta::Lines(point(0., 1.)),
+                ..ScrollWheelEvent::default()
+            },
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    assert_eq!(
+        cx.read_entity(&surface, |surface, _| surface.protocol_state),
+        protocol
+    );
 }
 
 #[test]
