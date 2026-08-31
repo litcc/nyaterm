@@ -746,23 +746,21 @@ pub fn parse_stats_output(output: &str) -> anyhow::Result<ParsedRemoteStats> {
                 }
             }
 
-            "DISK" if cols.len() >= 6 => {
-                if cols[1] != "-" {
-                    let mount = cols[2].trim();
+            "DISK" if cols.len() >= 6 && cols[1] != "-" => {
+                let mount = cols[2].trim();
 
-                    if mount.is_empty() || mount == "-" {
-                        continue;
-                    }
+                if mount.is_empty() || mount == "-" {
+                    continue;
+                }
 
-                    if seen_disk_mounts.insert(mount.to_string()) {
-                        stats.disks.push(DiskInfo {
-                            device: cols[1].to_string(),
-                            mount: mount.to_string(),
-                            total: cols[3].parse().unwrap_or(0),
-                            available: cols[4].parse().unwrap_or(0),
-                            use_percent: cols[5].parse().unwrap_or(0),
-                        });
-                    }
+                if seen_disk_mounts.insert(mount.to_string()) {
+                    stats.disks.push(DiskInfo {
+                        device: cols[1].to_string(),
+                        mount: mount.to_string(),
+                        total: cols[3].parse().unwrap_or(0),
+                        available: cols[4].parse().unwrap_or(0),
+                        use_percent: cols[5].parse().unwrap_or(0),
+                    });
                 }
             }
 
