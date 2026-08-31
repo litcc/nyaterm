@@ -3216,7 +3216,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.5.2"
-source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
+source = "git+https://github.com/nyakang/gpui-component?rev=eda41c4315c1a39c49ad7b2f4799509f6016edb0#eda41c4315c1a39c49ad7b2f4799509f6016edb0"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3248,7 +3248,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.2"
-source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
+source = "git+https://github.com/nyakang/gpui-component?rev=eda41c4315c1a39c49ad7b2f4799509f6016edb0#eda41c4315c1a39c49ad7b2f4799509f6016edb0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3296,7 +3296,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
+source = "git+https://github.com/nyakang/gpui-component?rev=eda41c4315c1a39c49ad7b2f4799509f6016edb0#eda41c4315c1a39c49ad7b2f4799509f6016edb0"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3310,7 +3310,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/nyakang/gpui-component?rev=626ec5fad136d652f444178c7e52a7b36854480a#626ec5fad136d652f444178c7e52a7b36854480a"
+source = "git+https://github.com/nyakang/gpui-component?rev=eda41c4315c1a39c49ad7b2f4799509f6016edb0#eda41c4315c1a39c49ad7b2f4799509f6016edb0"
 dependencies = [
  "proc-macro2",
  "quote",
