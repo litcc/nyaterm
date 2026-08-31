@@ -5,6 +5,7 @@ pub mod notes;
 pub mod quick_commands;
 pub mod sessions;
 pub mod settings;
+pub mod window_state;
 pub mod workspace;
 pub use connection::*;
 pub use credentials::*;
@@ -13,6 +14,7 @@ pub use notes::*;
 pub use quick_commands::*;
 pub use sessions::*;
 pub use settings::*;
+pub use window_state::*;
 pub use workspace::*;
 
 fn default_ssh_port() -> u16 {

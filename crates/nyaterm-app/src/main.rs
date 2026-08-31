@@ -1,12 +1,10 @@
 mod single_instance;
 
 use anyhow::Context as _;
-use gpui::{
-    App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, point, px, size,
-};
+use gpui::{App, AppContext, TitlebarOptions, WindowOptions, point, px};
 use nyaterm_app::assets;
 use nyaterm_core::{ActivationRequest, AppRuntime, LOG_FILE_PREFIX, LOG_FILE_SUFFIX};
-use nyaterm_desktop::AppShell;
+use nyaterm_desktop::{AppShell, AppShellStartup};
 use nyaterm_ui::nya_root;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -52,7 +50,8 @@ fn main() -> anyhow::Result<()> {
     application.run(move |cx: &mut App| {
         gpui_component::init(cx);
         nyaterm_desktop::init(cx);
-        let bounds = Bounds::centered(None, size(px(1280.), px(800.)), cx);
+        let startup = AppShellStartup::prepare(&runtime);
+        let placement = startup.main_window_placement(cx);
         let app_runtime = runtime.clone();
 
         cx.open_window(
@@ -63,11 +62,12 @@ fn main() -> anyhow::Result<()> {
                         .then(|| point(px(9.), px(11.))),
                     ..Default::default()
                 }),
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_bounds: Some(placement.window_bounds),
+                display_id: placement.display_id,
                 ..Default::default()
             },
             move |window, cx| {
-                let shell = cx.new(|cx| AppShell::new(app_runtime, activation_rx, cx));
+                let shell = cx.new(|cx| AppShell::new(app_runtime, activation_rx, startup, cx));
                 let close_shell = shell.clone();
                 window.on_window_should_close(cx, move |window, cx| {
                     close_shell.update(cx, |shell, cx| shell.request_window_close(window, cx));

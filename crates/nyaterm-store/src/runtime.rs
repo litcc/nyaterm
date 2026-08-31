@@ -10,9 +10,9 @@ use std::task::{Context, Poll};
 use futures::channel::oneshot;
 use nyaterm_core::{
     AiSettings, AppSettingsSummary, CloudSyncSettings, CloudSyncState, CommandHistoryEntry, Group,
-    KeywordHighlightConfig, OtpEntry, ProxyConfig, ProxyGroup, QuickCommand, QuickCommandCategory,
-    SavedConnection, SavedCredential, SavedPassword, SshKey, TranslationSettings, TunnelConfig,
-    TunnelGroup,
+    KeywordHighlightConfig, MainWindowState, OtpEntry, ProxyConfig, ProxyGroup, QuickCommand,
+    QuickCommandCategory, SavedConnection, SavedCredential, SavedPassword, SshKey,
+    TranslationSettings, TunnelConfig, TunnelGroup,
 };
 
 use crate::storage::{ConnectionStore, StorageError};
@@ -44,6 +44,7 @@ impl fmt::Debug for StoreConfig {
 pub enum StoreDomain {
     Bootstrap,
     Settings,
+    WindowState,
     Connections,
     Commands,
     Notes,
@@ -675,6 +676,36 @@ pub struct BootstrapSnapshot {
     pub open_tabs: Vec<nyaterm_core::RestorableOpenTab>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct LoadMainWindowState;
+
+impl StoreRequest for LoadMainWindowState {
+    type Response = Option<MainWindowState>;
+
+    fn domain(&self) -> StoreDomain {
+        StoreDomain::WindowState
+    }
+
+    fn execute(self, store: &ConnectionStore) -> Result<Self::Response, StorageError> {
+        store.load_main_window_state()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SaveMainWindowState(pub MainWindowState);
+
+impl StoreRequest for SaveMainWindowState {
+    type Response = ();
+
+    fn domain(&self) -> StoreDomain {
+        StoreDomain::WindowState
+    }
+
+    fn execute(self, store: &ConnectionStore) -> Result<Self::Response, StorageError> {
+        store.save_main_window_state(&self.0)
+    }
+}
+
 pub struct LoadBootstrap;
 
 impl StoreRequest for LoadBootstrap {
@@ -737,9 +768,10 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        FlushBarrier, LoadBootstrap, StoreClientError, StoreConfig, StoreDomain,
-        StoreOperationError, StoreRuntime,
+        FlushBarrier, LoadBootstrap, LoadMainWindowState, SaveMainWindowState, StoreClientError,
+        StoreConfig, StoreDomain, StoreOperationError, StoreRuntime,
     };
+    use nyaterm_core::{MainWindowBounds, MainWindowState};
 
     fn temp_dir(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -931,6 +963,50 @@ mod tests {
             .outcome
             .expect("normal submissions should resume after a failed shutdown");
 
+        drop(runtime);
+        std::fs::remove_dir_all(config_dir).ok();
+    }
+
+    #[test]
+    fn shutdown_window_state_write_completes_before_the_barrier() {
+        let config_dir = temp_dir("window-state-shutdown");
+        let runtime = StoreRuntime::spawn(StoreConfig {
+            config_dir: config_dir.clone(),
+            portable_key_path: None,
+        })
+        .expect("spawn runtime");
+        let ui = runtime.ui_client();
+        let state = MainWindowState::new(
+            None,
+            MainWindowBounds {
+                x: 40,
+                y: 60,
+                width: 1280,
+                height: 800,
+            },
+            true,
+        );
+
+        runtime.begin_shutdown();
+        drop(
+            ui.try_submit_shutdown(1, SaveMainWindowState(state.clone()))
+                .expect("submit state"),
+        );
+        futures::executor::block_on(
+            ui.try_submit_shutdown(2, FlushBarrier)
+                .expect("submit barrier"),
+        )
+        .outcome
+        .expect("barrier after state");
+        runtime.resume_after_failed_shutdown();
+        let loaded = futures::executor::block_on(
+            ui.try_submit(3, LoadMainWindowState)
+                .expect("submit state load"),
+        )
+        .outcome
+        .expect("load state");
+
+        assert_eq!(loaded, Some(state));
         drop(runtime);
         std::fs::remove_dir_all(config_dir).ok();
     }

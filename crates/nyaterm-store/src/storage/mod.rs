@@ -29,6 +29,7 @@ mod portable;
 mod remote_file_backend;
 mod session_import;
 mod vault;
+mod window_state;
 
 use self::command_history::replace_command_history_in_txn;
 pub use self::config_backup::ConfigBackupInfo;
@@ -79,6 +80,7 @@ const SETTINGS_CLOUD_SYNC: &str = "settings/doc/cloud-sync";
 const SETTINGS_QUICK_COMMANDS: &str = "settings/doc/quick-command";
 const SETTINGS_CLOUD_SYNC_STATE: &str = "settings/doc/cloud-sync-state";
 const SETTINGS_REMOTE_FILE_BACKEND_CACHE: &str = "settings/doc/file-backend-cache";
+const SETTINGS_MAIN_WINDOW_STATE: &str = "settings/window_state";
 const LEGACY_TEXT_CLOUD_SYNC_STATE: &str = "cloud-sync-state";
 const LEGACY_TEXT_REMOTE_FILE_BACKEND_CACHE: &str = "file-backend-cache";
 

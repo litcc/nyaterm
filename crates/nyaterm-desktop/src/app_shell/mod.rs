@@ -1,5 +1,12 @@
 //! Root GPUI shell boundary.
 
+mod window_state;
+
+use self::window_state::{
+    MAIN_WINDOW_STATE_SAVE_DEBOUNCE, MainWindowStateController, capture_main_window_state,
+};
+pub use window_state::{AppShellStartup, MainWindowPlacement};
+
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
@@ -13,7 +20,8 @@ use nyaterm_core::{
     DiagnosticsExportOptions, DiagnosticsRuntimeSnapshot, export_diagnostics_archive,
 };
 use nyaterm_store::{
-    FlushBarrier, LoadBootstrap, StoreConfig, StoreOperationError, StoreRuntime, StoreTask,
+    FlushBarrier, LoadBootstrap, SaveMainWindowState, StoreConfig, StoreOperationError,
+    StoreRuntime, StoreTask,
 };
 use nyaterm_ui::{
     NyaAppMenu, NyaAppMenuBar, NyaButton, NyaButtonVariant, NyaCopy, NyaCut, NyaPaste, NyaRedo,
@@ -87,6 +95,7 @@ pub struct AppShell {
     pending_activations: VecDeque<ActivationRequest>,
     recent_activation_ids: HashSet<[u8; 16]>,
     recent_activation_order: VecDeque<[u8; 16]>,
+    main_window_state: MainWindowStateController,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -108,6 +117,7 @@ impl AppShell {
     pub fn new(
         runtime: AppRuntime,
         activation_rx: ActivationReceiver,
+        startup: AppShellStartup,
         cx: &mut Context<Self>,
     ) -> Self {
         let startup_restore = cx.new(|_| StartupRestoreStore::default());
@@ -118,19 +128,30 @@ impl AppShell {
         // Store observe → AppShell notify was amplifying every snapshot publish
         // into an extra shell paint (connect bursts, sideband heartbeats, drag).
         let subscriptions = Vec::new();
+        let lifecycle = startup
+            .recovery
+            .map(|recovery| {
+                AppShellLifecycle::Recovery(RecoveryState {
+                    category: recovery.category,
+                    message: recovery.message,
+                    diagnostics_status: None,
+                })
+            })
+            .unwrap_or(AppShellLifecycle::Loading);
 
         let mut shell = Self {
             runtime,
-            lifecycle: AppShellLifecycle::Loading,
+            lifecycle,
             app: None,
-            store_runtime: None,
-            pending_bootstrap: None,
+            store_runtime: startup.store_runtime,
+            pending_bootstrap: startup.pending_bootstrap,
             startup_restore,
             overlays,
             activation_rx: Some(activation_rx),
             pending_activations: VecDeque::new(),
             recent_activation_ids: HashSet::new(),
             recent_activation_order: VecDeque::new(),
+            main_window_state: MainWindowStateController::default(),
             _subscriptions: subscriptions,
         };
         let quit_subscription = cx.on_app_quit(|this, cx| {
@@ -138,20 +159,81 @@ impl AppShell {
                 .store_runtime
                 .as_ref()
                 .map(StoreRuntime::blocking_client);
+            let window_state = this.main_window_state.latest_for_shutdown();
             cx.background_executor().spawn(async move {
                 if let Some(store) = store {
+                    if let Some(state) = window_state {
+                        let _ = store.request_shutdown(u64::MAX - 1, SaveMainWindowState(state));
+                    }
                     let _ = store.request_shutdown(u64::MAX, FlushBarrier);
                 }
             })
         });
         shell._subscriptions.push(quit_subscription);
-        shell.begin_bootstrap();
         shell
     }
 
     pub fn start_after_window_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_main_window_state_persistence(window, cx);
         self.start_activation_drain(window, cx);
         self.launch_pending_bootstrap(window, cx);
+    }
+
+    fn start_main_window_state_persistence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.record_main_window_state(window, cx);
+        let subscription = cx.observe_window_bounds(window, |this, window, cx| {
+            this.record_main_window_state(window, cx);
+        });
+        self._subscriptions.push(subscription);
+    }
+
+    fn record_main_window_state(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(state) = capture_main_window_state(window, cx) else {
+            return;
+        };
+        self.main_window_state.record(state);
+        self.schedule_main_window_state_save(window, cx);
+    }
+
+    fn schedule_main_window_state_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.main_window_state.arm_timer() {
+            return;
+        }
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(MAIN_WINDOW_STATE_SAVE_DEBOUNCE)
+                .await;
+            let pending = this
+                .update(cx, |this, _| {
+                    let (generation, state) = this.main_window_state.take_debounced_save()?;
+                    let store = this.store_runtime.as_ref()?.ui_client();
+                    match store.try_submit(generation, SaveMainWindowState(state)) {
+                        Ok(task) => Some((generation, task)),
+                        Err(error) => {
+                            tracing::warn!(category = %error, "main window state save was not submitted");
+                            None
+                        }
+                    }
+                })
+                .ok()
+                .flatten();
+            let Some((generation, task)) = pending else {
+                return;
+            };
+            let event = task.await;
+            let succeeded = event.outcome.is_ok();
+            if let Err(error) = event.outcome {
+                tracing::warn!(
+                    category = error.category(),
+                    "main window state could not be saved"
+                );
+            }
+            let _ = this.update(cx, |this, _| {
+                this.main_window_state
+                    .complete_save(generation, succeeded);
+            });
+        })
+        .detach();
     }
 
     fn start_activation_drain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -480,6 +562,19 @@ impl AppShell {
             return;
         };
         store_runtime.begin_shutdown();
+        let store_ui = store_runtime.ui_client();
+        let window_state_task = if let Some(state) = self.main_window_state.latest_for_shutdown() {
+            match store_ui.try_submit_shutdown(u64::MAX - 2, SaveMainWindowState(state)) {
+                Ok(task) => Some(task),
+                Err(error) => {
+                    self.lifecycle = AppShellLifecycle::FlushFailed(error.to_string());
+                    cx.notify();
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let Some(app) = &self.app else {
             self.lifecycle = AppShellLifecycle::FlushFailed(
                 "The application state is unavailable; pending changes cannot be captured."
@@ -496,10 +591,7 @@ impl AppShell {
                 return;
             }
         };
-        let task = match store_runtime
-            .ui_client()
-            .try_submit_shutdown(u64::MAX, FlushBarrier)
-        {
+        let task = match store_ui.try_submit_shutdown(u64::MAX, FlushBarrier) {
             Ok(task) => task,
             Err(error) => {
                 self.lifecycle = AppShellLifecycle::FlushFailed(error.to_string());
@@ -507,6 +599,7 @@ impl AppShell {
                 return;
             }
         };
+        drop(window_state_task);
         drop(snapshot_task);
         self.lifecycle = AppShellLifecycle::Flushing;
         cx.spawn(async move |this, cx| {

@@ -49,7 +49,7 @@ pub fn preload_i18n() -> Result<(), String> {
         .clone()
 }
 
-pub use app_shell::AppShell;
+pub use app_shell::{AppShell, AppShellStartup, MainWindowPlacement};
 
 pub fn init(cx: &mut gpui::App) {
     features::init(cx);

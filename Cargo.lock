@@ -5760,6 +5760,7 @@ dependencies = [
  "sha2 0.11.0",
  "time",
  "tracing",
+ "uuid",
  "windows-sys 0.61.2",
  "zed-reqwest",
  "zeroize",

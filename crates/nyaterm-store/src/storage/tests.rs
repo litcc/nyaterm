@@ -5,8 +5,9 @@ use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use nyaterm_core::{
     AiExecutionProfile, AssetAccelerator, AssetAcceleratorType, AssetDeviceType, AssetMetadata,
     CloudSyncSettings, CloudSyncState, CommandHistoryEntry, ConnectionAuth, ConnectionType,
-    ExistingFileBehavior, OtpEntry, RecordingMode, RecordingRotationPolicy, SavedCredential,
-    SearchEngineConfig, SshKey, export_quick_commands_json,
+    ExistingFileBehavior, MainWindowBounds, MainWindowState, OtpEntry, RecordingMode,
+    RecordingRotationPolicy, SavedCredential, SearchEngineConfig, SshKey,
+    export_quick_commands_json,
 };
 use redb::{Database, ReadableDatabase};
 use sha2::{Digest, Sha256};
@@ -19,11 +20,11 @@ use super::{
     META_PORTABLE_SOURCE_PAYLOAD_HASH, META_PORTABLE_SOURCE_SCHEMA_VERSION, META_TABLE,
     OTP_ACCOUNTS_TABLE, OTP_PREFIX, PORTABLE_OPAQUE_ENTITIES_TABLE, QuickCommand,
     QuickCommandCategory, QuickCommandsConfig, RDP_KNOWN_HOST_PREFIX, RDP_KNOWN_HOSTS_TABLE,
-    RdpKnownHostCheck, SETTINGS_CLOUD_SYNC, SETTINGS_DEFAULT, SETTINGS_QUICK_COMMANDS,
-    SETTINGS_TABLE, SSH_KEY_FILE_IMPORT_MAX_BYTES, SSH_KEY_PREFIX, SavedConnection, SessionsConfig,
-    StorageError, TEXT_DOCS_TABLE, TUNNELS_TABLE, TunnelConfig, TunnelGroup, current_time_ms,
-    default_settings_value, deserialize_json, entity_key, json_path, set_nested_json_value,
-    stable_id, write_json_in_txn,
+    RdpKnownHostCheck, SETTINGS_CLOUD_SYNC, SETTINGS_DEFAULT, SETTINGS_MAIN_WINDOW_STATE,
+    SETTINGS_QUICK_COMMANDS, SETTINGS_TABLE, SSH_KEY_FILE_IMPORT_MAX_BYTES, SSH_KEY_PREFIX,
+    SavedConnection, SessionsConfig, StorageError, TEXT_DOCS_TABLE, TUNNELS_TABLE, TunnelConfig,
+    TunnelGroup, current_time_ms, default_settings_value, deserialize_json, entity_key, json_path,
+    set_nested_json_value, stable_id, write_json_in_txn,
 };
 
 #[test]
@@ -4004,4 +4005,138 @@ fn connection_asset_survives_redb_replace_sessions_roundtrip() {
     assert_eq!(accelerators[0].model.as_deref(), Some("910B"));
 
     std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn main_window_state_is_missing_until_saved_and_round_trips_independently() {
+    let dir = unique_temp_dir("main-window-state-round-trip");
+    let store = ConnectionStore::open(&dir).expect("store");
+    assert_eq!(store.load_main_window_state().expect("load missing"), None);
+
+    let state = MainWindowState::new(
+        Some(uuid::Uuid::parse_str("12345678-1234-5678-1234-567812345678").expect("uuid")),
+        MainWindowBounds {
+            x: -1280,
+            y: 40,
+            width: 1200,
+            height: 760,
+        },
+        true,
+    );
+    store
+        .save_main_window_state(&state)
+        .expect("save window state");
+
+    let mut settings = store.load_app_settings_summary().expect("load settings");
+    settings.theme = "github-light".to_string();
+    store
+        .save_appearance_settings(&settings)
+        .expect("save settings");
+    drop(store);
+
+    let reopened = ConnectionStore::open(&dir).expect("reopen store");
+    assert_eq!(
+        reopened
+            .load_main_window_state()
+            .expect("load window state"),
+        Some(state)
+    );
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn main_window_state_rejects_corrupted_and_unsupported_documents() {
+    let dir = unique_temp_dir("main-window-state-invalid");
+    let store = ConnectionStore::open(&dir).expect("store");
+
+    let txn = store.db.begin_write().expect("write transaction");
+    write_json_in_txn(
+        &txn,
+        SETTINGS_TABLE,
+        SETTINGS_MAIN_WINDOW_STATE,
+        &serde_json::json!({
+            "version": 99,
+            "restore_bounds": {"x": 0, "y": 0, "width": 1280, "height": 800},
+            "maximized": false
+        }),
+    )
+    .expect("write unsupported state");
+    txn.commit().expect("commit unsupported state");
+    assert!(matches!(
+        store.load_main_window_state(),
+        Err(StorageError::InvalidData(_))
+    ));
+
+    let txn = store.db.begin_write().expect("write transaction");
+    write_json_in_txn(
+        &txn,
+        SETTINGS_TABLE,
+        SETTINGS_MAIN_WINDOW_STATE,
+        &serde_json::json!({
+            "version": 1,
+            "restore_bounds": {"x": 0, "y": 0, "width": 0, "height": -1},
+            "maximized": false
+        }),
+    )
+    .expect("write invalid state");
+    txn.commit().expect("commit invalid state");
+    assert!(matches!(
+        store.load_main_window_state(),
+        Err(StorageError::InvalidData(_))
+    ));
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn portable_snapshot_excludes_and_preserves_device_local_main_window_state() {
+    let source_dir = unique_temp_dir("window-state-portable-source");
+    let source = ConnectionStore::open(&source_dir).expect("source store");
+    source
+        .save_main_window_state(&MainWindowState::new(
+            None,
+            MainWindowBounds {
+                x: 2100,
+                y: 100,
+                width: 1200,
+                height: 800,
+            },
+            true,
+        ))
+        .expect("save source window state");
+    let mut snapshot = source
+        .build_raw_portable_snapshot(
+            nyaterm_core::PortableSnapshotKind::Backup,
+            "source-device",
+            "test",
+        )
+        .expect("build portable snapshot");
+    snapshot.recalculate_hash().expect("hash portable snapshot");
+    assert!(!snapshot.entities.keys().any(|key| key.contains("window")));
+
+    let target_dir = unique_temp_dir("window-state-portable-target");
+    let target = ConnectionStore::open(&target_dir).expect("target store");
+    let target_state = MainWindowState::new(
+        None,
+        MainWindowBounds {
+            x: 40,
+            y: 60,
+            width: 1000,
+            height: 700,
+        },
+        false,
+    );
+    target
+        .save_main_window_state(&target_state)
+        .expect("save target window state");
+    target
+        .apply_raw_portable_snapshot(&snapshot)
+        .expect("apply portable snapshot");
+
+    assert_eq!(
+        target.load_main_window_state().expect("load target state"),
+        Some(target_state)
+    );
+    std::fs::remove_dir_all(source_dir).ok();
+    std::fs::remove_dir_all(target_dir).ok();
 }
