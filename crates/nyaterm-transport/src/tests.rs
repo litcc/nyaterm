@@ -242,6 +242,35 @@ fn local_command_receives_the_cached_shell_environment() {
     );
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_local_session_close_releases_conpty_reader() {
+    let manager = SessionManager::new();
+    let info = manager
+        .create_local_session(LocalSessionConfig {
+            name: "windows-close-test".to_string(),
+            shell_path: Some(super::default_local_shell_path()),
+            cols: 80,
+            rows: 24,
+            ..Default::default()
+        })
+        .expect("windows local session");
+    let session_id = info.id;
+    let (closed_tx, closed_rx) = mpsc::sync_channel(1);
+    let closer = std::thread::spawn(move || {
+        let result = manager
+            .close(&session_id)
+            .map_err(|error| error.to_string());
+        let _ = closed_tx.send(result);
+    });
+
+    closed_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("closing a Windows local session must not block on the ConPTY reader")
+        .expect("close Windows local session");
+    closer.join().expect("Windows local session closer");
+}
+
 #[test]
 fn local_session_info_preserves_working_dir() {
     if cfg!(target_os = "windows") {

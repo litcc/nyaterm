@@ -566,7 +566,7 @@ enum ManagedSession {
 
 pub struct LocalPtyTransport {
     info: SessionInfo,
-    master: Box<dyn MasterPty + Send>,
+    master: Option<Box<dyn MasterPty + Send>>,
     writer: QueuedTransportWriter,
     child: Box<dyn Child + Send + Sync>,
     reader_thread: Option<JoinHandle<()>>,
@@ -820,7 +820,7 @@ impl SessionManager {
         );
         let session = LocalPtyTransport {
             info: info.clone(),
-            master: pair.master,
+            master: Some(pair.master),
             writer,
             child,
             reader_thread: Some(reader_thread),
@@ -1246,6 +1246,8 @@ impl TerminalTransport for LocalPtyTransport {
         pixel_height: u16,
     ) -> anyhow::Result<()> {
         self.master
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("local PTY is closed"))?
             .resize(local_pty_size(cols, rows, pixel_width, pixel_height))?;
         self.info.cols = cols;
         self.info.rows = rows;
@@ -1255,6 +1257,10 @@ impl TerminalTransport for LocalPtyTransport {
     fn close(&mut self) -> anyhow::Result<()> {
         let _ = self.child.kill();
         self.writer.close();
+        // On Windows, portable-pty's ConPTY reader is a clone of a pipe owned by
+        // the master. Killing the child does not guarantee EOF while that master
+        // still owns the pseudo console, so release it before joining the reader.
+        drop(self.master.take());
         if let Some(reader_thread) = self.reader_thread.take() {
             let _ = reader_thread.join();
         }
