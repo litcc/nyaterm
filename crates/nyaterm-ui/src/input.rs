@@ -66,6 +66,21 @@ impl ComponentState {
             }
         }
     }
+
+    fn select_all_with_cursor_at_end(&self, cx: &mut App) {
+        let end = self.value(cx).len();
+        match self {
+            Self::Input(state) => {
+                state.update(cx, |state, cx| state.set_selected_range(0..end, cx))
+            }
+            Self::Textarea(state) => {
+                state.update(cx, |state, cx| state.set_selected_range(0..end, cx))
+            }
+            Self::Editor(state) => {
+                state.update(cx, |state, cx| state.set_selected_range(0..end, cx))
+            }
+        }
+    }
 }
 
 pub struct NyaInputState {
@@ -212,6 +227,12 @@ impl NyaInputState {
         let state = self.ensure_component(window, cx);
         state.focus(window, cx);
         window.dispatch_action(SelectAll.boxed_clone(), cx);
+    }
+
+    pub fn select_all_with_cursor_at_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = self.ensure_component(window, cx);
+        state.focus(window, cx);
+        state.select_all_with_cursor_at_end(cx);
     }
 
     pub fn focus_handle(&self) -> FocusHandle {
@@ -495,6 +516,7 @@ fn prepare_input_component(
 pub struct NyaInputShell {
     id: SharedString,
     state: Entity<NyaInputState>,
+    size: Size,
     multi_line: bool,
     search: bool,
     trailing: Vec<AnyElement>,
@@ -506,11 +528,18 @@ impl NyaInputShell {
         Self {
             id: id.into(),
             state: state.clone(),
+            size: Size::Medium,
             multi_line: false,
             search: false,
             trailing: Vec::new(),
             on_key_down: None,
         }
+    }
+
+    /// Use the 24px input size for controls embedded in compact rows.
+    pub fn compact(mut self) -> Self {
+        self.size = Size::Small;
+        self
     }
 
     pub fn multi_line(mut self) -> Self {
@@ -542,6 +571,7 @@ impl RenderOnce for NyaInputShell {
         let NyaInputShell {
             id,
             state,
+            size,
             multi_line,
             search,
             trailing,
@@ -555,7 +585,7 @@ impl RenderOnce for NyaInputShell {
         let input = match state {
             ComponentState::Input(state) => {
                 let mut input = Input::new(&state)
-                    .with_size(Size::Medium)
+                    .with_size(size)
                     .disabled(disabled)
                     .readonly(readonly);
                 if multi_line || state_multi_line {

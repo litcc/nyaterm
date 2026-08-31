@@ -1,6 +1,6 @@
 use rust_i18n::t;
 
-use crate::features::NyaTermApp;
+use crate::features::{NyaTermApp, text_inputs::TextInputSetup};
 use crate::models::{
     TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
     TransferJobStatus, TransferNewSymlinkState, TransferRenameState, TransferSymlinkField,
@@ -188,16 +188,18 @@ impl NyaTermApp {
             return;
         }
         self.transfer.schedule_rename_focus();
+        self.ensure_pending_focus_clock(cx);
         cx.notify();
     }
 
-    pub(in crate::features) fn open_transfer_rename_for_path_after_delay(
+    pub(in crate::features) fn open_transfer_rename_for_path_and_focus(
         &mut self,
         old_path: String,
         cx: &mut Context<Self>,
     ) {
         if self.open_transfer_rename_for_path(old_path, cx) {
             self.transfer.schedule_rename_focus();
+            self.ensure_pending_focus_clock(cx);
             cx.notify();
         }
     }
@@ -226,6 +228,12 @@ impl NyaTermApp {
             return false;
         }
         let raw_path_token = entry.and_then(|entry| entry.raw_path_token);
+        self.ensure_text_input(
+            format!("transfer.rename.{old_path}"),
+            &initial_name,
+            TextInputSetup::default(),
+            cx,
+        );
         self.transfer.open_rename_dialog(TransferRenameState {
             old_path,
             raw_path_token,

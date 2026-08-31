@@ -270,8 +270,9 @@ mod tests {
     use std::time::Duration;
 
     use gpui::{
-        AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
-        TestAppContext, VisualTestContext, div, px,
+        AppContext as _, ClickEvent, Entity, IntoElement, Modifiers, MouseButton, MouseClickEvent,
+        MouseDownEvent, MouseUpEvent, ParentElement as _, Render, Styled as _, TestAppContext,
+        VisualTestContext, div, px,
     };
     use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
 
@@ -440,6 +441,162 @@ mod tests {
             );
         });
         let _ = Duration::from_secs(1);
+    }
+
+    #[test]
+    fn opening_inline_rename_builds_the_input_before_snapshotting() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+
+        cx.update_entity(&app, |app, cx| {
+            let entry = super::super::tests_support::browser_entry(7);
+            let old_path = entry.path.clone();
+            let initial_name = entry.name.clone();
+            app.transfer.replace_browser_entries_for_test(vec![entry]);
+
+            assert!(app.open_transfer_rename_for_path(old_path.clone(), cx));
+
+            let input_id = format!("transfer.rename.{old_path}");
+            let field = app
+                .existing_text_input(&input_id)
+                .expect("opening rename must build its input field");
+            assert_eq!(field.read(cx).value(cx), initial_name);
+
+            app.flush_transfer_panel_snapshot(cx);
+            assert!(
+                app.transfer_panel
+                    .read(cx)
+                    .snapshot()
+                    .expect("flushed")
+                    .browser
+                    .rename_field
+                    .is_some(),
+                "the virtualized row must receive the rename field"
+            );
+        });
+    }
+
+    #[test]
+    fn inline_rename_is_compact_focused_selected_and_places_the_cursor_at_the_end() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let entry = super::super::tests_support::browser_entry(7);
+        let old_path = entry.path.clone();
+        let initial_name = entry.name.clone();
+        let input_id = "transfer.rename./remote/entry-0007";
+
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.transfer.replace_browser_entries_for_test(vec![entry]);
+                app.open_transfer_rename_for_path_and_focus(old_path, cx);
+                assert!(app.transfer.rename_dialog_is_open());
+                assert!(app.transfer.rename_focus_is_pending());
+                assert!(app.shell.pending_focus_clock_is_armed());
+                app.flush_transfer_panel_snapshot(cx);
+                app.transfer_panel.update(cx, |panel, cx| {
+                    panel
+                        .snapshot
+                        .as_mut()
+                        .expect("transfer snapshot should exist")
+                        .availability = super::super::TransferBrowserAvailability::Browsable;
+                    cx.notify();
+                });
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+
+        vcx.update(|window, cx| {
+            assert!(!app.read(cx).transfer.rename_focus_is_pending());
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+
+        let bounds = vcx
+            .debug_bounds(input_id)
+            .expect("inline rename input should render");
+        assert_eq!(bounds.size.height, px(24.));
+
+        vcx.update(|window, cx| {
+            let field = app
+                .read(cx)
+                .existing_text_input(input_id)
+                .expect("rename field should still exist");
+            assert!(field.read(cx).has_focus());
+            assert!(field.read(cx).component_focus_handle(cx).is_focused(window));
+            let component = field
+                .read(cx)
+                .component_state()
+                .expect("inline rename uses a single-line input");
+
+            assert_eq!(component.read(cx).selected_range(), 0..initial_name.len());
+            assert_eq!(component.read(cx).cursor(), initial_name.len());
+        });
+    }
+
+    #[test]
+    fn selected_name_renames_immediately_and_the_input_preserves_double_click() {
+        let mut cx = TestAppContext::single();
+        let (app, vcx) = hosted(&mut cx);
+        let entry = super::super::tests_support::browser_entry(7);
+        let identity = entry.identity_key();
+        let click = ClickEvent::Mouse(MouseClickEvent {
+            down: MouseDownEvent {
+                button: MouseButton::Left,
+                click_count: 1,
+                ..Default::default()
+            },
+            up: MouseUpEvent {
+                button: MouseButton::Left,
+                click_count: 1,
+                ..Default::default()
+            },
+        });
+
+        vcx.update(|window, cx| {
+            app.update(cx, |app, cx| {
+                app.transfer.replace_browser_entries_for_test(vec![entry]);
+                app.transfer.select_browser_entry(identity.clone());
+                assert!(app.transfer.arm_browser_rename_click(&identity, true));
+                app.schedule_transfer_browser_name_rename(identity, &click, cx);
+                assert!(
+                    app.transfer.rename_dialog_is_open(),
+                    "the click must open rename synchronously without a timer"
+                );
+                app.flush_transfer_panel_snapshot(cx);
+                app.transfer_panel.update(cx, |panel, cx| {
+                    panel
+                        .snapshot
+                        .as_mut()
+                        .expect("transfer snapshot should exist")
+                        .availability = super::super::TransferBrowserAvailability::Browsable;
+                    cx.notify();
+                });
+            });
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+
+        let input_bounds = vcx
+            .debug_bounds("transfer.rename./remote/entry-0007")
+            .expect("inline rename input should render");
+        vcx.simulate_event(MouseDownEvent {
+            position: input_bounds.center(),
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        vcx.update(|_, cx| {
+            assert!(
+                !app.read(cx).transfer.rename_dialog_is_open(),
+                "the second click must leave rename and preserve double-click open"
+            );
+        });
     }
 
     struct Host {

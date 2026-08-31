@@ -5,7 +5,6 @@ use nyaterm_core::truncate_preview;
 use nyaterm_transport::SftpFileEntry;
 
 use std::collections::HashSet;
-use std::time::Duration;
 
 use crate::features::NyaTermApp;
 use crate::models::{TransferBrowserContextTarget, TransferBrowserDragSelectionState};
@@ -44,21 +43,31 @@ impl NyaTermApp {
         self.transfer.clear_browser_rename_click();
         let modifiers = event.modifiers();
         if event.click_count() >= 2 && !modifiers.modified() {
-            self.cancel_transfer_browser_pending_rename(cx);
-            let entry = self
-                .transfer
-                .browser_view()
-                .entries
-                .iter()
-                .find(|entry| entry.matches_identity(&identity))
-                .cloned();
-            self.select_transfer_browser_entry(identity, cx);
-            if let Some(entry) = entry {
-                if entry.is_directory() {
-                    self.open_transfer_browser_entry_directory(entry, window, cx);
-                } else {
-                    self.open_transfer_default(entry, window, cx);
-                }
+            self.open_transfer_browser_entry_from_double_click(identity, window, cx);
+        }
+    }
+
+    pub(in crate::features::pages::transfers) fn open_transfer_browser_entry_from_double_click(
+        &mut self,
+        identity: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_transfer_browser_pending_rename(cx);
+        self.dismiss_transfer_rename_if_open(cx);
+        let entry = self
+            .transfer
+            .browser_view()
+            .entries
+            .iter()
+            .find(|entry| entry.matches_identity(&identity))
+            .cloned();
+        self.select_transfer_browser_entry(identity, cx);
+        if let Some(entry) = entry {
+            if entry.is_directory() {
+                self.open_transfer_browser_entry_directory(entry, window, cx);
+            } else {
+                self.open_transfer_default(entry, window, cx);
             }
         }
     }
@@ -142,27 +151,7 @@ impl NyaTermApp {
             return;
         }
 
-        let Some(token) = self.transfer.schedule_browser_pending_rename(&path) else {
-            return;
-        };
-        cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(220))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                let rename_dialog_open = this.transfer.rename_dialog_is_open();
-                let should_rename =
-                    this.transfer
-                        .resolve_browser_pending_rename(&path, token, rename_dialog_open);
-                if should_rename {
-                    this.open_transfer_rename_for_path_after_delay(path, cx);
-                } else {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-        cx.notify();
+        self.open_transfer_rename_for_path_and_focus(path, cx);
     }
 
     pub(in crate::features::pages::transfers) fn cancel_transfer_browser_pending_rename(

@@ -85,8 +85,11 @@ impl NyaTermApp {
             dirty = true;
         }
         if let Some(input_id) = self.transfer.pending_rename_input_id()
-            && self.focus_text_input_if_present(&input_id, window, cx)
+            && let Some(field) = self.existing_text_input(&input_id)
         {
+            field.update(cx, |field, cx| {
+                field.select_all_with_cursor_at_end(window, cx)
+            });
             self.transfer.finish_rename_focus();
             dirty = true;
         }

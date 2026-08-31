@@ -7,12 +7,13 @@ use std::time::Instant;
 use gpui::{Pixels, ScrollHandle, ScrollStrategy};
 use nyaterm_transport::{RemoteFilePath, SftpFileEntry};
 
+#[cfg(test)]
+use crate::models::TransferBrowserPendingRenameState;
 use crate::models::{
     TransferBrowserColumnResizeState, TransferBrowserContextTarget,
     TransferBrowserDragSelectionState, TransferBrowserFavoritesMenuState,
     TransferBrowserNavigationSnapshot, TransferBrowserPathMenuState,
-    TransferBrowserPendingRenameState, TransferBrowserSessionCacheState, TransferBrowserSortColumn,
-    TransferBrowserUploadMenuState,
+    TransferBrowserSessionCacheState, TransferBrowserSortColumn, TransferBrowserUploadMenuState,
 };
 
 use super::browser_logic::BrowserFilterKey;
@@ -595,6 +596,7 @@ impl TransferFeatureState {
         self.browser.external_drop_hover
     }
 
+    #[cfg(test)]
     pub(in crate::features) fn schedule_browser_pending_rename(
         &mut self,
         path: &str,
@@ -612,25 +614,6 @@ impl TransferFeatureState {
             token,
         });
         Some(token)
-    }
-
-    pub(in crate::features) fn resolve_browser_pending_rename(
-        &mut self,
-        path: &str,
-        token: u64,
-        rename_dialog_open: bool,
-    ) -> bool {
-        let should_rename = self
-            .browser
-            .pending_rename
-            .as_ref()
-            .is_some_and(|pending| pending.path == path && pending.token == token)
-            && self.browser.selected_remote_path.as_deref() == Some(path)
-            && self.browser.selected_remote_paths.len() == 1
-            && self.browser.selected_remote_paths.contains(path)
-            && !rename_dialog_open;
-        self.browser.pending_rename = None;
-        should_rename
     }
 
     pub(in crate::features) fn cancel_browser_pending_rename(&mut self) -> bool {

@@ -112,6 +112,7 @@ pub(super) fn transfer_browser_entry_row(
     });
     let is_renaming = inline_rename.is_some();
     let name_click_path = entry_identity.clone();
+    let rename_double_click_path = entry_identity.clone();
     let rename_input_path = entry.path.clone();
     let mut rename_input = rename_input;
     let rename_has_error = inline_rename.as_ref().is_some_and(|state| {
@@ -230,9 +231,21 @@ pub(super) fn transfer_browser_entry_row(
                             .min_w_0()
                             .flex_1()
                             .font_family(gpui_code_font_family())
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation();
-                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |panel, event: &MouseDownEvent, window, cx| {
+                                    panel.with_app(cx, |this, cx| {
+                                        if event.click_count >= 2 && !event.modifiers.modified() {
+                                            this.open_transfer_browser_entry_from_double_click(
+                                                rename_double_click_path.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                        }
+                                        cx.stop_propagation();
+                                    })
+                                }),
+                            )
                             .on_mouse_down(
                                 MouseButton::Right,
                                 cx.listener(|panel, _, _, cx| {

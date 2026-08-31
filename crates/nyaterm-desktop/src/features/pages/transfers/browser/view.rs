@@ -289,6 +289,7 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
                                     )),
                                     &field,
                                 )
+                                .compact()
                                 .into_any_element()
                             });
                         items.push(
