@@ -14,6 +14,7 @@ use gpui_component::{
 
 use crate::NyaMenuItem;
 use crate::NyaScrollable;
+use crate::menu::style_nya_popup_menu;
 
 const KEY_CONTEXT: &str = "NyaAppMenuBar";
 
@@ -338,7 +339,7 @@ impl NyaAppMenuEntry {
         let index = self.index;
         let min_width = self.menu.min_width;
         let popup = PopupMenu::build(window, cx, |menu, window, cx| {
-            let menu = menu.when_some(min_width, |menu, width| menu.min_w(width));
+            let menu = style_nya_popup_menu(menu, min_width, None);
             items
                 .iter()
                 .fold(menu, |menu, item| item.append_to(menu, window, cx))

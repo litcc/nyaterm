@@ -2,14 +2,60 @@ use std::rc::Rc;
 
 use gpui::{
     Anchor, App, ClickEvent, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
-    SharedString, Styled, Window, div, prelude::FluentBuilder as _, rgb,
+    SharedString, Styled, Window, div, prelude::FluentBuilder as _, px, rgb,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
-use gpui_component::{ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _};
+use gpui_component::menu::{
+    ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuAppearance, PopupMenuItem,
+};
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Selectable as _, Sizable as _,
+};
 
 type MenuClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 type ContextMenuItemsBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<NyaMenuItem>>;
+
+const NYA_MENU_WIDTH: f32 = 220.;
+
+pub(crate) fn nya_popup_menu_appearance() -> PopupMenuAppearance {
+    PopupMenuAppearance::new()
+        .row_height(px(28.))
+        .font_size(px(12.))
+        .icon_size(px(16.))
+        .icon_slot_width(px(24.))
+        .horizontal_padding(px(8.))
+        .item_gap(px(8.))
+        .content_padding(px(4.))
+        .row_gap(px(0.))
+        .separator_thickness(px(1.))
+        .separator_vertical_margin(px(4.))
+        .separator_horizontal_margin(px(0.))
+        .disabled_opacity(0.5)
+        .item_radius(px(4.))
+}
+
+fn resolved_menu_widths(
+    min_width: Option<Pixels>,
+    max_width: Option<Pixels>,
+) -> (Option<Pixels>, Option<Pixels>) {
+    if min_width.is_none() && max_width.is_none() {
+        let width = px(NYA_MENU_WIDTH);
+        (Some(width), Some(width))
+    } else {
+        (min_width, max_width)
+    }
+}
+
+pub(crate) fn style_nya_popup_menu(
+    menu: PopupMenu,
+    min_width: Option<Pixels>,
+    max_width: Option<Pixels>,
+) -> PopupMenu {
+    let (min_width, max_width) = resolved_menu_widths(min_width, max_width);
+    menu.appearance(nya_popup_menu_appearance())
+        .when_some(min_width, |menu, width| menu.min_w(width))
+        .when_some(max_width, |menu, width| menu.max_w(width))
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NyaMenuAnchor {
@@ -165,11 +211,11 @@ impl NyaMenuItem {
         match &self.kind {
             NyaMenuItemKind::Separator => menu.separator(),
             NyaMenuItemKind::Label => menu.label(self.label.clone()),
-            NyaMenuItemKind::Action => menu.item(self.popup_item()),
+            NyaMenuItemKind::Action => menu.item(self.popup_item(cx)),
             NyaMenuItemKind::Submenu(items) => {
                 let items = items.clone();
                 menu.submenu_with_icon(
-                    self.component_icon(),
+                    self.component_icon(cx),
                     self.label.clone(),
                     window,
                     cx,
@@ -183,7 +229,7 @@ impl NyaMenuItem {
         }
     }
 
-    fn popup_item(&self) -> PopupMenuItem {
+    fn popup_item(&self, cx: &App) -> PopupMenuItem {
         let mut item = if self.danger || self.shortcut.is_some() {
             let label = self.label.clone();
             let shortcut = self.shortcut.clone();
@@ -216,7 +262,7 @@ impl NyaMenuItem {
         };
 
         item = item
-            .when_some(self.component_icon(), |item, icon| item.icon(icon))
+            .when_some(self.component_icon(cx), |item, icon| item.icon(icon))
             .disabled(self.disabled)
             .checked(self.checked);
         if let Some(on_click) = self.on_click.clone() {
@@ -225,11 +271,19 @@ impl NyaMenuItem {
         item
     }
 
-    fn component_icon(&self) -> Option<Icon> {
-        self.icon_path.clone().map(|path| {
-            Icon::default()
-                .path(path)
-                .when_some(self.icon_color, |icon, color| icon.text_color(rgb(color)))
+    fn component_icon(&self, cx: &App) -> Option<Icon> {
+        let icon = if let Some(path) = self.icon_path.clone() {
+            Icon::default().path(path)
+        } else if self.checked {
+            Icon::new(IconName::Check)
+        } else {
+            return None;
+        };
+
+        Some(if let Some(color) = self.icon_color {
+            icon.text_color(rgb(color))
+        } else {
+            icon.text_color(cx.theme().muted_foreground)
         })
     }
 }
@@ -396,9 +450,7 @@ impl RenderOnce for NyaDropdownMenu {
                 // only when no item opens one; an explicit scrollable(true) wins.
                 let scrollable =
                     force_scrollable || items.iter().all(|item| item.children().is_none());
-                let menu = menu
-                    .when_some(min_width, |menu, width| menu.min_w(width))
-                    .when_some(max_width, |menu, width| menu.max_w(width))
+                let menu = style_nya_popup_menu(menu, min_width, max_width)
                     .when_some(max_height, |menu, height| menu.max_h(height))
                     .scrollable(scrollable);
                 items
@@ -496,7 +548,7 @@ where
         let min_width = self.min_width;
         self.element
             .context_menu(move |menu, window, cx| {
-                let menu = menu.when_some(min_width, |menu, width| menu.min_w(width));
+                let menu = style_nya_popup_menu(menu, min_width, None);
                 let items = items_builder(window, cx);
                 // PopupMenu paints a vertical scrollbar whenever `scrollable` is
                 // true, even when every item fits. Keep short context menus clean;
@@ -519,7 +571,10 @@ mod tests {
         VisualTestContext, Window, div, point, prelude::*, px, uniform_list,
     };
 
-    use super::{NyaContextMenu, NyaMenuItem, NyaMenuItemKind, context_menu_should_scroll};
+    use super::{
+        NyaContextMenu, NyaMenuItem, NyaMenuItemKind, context_menu_should_scroll,
+        resolved_menu_widths,
+    };
 
     struct DynamicContextMenuFixture {
         target: Rc<Cell<u8>>,
@@ -637,6 +692,22 @@ mod tests {
         let menu = NyaContextMenu::new(div(), [NyaMenuItem::action("Open")]).min_width(px(200.));
 
         assert_eq!(menu.test_min_width(), Some(px(200.)));
+    }
+
+    #[test]
+    fn standard_menu_width_is_220_unless_a_caller_sets_a_constraint() {
+        assert_eq!(
+            resolved_menu_widths(None, None),
+            (Some(px(220.)), Some(px(220.)))
+        );
+        assert_eq!(
+            resolved_menu_widths(Some(px(208.)), None),
+            (Some(px(208.)), None)
+        );
+        assert_eq!(
+            resolved_menu_widths(None, Some(px(180.))),
+            (None, Some(px(180.)))
+        );
     }
 
     /// The SFTP browser context menu pins itself to 208px (the Tauri `w-52` /
