@@ -284,7 +284,7 @@ impl NyaTermApp {
             cx.notify();
             return;
         }
-        if new_name.contains('/') || new_name == "." || new_name == ".." {
+        if !self.valid_transfer_browser_child_name(&new_name) {
             self.shell
                 .set_status("remote name must be a single file or directory name".to_string());
             cx.notify();
@@ -356,7 +356,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());

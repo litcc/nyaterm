@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use nyaterm_store::{StoreBlockingClient, StoreDomain};
 use nyaterm_transport::{
-    RemoteFileBackendKind, RemoteFileBackendPreference, RemoteFileBackendPreferenceStore,
-    RemoteFileService, SshSessionConfig,
+    FileBrowserService, RemoteFileBackendKind, RemoteFileBackendPreference,
+    RemoteFileBackendPreferenceStore, RemoteFileService, SshSessionConfig,
 };
 
 use crate::features::NyaTermApp;
@@ -121,6 +121,50 @@ impl NyaTermApp {
             .active_ssh_config_owned()
             .ok_or_else(|| anyhow::anyhow!("active session is not SSH"))?;
         self.remote_file_service_for_session(&session_id, config)
+    }
+
+    pub(in crate::features) fn file_browser_service_for_session(
+        &mut self,
+        session_id: &str,
+    ) -> anyhow::Result<FileBrowserService> {
+        match self.session.file_browser_backend_for_session(session_id) {
+            Some(nyaterm_transport::FileBrowserBackendKind::Local) => {
+                Ok(FileBrowserService::local())
+            }
+            Some(nyaterm_transport::FileBrowserBackendKind::Remote) => {
+                let config = self
+                    .session
+                    .metadata(session_id)
+                    .and_then(|metadata| metadata.ssh_config.clone())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("SSH file browser configuration is unavailable")
+                    })?;
+                self.remote_file_service_for_session(session_id, config)
+                    .map(FileBrowserService::remote)
+            }
+            None => anyhow::bail!("session does not provide a file browser"),
+        }
+    }
+
+    pub(in crate::features) fn active_file_browser_service(
+        &mut self,
+    ) -> anyhow::Result<FileBrowserService> {
+        let session_id = self
+            .session
+            .active_id_owned()
+            .ok_or_else(|| anyhow::anyhow!("start a local or SSH session first"))?;
+        self.file_browser_service_for_session(&session_id)
+    }
+
+    pub(in crate::features) fn transfer_file_browser_service(
+        &mut self,
+        session_id: Option<&str>,
+    ) -> anyhow::Result<FileBrowserService> {
+        let session_id = session_id
+            .or_else(|| self.session.active_id())
+            .ok_or_else(|| anyhow::anyhow!("source file browser session is unavailable"))?
+            .to_string();
+        self.file_browser_service_for_session(&session_id)
     }
 
     pub(in crate::features) fn transfer_remote_file_service(

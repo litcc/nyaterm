@@ -40,6 +40,7 @@ pub(in crate::features) struct TransferChrome {
 /// it. The costly field -- the listing -- is shared rather than copied; the rest are
 /// short paths and small sets.
 pub(in crate::features) struct TransferBrowserPresentation {
+    pub local_backend: bool,
     pub path: String,
     pub home_dir: String,
     pub path_editing: bool,

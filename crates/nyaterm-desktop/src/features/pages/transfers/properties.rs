@@ -110,11 +110,21 @@ impl NyaTermApp {
             name = truncate_preview(&state.entry.name, 42)
         )
         .to_string();
+        let primary_label = if state
+            .session_id
+            .as_deref()
+            .and_then(|session_id| self.session.file_browser_backend_for_session(session_id))
+            == Some(nyaterm_transport::FileBrowserBackendKind::Local)
+        {
+            t!("common.close").to_string()
+        } else {
+            t!("common.save").to_string()
+        };
         self.open_form_dialog(
             (
                 title,
                 460.,
-                t!("common.save").to_string(),
+                primary_label,
                 |app, _, cx| app.transfer_properties_dialog_content(cx),
                 |app, window, cx| app.submit_transfer_properties(window, cx),
                 |app, cx| app.close_transfer_properties(cx),
@@ -163,7 +173,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());
@@ -225,6 +235,15 @@ impl NyaTermApp {
         };
         if state.saving {
             return false;
+        }
+        if state
+            .session_id
+            .as_deref()
+            .and_then(|session_id| self.session.file_browser_backend_for_session(session_id))
+            == Some(nyaterm_transport::FileBrowserBackendKind::Local)
+        {
+            self.close_transfer_properties(cx);
+            return true;
         }
         let Some(properties) = state.properties.clone() else {
             self.shell
@@ -289,7 +308,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());

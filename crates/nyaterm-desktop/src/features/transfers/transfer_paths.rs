@@ -512,6 +512,15 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         self.transfer.set_browser_external_drop_hover(false);
+        if self.session.active_file_browser_backend()
+            == Some(nyaterm_transport::FileBrowserBackendKind::Local)
+        {
+            let status = "upload by dropping files is unavailable for local browsing".to_string();
+            self.shell.set_status(status.clone());
+            self.transfer.set_browser_status(status);
+            cx.notify();
+            return;
+        }
         if paths.is_empty() {
             let status = t!("fileExplorer.externalDropPathsRequired").to_string();
             self.shell.set_status(status.clone());

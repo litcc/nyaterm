@@ -7,7 +7,7 @@ use crate::models::{
 };
 use gpui::{Context, Window};
 
-use super::super::helpers::{remote_child_path, valid_remote_child_name};
+use super::super::helpers::remote_child_path;
 
 impl NyaTermApp {
     pub(in crate::features) fn open_transfer_new_folder_dialog(
@@ -67,7 +67,7 @@ impl NyaTermApp {
             return true;
         };
         let name = state.value.trim().to_string();
-        if !valid_remote_child_name(&name) {
+        if !self.valid_transfer_browser_child_name(&name) {
             self.shell
                 .set_status("folder name must be a single non-empty name".to_string());
             cx.notify();
@@ -110,7 +110,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());
@@ -223,7 +223,7 @@ impl NyaTermApp {
             return true;
         };
         let name = state.value.trim().to_string();
-        if !valid_remote_child_name(&name) {
+        if !self.valid_transfer_browser_child_name(&name) {
             self.shell
                 .set_status("file name must be a single non-empty name".to_string());
             cx.notify();
@@ -264,7 +264,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());

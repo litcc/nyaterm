@@ -1,8 +1,15 @@
 use gpui::Pixels;
+use std::path::Path;
 
 use crate::models::TransferBrowserColumnWidths;
 
 pub(in crate::features::pages::transfers) fn remote_file_name(path: &str) -> String {
+    if looks_like_native_path(path) {
+        return Path::new(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string());
+    }
     path.trim_end_matches('/')
         .rsplit('/')
         .next()
@@ -11,6 +18,13 @@ pub(in crate::features::pages::transfers) fn remote_file_name(path: &str) -> Str
 }
 
 pub(in crate::features::pages::transfers) fn remote_parent_path(path: &str) -> String {
+    if looks_like_native_path(path) {
+        return Path::new(path)
+            .parent()
+            .map(|parent| parent.to_string_lossy().into_owned())
+            .filter(|parent| !parent.is_empty())
+            .unwrap_or_else(|| path.to_string());
+    }
     let path = path.trim_end_matches('/');
     match path.rfind('/') {
         Some(0) => "/".to_string(),
@@ -23,6 +37,14 @@ pub(in crate::features::pages::transfers) fn remote_sibling_path(
     old_path: &str,
     new_name: &str,
 ) -> String {
+    if looks_like_native_path(old_path) {
+        return Path::new(old_path)
+            .parent()
+            .unwrap_or_else(|| Path::new(old_path))
+            .join(new_name)
+            .to_string_lossy()
+            .into_owned();
+    }
     match remote_parent_path(old_path).as_str() {
         "/" => format!("/{new_name}"),
         "." => new_name.to_string(),
@@ -34,6 +56,12 @@ pub(in crate::features::pages::transfers) fn remote_child_path(
     parent: &str,
     child_name: &str,
 ) -> String {
+    if looks_like_native_path(parent) {
+        return Path::new(parent)
+            .join(child_name)
+            .to_string_lossy()
+            .into_owned();
+    }
     let trimmed = parent.trim_end_matches('/');
     match trimmed {
         "" if parent.starts_with('/') => format!("/{child_name}"),
@@ -48,8 +76,12 @@ pub(in crate::features::pages::transfers) fn normalized_transfer_browser_path(
     let trimmed = path.trim();
     if trimmed.is_empty() {
         ".".to_string()
-    } else if trimmed == "/" {
-        "/".to_string()
+    } else if trimmed == "/"
+        || (looks_like_native_path(trimmed) && Path::new(trimmed).parent().is_none())
+    {
+        trimmed.to_string()
+    } else if looks_like_native_path(trimmed) {
+        trimmed.trim_end_matches(['/', '\\']).to_string()
     } else {
         trimmed.trim_end_matches('/').to_string()
     }
@@ -57,6 +89,19 @@ pub(in crate::features::pages::transfers) fn normalized_transfer_browser_path(
 
 pub(in crate::features::pages::transfers) fn valid_remote_child_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains('/')
+}
+
+fn looks_like_native_path(path: &str) -> bool {
+    path.contains('\\')
+        || path.as_bytes().get(1) == Some(&b':')
+        || (path.starts_with("//") && !path.starts_with("///"))
+}
+
+pub(in crate::features::pages::transfers) fn transfer_browser_path_is_root(path: &str) -> bool {
+    let path = normalized_transfer_browser_path(path);
+    path == "."
+        || path == "/"
+        || (looks_like_native_path(&path) && Path::new(&path).parent().is_none())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -110,7 +155,7 @@ pub(in crate::features::pages::transfers) fn format_sftp_modified(value: Option<
 
 #[cfg(test)]
 mod tests {
-    use super::remote_child_path;
+    use super::{remote_child_path, transfer_browser_path_is_root};
 
     #[test]
     fn remote_child_path_preserves_filesystem_root() {
@@ -118,5 +163,13 @@ mod tests {
         assert_eq!(remote_child_path("///", "var"), "/var");
         assert_eq!(remote_child_path("/var/", "log"), "/var/log");
         assert_eq!(remote_child_path(".", "relative"), "relative");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_drive_and_unc_roots_are_terminal() {
+        assert!(transfer_browser_path_is_root(r"C:\"));
+        assert!(transfer_browser_path_is_root(r"\\server\share\"));
+        assert!(!transfer_browser_path_is_root(r"C:\tmp"));
     }
 }

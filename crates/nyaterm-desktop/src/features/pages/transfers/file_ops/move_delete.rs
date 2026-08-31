@@ -235,7 +235,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());
@@ -377,7 +377,7 @@ impl NyaTermApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());

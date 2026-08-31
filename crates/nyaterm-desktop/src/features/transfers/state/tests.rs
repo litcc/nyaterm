@@ -1422,7 +1422,6 @@ fn preview_tab(session_id: &str, remote_path: &str) -> crate::models::TransferPr
             &nyaterm_transport::RemoteFilePath::new(remote_path),
         ),
         session_id: Some(session_id.to_string()),
-        ssh_config: None,
         remote_path: remote_path.to_string(),
         raw_path_token: None,
         name: remote_path

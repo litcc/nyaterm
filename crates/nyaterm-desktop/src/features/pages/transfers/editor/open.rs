@@ -1,19 +1,14 @@
-use rust_i18n::t;
-
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{Context, Window};
 use nyaterm_core::AiCustomActionConfig;
-use nyaterm_transport::{
-    RemoteTextGeneration, SftpFileEntry, SftpFileType, SftpTransferControl, SshSessionConfig,
-};
+use nyaterm_transport::{RemoteTextGeneration, SftpFileEntry, SftpFileType, SftpTransferControl};
 
 use crate::features::NyaTermApp;
 use crate::models::{
-    NavItem, TransferEditorField, TransferEditorState, TransferJobEvent, TransferJobKind,
-    TransferJobOutput, TransferJobResult, TransferJobState, TransferJobStatus,
-    TransferUnknownFileState,
+    TransferEditorField, TransferEditorState, TransferJobEvent, TransferJobKind, TransferJobOutput,
+    TransferJobResult, TransferJobState, TransferJobStatus, TransferUnknownFileState,
 };
 
 use super::super::helpers::remote_file_name;
@@ -78,13 +73,7 @@ impl NyaTermApp {
             cx.notify();
             return;
         }
-        let Some(_config) = self.session.active_ssh_config_owned() else {
-            self.shell
-                .set_status("start an SSH session first".to_string());
-            cx.notify();
-            return;
-        };
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());
@@ -358,15 +347,8 @@ impl NyaTermApp {
             cx.notify();
             return;
         }
-        let Some(config) = self.session.active_ssh_config_owned() else {
-            self.shell
-                .set_status("start an SSH session first".to_string());
-            self.ensure_panel_open(NavItem::Transfers);
-            cx.notify();
-            return;
-        };
         let session_id = self.session.active_id_owned();
-        self.open_transfer_external_for_session(entry, session_id, config, cx);
+        self.open_transfer_external_for_session(entry, session_id, cx);
     }
 
     pub(in crate::features) fn open_active_transfer_editor_external(
@@ -374,15 +356,6 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         let Some(tab) = self.transfer.active_editor_tab().cloned() else {
-            return;
-        };
-        let Some(config) = self.transfer_editor_ssh_config(tab.session_id.as_deref()) else {
-            let error = t!("fileEditor.sourceSessionUnavailable").to_string();
-            if let Some(tab) = self.transfer.active_editor_tab_mut() {
-                tab.error = Some(error.clone());
-            }
-            self.shell.set_status(error);
-            cx.notify();
             return;
         };
         let entry = SftpFileEntry {
@@ -402,26 +375,44 @@ impl NyaTermApp {
             raw_path_token: tab.raw_path_token,
             symlink_target_is_directory: false,
         };
-        self.open_transfer_external_for_session(entry, tab.session_id, config, cx);
+        self.open_transfer_external_for_session(entry, tab.session_id, cx);
     }
 
     pub(in crate::features::pages::transfers) fn open_transfer_external_for_session(
         &mut self,
         entry: SftpFileEntry,
         session_id: Option<String>,
-        config: SshSessionConfig,
         cx: &mut Context<Self>,
     ) {
-        let service = match self.transfer_remote_file_service(session_id.as_deref(), config) {
+        let service = match self.transfer_file_browser_service(session_id.as_deref()) {
             Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());
                 return;
             }
         };
+        let remote_file_path = entry.remote_path();
+        if let Some(local_path) = service.local_path(&remote_file_path) {
+            let default_editor = self.settings.summary().transfer_default_editor.clone();
+            match open_local_path_with_editor(&local_path, &default_editor) {
+                Ok(()) => {
+                    self.transfer
+                        .set_browser_status(format!("opened {} externally", entry.path));
+                    self.shell
+                        .set_status(format!("opened local file {} externally", entry.path));
+                }
+                Err(error) => self.shell.set_status(error),
+            }
+            cx.notify();
+            return;
+        }
+        let Some(service) = service.remote_service() else {
+            self.shell
+                .set_status("file browser service is unavailable".to_string());
+            return;
+        };
         self.transfer.select_browser_path(entry.path.clone());
         self.transfer.set_remote_path(entry.path.clone());
-        let remote_file_path = entry.remote_path();
         let remote_path = entry.path.clone();
         let local_path = self.transfer_external_open_path(&entry, session_id.as_deref());
         let default_editor = self.settings.summary().transfer_default_editor.clone();

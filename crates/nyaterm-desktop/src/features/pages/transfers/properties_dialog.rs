@@ -26,6 +26,11 @@ impl NyaTermApp {
         let entry = state.entry.clone();
         let properties = state.properties.clone();
         let loading = properties.is_none();
+        let editable = state
+            .session_id
+            .as_deref()
+            .and_then(|session_id| self.session.file_browser_backend_for_session(session_id))
+            == Some(nyaterm_transport::FileBrowserBackendKind::Remote);
         let property_mode = parse_transfer_mode(&state.mode_value)
             .or(entry.permissions)
             .unwrap_or(0o644);
@@ -61,17 +66,19 @@ impl NyaTermApp {
             .overflow_y_scrollbar()
             .when_some(properties, |this, properties| {
                 this.child(properties_summary(palette, &state, &properties))
-                    .child(
-                        div()
-                            .mt_5()
-                            .pt_5()
-                            .border_t_1()
-                            .border_color(rgb(palette.border))
-                            .child(property_section_heading(
-                                palette,
-                                t!("fileExplorer.ownership"),
-                            )),
-                    )
+                    .when(editable, |this| {
+                        this.child(
+                            div()
+                                .mt_5()
+                                .pt_5()
+                                .border_t_1()
+                                .border_color(rgb(palette.border))
+                                .child(property_section_heading(
+                                    palette,
+                                    t!("fileExplorer.ownership"),
+                                )),
+                        )
+                    })
                     .child(
                         div()
                             .flex()

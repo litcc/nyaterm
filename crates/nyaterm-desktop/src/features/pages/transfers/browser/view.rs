@@ -16,7 +16,7 @@ use super::super::{
     FILE_BROWSER_HEADER_HEIGHT_PX, TransferBrowserAvailability,
     TransferBrowserEntryRowPresentation, TransferBrowserSortHeaderState,
     normalized_transfer_browser_path, sort_header_cell, transfer_browser_entry_row,
-    transfer_browser_parent_entry_row, transfer_browser_table_width,
+    transfer_browser_parent_entry_row, transfer_browser_path_is_root, transfer_browser_table_width,
 };
 use super::helpers::{
     compact_transfer_footer_button, compact_transfer_footer_button_active,
@@ -53,7 +53,7 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
                     Some(t!("fileExplorer.unsupportedSessionDesc")),
                 ),
                 TransferBrowserAvailability::NoSession
-                | TransferBrowserAvailability::DisconnectedSsh => {
+                | TransferBrowserAvailability::DisconnectedSession => {
                     (t!("fileExplorer.connectToSession"), None)
                 }
                 TransferBrowserAvailability::Browsable => unreachable!(),
@@ -102,6 +102,7 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
         }
 
         let can_transfer = availability == TransferBrowserAvailability::Browsable;
+        let local_backend = browser.local_backend;
         let _selected = browser
             .selected_remote_path
             .as_deref()
@@ -167,7 +168,7 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
             });
         let current_browser_path = normalized_transfer_browser_path(&browser.path);
         let has_parent_entry =
-            can_transfer && current_browser_path != "/" && current_browser_path != ".";
+            can_transfer && !transfer_browser_path_is_root(&current_browser_path);
         let show_list_scrollbar = can_transfer && !browser.loading && !visible_entries.is_empty();
         let auto_sync_cwd = browser.auto_sync_cwd_enabled;
         let cwd_tracking_available = browser.connection_id.clone().is_some();
@@ -375,22 +376,25 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
                                 this.open_transfer_new_folder_dialog(window, cx);
                             })),
                         ))
-                        .child(transfer_toolbar_divider(palette))
-                        .child(compact_transfer_upload_menu_button(
-                            palette,
-                            t!("fileExplorer.upload"),
-                            cx,
-                        ))
-                        .child(compact_transfer_toolbar_button_enabled(
-                            palette,
-                            "transfer-browser-download-selected",
-                            "icons/fe/download.svg",
-                            t!("fileExplorer.downloadSelected"),
-                            footer_stats.selected_item_count > 0,
-                            cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
-                                this.start_selected_sftp_download_jobs(window, cx);
-                            })),
-                        ))
+                        .when(!local_backend, |toolbar| {
+                            toolbar
+                                .child(transfer_toolbar_divider(palette))
+                                .child(compact_transfer_upload_menu_button(
+                                    palette,
+                                    t!("fileExplorer.upload"),
+                                    cx,
+                                ))
+                                .child(compact_transfer_toolbar_button_enabled(
+                                    palette,
+                                    "transfer-browser-download-selected",
+                                    "icons/fe/download.svg",
+                                    t!("fileExplorer.downloadSelected"),
+                                    footer_stats.selected_item_count > 0,
+                                    cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
+                                        this.start_selected_sftp_download_jobs(window, cx);
+                                    })),
+                                ))
+                        })
                         .child(compact_transfer_toolbar_button_enabled(
                             palette,
                             "transfer-browser-delete-selected",

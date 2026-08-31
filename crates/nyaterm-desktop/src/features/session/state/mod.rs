@@ -7,8 +7,8 @@ use std::time::Instant;
 use gpui::{FocusHandle, UniformListScrollHandle};
 use nyaterm_core::{AiExecutionProfile, SavedConnection};
 use nyaterm_transport::{
-    RemoteFileBackendPreferenceStore, RemoteFileService, SessionEvent, SessionInfo, SessionKind,
-    SessionManager, SshMultiplexHandle, SshSessionConfig,
+    FileBrowserBackendKind, RemoteFileBackendPreferenceStore, RemoteFileService, SessionEvent,
+    SessionInfo, SessionKind, SessionManager, SshMultiplexHandle, SshSessionConfig,
 };
 
 use crate::features::runtime_jobs::SessionStartResult;
@@ -760,8 +760,36 @@ impl SessionFeatureState {
         self.active_ssh_config().cloned()
     }
 
-    pub(in crate::features) fn active_ssh_file_browser_config(&self) -> Option<&SshSessionConfig> {
-        self.active_ssh_config()
+    pub(in crate::features) fn file_browser_backend_for_session(
+        &self,
+        session_id: &str,
+    ) -> Option<FileBrowserBackendKind> {
+        if self.is_disconnected(session_id) {
+            return None;
+        }
+        self.file_browser_backend_support_for_session(session_id)
+    }
+
+    pub(in crate::features) fn file_browser_backend_support_for_session(
+        &self,
+        session_id: &str,
+    ) -> Option<FileBrowserBackendKind> {
+        match self.session_info(session_id)?.kind {
+            SessionKind::LocalPty => Some(FileBrowserBackendKind::Local),
+            SessionKind::Ssh => self
+                .metadata(session_id)
+                .and_then(|metadata| metadata.ssh_config.as_ref())
+                .filter(|config| config.remote_file_browser_enabled())
+                .map(|_| FileBrowserBackendKind::Remote),
+            _ => None,
+        }
+    }
+
+    pub(in crate::features) fn active_file_browser_backend(
+        &self,
+    ) -> Option<FileBrowserBackendKind> {
+        self.active_id()
+            .and_then(|session_id| self.file_browser_backend_for_session(session_id))
     }
 
     pub(in crate::features) fn remote_file_service_for_session(

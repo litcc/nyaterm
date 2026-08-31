@@ -62,10 +62,6 @@ impl NyaTermApp {
         let category = classify_preview(&entry.name);
 
         let session_id = self.session.active_id_owned();
-        // Capture the source session's SSH config now, so a later "open
-        // externally" from this tab uses the tab's own session rather than
-        // whatever session is active at that time.
-        let ssh_config = self.transfer_editor_ssh_config(session_id.as_deref());
         let remote_file_path = entry.remote_path();
         let tab_id =
             TransferPreviewState::tab_id_for_remote_path(session_id.as_deref(), &remote_file_path);
@@ -104,7 +100,6 @@ impl NyaTermApp {
         let tab = TransferPreviewState {
             id: tab_id.clone(),
             session_id: session_id.clone(),
-            ssh_config,
             remote_path: entry.path.clone(),
             raw_path_token: entry.raw_path_token.clone(),
             name: entry.name.clone(),
@@ -229,16 +224,6 @@ impl NyaTermApp {
         let Some(tab) = self.transfer.active_preview_tab().cloned() else {
             return;
         };
-        let Some(config) = tab
-            .ssh_config
-            .clone()
-            .or_else(|| self.transfer_editor_ssh_config(tab.session_id.as_deref()))
-        else {
-            let error = rust_i18n::t!("filePreview.sourceSessionUnavailable").to_string();
-            self.shell.set_status(error);
-            cx.notify();
-            return;
-        };
         let entry = SftpFileEntry {
             name: tab.name,
             path: tab.remote_path,
@@ -251,7 +236,7 @@ impl NyaTermApp {
             raw_path_token: tab.raw_path_token,
             symlink_target_is_directory: false,
         };
-        self.open_transfer_external_for_session(entry, tab.session_id, config, cx);
+        self.open_transfer_external_for_session(entry, tab.session_id, cx);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -266,15 +251,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         let remote_path = remote_file_path.display_path.clone();
-        let Some(config) = self.transfer_editor_ssh_config(session_id.as_deref()) else {
-            let error = rust_i18n::t!("filePreview.sourceSessionUnavailable").to_string();
-            self.transfer
-                .fail_preview_tab(&tab_id, generation, error.clone());
-            self.shell.set_status(error);
-            cx.notify();
-            return;
-        };
-        let service = match self.transfer_remote_file_service(session_id.as_deref(), config) {
+        let service = match self.transfer_file_browser_service(session_id.as_deref()) {
             Ok(service) => service,
             Err(error) => {
                 let error = error.to_string();
@@ -405,7 +382,7 @@ impl NyaTermApp {
 /// length is not known until read). Failures return an error card rather than
 /// propagating, so the tab always resolves.
 fn load_preview_content(
-    service: &nyaterm_transport::RemoteFileService,
+    service: &nyaterm_transport::FileBrowserService,
     remote_file_path: &RemoteFilePath,
     category: PreviewCategory,
     max_bytes: u64,

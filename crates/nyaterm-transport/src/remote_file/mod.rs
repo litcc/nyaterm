@@ -947,51 +947,93 @@ pub enum FileTransferEndpoint {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FileCopyRequest {
     pub source: FileTransferEndpoint,
     pub destination: FileTransferEndpoint,
+    pub control: SftpTransferControl,
+    pub options: SftpPathTransferOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileCopySummary {
     pub bytes: u64,
     pub used_local_staging: bool,
+    pub destination_path: String,
 }
 
 impl FileCopyRequest {
     pub fn execute(self) -> anyhow::Result<FileCopySummary> {
+        let control = self.control;
+        let options = self.options;
         match (self.source, self.destination) {
             (FileTransferEndpoint::Local(source), FileTransferEndpoint::Local(destination)) => {
+                ensure_local_copy_tree_supported(&source)?;
+                let Some(destination) = resolve_copy_local_target(
+                    &source,
+                    &destination,
+                    &options,
+                    SftpTransferDirection::Copy,
+                )?
+                else {
+                    return Ok(FileCopySummary {
+                        bytes: 0,
+                        used_local_staging: false,
+                        destination_path: destination.to_string_lossy().into_owned(),
+                    });
+                };
+                control.wait_if_paused_blocking()?;
                 Ok(FileCopySummary {
-                    bytes: copy_local_path(&source, &destination)?,
+                    bytes: copy_local_path(&source, &destination, &control)?,
                     used_local_staging: false,
+                    destination_path: destination.to_string_lossy().into_owned(),
                 })
             }
             (
                 FileTransferEndpoint::Local(source),
                 FileTransferEndpoint::Remote { service, path },
             ) => {
+                ensure_local_copy_tree_supported(&source)?;
+                let Some(path) = resolve_copy_remote_target(
+                    &source.to_string_lossy(),
+                    source.is_dir(),
+                    &service,
+                    &path,
+                    &options,
+                    SftpTransferDirection::Upload,
+                )?
+                else {
+                    return Ok(FileCopySummary {
+                        bytes: 0,
+                        used_local_staging: false,
+                        destination_path: path.display_path,
+                    });
+                };
                 let summary = if source.is_dir() {
                     service.upload_path_with_progress_and_path_options(
                         source,
                         &path.display_path,
-                        SftpTransferControl::default(),
-                        SftpPathTransferOptions::default(),
+                        control,
+                        SftpPathTransferOptions::new(
+                            SftpDuplicatePolicy::Overwrite,
+                            None,
+                            options.transfer_options().clone(),
+                        ),
                         |_| {},
                     )?
                 } else {
                     service.upload_remote_file_with_progress_and_control_options(
                         source,
                         &path,
-                        SftpTransferControl::default(),
-                        SftpTransferOptions::default(),
+                        control,
+                        options.transfer_options().clone(),
                         |_| {},
                     )?
                 };
                 Ok(FileCopySummary {
                     bytes: summary.bytes,
                     used_local_staging: false,
+                    destination_path: path.display_path,
                 })
             }
             (
@@ -1001,13 +1043,14 @@ impl FileCopyRequest {
                 let summary = service.download_remote_path_with_progress_and_path_options(
                     &path,
                     destination,
-                    SftpTransferControl::default(),
-                    SftpPathTransferOptions::default(),
+                    control,
+                    options,
                     |_| {},
                 )?;
                 Ok(FileCopySummary {
                     bytes: summary.bytes,
                     used_local_staging: false,
+                    destination_path: summary.local_path.to_string_lossy().into_owned(),
                 })
             }
             (
@@ -1020,6 +1063,23 @@ impl FileCopyRequest {
                     path: destination_path,
                 },
             ) => {
+                let source_is_directory =
+                    source.remote_file_properties(&source_path)?.is_directory();
+                let Some(destination_path) = resolve_copy_remote_target(
+                    &source_path.display_path,
+                    source_is_directory,
+                    &destination,
+                    &destination_path,
+                    &options,
+                    SftpTransferDirection::Copy,
+                )?
+                else {
+                    return Ok(FileCopySummary {
+                        bytes: 0,
+                        used_local_staging: false,
+                        destination_path: destination_path.display_path,
+                    });
+                };
                 if source.backend()? == RemoteFileBackendKind::Sftp
                     && destination.backend()? == RemoteFileBackendKind::Sftp
                 {
@@ -1027,12 +1087,13 @@ impl FileCopyRequest {
                         &source_path,
                         &destination.sftp()?,
                         &destination_path,
-                        SftpTransferControl::default(),
-                        SftpTransferOptions::default(),
+                        control,
+                        options.transfer_options().clone(),
                     )?;
                     return Ok(FileCopySummary {
                         bytes,
                         used_local_staging: false,
+                        destination_path: destination_path.display_path,
                     });
                 }
                 let staging = RemoteCopyStaging::new()?;
@@ -1040,7 +1101,7 @@ impl FileCopyRequest {
                 let downloaded = source.download_remote_path_with_progress_and_path_options(
                     &source_path,
                     &local,
-                    SftpTransferControl::default(),
+                    control.clone(),
                     SftpPathTransferOptions::default(),
                     |_| {},
                 )?;
@@ -1048,22 +1109,27 @@ impl FileCopyRequest {
                     destination.upload_path_with_progress_and_path_options(
                         &downloaded.local_path,
                         &destination_path.display_path,
-                        SftpTransferControl::default(),
-                        SftpPathTransferOptions::default(),
+                        control.clone(),
+                        SftpPathTransferOptions::new(
+                            SftpDuplicatePolicy::Overwrite,
+                            None,
+                            options.transfer_options().clone(),
+                        ),
                         |_| {},
                     )?
                 } else {
                     destination.upload_remote_file_with_progress_and_control_options(
                         &downloaded.local_path,
                         &destination_path,
-                        SftpTransferControl::default(),
-                        SftpTransferOptions::default(),
+                        control,
+                        options.transfer_options().clone(),
                         |_| {},
                     )?
                 };
                 Ok(FileCopySummary {
                     bytes: downloaded.bytes.min(uploaded.bytes),
                     used_local_staging: true,
+                    destination_path: destination_path.display_path,
                 })
             }
         }
@@ -1092,13 +1158,22 @@ impl Drop for RemoteCopyStaging {
     }
 }
 
-fn copy_local_path(source: &Path, destination: &Path) -> anyhow::Result<u64> {
-    if source.is_dir() {
+fn copy_local_path(
+    source: &Path,
+    destination: &Path,
+    control: &SftpTransferControl,
+) -> anyhow::Result<u64> {
+    control.wait_if_paused_blocking()?;
+    let metadata = fs::symlink_metadata(source)?;
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!("copying local symbolic links is not supported");
+    }
+    if metadata.is_dir() {
         fs::create_dir_all(destination)?;
         let mut bytes = 0;
         for entry in fs::read_dir(source)? {
             let entry = entry?;
-            bytes += copy_local_path(&entry.path(), &destination.join(entry.file_name()))?;
+            bytes += copy_local_path(&entry.path(), &destination.join(entry.file_name()), control)?;
         }
         Ok(bytes)
     } else {
@@ -1106,6 +1181,79 @@ fn copy_local_path(source: &Path, destination: &Path) -> anyhow::Result<u64> {
             fs::create_dir_all(parent)?;
         }
         Ok(fs::copy(source, destination)?)
+    }
+}
+
+fn ensure_local_copy_tree_supported(path: &Path) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        anyhow::bail!("copying local symbolic links is not supported");
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            ensure_local_copy_tree_supported(&entry?.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_copy_local_target(
+    source: &Path,
+    requested: &Path,
+    options: &SftpPathTransferOptions,
+    direction: SftpTransferDirection,
+) -> anyhow::Result<Option<PathBuf>> {
+    if source == requested || (source.is_dir() && requested.starts_with(source)) {
+        anyhow::bail!("cannot copy a local path onto or into itself");
+    }
+    if !requested.exists() {
+        return Ok(Some(requested.to_path_buf()));
+    }
+    match duplicate_decision(
+        options.duplicate_policy(),
+        options.duplicate_resolver(),
+        direction,
+        &source.to_string_lossy(),
+        &requested.to_string_lossy(),
+        source.is_dir(),
+    )? {
+        SftpDuplicateDecision::Overwrite => Ok(Some(requested.to_path_buf())),
+        SftpDuplicateDecision::Skip => Ok(None),
+        SftpDuplicateDecision::Rename => Ok(Some(unique_local_path(requested))),
+    }
+}
+
+fn resolve_copy_remote_target(
+    source_path: &str,
+    source_is_directory: bool,
+    service: &RemoteFileService,
+    requested: &RemoteFilePath,
+    options: &SftpPathTransferOptions,
+    direction: SftpTransferDirection,
+) -> anyhow::Result<Option<RemoteFilePath>> {
+    if service.remote_file_properties(requested).is_err() {
+        return Ok(Some(requested.clone()));
+    }
+    match duplicate_decision(
+        options.duplicate_policy(),
+        options.duplicate_resolver(),
+        direction,
+        source_path,
+        &requested.display_path,
+        source_is_directory,
+    )? {
+        SftpDuplicateDecision::Overwrite => Ok(Some(requested.clone())),
+        SftpDuplicateDecision::Skip => Ok(None),
+        SftpDuplicateDecision::Rename => {
+            for index in 1.. {
+                let candidate =
+                    RemoteFilePath::new(format!("{} ({index})", requested.display_path));
+                if service.remote_file_properties(&candidate).is_err() {
+                    return Ok(Some(candidate));
+                }
+            }
+            unreachable!()
+        }
     }
 }
 
@@ -1876,7 +2024,10 @@ fn sort_entries(entries: &mut [SftpFileEntry]) {
 mod tests {
     use std::convert::Infallible;
 
-    use crate::{RemoteFilePath, SftpFileType};
+    use crate::{
+        FileCopyRequest, FileTransferEndpoint, RemoteFilePath, SftpDuplicatePolicy, SftpFileType,
+        SftpPathTransferOptions, SftpTransferControl, SftpTransferOptions,
+    };
 
     use super::{
         BackendProbeStage, RemoteFileBackendKind, ensure_safe_delete_target, format_permissions,
@@ -1908,6 +2059,37 @@ mod tests {
             assert!(ensure_safe_delete_target(path).is_err(), "{path}");
         }
         assert!(ensure_safe_delete_target("/tmp/file").is_ok());
+    }
+
+    #[test]
+    fn local_copy_applies_skip_and_rename_duplicate_policies() {
+        let root = std::env::temp_dir().join(format!("nyaterm-file-copy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.txt");
+        let target = root.join("target.txt");
+        std::fs::write(&source, "source").unwrap();
+        std::fs::write(&target, "target").unwrap();
+
+        let request = |policy| FileCopyRequest {
+            source: FileTransferEndpoint::Local(source.clone()),
+            destination: FileTransferEndpoint::Local(target.clone()),
+            control: SftpTransferControl::default(),
+            options: SftpPathTransferOptions::new(policy, None, SftpTransferOptions::default()),
+        };
+        let skipped = request(SftpDuplicatePolicy::Skip).execute().unwrap();
+        assert_eq!(skipped.bytes, 0);
+        assert_eq!(skipped.destination_path, target.to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "target");
+        let renamed = request(SftpDuplicatePolicy::Rename).execute().unwrap();
+        assert_eq!(
+            renamed.destination_path,
+            root.join("target (1).txt").to_string_lossy()
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("target (1).txt")).unwrap(),
+            "source"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

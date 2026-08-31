@@ -47,12 +47,25 @@ impl NyaTermApp {
     ) -> Vec<NyaMenuItem> {
         use super::context_menu_policy::{
             TransferContextMenuAction as Action, TransferContextMenuNode as Node,
+            transfer_context_action_visible_for_backend,
             transfer_current_directory_context_menu_policy,
         };
 
         let policy = transfer_current_directory_context_menu_policy();
+        let local_backend = self.session.active_file_browser_backend()
+            == Some(nyaterm_transport::FileBrowserBackendKind::Local);
         let mut items = Vec::with_capacity(policy.len());
         for node in policy {
+            if let Node::Action(action) = node {
+                let backend = if local_backend {
+                    nyaterm_transport::FileBrowserBackendKind::Local
+                } else {
+                    nyaterm_transport::FileBrowserBackendKind::Remote
+                };
+                if !transfer_context_action_visible_for_backend(action, backend) {
+                    continue;
+                }
+            }
             let item = match node {
                 Node::Separator => NyaMenuItem::separator(),
                 Node::Action(Action::Refresh) => NyaMenuItem::action(t!("fileExplorer.cmRefresh"))
@@ -169,7 +182,8 @@ impl NyaTermApp {
     ) -> Vec<NyaMenuItem> {
         use super::context_menu_policy::{
             TransferContextMenuAction as Action, TransferContextMenuNode as Node,
-            TransferEntryMenuCapabilities, transfer_entry_context_menu_policy,
+            TransferEntryMenuCapabilities, transfer_context_action_visible_for_backend,
+            transfer_entry_context_menu_policy,
         };
 
         let ai_actions = self.enabled_transfer_file_ai_actions_for_entry(&entry);
@@ -182,9 +196,21 @@ impl NyaTermApp {
             has_ai_actions: !ai_actions.is_empty(),
             has_send_targets: !send_targets.is_empty(),
         });
+        let local_backend = self.session.active_file_browser_backend()
+            == Some(nyaterm_transport::FileBrowserBackendKind::Local);
         let mut items = Vec::with_capacity(policy.len());
 
         for node in policy {
+            if let Node::Action(action) = node {
+                let backend = if local_backend {
+                    nyaterm_transport::FileBrowserBackendKind::Local
+                } else {
+                    nyaterm_transport::FileBrowserBackendKind::Remote
+                };
+                if !transfer_context_action_visible_for_backend(action, backend) {
+                    continue;
+                }
+            }
             let item = match node {
                 Node::Separator => NyaMenuItem::separator(),
                 Node::Action(Action::Open) => NyaMenuItem::action(t!("fileExplorer.cmOpen"))

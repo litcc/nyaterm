@@ -109,7 +109,7 @@ impl NyaTermApp {
             }
             ShortcutId::RenameFile => {
                 if self.selected_transfer_entries().len() == 1
-                    && self.session.active_ssh_file_browser_config().is_some()
+                    && self.session.active_file_browser_backend().is_some()
                     && !self.transfer.rename_dialog_is_open()
                 {
                     self.open_transfer_rename_dialog(window, cx);

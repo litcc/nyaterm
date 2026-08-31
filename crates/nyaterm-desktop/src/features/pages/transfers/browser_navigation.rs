@@ -9,12 +9,23 @@ use crate::models::{TransferBrowserNavigationSnapshot, TransferBrowserSessionCac
 use super::{normalized_transfer_browser_path, remote_file_name, remote_parent_path};
 
 impl NyaTermApp {
+    pub(in crate::features::pages::transfers) fn valid_transfer_browser_child_name(
+        &self,
+        name: &str,
+    ) -> bool {
+        let backend = self
+            .session
+            .active_file_browser_backend()
+            .unwrap_or(nyaterm_transport::FileBrowserBackendKind::Remote);
+        nyaterm_transport::valid_file_browser_child_name(backend, name)
+    }
+
     pub(in crate::features) fn cache_transfer_browser_session(&mut self, session_id: &str) {
         if session_id.trim().is_empty()
             || !self
                 .session
-                .metadata(session_id)
-                .is_some_and(|metadata| metadata.ssh_config.is_some())
+                .file_browser_backend_support_for_session(session_id)
+                .is_some()
         {
             return;
         }
@@ -66,7 +77,7 @@ impl NyaTermApp {
     pub(in crate::features) fn reset_transfer_browser_for_active_session(&mut self) {
         self.transfer.set_remote_path(".");
         self.transfer
-            .reset_browser_for_session(self.session.active_ssh_file_browser_config().is_some());
+            .reset_browser_for_session(self.session.active_file_browser_backend().is_some());
     }
 
     pub(in crate::features) fn load_transfer_browser_for_active_session_if_needed(
@@ -76,7 +87,7 @@ impl NyaTermApp {
         let Some(session_id) = self.session.active_id_owned() else {
             return;
         };
-        if self.session.active_ssh_file_browser_config().is_none()
+        if self.session.active_file_browser_backend().is_none()
             || self.session.is_disconnected(&session_id)
             || self.transfer.has_browser_session_cache(&session_id)
             || self.transfer.browser_view().loading
@@ -87,9 +98,17 @@ impl NyaTermApp {
             return;
         }
 
+        let initial_path = match self.session.active_file_browser_backend() {
+            Some(nyaterm_transport::FileBrowserBackendKind::Local) => dirs::home_dir()
+                .or_else(|| std::env::current_dir().ok())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| ".".to_string()),
+            _ => ".".to_string(),
+        };
         let rollback = self.prepare_transfer_browser_navigation();
-        self.transfer.begin_browser_directory_load(".".to_string());
-        self.record_transfer_browser_history(".".to_string());
+        self.transfer
+            .begin_browser_directory_load(initial_path.clone());
+        self.record_transfer_browser_history(initial_path);
         self.start_sftp_list_job(None, rollback, cx);
     }
 
@@ -249,7 +268,7 @@ impl NyaTermApp {
     ) {
         let Some(connection_id) = self.active_transfer_browser_connection_id() else {
             self.transfer
-                .set_browser_status("Auto CWD requires a saved SSH connection");
+                .set_browser_status("Auto CWD requires a saved local or SSH connection");
             cx.notify();
             return;
         };

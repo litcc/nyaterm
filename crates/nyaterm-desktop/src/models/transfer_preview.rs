@@ -452,10 +452,6 @@ impl PreviewViewport {
 pub(crate) struct TransferPreviewState {
     pub(crate) id: String,
     pub(crate) session_id: Option<String>,
-    /// The SSH config captured when the tab was opened, so an "open externally"
-    /// from a tab belonging to a non-active session uses that session's config
-    /// rather than whatever session happens to be active now.
-    pub(crate) ssh_config: Option<nyaterm_transport::SshSessionConfig>,
     pub(crate) remote_path: String,
     pub(crate) raw_path_token: Option<String>,
     pub(crate) name: String,
@@ -594,7 +590,6 @@ mod tests {
                 &RemoteFilePath::new(remote_path),
             ),
             session_id: Some(session_id.to_string()),
-            ssh_config: None,
             remote_path: remote_path.to_string(),
             raw_path_token: None,
             name: remote_path

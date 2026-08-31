@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
 
 use gpui::Context;
-use nyaterm_transport::{SftpCwdFollowMode, SshProcessService};
+use nyaterm_transport::{FileBrowserBackendKind, SftpCwdFollowMode, SshProcessService};
 
 use crate::features::NyaTermApp;
 use crate::models::{
-    NavItem, TransferBrowserChildrenMenuStatus, TransferBrowserNavigationSnapshot,
+    TransferBrowserChildrenMenuStatus, TransferBrowserNavigationSnapshot,
     TransferBrowserPathMenuKind, TransferBrowserPathMenuState, TransferJobEvent, TransferJobKind,
     TransferJobOutput, TransferJobResult, TransferJobState, TransferJobStatus,
 };
@@ -18,20 +18,7 @@ impl NyaTermApp {
         remote_path: String,
         cx: &mut Context<Self>,
     ) {
-        if self.session.active_ssh_config_owned().is_none() {
-            if let Some(TransferBrowserPathMenuState {
-                kind: TransferBrowserPathMenuKind::Children { status, .. },
-                ..
-            }) = self.transfer.browser.path_menu.as_mut()
-            {
-                *status = TransferBrowserChildrenMenuStatus::Error(
-                    "start an SSH session first".to_string(),
-                );
-            }
-            cx.notify();
-            return;
-        }
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.transfer.browser.status = error.to_string();
@@ -103,15 +90,7 @@ impl NyaTermApp {
         rollback: TransferBrowserNavigationSnapshot,
         cx: &mut Context<Self>,
     ) {
-        if self.session.active_ssh_config_owned().is_none() {
-            self.restore_transfer_browser_navigation(rollback);
-            self.shell
-                .set_status("start an SSH session first".to_string());
-            self.ensure_panel_open(NavItem::Transfers);
-            cx.notify();
-            return;
-        }
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.restore_transfer_browser_navigation(rollback);
@@ -180,6 +159,10 @@ impl NyaTermApp {
         if self.transfer_sync_cwd_job_running() {
             self.transfer.browser.status = "remote cwd sync already running".to_string();
             cx.notify();
+            return;
+        }
+        if self.session.active_file_browser_backend() == Some(FileBrowserBackendKind::Local) {
+            self.start_local_transfer_sync_cwd_job(cx);
             return;
         }
         let context = match self.active_ssh_runtime_context("syncing remote cwd") {
@@ -253,7 +236,7 @@ impl NyaTermApp {
         self.transfer.browser.loading = true;
         self.transfer.browser.error = None;
         self.shell.set_status("remote cwd sync started".to_string());
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.transfer.browser.loading = false;
@@ -340,12 +323,7 @@ impl NyaTermApp {
         if self.transfer.browser.home_dir_pending || !self.transfer.browser.home_dir.is_empty() {
             return;
         }
-        if self.session.active_ssh_config_owned().is_none() {
-            self.transfer.browser.status = "remote home requires an SSH session".to_string();
-            cx.notify();
-            return;
-        }
-        let service = match self.active_remote_file_service() {
+        let service = match self.active_file_browser_service() {
             Ok(service) => service,
             Err(error) => {
                 self.transfer.browser.status = error.to_string();
@@ -380,6 +358,74 @@ impl NyaTermApp {
                     let home_dir = service.home_dir().map_err(|error| error.to_string())?;
                     Ok(TransferJobOutput::HomeDir(home_dir))
                 })();
+                let _ = transfer_tx.unbounded_send(TransferJobResult {
+                    id,
+                    event: TransferJobEvent::Finished(result),
+                });
+            },
+        );
+        cx.notify();
+    }
+
+    fn start_local_transfer_sync_cwd_job(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.session.active_id_owned() else {
+            return;
+        };
+        let Some(cwd) = self
+            .session
+            .cwd(&session_id)
+            .map(str::trim)
+            .filter(|cwd| !cwd.is_empty())
+            .map(str::to_string)
+        else {
+            self.transfer.browser.status = "local cwd is not available".to_string();
+            self.transfer.browser.loading = false;
+            self.transfer.browser.error = Some("local cwd is not available".to_string());
+            cx.notify();
+            return;
+        };
+        let service = match self.active_file_browser_service() {
+            Ok(service) => service,
+            Err(error) => {
+                self.transfer.browser.error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
+        let id = self.transfer.next_transfer_job_id("local-sync-cwd");
+        self.transfer
+            .browser
+            .navigation_jobs
+            .insert(session_id.clone(), id.clone());
+        self.transfer.enqueue_transfer_job(TransferJobState {
+            id: id.clone(),
+            session_id: Some(session_id),
+            kind: TransferJobKind::SyncCwd,
+            status: TransferJobStatus::Running,
+            detail: "Resolving local cwd".to_string(),
+            created_at_ms: TransferJobState::now_ms(),
+            display_name: String::new(),
+            entries: Vec::new(),
+            summary: None,
+            progress: None,
+            control: None,
+        });
+        self.transfer.browser.loading = true;
+        self.transfer.browser.error = None;
+        let transfer_tx = self.transfer.transfer_event_sender();
+        submit_transfer_blocking_job(
+            &self.blocking_jobs,
+            "local-sync-cwd",
+            id.clone(),
+            transfer_tx.clone(),
+            move || {
+                let result = service
+                    .list_dir(&cwd)
+                    .map(|entries| TransferJobOutput::CwdSynced {
+                        remote_path: cwd,
+                        entries,
+                    })
+                    .map_err(|error| error.to_string());
                 let _ = transfer_tx.unbounded_send(TransferJobResult {
                     id,
                     event: TransferJobEvent::Finished(result),

@@ -49,21 +49,21 @@ const NATIVE_EDITOR_MAX_BYTES: u64 = 512 * 1024;
 pub(in crate::features) enum TransferBrowserAvailability {
     NoSession,
     UnsupportedSession,
-    DisconnectedSsh,
+    DisconnectedSession,
     Browsable,
 }
 
 fn transfer_browser_availability(
     has_active_session: bool,
-    has_ssh_config: bool,
+    has_browser_backend: bool,
     is_disconnected: bool,
 ) -> TransferBrowserAvailability {
     if !has_active_session {
         TransferBrowserAvailability::NoSession
-    } else if !has_ssh_config {
+    } else if !has_browser_backend {
         TransferBrowserAvailability::UnsupportedSession
     } else if is_disconnected {
-        TransferBrowserAvailability::DisconnectedSsh
+        TransferBrowserAvailability::DisconnectedSession
     } else {
         TransferBrowserAvailability::Browsable
     }
@@ -165,7 +165,7 @@ mod tests {
         );
         assert_eq!(
             transfer_browser_availability(true, true, true),
-            TransferBrowserAvailability::DisconnectedSsh
+            TransferBrowserAvailability::DisconnectedSession
         );
         assert_eq!(
             transfer_browser_availability(true, true, false),

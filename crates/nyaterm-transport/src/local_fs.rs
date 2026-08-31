@@ -1,11 +1,13 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::time::UNIX_EPOCH;
 
 use anyhow::{Context as _, anyhow, bail};
 
 use super::{
-    SftpFileEntry, SftpFileProperties, SftpFileType, SftpRemoteTextFile, SftpWriteTextResult,
+    RemoteBinaryFile, RemoteTextDocument, RemoteTextMetadata, RemoteTextRevision,
+    RemoteTextWriteResult, SftpFileEntry, SftpFileProperties, SftpFileType, SftpRemoteTextFile,
+    SftpWriteTextResult,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -21,6 +23,7 @@ pub struct LocalDirectoryChild {
 impl LocalFileService {
     pub fn home_dir(&self) -> anyhow::Result<String> {
         dirs::home_dir()
+            .or_else(|| std::env::current_dir().ok())
             .map(path_to_string)
             .filter(|path| !path.is_empty())
             .ok_or_else(|| anyhow!("failed to determine local home directory"))
@@ -121,6 +124,11 @@ impl LocalFileService {
     ) -> anyhow::Result<()> {
         let old_path = old_path.as_ref();
         let new_path = new_path.as_ref();
+        ensure_safe_local_target(old_path)?;
+        ensure_safe_local_target(new_path)?;
+        if old_path.is_dir() && new_path.starts_with(old_path) {
+            bail!("cannot move a local directory into itself");
+        }
         fs::rename(old_path, new_path).with_context(|| {
             format!(
                 "failed to rename local path '{}' to '{}'",
@@ -132,6 +140,7 @@ impl LocalFileService {
 
     pub fn delete(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
         let path = path.as_ref();
+        ensure_safe_local_target(path)?;
         let metadata = fs::symlink_metadata(path)
             .with_context(|| format!("failed to inspect local path '{}'", path.display()))?;
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
@@ -141,6 +150,101 @@ impl LocalFileService {
             fs::remove_file(path)
                 .with_context(|| format!("failed to delete local file '{}'", path.display()))
         }
+    }
+
+    pub fn read_file_bytes(
+        &self,
+        path: impl AsRef<Path>,
+        max_bytes: u64,
+    ) -> anyhow::Result<RemoteBinaryFile> {
+        let path = path.as_ref();
+        let metadata = fs::metadata(path)
+            .with_context(|| format!("failed to inspect local file '{}'", path.display()))?;
+        if metadata.is_dir() {
+            bail!("cannot read a directory as bytes");
+        }
+        if metadata.len() > max_bytes {
+            bail!("file is too large to preview ({} bytes)", metadata.len());
+        }
+        let content_bytes = fs::read(path)
+            .with_context(|| format!("failed to read local file '{}'", path.display()))?;
+        if content_bytes.len() as u64 > max_bytes {
+            bail!("file grew beyond the preview limit while being read");
+        }
+        Ok(RemoteBinaryFile {
+            path: path_to_string(path),
+            size: content_bytes.len() as u64,
+            content_bytes,
+            modified_at: modified_time_secs(&metadata),
+        })
+    }
+
+    pub fn read_text_document(
+        &self,
+        path: impl AsRef<Path>,
+        max_bytes: u64,
+    ) -> anyhow::Result<RemoteTextDocument> {
+        let file = self.read_file_bytes(path, max_bytes)?;
+        if file.content_bytes.contains(&0) {
+            bail!("binary files are not supported by the built-in editor");
+        }
+        let content = String::from_utf8(file.content_bytes.clone())
+            .map_err(|_| anyhow!("file is not valid UTF-8 text"))?;
+        let metadata = RemoteTextMetadata {
+            size: file.size,
+            modified_at: Some(file.modified_at),
+        };
+        Ok(RemoteTextDocument {
+            path: file.path,
+            content,
+            revision: RemoteTextRevision::from_bytes(&file.content_bytes, metadata),
+        })
+    }
+
+    pub fn write_text_document(
+        &self,
+        path: impl AsRef<Path>,
+        content: impl AsRef<str>,
+        expected_revision: Option<&RemoteTextRevision>,
+        force: bool,
+    ) -> anyhow::Result<RemoteTextWriteResult> {
+        let path = path.as_ref();
+        if !force && expected_revision.is_none() {
+            bail!("local text revision is required for a safe save");
+        }
+        if !force {
+            let metadata = fs::metadata(path)
+                .with_context(|| format!("failed to inspect local file '{}'", path.display()))?;
+            if metadata.is_dir() {
+                bail!("cannot write a directory as text");
+            }
+            let bytes = fs::read(path)
+                .with_context(|| format!("failed to read local file '{}'", path.display()))?;
+            let current = RemoteTextRevision::from_bytes(
+                &bytes,
+                RemoteTextMetadata {
+                    size: bytes.len() as u64,
+                    modified_at: Some(modified_time_secs(&metadata)),
+                },
+            );
+            if expected_revision != Some(&current) {
+                return Ok(RemoteTextWriteResult::Conflict);
+            }
+        }
+        fs::write(path, content.as_ref())
+            .with_context(|| format!("failed to write local file '{}'", path.display()))?;
+        let metadata = fs::metadata(path)
+            .with_context(|| format!("failed to inspect local file '{}'", path.display()))?;
+        let bytes = content.as_ref().as_bytes();
+        Ok(RemoteTextWriteResult::Saved {
+            revision: RemoteTextRevision::from_bytes(
+                bytes,
+                RemoteTextMetadata {
+                    size: bytes.len() as u64,
+                    modified_at: Some(modified_time_secs(&metadata)),
+                },
+            ),
+        })
     }
 
     pub fn properties(&self, path: impl AsRef<Path>) -> anyhow::Result<SftpFileProperties> {
@@ -206,6 +310,26 @@ impl LocalFileService {
     }
 }
 
+fn ensure_safe_local_target(path: &Path) -> anyhow::Result<()> {
+    if path.as_os_str().is_empty() {
+        bail!("refusing to operate on an empty local path");
+    }
+    let mut meaningful = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => meaningful = true,
+            Component::ParentDir | Component::CurDir => {
+                bail!("refusing to operate on a relative traversal path")
+            }
+            Component::Prefix(_) | Component::RootDir => {}
+        }
+    }
+    if !meaningful {
+        bail!("refusing to operate on a local filesystem root");
+    }
+    Ok(())
+}
+
 fn file_entry_from_path(path: &Path, name: String) -> anyhow::Result<SftpFileEntry> {
     let symlink_metadata = fs::symlink_metadata(path)?;
     let metadata = fs::metadata(path).unwrap_or_else(|_| symlink_metadata.clone());
@@ -218,7 +342,7 @@ fn file_entry_from_path(path: &Path, name: String) -> anyhow::Result<SftpFileEnt
         owner: owner_string(&metadata),
         group: group_string(&metadata),
         modified_at: modified_time_secs(&metadata).try_into().ok(),
-        raw_path_token: None,
+        raw_path_token: Some(local_path_identity(path)),
         symlink_target_is_directory: symlink_metadata.file_type().is_symlink() && metadata.is_dir(),
     })
 }
@@ -244,7 +368,7 @@ fn file_properties_from_path(path: &Path) -> anyhow::Result<SftpFileProperties> 
         gid: gid(&metadata),
         modified_at: modified_time_secs(&metadata).try_into().ok(),
         accessed_at: accessed_time_secs(&metadata).try_into().ok(),
-        raw_path_token: None,
+        raw_path_token: Some(local_path_identity(path)),
         symlink_target_is_directory: symlink_metadata.file_type().is_symlink() && metadata.is_dir(),
     })
 }
@@ -266,6 +390,13 @@ fn file_type_from_metadata(
 
 fn path_to_string(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().to_string()
+}
+
+fn local_path_identity(path: &Path) -> String {
+    let path = path_to_string(path);
+    #[cfg(windows)]
+    let path = path.to_lowercase();
+    format!("local-path:{path}")
 }
 
 fn system_time_secs(time: std::io::Result<std::time::SystemTime>) -> u64 {
@@ -375,7 +506,7 @@ fn set_local_mode_if_supported(_path: &Path, _mode: Option<u32>) -> anyhow::Resu
 #[cfg(test)]
 mod tests {
     use super::LocalFileService;
-    use crate::{SftpFileType, SftpWriteTextResult};
+    use crate::{RemoteTextWriteResult, SftpFileType, SftpWriteTextResult};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("nyaterm-local-fs-{name}-{}", uuid::Uuid::new_v4()))
@@ -431,5 +562,37 @@ mod tests {
         assert!(matches!(result, SftpWriteTextResult::Conflict { .. }));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_document_revision_detects_same_size_changes() {
+        let service = LocalFileService;
+        let root = temp_dir("revision");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("doc.txt");
+        std::fs::write(&file, "same").unwrap();
+        let loaded = service.read_text_document(&file, 1024).unwrap();
+        std::fs::write(&file, "diff").unwrap();
+
+        assert_eq!(
+            service
+                .write_text_document(&file, "mine", Some(&loaded.revision), false)
+                .unwrap(),
+            RemoteTextWriteResult::Conflict
+        );
+        assert!(matches!(
+            service
+                .write_text_document(&file, "mine", Some(&loaded.revision), true)
+                .unwrap(),
+            RemoteTextWriteResult::Saved { .. }
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_service_rejects_filesystem_root_deletion() {
+        let service = LocalFileService;
+        let root = std::path::PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        assert!(service.delete(root).is_err());
     }
 }

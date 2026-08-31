@@ -126,6 +126,7 @@ impl SftpDuplicatePolicy {
 pub enum SftpTransferDirection {
     Download,
     Upload,
+    Copy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

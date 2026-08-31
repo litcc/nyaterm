@@ -346,7 +346,7 @@ impl TransferFeatureState {
         Some(remote_path)
     }
 
-    pub(in crate::features) fn reset_browser_for_session(&mut self, ssh_active: bool) {
+    pub(in crate::features) fn reset_browser_for_session(&mut self, browser_available: bool) {
         self.browser.path = ".".to_string();
         self.browser.raw_path_token = None;
         self.browser.home_dir.clear();
@@ -356,10 +356,10 @@ impl TransferFeatureState {
         self.browser.entries = Arc::new(Vec::new());
         self.browser.loading = false;
         self.browser.error = None;
-        self.browser.status = if ssh_active {
-            "List a remote directory to browse files.".to_string()
+        self.browser.status = if browser_available {
+            "List a directory to browse files.".to_string()
         } else {
-            "Start an SSH session to browse remote files.".to_string()
+            "Start a local or SSH session to browse files.".to_string()
         };
         self.browser.history.clear();
         self.browser.history_index = 0;

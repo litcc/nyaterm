@@ -1,9 +1,5 @@
-use rust_i18n::t;
-
 use gpui::{Context, Window};
-use nyaterm_transport::{
-    RemoteFilePath, RemoteTextGeneration, RemoteTextRevision, SshSessionConfig,
-};
+use nyaterm_transport::{RemoteFilePath, RemoteTextGeneration, RemoteTextRevision};
 
 use crate::features::{
     NyaTermApp, transfers::TransferEditorCloseAfterSave, transfers::TransferEditorCloseOutcome,
@@ -17,20 +13,6 @@ use crate::models::{
 use super::super::NATIVE_EDITOR_MAX_BYTES;
 
 impl NyaTermApp {
-    pub(in crate::features) fn transfer_editor_ssh_config(
-        &self,
-        session_id: Option<&str>,
-    ) -> Option<SshSessionConfig> {
-        session_id
-            .and_then(|session_id| self.session.metadata(session_id))
-            .and_then(|metadata| metadata.ssh_config.clone())
-            .or_else(|| {
-                (session_id == self.session.active_id())
-                    .then(|| self.session.active_ssh_config_owned())
-                    .flatten()
-            })
-    }
-
     pub(in crate::features) fn activate_transfer_editor_tab(
         &mut self,
         tab_id: &str,
@@ -140,15 +122,7 @@ impl NyaTermApp {
         else {
             return;
         };
-        let Some(config) = self.transfer_editor_ssh_config(session_id.as_deref()) else {
-            let error = t!("fileEditor.sourceSessionUnavailable").to_string();
-            self.transfer
-                .fail_editor_load_tab(&tab_id, generation, error.clone());
-            self.shell.set_status(error);
-            cx.notify();
-            return;
-        };
-        let service = match self.transfer_remote_file_service(session_id.as_deref(), config) {
+        let service = match self.transfer_file_browser_service(session_id.as_deref()) {
             Ok(service) => service,
             Err(error) => {
                 let error = error.to_string();
@@ -241,21 +215,12 @@ impl NyaTermApp {
         if snapshot.loading || snapshot.saving {
             return;
         }
-        let Some(config) = self.transfer_editor_ssh_config(snapshot.session_id.as_deref()) else {
-            let error = t!("fileEditor.sourceSessionUnavailable").to_string();
-            self.transfer
-                .set_editor_tab_error_by_id(&snapshot.id, error.clone());
-            self.shell.set_status(error);
-            cx.notify();
-            return;
-        };
         if !self.transfer.begin_editor_tab_save(tab_id) {
             return;
         }
         let remote_file_path = snapshot.remote_file_path();
         self.start_sftp_editor_save_job(
             snapshot.session_id,
-            config,
             snapshot.id,
             remote_file_path,
             snapshot.content,
@@ -292,7 +257,6 @@ impl NyaTermApp {
     pub(in crate::features) fn start_sftp_editor_save_job(
         &mut self,
         session_id: Option<String>,
-        config: SshSessionConfig,
         tab_id: String,
         remote_file_path: RemoteFilePath,
         content: String,
@@ -303,7 +267,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         let remote_path = remote_file_path.display_path.clone();
-        let service = match self.transfer_remote_file_service(session_id.as_deref(), config) {
+        let service = match self.transfer_file_browser_service(session_id.as_deref()) {
             Ok(service) => service,
             Err(error) => {
                 self.transfer

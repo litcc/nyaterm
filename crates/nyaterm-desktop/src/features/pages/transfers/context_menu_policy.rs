@@ -32,6 +32,19 @@ pub(super) enum TransferContextMenuAction {
     NewSymlink,
 }
 
+pub(super) fn transfer_context_action_visible_for_backend(
+    action: TransferContextMenuAction,
+    backend: nyaterm_transport::FileBrowserBackendKind,
+) -> bool {
+    backend == nyaterm_transport::FileBrowserBackendKind::Remote
+        || !matches!(
+            action,
+            TransferContextMenuAction::Upload
+                | TransferContextMenuAction::Download
+                | TransferContextMenuAction::NewSymlink
+        )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct TransferEntryMenuCapabilities {
     pub is_directory: bool,
@@ -39,7 +52,7 @@ pub(super) struct TransferEntryMenuCapabilities {
     pub show_open_external: bool,
     pub show_preview: bool,
     pub has_ai_actions: bool,
-    /// Whether at least one other browsable SSH session exists to send the
+    /// Whether at least one other browsable local or SSH session exists to send the
     /// selection to. Drives the "Send to" submenu after `Download`, matching
     /// the Tauri `openMoveDialog(getContextMenuEntries)` placement.
     pub has_send_targets: bool,
@@ -129,12 +142,12 @@ pub(super) fn transfer_parent_directory_context_menu_policy() -> Vec<TransferCon
 /// the "Send to" submenu.
 ///
 /// Kept UI-independent so the eligibility rule can be tested without a live app:
-/// a target must be connected (not disconnected), expose an SSH config, and be a
+/// a target must be connected (not disconnected), expose a browser backend, and be a
 /// session other than the source the selection lives in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SendToCandidate {
     pub session_id: String,
-    pub has_ssh_config: bool,
+    pub has_browser_backend: bool,
     pub is_disconnected: bool,
 }
 
@@ -143,7 +156,7 @@ pub(super) fn send_to_candidate_is_eligible(
     candidate: &SendToCandidate,
 ) -> bool {
     candidate.session_id != source_session_id
-        && candidate.has_ssh_config
+        && candidate.has_browser_backend
         && !candidate.is_disconnected
 }
 
@@ -170,6 +183,7 @@ pub(super) fn send_to_target_directory(
 ///
 /// The entry name comes from the source listing; the directory is the resolved
 /// target directory above. Root is preserved so `/` + `file` becomes `/file`.
+#[cfg(test)]
 pub(super) fn send_to_destination_path(target_dir: &str, entry_name: &str) -> String {
     let dir = target_dir.trim_end_matches('/');
     match dir {
@@ -184,9 +198,28 @@ mod tests {
     use super::{
         SendToCandidate, TransferContextMenuAction as Action, TransferContextMenuNode as Node,
         TransferEntryMenuCapabilities, send_to_candidate_is_eligible, send_to_destination_path,
-        send_to_target_directory, transfer_current_directory_context_menu_policy,
-        transfer_entry_context_menu_policy, transfer_parent_directory_context_menu_policy,
+        send_to_target_directory, transfer_context_action_visible_for_backend,
+        transfer_current_directory_context_menu_policy, transfer_entry_context_menu_policy,
+        transfer_parent_directory_context_menu_policy,
     };
+
+    #[test]
+    fn local_backend_hides_remote_only_actions() {
+        use nyaterm_transport::FileBrowserBackendKind::{Local, Remote};
+
+        for action in [Action::Upload, Action::Download, Action::NewSymlink] {
+            assert!(!transfer_context_action_visible_for_backend(action, Local));
+            assert!(transfer_context_action_visible_for_backend(action, Remote));
+        }
+        assert!(transfer_context_action_visible_for_backend(
+            Action::Properties,
+            Local
+        ));
+        assert!(transfer_context_action_visible_for_backend(
+            Action::SendTo,
+            Local
+        ));
+    }
 
     #[test]
     fn file_menu_matches_tauri_group_order() {
@@ -372,7 +405,7 @@ mod tests {
             source,
             &SendToCandidate {
                 session_id: source.to_string(),
-                has_ssh_config: true,
+                has_browser_backend: true,
                 is_disconnected: false,
             }
         ));
@@ -380,7 +413,7 @@ mod tests {
             source,
             &SendToCandidate {
                 session_id: "session-b".to_string(),
-                has_ssh_config: false,
+                has_browser_backend: false,
                 is_disconnected: false,
             }
         ));
@@ -388,7 +421,7 @@ mod tests {
             source,
             &SendToCandidate {
                 session_id: "session-c".to_string(),
-                has_ssh_config: true,
+                has_browser_backend: true,
                 is_disconnected: true,
             }
         ));
@@ -396,7 +429,7 @@ mod tests {
             source,
             &SendToCandidate {
                 session_id: "session-d".to_string(),
-                has_ssh_config: true,
+                has_browser_backend: true,
                 is_disconnected: false,
             }
         ));

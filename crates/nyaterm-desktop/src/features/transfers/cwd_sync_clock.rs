@@ -52,7 +52,8 @@ impl NyaTermApp {
     ///
     /// The same conditions and the same deferral gate the shell-wide clock applied.
     pub(in crate::features) fn sync_transfer_cwd_if_due(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.session.active_ssh_config().is_none() || self.remote_refresh_is_deferred() {
+        if self.session.active_file_browser_backend().is_none() || self.remote_refresh_is_deferred()
+        {
             return false;
         }
         if !self.transfer_browser_auto_sync_cwd_enabled()
@@ -222,8 +223,8 @@ mod tests {
         });
         cx.update(|cx| assert!(armed(&app, cx)));
 
-        // With no SSH session the app declines every beat, which is the point: the
-        // decision is not the panel's to make.
+        // With no browsable session the app declines every beat, which is the
+        // point: the decision is not the panel's to make.
         cx.executor().advance_clock(Duration::from_secs(3));
         cx.run_until_parked();
         cx.update(|cx| {

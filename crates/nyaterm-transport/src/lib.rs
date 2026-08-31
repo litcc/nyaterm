@@ -25,6 +25,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 mod ascend_npu;
 mod environment;
+mod file_browser;
 mod gpu;
 mod local_fs;
 mod recording;
@@ -75,6 +76,10 @@ mod zmodem;
 pub use environment::{
     EnvironmentSnapshot, EnvironmentValue, ShellEnvironmentCache, ShellEnvironmentError,
     normalize_environment_variable_name,
+};
+pub use file_browser::{
+    FileBrowserBackendKind, FileBrowserCapabilities, FileBrowserService, file_browser_join,
+    file_browser_name, file_browser_parent, valid_file_browser_child_name,
 };
 pub use session_config::{
     LocalSessionConfig, SerialSessionConfig, SftpCwdFollowMode, SftpSettings, SshAgentEndpoint,

@@ -560,12 +560,11 @@ impl NyaTermApp {
                 // Refresh the target session's cached listing in place if it is
                 // showing the destination directory — never switch the active
                 // session, and never touch the source browser.
-                let refreshed = !entries.is_empty()
-                    && self.transfer.refresh_browser_session_cache_listing(
-                        &target_session_id,
-                        &target_parent_path,
-                        entries,
-                    );
+                let refreshed = self.transfer.refresh_browser_session_cache_listing(
+                    &target_session_id,
+                    &target_parent_path,
+                    entries,
+                );
                 let staging_note = if used_local_staging { " (staged)" } else { "" };
                 self.transfer.browser.status = format!(
                     "sent {} to {}{}",

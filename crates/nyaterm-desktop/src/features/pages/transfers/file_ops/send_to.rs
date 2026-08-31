@@ -1,10 +1,10 @@
-use std::sync::Arc;
-
 use rust_i18n::t;
 
 use gpui::{Context, Window};
 use nyaterm_transport::{
-    FileCopyRequest, FileTransferEndpoint, RemoteFilePath, RemoteFileService, SftpFileEntry,
+    FileBrowserService, FileCopyRequest, RemoteFilePath, SftpDuplicatePolicy,
+    SftpDuplicateResolver, SftpFileEntry, SftpPathTransferOptions, SftpTransferControl,
+    file_browser_join, file_browser_name, file_browser_parent,
 };
 
 use crate::features::NyaTermApp;
@@ -14,10 +14,8 @@ use crate::models::{
 };
 
 use super::super::context_menu_policy::{
-    SendToCandidate, send_to_candidate_is_eligible, send_to_destination_path,
-    send_to_target_directory,
+    SendToCandidate, send_to_candidate_is_eligible, send_to_target_directory,
 };
-use super::super::helpers::{remote_file_name, remote_parent_path};
 
 /// A session the current selection can be sent to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,9 +30,9 @@ pub(in crate::features::pages::transfers) struct TransferSendToTarget {
 impl NyaTermApp {
     /// Eligible "Send to" targets for the active browser session.
     ///
-    /// A target is any *other* session that is connected (not disconnected) and
-    /// exposes an SSH config that the file browser can use. The source session is
-    /// always excluded. Ordered like the session tabs so the menu is stable.
+    /// A target is any *other* connected local or SSH session that exposes a file
+    /// browser backend. The source session is always excluded. Ordered like the
+    /// session tabs so the menu is stable.
     pub(in crate::features::pages::transfers) fn transfer_send_to_targets(
         &self,
     ) -> Vec<TransferSendToTarget> {
@@ -45,13 +43,13 @@ impl NyaTermApp {
             .ordered_sessions()
             .into_iter()
             .filter_map(|session| {
-                let has_ssh_config = self
+                let has_browser_backend = self
                     .session
-                    .metadata(&session.id)
-                    .is_some_and(|metadata| metadata.ssh_config.is_some());
+                    .file_browser_backend_for_session(&session.id)
+                    .is_some();
                 let candidate = SendToCandidate {
                     session_id: session.id.clone(),
-                    has_ssh_config,
+                    has_browser_backend,
                     is_disconnected: self.session.is_disconnected(&session.id),
                 };
                 send_to_candidate_is_eligible(source_session_id, &candidate).then(|| {
@@ -74,7 +72,7 @@ impl NyaTermApp {
         (dir != ".").then_some(dir)
     }
 
-    /// Copy the current selection set to another connected SSH session.
+    /// Copy the current selection set to another connected local or SSH session.
     pub(in crate::features::pages::transfers) fn start_send_selected_transfers_to_session(
         &mut self,
         target_session_id: String,
@@ -89,8 +87,8 @@ impl NyaTermApp {
             return;
         }
 
-        let source_service = match self.active_remote_file_service() {
-            Ok(service) => Arc::new(service),
+        let source_service = match self.active_file_browser_service() {
+            Ok(service) => service,
             Err(error) => {
                 self.shell.set_status(error.to_string());
                 cx.notify();
@@ -98,29 +96,27 @@ impl NyaTermApp {
             }
         };
 
-        let Some(target_config) = self
-            .session
-            .metadata(&target_session_id)
-            .and_then(|metadata| metadata.ssh_config.clone())
-        else {
-            self.shell
-                .set_status(t!("fileTransfer.statusSendTargetUnavailable").to_string());
-            cx.notify();
-            return;
+        let target_service = match self.file_browser_service_for_session(&target_session_id) {
+            Ok(service) => service,
+            Err(error) => {
+                self.shell.set_status(error.to_string());
+                cx.notify();
+                return;
+            }
         };
-        let target_service =
-            match self.remote_file_service_for_session(&target_session_id, target_config) {
-                Ok(service) => Arc::new(service),
-                Err(error) => {
-                    self.shell.set_status(error.to_string());
-                    cx.notify();
-                    return;
-                }
-            };
 
         let cached_target_dir = self.transfer_send_to_cached_target_dir(&target_session_id);
         let source_session_id = self.session.active_id_owned();
         let total = entries.len();
+        let duplicate_policy = self.transfer.duplicate_policy();
+        let duplicate_resolver = (duplicate_policy == SftpDuplicatePolicy::Ask).then(|| {
+            self.session.prompt_duplicate_broker() as std::sync::Arc<dyn SftpDuplicateResolver>
+        });
+        let options = SftpPathTransferOptions::new(
+            duplicate_policy,
+            duplicate_resolver,
+            self.sftp_transfer_options(),
+        );
 
         let context = SendToJobContext {
             source_session_id,
@@ -128,6 +124,7 @@ impl NyaTermApp {
             target_session_id,
             target_service,
             cached_target_dir,
+            options,
         };
         for entry in entries {
             self.enqueue_send_to_job(&context, entry, cx);
@@ -144,7 +141,7 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) {
         let id = self.transfer.next_transfer_job_id("sftp-send");
-        let entry_name = remote_file_name(&entry.path);
+        let entry_name = file_browser_name(context.source_service.kind(), &entry.path);
         let source_path = entry.path.clone();
         // Best-effort provisional target for the visible row; the worker resolves
         // the real directory (cache or the target session's home) before copying.
@@ -152,8 +149,11 @@ impl NyaTermApp {
             .cached_target_dir
             .clone()
             .unwrap_or_else(|| "~".to_string());
-        let provisional_target = send_to_destination_path(&provisional_dir, &entry_name);
-        let provisional_parent = remote_parent_path(&provisional_target);
+        let provisional_target =
+            file_browser_join(context.target_service.kind(), &provisional_dir, &entry_name);
+        let provisional_parent =
+            file_browser_parent(context.target_service.kind(), &provisional_target);
+        let control = SftpTransferControl::new();
 
         self.transfer.enqueue_transfer_job(TransferJobState {
             id: id.clone(),
@@ -173,7 +173,7 @@ impl NyaTermApp {
             entries: Vec::new(),
             summary: None,
             progress: None,
-            control: None,
+            control: Some(control.clone()),
         });
 
         let source_remote = entry.remote_path();
@@ -181,20 +181,23 @@ impl NyaTermApp {
         let target_service = context.target_service.clone();
         let target_session_id = context.target_session_id.clone();
         let cached_target_dir = context.cached_target_dir.clone();
+        let options = context.options.clone();
         let transfer_tx = self.transfer.transfer_event_sender();
         self.submit_transfer_blocking_job(
             "sftp-send-to",
             id.clone(),
             transfer_tx.clone(),
             move || {
-                let result = run_send_to(
-                    &source_service,
+                let result = run_send_to(SendToRequest {
+                    source_service,
                     source_remote,
-                    &target_service,
-                    cached_target_dir.as_deref(),
-                    &entry_name,
+                    target_service,
+                    cached_target_dir,
+                    entry_name,
                     target_session_id,
-                );
+                    control,
+                    options,
+                });
                 let _ = transfer_tx.unbounded_send(TransferJobResult {
                     id,
                     event: TransferJobEvent::Finished(result),
@@ -208,28 +211,43 @@ impl NyaTermApp {
 /// Shared inputs for every per-entry "Send to" job in one send action.
 struct SendToJobContext {
     source_session_id: Option<String>,
-    source_service: Arc<RemoteFileService>,
+    source_service: FileBrowserService,
     target_session_id: String,
-    target_service: Arc<RemoteFileService>,
+    target_service: FileBrowserService,
     cached_target_dir: Option<String>,
+    options: SftpPathTransferOptions,
+}
+
+struct SendToRequest {
+    source_service: FileBrowserService,
+    source_remote: RemoteFilePath,
+    target_service: FileBrowserService,
+    cached_target_dir: Option<String>,
+    entry_name: String,
+    target_session_id: String,
+    control: SftpTransferControl,
+    options: SftpPathTransferOptions,
 }
 
 /// Copy one entry to the target session and list the destination directory.
 ///
 /// Backend selection is left to `FileCopyRequest`: SFTP-to-SFTP copies directly,
 /// mixed backends stage through a local temp directory.
-fn run_send_to(
-    source_service: &Arc<RemoteFileService>,
-    source_path: RemoteFilePath,
-    target_service: &Arc<RemoteFileService>,
-    cached_target_dir: Option<&str>,
-    entry_name: &str,
-    target_session_id: String,
-) -> Result<TransferJobOutput, String> {
+fn run_send_to(request: SendToRequest) -> Result<TransferJobOutput, String> {
+    let SendToRequest {
+        source_service,
+        source_remote,
+        target_service,
+        cached_target_dir,
+        entry_name,
+        target_session_id,
+        control,
+        options,
+    } = request;
     // Resolve the destination directory from the target session only: the cache
     // when present, otherwise the target session's home. Never the source path.
     let target_dir = match cached_target_dir {
-        Some(dir) => dir.to_string(),
+        Some(dir) => dir,
         None => {
             let home = target_service.home_dir().map_err(|error| {
                 t!(
@@ -241,22 +259,20 @@ fn run_send_to(
             send_to_target_directory(None, Some(home.as_str()))
         }
     };
-    let target_path = send_to_destination_path(&target_dir, entry_name);
-    let target_parent_path = remote_parent_path(&target_path);
+    let requested_target_path = file_browser_join(target_service.kind(), &target_dir, &entry_name);
 
     let request = FileCopyRequest {
-        source: FileTransferEndpoint::Remote {
-            service: source_service.clone(),
-            path: source_path.clone(),
-        },
-        destination: FileTransferEndpoint::Remote {
-            service: target_service.clone(),
-            path: RemoteFilePath::new(target_path.clone()),
-        },
+        source: source_service.transfer_endpoint(&source_remote),
+        destination: target_service
+            .transfer_endpoint(&RemoteFilePath::new(requested_target_path.clone())),
+        control,
+        options,
     };
     let summary = request
         .execute()
         .map_err(|error| t!("fileTransfer.errorSend", error = error.to_string()).to_string())?;
+    let target_path = summary.destination_path;
+    let target_parent_path = file_browser_parent(target_service.kind(), &target_path);
 
     // A best-effort refresh of the destination listing; a failure here does not
     // fail the copy, it just leaves the target cache untouched.
@@ -265,7 +281,7 @@ fn run_send_to(
         .unwrap_or_default();
 
     Ok(TransferJobOutput::Sent {
-        source_path: source_path.display_path,
+        source_path: source_remote.display_path,
         target_session_id,
         target_path,
         target_parent_path,

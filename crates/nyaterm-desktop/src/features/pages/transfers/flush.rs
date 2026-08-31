@@ -60,7 +60,11 @@ impl NyaTermApp {
         let active_session_id = self.session.active_id().map(str::to_string);
         let availability = transfer_browser_availability(
             active_session_id.is_some(),
-            self.session.active_ssh_file_browser_config().is_some(),
+            active_session_id.as_deref().is_some_and(|session_id| {
+                self.session
+                    .file_browser_backend_support_for_session(session_id)
+                    .is_some()
+            }),
             active_session_id
                 .as_deref()
                 .is_some_and(|session_id| self.session.is_disconnected(session_id)),
@@ -89,6 +93,8 @@ impl NyaTermApp {
         let show_hidden_files = self.settings.summary().ui_file_explorer_show_hidden_files;
         let browser = self.transfer.browser_view();
         let browser = TransferBrowserPresentation {
+            local_backend: self.session.active_file_browser_backend()
+                == Some(nyaterm_transport::FileBrowserBackendKind::Local),
             path: browser.path.clone(),
             home_dir: browser.home_dir.clone(),
             path_editing: browser.path_editing,

@@ -242,23 +242,6 @@ impl TransferFeatureState {
             .unwrap_or_default()
     }
 
-    pub(in crate::features) fn set_editor_tab_error_by_id(
-        &mut self,
-        tab_id: &str,
-        error: String,
-    ) -> bool {
-        let Some(tab) = self
-            .editor
-            .workspace
-            .as_mut()
-            .and_then(|workspace| workspace.tabs.iter_mut().find(|tab| tab.id == tab_id))
-        else {
-            return false;
-        };
-        tab.error = Some(error);
-        true
-    }
-
     pub(in crate::features) fn fail_editor_load_tab(
         &mut self,
         tab_id: &str,

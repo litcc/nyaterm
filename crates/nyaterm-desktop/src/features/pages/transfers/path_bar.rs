@@ -786,6 +786,36 @@ fn build_transfer_browser_breadcrumbs(
     home_dir: &str,
 ) -> Vec<TransferBrowserBreadcrumbSegment> {
     let current_path = normalized_transfer_browser_path(current_path);
+    if current_path.contains('\\') || current_path.as_bytes().get(1) == Some(&b':') {
+        let mut path = std::path::PathBuf::new();
+        let mut segments = Vec::new();
+        for component in std::path::Path::new(&current_path).components() {
+            path.push(component.as_os_str());
+            match component {
+                std::path::Component::RootDir => {
+                    segments.push(TransferBrowserBreadcrumbSegment {
+                        label: path.to_string_lossy().into_owned(),
+                        path: path.to_string_lossy().into_owned(),
+                    });
+                }
+                std::path::Component::Normal(name) => {
+                    segments.push(TransferBrowserBreadcrumbSegment {
+                        label: name.to_string_lossy().into_owned(),
+                        path: path.to_string_lossy().into_owned(),
+                    });
+                }
+                std::path::Component::Prefix(_) => {}
+                std::path::Component::CurDir | std::path::Component::ParentDir => {}
+            }
+        }
+        if segments.is_empty() {
+            segments.push(TransferBrowserBreadcrumbSegment {
+                label: current_path.clone(),
+                path: current_path,
+            });
+        }
+        return segments;
+    }
     if current_path == "." || !current_path.starts_with('/') {
         let mut path = String::new();
         return current_path
@@ -908,9 +938,11 @@ fn display_transfer_browser_home_path(path: &str, home_dir: &str) -> String {
     if path == home_dir {
         return "~".to_string();
     }
-    let home_prefix = format!("{home_dir}/");
-    if let Some(suffix) = path.strip_prefix(&home_prefix) {
-        return format!("~/{suffix}");
+    for separator in ['/', '\\'] {
+        let home_prefix = format!("{home_dir}{separator}");
+        if let Some(suffix) = path.strip_prefix(&home_prefix) {
+            return format!("~{separator}{suffix}");
+        }
     }
     path
 }
@@ -925,6 +957,9 @@ fn expand_transfer_browser_home_path(path: &str, home_dir: &str) -> String {
         return home_dir;
     }
     if let Some(suffix) = trimmed.strip_prefix("~/") {
+        return normalized_transfer_browser_path(&remote_child_path(&home_dir, suffix));
+    }
+    if let Some(suffix) = trimmed.strip_prefix("~\\") {
         return normalized_transfer_browser_path(&remote_child_path(&home_dir, suffix));
     }
     normalized_transfer_browser_path(trimmed)
