@@ -104,6 +104,14 @@ def validate_version(raw: str, expected: str | None = None) -> str:
     return version
 
 
+def validate_artifact_version(raw: str) -> str:
+    """Validate a public filename label without changing package metadata."""
+    value = raw.strip()
+    if value == "main-snapshot":
+        return value
+    return validate_version(value)
+
+
 def target_info(target: str) -> TargetInfo:
     try:
         return TARGETS[target]
@@ -113,7 +121,7 @@ def target_info(target: str) -> TargetInfo:
 
 def artifact_names(target: str, version: str) -> set[str]:
     info = target_info(target)
-    prefix = f"{APP_NAME}_{normalize_version(version)}_{info.label}"
+    prefix = f"{APP_NAME}_{validate_artifact_version(version)}_{info.label}"
     if info.os_name == "macos":
         return {f"{prefix}.dmg", f"{prefix}.app.tar.gz"}
     if info.os_name == "linux":
@@ -227,7 +235,7 @@ def find_makensis() -> str:
 
 
 def create_windows_packages(
-    binary: Path, info: TargetInfo, version: str
+    binary: Path, info: TargetInfo, version: str, artifact_version: str
 ) -> None:
     portable_root = WORK_DIR / "NyaTerm-portable"
     portable_root.mkdir()
@@ -238,7 +246,7 @@ def create_windows_packages(
     (portable_root / "data" / ".keep").touch()
     copy_release_documents(portable_root, version)
     portable_output = (
-        DIST_DIR / f"{APP_NAME}_{version}_{info.label}_portable.zip"
+        DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}_portable.zip"
     )
     archive_zip(portable_root, portable_output)
 
@@ -257,7 +265,7 @@ def create_windows_packages(
         f'Delete "$INSTDIR\\{path.name}"' for path in installer_helpers
     )
 
-    output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}-setup.exe"
+    output = DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}-setup.exe"
     script = WORK_DIR / "nyaterm-installer.nsi"
     script.write_text(
         textwrap.dedent(
@@ -332,7 +340,9 @@ def create_windows_packages(
     run([find_makensis(), str(script)])
 
 
-def create_macos_packages(binary: Path, info: TargetInfo, version: str) -> None:
+def create_macos_packages(
+    binary: Path, info: TargetInfo, version: str, artifact_version: str
+) -> None:
     bundle = WORK_DIR / "NyaTerm.app"
     macos_dir = bundle / "Contents" / "MacOS"
     resources_dir = bundle / "Contents" / "Resources"
@@ -378,7 +388,7 @@ def create_macos_packages(binary: Path, info: TargetInfo, version: str) -> None:
         run([codesign, "--force", "--sign", "-", "--timestamp=none", str(helper)])
     run([codesign, "--force", "--deep", "--sign", "-", "--timestamp=none", str(bundle)])
 
-    tar_output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}.app.tar.gz"
+    tar_output = DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}.app.tar.gz"
     with tarfile.open(tar_output, "w:gz", compresslevel=9) as archive:
         archive.add(bundle, arcname="NyaTerm.app")
 
@@ -386,7 +396,7 @@ def create_macos_packages(binary: Path, info: TargetInfo, version: str) -> None:
     dmg_root.mkdir()
     shutil.copytree(bundle, dmg_root / "NyaTerm.app", symlinks=True)
     (dmg_root / "Applications").symlink_to("/Applications")
-    dmg_output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}.dmg"
+    dmg_output = DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}.dmg"
     run(
         [
             require_tool("hdiutil"),
@@ -490,7 +500,9 @@ def linux_deb_dependencies(binaries: list[Path]) -> str:
     return parse_dpkg_dependencies(output)
 
 
-def create_linux_appimage(binary: Path, info: TargetInfo, version: str) -> None:
+def create_linux_appimage(
+    binary: Path, info: TargetInfo, version: str, artifact_version: str
+) -> None:
     appdir = WORK_DIR / "NyaTerm.AppDir"
     usr_bin = appdir / "usr" / "bin"
     usr_bin.mkdir(parents=True)
@@ -515,14 +527,16 @@ def create_linux_appimage(binary: Path, info: TargetInfo, version: str) -> None:
     )
     make_executable(apprun)
 
-    output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}.AppImage"
+    output = DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}.AppImage"
     env = os.environ.copy()
     env["ARCH"] = linux_appimage_arch(info.target)
     env.setdefault("APPIMAGE_EXTRACT_AND_RUN", "1")
     run([require_tool("appimagetool"), str(appdir), str(output)], env=env)
 
 
-def create_linux_deb(binary: Path, info: TargetInfo, version: str) -> None:
+def create_linux_deb(
+    binary: Path, info: TargetInfo, version: str, artifact_version: str
+) -> None:
     root = WORK_DIR / "deb"
     app_root = root / "opt" / LINUX_PACKAGE
     app_root.mkdir(parents=True)
@@ -558,11 +572,13 @@ def create_linux_deb(binary: Path, info: TargetInfo, version: str) -> None:
         ).lstrip(),
         encoding="utf-8",
     )
-    output = DIST_DIR / f"{APP_NAME}_{version}_{info.label}.deb"
+    output = DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}.deb"
     run([require_tool("dpkg-deb"), "--build", "--root-owner-group", str(root), str(output)])
 
 
-def create_linux_rpm(binary: Path, info: TargetInfo, version: str) -> None:
+def create_linux_rpm(
+    binary: Path, info: TargetInfo, version: str, artifact_version: str
+) -> None:
     rpm_root = WORK_DIR / "rpm"
     top_dir = rpm_root / "rpmbuild"
     payload = rpm_root / "payload"
@@ -627,13 +643,17 @@ def create_linux_rpm(binary: Path, info: TargetInfo, version: str) -> None:
     built = list((top_dir / "RPMS" / linux_rpm_arch(info.target)).glob("*.rpm"))
     if len(built) != 1:
         raise RuntimeError(f"expected one RPM artifact, found {len(built)}")
-    shutil.copy2(built[0], DIST_DIR / f"{APP_NAME}_{version}_{info.label}.rpm")
+    shutil.copy2(
+        built[0], DIST_DIR / f"{APP_NAME}_{artifact_version}_{info.label}.rpm"
+    )
 
 
-def create_linux_packages(binary: Path, info: TargetInfo, version: str) -> None:
-    create_linux_appimage(binary, info, version)
-    create_linux_deb(binary, info, version)
-    create_linux_rpm(binary, info, version)
+def create_linux_packages(
+    binary: Path, info: TargetInfo, version: str, artifact_version: str
+) -> None:
+    create_linux_appimage(binary, info, version, artifact_version)
+    create_linux_deb(binary, info, version, artifact_version)
+    create_linux_rpm(binary, info, version, artifact_version)
 
 
 def main() -> None:
@@ -644,19 +664,22 @@ def main() -> None:
     version = validate_version(
         os.environ.get("NYATERM_VERSION", expected_version), expected_version
     )
+    artifact_version = validate_artifact_version(
+        os.environ.get("NYATERM_ARTIFACT_VERSION", version)
+    )
     reset_output()
     print(f"==> Packaging {APP_NAME} {version} for {info.target}", flush=True)
     binary = build_application(info.target)
 
     if info.os_name == "macos":
-        create_macos_packages(binary, info, version)
+        create_macos_packages(binary, info, version, artifact_version)
     elif info.os_name == "linux":
-        create_linux_packages(binary, info, version)
+        create_linux_packages(binary, info, version, artifact_version)
     else:
-        create_windows_packages(binary, info, version)
+        create_windows_packages(binary, info, version, artifact_version)
 
     actual = {path.name for path in DIST_DIR.iterdir() if path.is_file()}
-    expected = artifact_names(info.target, version)
+    expected = artifact_names(info.target, artifact_version)
     if actual != expected:
         raise RuntimeError(
             f"package output mismatch: expected {sorted(expected)}, got {sorted(actual)}"

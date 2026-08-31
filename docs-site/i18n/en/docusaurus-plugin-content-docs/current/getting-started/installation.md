@@ -32,6 +32,8 @@ For the Windows portable edition, extract the zip and run `NyaTerm.exe`; configu
 
 **Help → Check Updates** only checks GitHub Releases and opens the Releases page — it does not download or replace program files. To update a portable build, close NyaTerm, replace the program files manually, and keep `data/`.
 
+An installed Tauri release can use its existing signed updater once to migrate to the GPUI installer. The old Tauri portable updater only accepts one application executable and cannot carry the RDP/VNC helper processes required by GPUI. Download the complete GPUI portable zip, copy the old `data/` directory into the new directory, and do not replace only `NyaTerm.exe`.
+
 ### macOS
 
 macOS users can install NyaTerm with Homebrew:

@@ -87,7 +87,7 @@ jobs:
         run: cargo test --workspace --locked --no-fail-fast
 
   python:
-    name: Packaging helpers
+    name: Release helpers
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -106,15 +106,34 @@ jobs:
       - name: Test packaging helpers
         run: >-
           python -m unittest
+          scripts.tests.test_check_release_assets
           scripts.tests.test_package_native
           scripts.tests.test_verify_native_package
+          scripts.tests.test_generate_release_metadata
+
+  workflows:
+    name: Workflow syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run actionlint
+        run: >-
+          docker run --rm
+          -v "${PWD}:/repo"
+          -w /repo
+          rhysd/actionlint:1.7.7
 
   # Single always-reporting status check for branch protection. Passes when its
   # dependencies succeeded or were skipped, fails when any failed or was cancelled.
   gate:
     name: Rust gate
     runs-on: ubuntu-24.04
-    needs: [lint, test, python]
+    needs: [lint, test, python, workflows]
     if: always()
     timeout-minutes: 5
     steps:

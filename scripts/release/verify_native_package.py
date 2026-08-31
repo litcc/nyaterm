@@ -401,9 +401,14 @@ def verify_rpm(path: Path, target: str, version: str) -> None:
     verify_linux_desktop(desktop_content, "/opt/nyaterm/nyaterm", path.name)
 
 
-def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
+def verify_release(
+    dist: Path, target: str, version: str, artifact_version: str | None = None
+) -> dict[str, object]:
     version = package_native.validate_version(version)
-    expected_names = package_native.artifact_names(target, version)
+    artifact_version = package_native.validate_artifact_version(
+        artifact_version or version
+    )
+    expected_names = package_native.artifact_names(target, artifact_version)
     actual_names = {path.name for path in dist.iterdir() if path.is_file()}
     missing = expected_names - actual_names
     unexpected = actual_names - expected_names
@@ -416,7 +421,7 @@ def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
             raise RuntimeError(f"release artifact is unexpectedly small: {name}")
 
     info = package_native.target_info(target)
-    prefix = f"{package_native.APP_NAME}_{version}_{info.label}"
+    prefix = f"{package_native.APP_NAME}_{artifact_version}_{info.label}"
     if info.os_name == "windows":
         verify_windows_portable(dist / f"{prefix}_portable.zip", target, version)
         verify_windows_installer(dist / f"{prefix}-setup.exe", target)
@@ -434,9 +439,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--artifact-version")
     parser.add_argument("--dist", type=Path, default=Path("dist"))
     args = parser.parse_args()
-    summary = verify_release(args.dist.resolve(), args.target, args.version)
+    summary = verify_release(
+        args.dist.resolve(), args.target, args.version, args.artifact_version
+    )
     print(
         f"Verified {len(summary['artifacts'])} artifacts for "
         f"{summary['target']} ({summary['version']})"

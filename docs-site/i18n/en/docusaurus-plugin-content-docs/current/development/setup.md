@@ -97,7 +97,7 @@ cargo test --workspace --locked --no-fail-fast
 The separate Linux Python packaging-test job runs:
 
 ```bash
-python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
+python -m unittest scripts.tests.test_check_release_assets scripts.tests.test_package_native scripts.tests.test_verify_native_package scripts.tests.test_generate_release_metadata
 ```
 
 The non-ignored RDP/VNC helper lifecycle integration tests are covered automatically by workspace tests, including handshake, normal exit, and crash/hang reaping. They can also be run directly:
@@ -138,6 +138,23 @@ python scripts/release/verify_native_package.py --target "${TARGET}" --version "
 ```
 
 Before publication, `scripts/ci/check_release_assets.py` also rejects missing or extra artifacts in the combined six-target asset set.
+
+`NYATERM_ARTIFACT_VERSION` changes only the version segment in artifact names;
+package metadata still uses the workspace SemVer. This interface is reserved
+for manual snapshot builds, and packaging and verification must receive the
+same value:
+
+```bash
+NYATERM_ARTIFACT_VERSION=main-snapshot \
+  python scripts/release/package_native.py "${TARGET}"
+python scripts/release/verify_native_package.py \
+  --target "${TARGET}" --version "${VERSION}" \
+  --artifact-version main-snapshot --dist dist
+```
+
+After validation, a version tag publishes GitHub Release and versioned R2 assets, then triggers Gitee, AUR, and Homebrew. The website reads `downloads.json`; signed `latest.json` exists only to migrate installed Tauri releases to GPUI. Only stable releases replace the root R2 manifests, while prereleases retain versioned manifests. A manual `Main Snapshot` run overwrites the `main-snapshot` prerelease without publishing to downstream channels.
+
+The Release workflow requires `NYATERM_GITHUB_GIST_CLIENT_ID`, the Gitee/R2 repository variables, and the updater, R2, Gitee, AUR, and Homebrew secrets named in the workflows. Missing configuration fails the relevant release step instead of producing an incomplete official release.
 
 ### Native tools and the manual-acceptance boundary
 

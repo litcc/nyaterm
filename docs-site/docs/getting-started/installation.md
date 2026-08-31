@@ -32,6 +32,8 @@ Windows 便携版解压后运行 `NyaTerm.exe` 即可，配置数据保存在同
 
 **Help → 检查更新** 只检查 GitHub Releases 并提供页面入口，不会自动下载或替换程序文件。更新便携版时关闭 NyaTerm 后手动替换程序文件，保留 `data/` 目录。
 
+以前安装的 Tauri 安装版可以通过原有签名更新器迁移一次到 GPUI 安装版。旧 Tauri 便携更新器只允许更新单个主程序，无法携带 GPUI 必需的 RDP/VNC helper；请下载完整的 GPUI 便携 ZIP，并将旧目录中的 `data/` 复制到新目录，不能只替换 `NyaTerm.exe`。
+
 ### macOS
 
 macOS 用户可以通过 Homebrew 安装 NyaTerm：

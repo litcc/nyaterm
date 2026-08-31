@@ -282,11 +282,13 @@ NyaTerm 适合每天在服务器、本地命令、设备调试和配置文件之
 
 | 平台 | 格式 |
 |------|------|
-| Windows | `.msi` / `.exe` / 便携版 `.zip` |
+| Windows | `.exe` / 便携版 `.zip` |
 | macOS | `.dmg` |
-| Linux | `.deb` / `.AppImage` |
+| Linux | `.deb` / `.AppImage` / `.rpm` |
 
-Windows 便携版解压后运行 `NyaTerm.exe` 即可。**Help → 检查更新** 与安装版共用 Cloudflare R2 更新清单和下载源。重启时 NyaTerm 会自动替换程序文件，并完整保留 `data/` 目录。
+Windows 便携版解压后运行 `NyaTerm.exe` 即可。GPUI 版本的 **Help → 检查更新** 只检查 GitHub Releases 并打开发布页面，不会自动替换程序文件。更新前请关闭 NyaTerm，替换完整的便携目录并保留 `data/`。
+
+以前安装的 Tauri 安装版可以通过原有签名更新器迁移一次到 GPUI 安装版。旧 Tauri 便携更新器无法携带 GPUI 必需的 RDP/VNC helper，因此必须手动迁移：下载完整的 GPUI 便携 ZIP，再把原 `data/` 目录复制进去。
 
 ### macOS
 

@@ -275,11 +275,13 @@ Download the latest build for your platform from [nyaterm.app](https://nyaterm.a
 
 | Platform | Format |
 |----------|--------|
-| Windows | `.msi` / `.exe` / portable `.zip` |
+| Windows | `.exe` / portable `.zip` |
 | macOS | `.dmg` |
-| Linux | `.deb` / `.AppImage` |
+| Linux | `.deb` / `.AppImage` / `.rpm` |
 
-For the Windows portable edition, extract the zip and run `NyaTerm.exe`. **Help → Check Updates** uses the same Cloudflare R2 update manifest and download source as the installed edition. NyaTerm preserves the complete `data/` folder while replacing the program files and restarting.
+For the Windows portable edition, extract the zip and run `NyaTerm.exe`. The GPUI application checks GitHub Releases and opens the release page; it does not replace files automatically. Close NyaTerm before updating the complete portable directory, and preserve `data/`.
+
+Installed releases from the former Tauri application can use their signed updater once to migrate to a GPUI installer. The old Tauri portable updater cannot carry the GPUI RDP/VNC helper processes and therefore requires a manual migration: download the complete GPUI portable zip and copy the existing `data/` directory into it.
 
 ### macOS
 

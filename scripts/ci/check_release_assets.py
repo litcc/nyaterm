@@ -43,6 +43,10 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="release version; must match the Cargo workspace version",
     )
+    parser.add_argument(
+        "--artifact-version",
+        help="optional public filename label, for example main-snapshot",
+    )
     args = parser.parse_args(argv)
 
     directory = args.dist.resolve()
@@ -50,7 +54,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"release directory not found: {directory}", file=sys.stderr)
         return 1
 
-    expected = expected_artifacts(args.version)
+    package_native.validate_version(args.version)
+    artifact_version = package_native.validate_artifact_version(
+        args.artifact_version or args.version
+    )
+    expected = expected_artifacts(artifact_version)
     actual = {entry.name for entry in directory.iterdir() if entry.is_file()}
 
     problems = [f"missing artifact: {name}" for name in sorted(expected - actual)]

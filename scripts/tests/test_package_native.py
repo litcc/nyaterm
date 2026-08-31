@@ -28,6 +28,25 @@ class PackageNativeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match"):
             package_native.validate_version("v2.0.1", "2.0.0")
 
+    def test_snapshot_is_only_allowed_as_an_artifact_label(self) -> None:
+        self.assertEqual(
+            package_native.validate_artifact_version("main-snapshot"),
+            "main-snapshot",
+        )
+        with self.assertRaises(ValueError):
+            package_native.validate_version("main-snapshot")
+        with self.assertRaises(ValueError):
+            package_native.validate_artifact_version("nightly")
+        self.assertEqual(
+            package_native.artifact_names(
+                "x86_64-pc-windows-msvc", "main-snapshot"
+            ),
+            {
+                "NyaTerm_main-snapshot_windows_x64_portable.zip",
+                "NyaTerm_main-snapshot_windows_x64-setup.exe",
+            },
+        )
+
     def test_all_release_targets_have_expected_artifact_names(self) -> None:
         expected = {
             "aarch64-apple-darwin": {
@@ -135,7 +154,9 @@ class PackageNativeTests(unittest.TestCase):
                 for path in package_native.helper_binary_paths(target):
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(b"MZ")
-                package_native.create_windows_packages(application, info, "2.0.0")
+                package_native.create_windows_packages(
+                    application, info, "2.0.0", "2.0.0"
+                )
                 script = (
                     package_native.WORK_DIR / "nyaterm-installer.nsi"
                 ).read_text(encoding="utf-8")

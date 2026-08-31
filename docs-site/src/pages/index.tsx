@@ -44,7 +44,9 @@ type LatestDownloadManifest = {
   platforms?: Partial<Record<DownloadPlatformKey, {url?: string}>>;
 };
 
-const latestDownloadManifestUrl = 'https://downloads.nyaterm.app/latest.json';
+// downloads.json is intentionally separate from latest.json. The latter remains a
+// signed Tauri updater bridge for installed pre-GPUI releases.
+const latestDownloadManifestUrl = 'https://downloads.nyaterm.app/downloads.json';
 const downloadBaseUrl = 'https://downloads.nyaterm.app';
 
 // Fallback for the initial render and older manifests that predate portable targets.

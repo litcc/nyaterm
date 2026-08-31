@@ -48,7 +48,7 @@ The Linux packaging-helper job, which needs neither Rust nor native GUI
 libraries, runs this exact command:
 
 ```bash
-python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
+python -m unittest scripts.tests.test_check_release_assets scripts.tests.test_package_native scripts.tests.test_verify_native_package scripts.tests.test_generate_release_metadata
 ```
 
 Documentation CI runs these exact commands on Linux with Python 3.12, Node.js
@@ -134,6 +134,26 @@ asset set is exact. Those automated checks validate package structure,
 metadata, helper presence, and binary architecture. They do not replace manual
 installation, launch, upgrade/uninstall, URL-handler, platform trust/signing,
 GUI, PTY, GPU/IME, or real RDP/VNC acceptance on the target OS.
+
+`NYATERM_ARTIFACT_VERSION` changes only the version segment in artifact names;
+package metadata still uses the workspace SemVer. This is reserved for the
+manual snapshot workflow and must be passed to both packaging and verification:
+
+```bash
+NYATERM_ARTIFACT_VERSION=main-snapshot \
+  python scripts/release/package_native.py "${TARGET}"
+python scripts/release/verify_native_package.py \
+  --target "${TARGET}" --version "${VERSION}" \
+  --artifact-version main-snapshot --dist dist
+```
+
+Tag releases publish the verified assets to GitHub and Cloudflare R2, then
+trigger the Gitee, AUR, and Homebrew workflows. `downloads.json` is the website
+download catalog; the signed `latest.json` exists only to migrate installed
+Tauri releases. A manual `Main Snapshot` run overwrites the `main-snapshot`
+prerelease and does not publish to downstream channels. Release builds require
+the repository variables and secrets named by those workflows; missing release
+configuration is a hard failure.
 
 Tests should live beside the behavior they cover. Storage, credentials,
 encryption, backup, cloud-sync, known-host, and session changes must include

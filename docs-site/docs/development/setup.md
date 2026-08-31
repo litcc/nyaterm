@@ -97,7 +97,7 @@ cargo test --workspace --locked --no-fail-fast
 Linux 上独立的 Python 打包单测 job 执行：
 
 ```bash
-python -m unittest scripts.tests.test_package_native scripts.tests.test_verify_native_package
+python -m unittest scripts.tests.test_check_release_assets scripts.tests.test_package_native scripts.tests.test_verify_native_package scripts.tests.test_generate_release_metadata
 ```
 
 RDP/VNC helper 的非 ignored lifecycle 集成测试已经由 workspace tests 自动覆盖，包括握手、正常退出和 crash/hang 回收；也可定向运行：
@@ -138,6 +138,20 @@ python scripts/release/verify_native_package.py --target "${TARGET}" --version "
 ```
 
 发布前还会对六目标合并后的资产集合执行 `scripts/ci/check_release_assets.py`，拒绝缺失或多余的产物。
+
+`NYATERM_ARTIFACT_VERSION` 只改变产物文件名中的版本段，包内元数据仍使用 workspace 的 SemVer。该接口仅供手动快照构建使用，打包和验包必须传入同一个值：
+
+```bash
+NYATERM_ARTIFACT_VERSION=main-snapshot \
+  python scripts/release/package_native.py "${TARGET}"
+python scripts/release/verify_native_package.py \
+  --target "${TARGET}" --version "${VERSION}" \
+  --artifact-version main-snapshot --dist dist
+```
+
+正式标签在验包后发布 GitHub Release 和 R2 版本目录，再触发 Gitee、AUR 与 Homebrew。官网读取 `downloads.json`；签名的 `latest.json` 只用于让已安装的旧 Tauri 版本迁移到 GPUI。稳定版才覆盖 R2 根目录清单，预发布只保留版本化清单。手动运行 `Main Snapshot` 会覆盖 `main-snapshot` prerelease，不发布到外部分发渠道。
+
+Release workflow 需要 `NYATERM_GITHUB_GIST_CLIENT_ID`、Gitee/R2 Variables，以及 Tauri updater、R2、Gitee、AUR、Homebrew 对应的 Secrets。相关发布步骤缺少配置时会失败，不会生成缺功能或只发布一部分渠道的正式包。
 
 ### 原生工具与手工验收边界
 
