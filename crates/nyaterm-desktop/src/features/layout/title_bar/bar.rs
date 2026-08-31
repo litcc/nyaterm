@@ -9,9 +9,8 @@ use time::{OffsetDateTime, UtcOffset, Weekday, macros::format_description};
 
 use crate::features::{
     NyaTermApp, formatting::format_rate, formatting::format_uptime, formatting::short_id,
-    icons::IconDef, icons::resolve_connection_icon, transfers::format_file_size,
-    view_widgets::connection_type_icon, view_widgets::logo_mark,
-    view_widgets::window_control_button,
+    icons::IconDef, icons::resolve_connection_icon, view_widgets::connection_type_icon,
+    view_widgets::logo_mark, view_widgets::window_control_button,
 };
 use crate::models::HeaderStatusMode;
 
@@ -676,8 +675,8 @@ impl NyaTermApp {
         let cpu_text = format!("CPU {:.0}%", stats.cpu.usage.clamp(0., 100.));
         let memory_text = format!(
             "RAM {}/{}",
-            format_file_size(Some(stats.memory.used)),
-            format_file_size(Some(memory_total))
+            format_binary_bytes(stats.memory.used),
+            format_binary_bytes(memory_total)
         );
         let tx_text = format_rate(tx);
         let rx_text = format_rate(rx);
@@ -967,6 +966,29 @@ fn format_optional_percent(value: Option<f64>) -> String {
     )
 }
 
+fn format_binary_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 7] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024. && unit < UNITS.len() - 1 {
+        value /= 1024.;
+        unit += 1;
+    }
+
+    if unit == 0 {
+        format!("{bytes} B")
+    } else if value < 100. {
+        format!("{value:.1} {}", UNITS[unit])
+    } else {
+        format!("{value:.0} {}", UNITS[unit])
+    }
+}
+
 fn format_memory_mb_value(value: u64) -> String {
     if value >= 1024 {
         let gib = value as f64 / 1024.;
@@ -1101,7 +1123,7 @@ mod tests {
     use crate::models::HeaderStatusMode;
 
     use super::{
-        format_header_datetime, format_memory_mb_compact, hardware_card_limit,
+        format_binary_bytes, format_header_datetime, format_memory_mb_compact, hardware_card_limit,
         header_status_mode_icon, localized_weekday, percent_from_parts, pressure_color,
         session_header_icon,
     };
@@ -1152,6 +1174,23 @@ mod tests {
             session_header_icon(SessionKind::Serial, None).path,
             "icons/conn/serial.svg"
         );
+    }
+
+    #[test]
+    fn resource_memory_uses_adaptive_binary_units() {
+        const KIB: u64 = 1024;
+        const MIB: u64 = KIB * 1024;
+        const GIB: u64 = MIB * 1024;
+        const TIB: u64 = GIB * 1024;
+
+        assert_eq!(format_binary_bytes(0), "0 B");
+        assert_eq!(format_binary_bytes(1023), "1023 B");
+        assert_eq!(format_binary_bytes(KIB), "1.0 KiB");
+        assert_eq!(format_binary_bytes(MIB), "1.0 MiB");
+        assert_eq!(format_binary_bytes(128 * MIB), "128 MiB");
+        assert_eq!(format_binary_bytes(16 * GIB), "16.0 GiB");
+        assert_eq!(format_binary_bytes(31 * GIB + GIB / 2), "31.5 GiB");
+        assert_eq!(format_binary_bytes(TIB), "1.0 TiB");
     }
 
     #[test]

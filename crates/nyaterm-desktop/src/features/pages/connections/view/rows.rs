@@ -1,15 +1,16 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, AppContext as _, Context, FontWeight, IntoElement, KeyDownEvent, MouseButton,
-    MouseDownEvent, Render, SharedString, Window, div,
+    AnyElement, AppContext as _, ClipboardItem, Context, FontWeight, IntoElement, KeyDownEvent,
+    MouseButton, MouseDownEvent, RenderOnce, SharedString, Window, div,
     prelude::{
         FluentBuilder, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled,
     },
     px, relative, rgb, rgba, svg,
 };
 use nyaterm_core::SavedConnection;
-use nyaterm_ui::NyaInput;
+use nyaterm_ui::{NyaHoverCard, NyaIconButton, NyaInput};
+use rust_i18n::t;
 
 use crate::features::{
     connections::ConnectionDragKind, connections::ConnectionDragPayload,
@@ -20,64 +21,116 @@ use crate::features::{
 };
 
 use super::super::list::{
-    ConnectionSectionHeader, connection_detail_rows, connection_tree_indent_px,
+    ConnectionDetailRow, ConnectionSectionHeader, connection_detail_rows, connection_tree_indent_px,
 };
 use super::super::panel::{ConnectionListSnapshot, ConnectionPanel};
 use super::CONNECTION_ACTION_CLEARANCE_PX;
 
-/// The label/value card shown after hovering a saved connection.
+/// Interactive label/value card shown after hovering a saved connection.
 ///
-/// This is a tooltip rather than an absolutely positioned child of the row: the
-/// panel clips its overflow, and rows painted after the hovered one would cover
-/// an in-tree card anyway. As a tooltip it is deferred to the top paint layer and
-/// flips to stay inside the window, which is what the old UI got from portalling.
-pub(in crate::features) struct ConnectionDetailsTooltip {
-    rows: Arc<[(&'static str, String)]>,
+/// `NyaHoverCard` keeps this content open while the pointer crosses from the
+/// connection name, so copy buttons remain reachable just like Tauri's
+/// hoverable TooltipContent.
+#[derive(IntoElement)]
+pub(in crate::features) struct ConnectionDetailsHoverCard {
+    connection_id: String,
+    rows: Arc<[ConnectionDetailRow]>,
+    palette: crate::theme::ThemePalette,
 }
 
-impl ConnectionDetailsTooltip {
-    pub(in crate::features) fn new(rows: Arc<[(&'static str, String)]>) -> Self {
-        Self { rows }
+impl ConnectionDetailsHoverCard {
+    pub(in crate::features) fn new(
+        connection_id: String,
+        rows: Arc<[ConnectionDetailRow]>,
+        palette: crate::theme::ThemePalette,
+    ) -> Self {
+        Self {
+            connection_id,
+            rows,
+            palette,
+        }
     }
 }
 
-impl Render for ConnectionDetailsTooltip {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let mut grid = div().flex().flex_col().gap_1();
-        for (label, value) in self.rows.iter() {
+impl RenderOnce for ConnectionDetailsHoverCard {
+    fn render(self, _: &mut Window, _: &mut gpui::App) -> impl IntoElement {
+        let mut grid = div().flex().flex_col().gap(px(6.));
+        for (index, row) in self.rows.iter().enumerate() {
+            let value = div()
+                .min_w_0()
+                .flex_1()
+                .text_size(px(11.))
+                .text_color(rgb(self.palette.text))
+                .when(row.multiline, |this| this.whitespace_normal())
+                .when(!row.multiline, |this| {
+                    this.overflow_hidden().whitespace_nowrap().text_ellipsis()
+                })
+                .child(row.value.clone());
+            let copy = row.copy_value.clone().map(|copy_value| {
+                let copy_id = format!("connection-detail-copy-{}-{index}", self.connection_id);
+                let copy_selector = copy_id.clone();
+                div()
+                    .id(SharedString::from(copy_id.clone()))
+                    .debug_selector(move || copy_selector.clone())
+                    .size(px(20.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        NyaIconButton::new(format!("{copy_id}-button"), "icons/copy.svg")
+                            .icon_size(px(12.))
+                            .tooltip(t!("savedConnections.copy").to_string())
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    copy_value.clone(),
+                                ));
+                            }),
+                    )
+            });
             grid = grid.child(
                 div()
+                    .min_w_0()
                     .flex()
                     .items_start()
                     .gap_2()
                     .child(
                         div()
-                            .w(px(60.))
+                            .w(px(64.))
                             .flex_none()
                             .text_size(px(11.))
-                            .text_color(rgb(0x8f98aa))
-                            .child(*label),
+                            .text_color(rgb(self.palette.text_dimmed))
+                            .child(row.label.clone()),
                     )
+                    .child(value)
                     .child(
                         div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(px(11.))
-                            .text_color(rgb(0xe5edf7))
-                            .child(value.clone()),
+                            .w(px(20.))
+                            .h(px(20.))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .children(copy),
                     ),
             );
         }
 
+        let content_selector = format!(
+            "connection-details-hover-card-content-{}",
+            self.connection_id
+        );
         div()
-            .w(px(228.))
+            .id(SharedString::from(content_selector.clone()))
+            .debug_selector(move || content_selector.clone())
+            .w(px(220.))
             .rounded_md()
             .border_1()
-            .border_color(rgb(0x334155))
-            .bg(rgba(0x151b24f2))
+            .border_color(rgb(self.palette.border))
+            .bg(rgb(self.palette.surface_elevated))
             .shadow_lg()
-            .px_3()
-            .py_2()
+            .px_2()
+            .py(px(6.))
             .child(grid)
     }
 }
@@ -451,8 +504,8 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
     let menu_id = connection.id.clone();
     let kind = connection.kind_label();
     let icon_def = resolve_connection_icon(connection.icon.as_deref(), kind);
-    let details_rows: Arc<[(&'static str, String)]> =
-        connection_detail_rows(&connection, &snapshot.connections_by_id, &snapshot.proxies).into();
+    let details_rows: Arc<[ConnectionDetailRow]> =
+        connection_detail_rows(&connection, &snapshot.connections_by_id).into();
     let drop_position = snapshot
         .drop_position_for_kind_target(ConnectionDragKind::Connection, Some(&connection.id));
     let show_before = drop_position == Some(ConnectionDropPosition::Before);
@@ -606,31 +659,41 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
                 })
             }),
         )
-        // Single-line name; the detail card is a real tooltip so it can hang
-        // outside the panel instead of covering the rows underneath it.
-        .child(connection_type_icon(palette, icon_def, selected, 16.))
+        // Match Tauri's hoverable TooltipContent with a real HoverCard: the
+        // pointer can cross into the card and click host/port/user copy buttons.
         .child(
-            div()
-                .id(SharedString::from(name_selector.clone()))
-                .debug_selector(move || name_selector.clone())
-                .flex_none()
-                // Match Tauri's `pr-14`: at maximum horizontal scroll the
-                // final glyph can move clear of the viewport-fixed actions.
-                .pr(px(CONNECTION_ACTION_CLEARANCE_PX))
-                .text_size(px(12.))
-                .font_weight(FontWeight(500.))
-                .text_color(if selected {
-                    rgb(palette.link)
-                } else {
-                    rgb(palette.text)
-                })
-                // Full name, never clipped — the list scrolls to reach it.
-                .whitespace_nowrap()
-                .child(connection.name.clone())
-                .tooltip(move |_, cx| {
-                    cx.new(|_| ConnectionDetailsTooltip::new(details_rows.clone()))
-                        .into()
-                }),
+            NyaHoverCard::new(
+                format!("connection-details-hover-card-{}", connection.id),
+                div()
+                    .id(SharedString::from(name_selector.clone()))
+                    .debug_selector(move || name_selector.clone())
+                    .h_full()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    // Match Tauri's `pr-14`: at maximum horizontal scroll the
+                    // final glyph can move clear of the viewport-fixed actions.
+                    .pr(px(CONNECTION_ACTION_CLEARANCE_PX))
+                    .child(connection_type_icon(palette, icon_def, selected, 16.))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight(500.))
+                            .text_color(if selected {
+                                rgb(palette.link)
+                            } else {
+                                rgb(palette.text)
+                            })
+                            // Full name, never clipped — the list scrolls to reach it.
+                            .whitespace_nowrap()
+                            .child(connection.name.clone()),
+                    ),
+                ConnectionDetailsHoverCard::new(connection.id.clone(), details_rows, palette),
+            )
+            .open_delay(Duration::from_millis(350))
+            .close_delay(Duration::from_millis(120))
+            .appearance(false),
         )
         .child(div().flex_1().min_w_0())
         .when(show_before, |this| {
@@ -657,4 +720,89 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
                     .bg(rgb(palette.link)),
             )
         })
+}
+
+#[cfg(test)]
+mod hover_card_tests {
+    use std::{sync::Arc, time::Duration};
+
+    use gpui::{
+        Context, InteractiveElement as _, Modifiers, Render, Styled as _, TestAppContext, Window,
+        div, px,
+    };
+    use nyaterm_ui::NyaHoverCard;
+
+    use crate::theme::{apply_component_theme, theme_palette};
+
+    use super::{ConnectionDetailRow, ConnectionDetailsHoverCard};
+
+    struct HoverCardHarness;
+
+    impl Render for HoverCardHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+            let rows: Arc<[ConnectionDetailRow]> = [ConnectionDetailRow {
+                label: "Host".to_string(),
+                value: "example.com".to_string(),
+                copy_value: Some("example.com".to_string()),
+                multiline: false,
+            }]
+            .into();
+            NyaHoverCard::new(
+                "connection-details-hover-card-test",
+                div()
+                    .debug_selector(|| "connection-details-hover-card-trigger-test".into())
+                    .size(px(40.)),
+                ConnectionDetailsHoverCard::new(
+                    "test".to_string(),
+                    rows,
+                    theme_palette("github-dark"),
+                ),
+            )
+            .appearance(false)
+            .open_delay(Duration::from_millis(10))
+            .close_delay(Duration::from_millis(120))
+        }
+    }
+
+    #[gpui::test]
+    fn connection_hover_card_stays_open_and_copy_button_works(cx: &mut TestAppContext) {
+        cx.update(|cx| apply_component_theme(theme_palette("github-dark"), cx));
+        let (_, cx) = cx.add_window_view(|_, _| HoverCardHarness);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let trigger = cx
+            .debug_bounds("connection-details-hover-card-trigger-test")
+            .expect("hover-card trigger");
+        cx.simulate_mouse_move(trigger.center(), None, Modifiers::default());
+        cx.executor().advance_clock(Duration::from_millis(10));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+        });
+
+        let content_selector = "connection-details-hover-card-content-test";
+        let content = cx
+            .debug_bounds(content_selector)
+            .expect("opened hover-card content");
+        cx.simulate_mouse_move(content.center(), None, Modifiers::default());
+        cx.executor().advance_clock(Duration::from_millis(120));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds(content_selector).is_some(),
+            "moving from the trigger into content must cancel delayed close"
+        );
+
+        let copy = cx
+            .debug_bounds("connection-detail-copy-test-0")
+            .expect("copy button target");
+        cx.simulate_click(copy.center(), Modifiers::default());
+        let clipboard = cx.update(|_, cx| {
+            cx.read_from_clipboard()
+                .and_then(|item| item.text())
+                .unwrap_or_default()
+        });
+        assert_eq!(clipboard, "example.com");
+    }
 }

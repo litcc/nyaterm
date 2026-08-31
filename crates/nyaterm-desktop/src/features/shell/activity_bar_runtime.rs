@@ -634,7 +634,7 @@ mod tests {
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
-    use crate::models::{NavItem, PanelOpenMode, PanelSide};
+    use crate::models::{ActivityBarZone, NavItem, PanelOpenMode, PanelSide};
 
     fn unique_test_dir() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -791,6 +791,49 @@ mod tests {
             app.toggle_gpu_monitor_panel(cx);
             assert_eq!(app.shell.floating_panel(PanelSide::Right), None);
             assert!(!app.shell.activity_bar_layout().is_hidden("gpuMonitor"));
+        });
+    }
+
+    #[test]
+    fn drop_indices_map_to_visible_insertion_slots_across_both_sides() {
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx);
+        cx.update_entity(&app, |app, cx| {
+            app.shell.chrome.activity_bar_layout.left_top = vec![
+                "fileExplorer".to_string(),
+                "network".to_string(),
+                "securityAuth".to_string(),
+            ];
+            app.shell.chrome.activity_bar_layout.right_top =
+                vec!["savedConnections".to_string(), "activeSessions".to_string()];
+            app.shell.chrome.activity_bar_layout.hidden_items.clear();
+
+            app.move_activity_entry("network".to_string(), ActivityBarZone::LeftTop, Some(0), cx);
+            assert_eq!(
+                app.shell.activity_bar_layout().left_top,
+                ["network", "fileExplorer", "securityAuth"]
+            );
+
+            app.move_activity_entry("network".to_string(), ActivityBarZone::LeftTop, Some(3), cx);
+            assert_eq!(
+                app.shell.activity_bar_layout().left_top,
+                ["fileExplorer", "securityAuth", "network"]
+            );
+
+            app.move_activity_entry(
+                "network".to_string(),
+                ActivityBarZone::RightTop,
+                Some(1),
+                cx,
+            );
+            assert_eq!(
+                app.shell.activity_bar_layout().left_top,
+                ["fileExplorer", "securityAuth"]
+            );
+            assert_eq!(
+                app.shell.activity_bar_layout().right_top,
+                ["savedConnections", "network", "activeSessions"]
+            );
         });
     }
 

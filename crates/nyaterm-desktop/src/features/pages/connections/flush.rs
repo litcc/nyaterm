@@ -75,7 +75,6 @@ impl NyaTermApp {
         let key = ConnectionListKey::new(
             self.connection_state.list_rows_key(),
             self.connection_state.list_selection(),
-            self.tunnel_state.proxies_arc(),
             self.connection_state
                 .list_keyboard_active_connection_id()
                 .map(str::to_string),
@@ -116,7 +115,6 @@ impl NyaTermApp {
             rows: model.rows,
             widest_row: model.widest_row,
             connections_by_id: Arc::new(connections_by_id),
-            proxies: self.tunnel_state.proxies_arc(),
             selection: self.connection_state.list_selection(),
             expanded_groups: self.connection_state.list_expanded_groups_arc(),
             keyboard_active: self

@@ -20,13 +20,7 @@ pub(in crate::features) struct TunnelFeatureState {
 pub(in crate::features) struct TunnelCatalogState {
     tunnels: Vec<TunnelConfig>,
     tunnel_groups: Vec<TunnelGroup>,
-    /// Behind an `Arc` because the connections panel snapshots it.
-    ///
-    /// Saved-connection rows name their proxy in the detail tooltip, so a proxy
-    /// edit has to reach that panel. Every write below replaces this vector
-    /// whole, so a fresh `Arc` per write makes the pointer an exact change
-    /// signal that no mutator has to maintain by hand.
-    proxies: Arc<Vec<ProxyConfig>>,
+    proxies: Vec<ProxyConfig>,
     proxy_groups: Vec<ProxyGroup>,
 }
 
@@ -72,7 +66,7 @@ impl TunnelCatalogState {
         Self {
             tunnels,
             tunnel_groups,
-            proxies: Arc::new(proxies),
+            proxies,
             proxy_groups,
         }
     }
@@ -104,16 +98,6 @@ impl TunnelFeatureState {
 
     pub(in crate::features) fn proxies(&self) -> &[ProxyConfig] {
         &self.catalog.proxies
-    }
-
-    /// The proxy list as the snapshot holds it.
-    ///
-    /// Saved-connection rows render proxy names in their detail tooltip, so the
-    /// connections panel has to notice a proxy edit. The catalog only ever
-    /// replaces this vector wholesale, so handing out the `Arc` makes the
-    /// pointer an exact change signal with nothing to keep in sync.
-    pub(in crate::features) fn proxies_arc(&self) -> Arc<Vec<ProxyConfig>> {
-        self.catalog.proxies.clone()
     }
 
     pub(in crate::features) fn proxy_groups(&self) -> &[ProxyGroup] {
@@ -162,7 +146,7 @@ impl TunnelFeatureState {
         proxy_id: &str,
         group_id: Option<String>,
     ) -> Option<Vec<ProxyConfig>> {
-        let mut proxies = self.catalog.proxies.as_ref().clone();
+        let mut proxies = self.catalog.proxies.clone();
         proxies
             .iter_mut()
             .find(|proxy| proxy.id == proxy_id)?
@@ -182,7 +166,7 @@ impl TunnelFeatureState {
     }
 
     pub(in crate::features) fn proxies_without(&self, proxy_id: &str) -> (Vec<ProxyConfig>, bool) {
-        let mut proxies = self.catalog.proxies.as_ref().clone();
+        let mut proxies = self.catalog.proxies.clone();
         let before = proxies.len();
         proxies.retain(|proxy| proxy.id != proxy_id);
         let deleted = proxies.len() != before;
@@ -203,7 +187,7 @@ impl TunnelFeatureState {
     }
 
     pub(in crate::features) fn proxies_with_upsert(&self, proxy: ProxyConfig) -> Vec<ProxyConfig> {
-        let mut proxies = self.catalog.proxies.as_ref().clone();
+        let mut proxies = self.catalog.proxies.clone();
         if let Some(existing) = proxies.iter_mut().find(|existing| existing.id == proxy.id) {
             *existing = proxy;
         } else {
@@ -311,7 +295,7 @@ impl TunnelFeatureState {
     }
 
     pub(in crate::features) fn commit_proxies(&mut self, proxies: Vec<ProxyConfig>) {
-        self.catalog.proxies = Arc::new(proxies);
+        self.catalog.proxies = proxies;
     }
 
     pub(in crate::features) fn commit_tunnel_groups(&mut self, groups: Vec<TunnelGroup>) {
@@ -336,7 +320,7 @@ impl TunnelFeatureState {
         removal: ProxyGroupRemoval,
     ) -> Vec<String> {
         self.catalog.proxy_groups = removal.groups;
-        self.catalog.proxies = Arc::new(removal.proxies);
+        self.catalog.proxies = removal.proxies;
         removal.deleted_proxy_ids
     }
 

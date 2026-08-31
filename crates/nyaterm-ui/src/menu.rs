@@ -16,6 +16,30 @@ type MenuClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 type ContextMenuItemsBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<NyaMenuItem>>;
 
 const NYA_MENU_WIDTH: f32 = 220.;
+const NYA_SUBMENU_OVERLAP: f32 = 8.;
+
+fn menu_has_submenu(items: &[NyaMenuItem]) -> bool {
+    items.iter().any(|item| item.children().is_some())
+}
+
+/// `PopupMenu` chooses a submenu's side from the parent menu's `max_width` and
+/// origin. Its probe does not include the parent menu's own width, so an exact
+/// 220px parent opened near the right edge can still choose the right side and
+/// leave its child outside the window. Widen only that probe when the pointer
+/// is in the collision zone; the parent's 220px minimum keeps its normal visual
+/// width, while the component sees enough reserved space to flip the child.
+fn submenu_direction_probe_width(
+    items: &[NyaMenuItem],
+    pointer_x: Pixels,
+    window_width: Pixels,
+) -> Option<Pixels> {
+    if !menu_has_submenu(items) {
+        return None;
+    }
+
+    let parent_and_child = px(NYA_MENU_WIDTH * 2. - NYA_SUBMENU_OVERLAP);
+    (pointer_x + parent_and_child > window_width).then_some(parent_and_child)
+}
 
 pub(crate) fn nya_popup_menu_appearance() -> PopupMenuAppearance {
     PopupMenuAppearance::new()
@@ -220,6 +244,8 @@ impl NyaMenuItem {
                     window,
                     cx,
                     move |menu, window, cx| {
+                        let menu = style_nya_popup_menu(menu, None, None)
+                            .scrollable(popup_menu_should_scroll(&items, None));
                         items
                             .iter()
                             .fold(menu, |menu, item| item.append_to(menu, window, cx))
@@ -548,8 +574,14 @@ where
         let min_width = self.min_width;
         self.element
             .context_menu(move |menu, window, cx| {
-                let menu = style_nya_popup_menu(menu, min_width, None);
                 let items = items_builder(window, cx);
+                let direction_probe_width = submenu_direction_probe_width(
+                    &items,
+                    window.mouse_position().x,
+                    window.bounds().size.width,
+                );
+                let menu = style_nya_popup_menu(menu, min_width, None)
+                    .when_some(direction_probe_width, |menu, width| menu.max_w(width));
                 // PopupMenu paints a vertical scrollbar whenever `scrollable` is
                 // true, even when every item fits. Keep short context menus clean;
                 // only long flat menus need the bounded scrolling behavior.
@@ -573,7 +605,7 @@ mod tests {
 
     use super::{
         NyaContextMenu, NyaMenuItem, NyaMenuItemKind, popup_menu_should_scroll,
-        resolved_menu_widths,
+        resolved_menu_widths, submenu_direction_probe_width,
     };
 
     struct DynamicContextMenuFixture {
@@ -721,6 +753,29 @@ mod tests {
         let menu = NyaContextMenu::new(div(), [NyaMenuItem::action("Preview")]).min_width(px(208.));
 
         assert_eq!(menu.test_min_width(), Some(px(208.)));
+    }
+
+    #[test]
+    fn context_submenu_reserves_parent_and_child_width_near_right_edge() {
+        let items = vec![NyaMenuItem::submenu(
+            "Move to category",
+            vec![NyaMenuItem::action("Category")],
+        )];
+
+        // Matches the reported narrow-window geometry: the menu opens around
+        // x=48 in a 381px content area, where two 220px menus cannot fit right.
+        assert_eq!(
+            submenu_direction_probe_width(&items, px(48.), px(381.)),
+            Some(px(432.))
+        );
+        assert_eq!(
+            submenu_direction_probe_width(&items, px(48.), px(900.)),
+            None
+        );
+        assert_eq!(
+            submenu_direction_probe_width(&[NyaMenuItem::action("Open")], px(360.), px(381.)),
+            None
+        );
     }
 
     #[test]

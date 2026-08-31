@@ -8,10 +8,11 @@ use gpui::{
     },
     px, rgb, svg,
 };
-use nyaterm_core::{Group, ProxyConfig, SavedConnection, natural_compare, truncate_preview};
+use nyaterm_core::{Group, SavedConnection, natural_compare};
+use rust_i18n::t;
 
 use crate::features::{
-    NyaTermApp, formatting::format_last_used_ms, text_inputs::ORDINARY_INPUT_SHELL_PADDING_X_PX,
+    NyaTermApp, text_inputs::ORDINARY_INPUT_SHELL_PADDING_X_PX,
     text_inputs::ordinary_input_focus_ring, text_inputs::ordinary_input_shell_border_color,
 };
 use crate::models::{
@@ -531,7 +532,7 @@ pub(super) fn toggle_chip(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     use nyaterm_core::{Group, SavedConnection};
 
@@ -815,6 +816,201 @@ mod tests {
         ];
 
         assert_eq!(widest_connection_row(&rows, &connections), Some(2));
+    }
+
+    #[test]
+    fn saved_connection_tooltip_matches_tauri_fields_for_every_session_type() {
+        let cases = [
+            (
+                serde_json::json!({
+                    "type": "ssh",
+                    "host": " ssh.example.com ",
+                    "port": 2222,
+                    "username": " root "
+                }),
+                vec![
+                    "savedConnections.host",
+                    "savedConnections.port",
+                    "savedConnections.user",
+                    "savedConnections.description",
+                ],
+            ),
+            (
+                serde_json::json!({
+                    "type": "local_terminal",
+                    "shell_path": " pwsh.exe ",
+                    "shell_args": " -NoLogo ",
+                    "working_dir": " C:\\\\Work "
+                }),
+                vec![
+                    "savedConnections.terminalPath",
+                    "savedConnections.shellArgs",
+                    "savedConnections.workingDir",
+                    "savedConnections.description",
+                ],
+            ),
+            (
+                serde_json::json!({
+                    "type": "telnet",
+                    "host": "switch.example.com",
+                    "port": 2323,
+                    "username": "operator"
+                }),
+                vec![
+                    "savedConnections.host",
+                    "savedConnections.port",
+                    "savedConnections.user",
+                    "savedConnections.description",
+                ],
+            ),
+            (
+                serde_json::json!({
+                    "type": "serial",
+                    "port_name": "COM3",
+                    "baud_rate": 115200,
+                    "data_bits": 8,
+                    "parity": "none",
+                    "stop_bits": "1"
+                }),
+                vec![
+                    "savedConnections.serialPort",
+                    "savedConnections.baudRate",
+                    "savedConnections.dataBits",
+                    "savedConnections.parity",
+                    "savedConnections.stopBits",
+                    "savedConnections.description",
+                ],
+            ),
+            (
+                serde_json::json!({
+                    "type": "rdp",
+                    "host": "desktop.example.com",
+                    "port": 3390,
+                    "username": "alice"
+                }),
+                vec![
+                    "savedConnections.host",
+                    "savedConnections.port",
+                    "savedConnections.user",
+                    "savedConnections.description",
+                ],
+            ),
+            (
+                serde_json::json!({
+                    "type": "vnc",
+                    "host": "screen.example.com",
+                    "port": 5901
+                }),
+                vec![
+                    "savedConnections.host",
+                    "savedConnections.port",
+                    "savedConnections.user",
+                    "savedConnections.description",
+                ],
+            ),
+        ];
+
+        for (config, expected_keys) in cases {
+            let mut connection = connection("test", "Test", None, 0);
+            connection.config = serde_json::from_value(config).expect("valid connection type");
+            connection.description = Some(" production host ".to_string());
+
+            let rows = super::connection_detail_rows(&connection, &HashMap::new());
+            let labels = rows
+                .iter()
+                .map(|row| row.label.as_str())
+                .collect::<Vec<_>>();
+            let expected = expected_keys
+                .into_iter()
+                .map(|key| rust_i18n::t!(key).into_owned())
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                labels,
+                expected,
+                "unexpected fields for {}",
+                connection.kind_label()
+            );
+            assert_eq!(
+                rows.last().map(|row| row.value.as_str()),
+                Some("production host")
+            );
+            let expected_copy_count = match connection.kind_label() {
+                "SSH" | "Telnet" | "RDP" => 3,
+                "VNC" => 2,
+                _ => 0,
+            };
+            assert_eq!(
+                rows.iter().filter(|row| row.copy_value.is_some()).count(),
+                expected_copy_count,
+                "unexpected copy buttons for {}",
+                connection.kind_label()
+            );
+        }
+    }
+
+    #[test]
+    fn saved_connection_tooltip_uses_tauri_missing_value_rules() {
+        let mut local = connection("local", "Local", None, 0);
+        local.config = serde_json::from_value(serde_json::json!({
+            "type": "local_terminal",
+            "shell_path": " ",
+            "shell_args": " ",
+            "working_dir": null
+        }))
+        .expect("valid local terminal");
+
+        let local_rows = super::connection_detail_rows(&local, &HashMap::new());
+        assert_eq!(local_rows.len(), 3, "blank shell args must be omitted");
+        assert_eq!(
+            local_rows[0].value,
+            rust_i18n::t!("savedConnections.notSet").to_string()
+        );
+        assert_eq!(
+            local_rows[1].value,
+            rust_i18n::t!("savedConnections.notSet").to_string()
+        );
+        assert_eq!(
+            local_rows[2].value,
+            rust_i18n::t!("savedConnections.noDescription").to_string()
+        );
+
+        assert!(
+            local_rows.iter().all(|row| row.copy_value.is_none()),
+            "Tauri does not offer copy buttons for local terminal fields"
+        );
+
+        let mut vnc = connection("vnc", "VNC", None, 0);
+        vnc.config = serde_json::from_value(serde_json::json!({
+            "type": "vnc",
+            "host": "screen.example.com"
+        }))
+        .expect("valid VNC connection");
+        let vnc_rows = super::connection_detail_rows(&vnc, &HashMap::new());
+        assert_eq!(
+            vnc_rows[2].value,
+            rust_i18n::t!("savedConnections.notSet").to_string(),
+            "Tauri renders the unavailable VNC username as not set"
+        );
+        assert_eq!(
+            vnc_rows[0].copy_value.as_deref(),
+            Some("screen.example.com")
+        );
+        assert_eq!(vnc_rows[1].copy_value.as_deref(), Some("5900"));
+        assert_eq!(vnc_rows[2].copy_value, None);
+
+        let mut ssh = connection("ssh", "SSH", None, 0);
+        ssh.config = serde_json::from_value(serde_json::json!({
+            "type": "ssh",
+            "host": " ",
+            "port": 22,
+            "username": " "
+        }))
+        .expect("valid SSH connection");
+        let ssh_rows = super::connection_detail_rows(&ssh, &HashMap::new());
+        assert_eq!(ssh_rows[0].copy_value, None);
+        assert_eq!(ssh_rows[1].copy_value.as_deref(), Some("22"));
+        assert_eq!(ssh_rows[2].copy_value, None);
     }
 
     fn group(id: &str, name: &str, parent_id: Option<&str>, sort_order: i32) -> Group {
@@ -1223,180 +1419,185 @@ pub(super) fn icon_action_button_styled(
         .when(!is_svg, |this| this.child(label))
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ConnectionDetailRow {
+    pub(super) label: String,
+    pub(super) value: String,
+    pub(super) copy_value: Option<String>,
+    pub(super) multiline: bool,
+}
+
+impl ConnectionDetailRow {
+    fn new(label: String, value: String) -> Self {
+        Self {
+            label,
+            value,
+            copy_value: None,
+            multiline: false,
+        }
+    }
+
+    fn copyable(mut self, copy_value: Option<String>) -> Self {
+        self.copy_value = copy_value;
+        self
+    }
+
+    fn multiline(mut self) -> Self {
+        self.multiline = true;
+        self
+    }
+}
+
 pub(super) fn connection_detail_rows(
     connection: &SavedConnection,
     all_connections: &HashMap<String, SavedConnection>,
-    proxies: &[ProxyConfig],
-) -> Vec<(&'static str, String)> {
+) -> Vec<ConnectionDetailRow> {
     let description = connection
         .description
         .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("—")
-        .to_string();
-    let mut rows = vec![
-        ("Type", connection.kind_label().to_string()),
-        ("Name", connection.name.clone()),
-    ];
-    match &connection.config {
+        .and_then(non_empty_detail_value)
+        .unwrap_or_else(|| t!("savedConnections.noDescription").to_string());
+
+    let mut rows = match &connection.config {
         nyaterm_core::ConnectionType::Ssh {
             host,
             port,
             username,
-            backspace_mode,
-            x11_forwarding,
             ..
-        } => {
-            rows.push(("Host", host.clone()));
-            rows.push(("Port", port.to_string()));
-            rows.push(("User", username.clone()));
-            rows.push((
-                "BS",
-                match backspace_mode.as_str() {
-                    "ctrl-h" | "bs" | "ctrl_h" => "Ctrl+H".to_string(),
-                    _ => "DEL".to_string(),
-                },
-            ));
-            if *x11_forwarding {
-                rows.push(("X11", "on".to_string()));
-            }
-            if let Some(network) = connection.network.as_ref() {
-                if let Some(proxy_id) = network.proxy_id.as_deref() {
-                    let proxy_label = proxies
-                        .iter()
-                        .find(|proxy| proxy.id == proxy_id)
-                        .map(|proxy| proxy.name.clone())
-                        .unwrap_or_else(|| truncate_preview(proxy_id, 16));
-                    rows.push(("Proxy", proxy_label));
-                }
-                if network.proxy_jump_id.is_some() {
-                    let chain = format_jump_host_chain(connection, all_connections);
-                    rows.push(("Jump", chain));
-                }
-            }
-        }
+        } => vec![
+            copyable_text_detail_row(t!("savedConnections.host").to_string(), host),
+            copyable_value_detail_row(t!("savedConnections.port").to_string(), port.to_string()),
+            copyable_text_detail_row(t!("savedConnections.user").to_string(), username),
+        ],
         nyaterm_core::ConnectionType::LocalTerminal {
             shell_path,
             shell_args,
             working_dir,
             ..
         } => {
-            rows.push((
-                "Shell",
-                if shell_path.trim().is_empty() {
-                    "system".to_string()
-                } else {
-                    shell_path.clone()
-                },
-            ));
-            if !shell_args.trim().is_empty() {
-                rows.push(("Args", truncate_preview(shell_args, 28)));
+            let mut rows = vec![ConnectionDetailRow::new(
+                t!("savedConnections.terminalPath").to_string(),
+                required_detail_value(shell_path),
+            )];
+            if let Some(shell_args) = non_empty_detail_value(shell_args) {
+                rows.push(ConnectionDetailRow::new(
+                    t!("savedConnections.shellArgs").to_string(),
+                    shell_args,
+                ));
             }
-            rows.push((
-                "CWD",
+            rows.push(ConnectionDetailRow::new(
+                t!("savedConnections.workingDir").to_string(),
                 working_dir
-                    .clone()
-                    .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| "—".to_string()),
+                    .as_deref()
+                    .map(required_detail_value)
+                    .unwrap_or_else(|| t!("savedConnections.notSet").to_string()),
             ));
+            rows
         }
         nyaterm_core::ConnectionType::Telnet {
             host,
             port,
-            backspace_mode,
-            raw_tcp_cli,
-            local_echo,
+            username,
             ..
-        } => {
-            rows.push(("Host", host.clone()));
-            rows.push(("Port", port.to_string()));
-            rows.push((
-                "BS",
-                match backspace_mode.as_str() {
-                    "ctrl-h" | "bs" | "ctrl_h" => "Ctrl+H".to_string(),
-                    _ => "DEL".to_string(),
-                },
-            ));
-            if *raw_tcp_cli {
-                rows.push(("Mode", "raw tcp".to_string()));
-            }
-            if *local_echo {
-                rows.push(("Echo", "local".to_string()));
-            }
-        }
+        } => vec![
+            copyable_text_detail_row(t!("savedConnections.host").to_string(), host),
+            copyable_value_detail_row(t!("savedConnections.port").to_string(), port.to_string()),
+            copyable_text_detail_row(t!("savedConnections.user").to_string(), username),
+        ],
         nyaterm_core::ConnectionType::Serial {
             port_name,
             baud_rate,
             data_bits,
             parity,
             stop_bits,
-            backspace_mode,
             ..
         } => {
-            rows.push(("Port", port_name.clone()));
-            rows.push(("Baud", baud_rate.to_string()));
-            rows.push(("Data", data_bits.to_string()));
-            rows.push(("Parity", parity.clone()));
-            rows.push(("Stop", stop_bits.clone()));
-            rows.push((
-                "BS",
-                match backspace_mode.as_str() {
-                    "ctrl-h" | "bs" | "ctrl_h" => "Ctrl+H".to_string(),
-                    _ => "DEL".to_string(),
-                },
-            ));
+            let mut rows = vec![
+                ConnectionDetailRow::new(
+                    t!("savedConnections.serialPort").to_string(),
+                    required_detail_value(port_name),
+                ),
+                ConnectionDetailRow::new(
+                    t!("savedConnections.baudRate").to_string(),
+                    baud_rate.to_string(),
+                ),
+                ConnectionDetailRow::new(
+                    t!("savedConnections.dataBits").to_string(),
+                    data_bits.to_string(),
+                ),
+            ];
+            if let Some(parity) = non_empty_detail_value(parity) {
+                rows.push(ConnectionDetailRow::new(
+                    t!("savedConnections.parity").to_string(),
+                    parity,
+                ));
+            }
+            if let Some(stop_bits) = non_empty_detail_value(stop_bits) {
+                rows.push(ConnectionDetailRow::new(
+                    t!("savedConnections.stopBits").to_string(),
+                    stop_bits,
+                ));
+            }
+            rows
         }
         nyaterm_core::ConnectionType::Rdp {
             host,
             port,
             username,
-            security,
-            display,
             ..
-        } => {
-            rows.push(("Host", host.clone()));
-            rows.push(("Port", port.to_string()));
-            if !username.trim().is_empty() {
-                rows.push(("User", username.clone()));
-            }
-            rows.push((
-                "Security",
-                if security.use_nla {
-                    "NLA".to_string()
-                } else {
-                    "standard".to_string()
-                },
-            ));
-            rows.push(("Display", format!("{}x{}", display.width, display.height)));
-        }
-        nyaterm_core::ConnectionType::Vnc {
-            host,
-            port,
-            security,
-            display,
-            clipboard,
-            shared,
-            view_only,
-            ..
-        } => {
-            rows.push(("Host", host.clone()));
-            rows.push(("Port", port.to_string()));
-            rows.push(("Security", security.mode.clone()));
-            rows.push(("Scale", display.scale_mode.clone()));
-            rows.push((
-                "Clipboard",
-                if clipboard.enabled { "on" } else { "off" }.to_string(),
-            ));
-            rows.push(("Shared", if *shared { "yes" } else { "no" }.to_string()));
-            if *view_only {
-                rows.push(("Input", "view only".to_string()));
-            }
-        }
+        } => vec![
+            copyable_text_detail_row(t!("savedConnections.host").to_string(), host),
+            copyable_value_detail_row(t!("savedConnections.port").to_string(), port.to_string()),
+            copyable_text_detail_row(t!("savedConnections.user").to_string(), username),
+        ],
+        nyaterm_core::ConnectionType::Vnc { host, port, .. } => vec![
+            copyable_text_detail_row(t!("savedConnections.host").to_string(), host),
+            copyable_value_detail_row(t!("savedConnections.port").to_string(), port.to_string()),
+            ConnectionDetailRow::new(
+                t!("savedConnections.user").to_string(),
+                t!("savedConnections.notSet").to_string(),
+            ),
+        ],
+    };
+
+    if matches!(&connection.config, nyaterm_core::ConnectionType::Ssh { .. })
+        && connection
+            .network
+            .as_ref()
+            .and_then(|network| network.proxy_jump_id.as_deref())
+            .is_some()
+    {
+        rows.push(
+            ConnectionDetailRow::new(
+                t!("savedConnections.jumpHostChain").to_string(),
+                format_jump_host_chain(connection, all_connections),
+            )
+            .multiline(),
+        );
     }
-    rows.push(("Last", format_last_used_ms(connection.last_used_at_ms)));
-    rows.push(("Desc", description));
+    rows.push(
+        ConnectionDetailRow::new(t!("savedConnections.description").to_string(), description)
+            .multiline(),
+    );
     rows
+}
+
+fn required_detail_value(value: &str) -> String {
+    non_empty_detail_value(value).unwrap_or_else(|| t!("savedConnections.notSet").to_string())
+}
+
+fn copyable_text_detail_row(label: String, value: &str) -> ConnectionDetailRow {
+    let copy_value = non_empty_detail_value(value);
+    ConnectionDetailRow::new(label, required_detail_value(value)).copyable(copy_value)
+}
+
+fn copyable_value_detail_row(label: String, value: String) -> ConnectionDetailRow {
+    ConnectionDetailRow::new(label, value.clone()).copyable(Some(value))
+}
+
+fn non_empty_detail_value(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 pub(super) fn format_jump_host_chain(
@@ -1408,18 +1609,18 @@ pub(super) fn format_jump_host_chain(
         .as_ref()
         .and_then(|network| network.proxy_jump_id.clone())
     else {
-        return "—".to_string();
+        return t!("savedConnections.notSet").to_string();
     };
     let mut seen = std::collections::HashSet::new();
     seen.insert(connection.id.clone());
     let mut labels = Vec::new();
     loop {
         if !seen.insert(jump_id.clone()) {
-            labels.push("↺ cycle".to_string());
+            labels.push(t!("savedConnections.jumpHostCycle").to_string());
             break;
         }
         let Some(jump) = by_id.get(jump_id.as_str()) else {
-            labels.push(format!("missing:{jump_id}"));
+            labels.push(t!("savedConnections.jumpHostMissing").to_string());
             break;
         };
         labels.push(jump.name.clone());
@@ -1433,8 +1634,8 @@ pub(super) fn format_jump_host_chain(
         }
     }
     if labels.is_empty() {
-        "—".to_string()
+        t!("savedConnections.notSet").to_string()
     } else {
-        labels.join(" → ")
+        labels.join(" -> ")
     }
 }

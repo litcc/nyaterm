@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui::{Context, Entity, FocusHandle, IntoElement, Render, Rgba, WeakEntity, Window};
-use nyaterm_core::{ProxyConfig, SavedConnection};
+use nyaterm_core::SavedConnection;
 use nyaterm_ui::NyaInputState;
 
 use crate::features::NyaTermApp;
@@ -46,7 +46,6 @@ pub(in crate::features) struct ConnectionChrome {
 pub(in crate::features) struct ConnectionListKey {
     rows: ConnectionListRowsKey,
     selection: Arc<HashSet<String>>,
-    proxies: Arc<Vec<ProxyConfig>>,
     keyboard_active: Option<String>,
     hovered_group: Option<String>,
     drop_target: Option<ConnectionDropTarget>,
@@ -58,7 +57,6 @@ impl ConnectionListKey {
     pub(in crate::features) fn new(
         rows: ConnectionListRowsKey,
         selection: Arc<HashSet<String>>,
-        proxies: Arc<Vec<ProxyConfig>>,
         keyboard_active: Option<String>,
         hovered_group: Option<String>,
         drop_target: Option<ConnectionDropTarget>,
@@ -67,7 +65,6 @@ impl ConnectionListKey {
         Self {
             rows,
             selection,
-            proxies,
             keyboard_active,
             hovered_group,
             drop_target,
@@ -82,15 +79,14 @@ impl ConnectionListKey {
 
 impl PartialEq for ConnectionListKey {
     fn eq(&self, other: &Self) -> bool {
-        // `selection` and `proxies` compare by pointer, not contents. Every write
-        // to either goes through `Arc::make_mut` or replaces the whole vector, and
-        // the live snapshot always holds a clone, so a mutation cannot leave the
-        // pointer alone. That makes this O(1) and, more to the point, impossible
-        // for a new mutator to get wrong -- there is no counter to forget. A
-        // pointer that moved without the contents changing costs one redundant
-        // rebuild, which is the safe direction to be wrong in.
+        // `selection` compares by pointer, not contents. Every write goes through
+        // `Arc::make_mut` or replaces the whole set, and the live snapshot always
+        // holds a clone, so a mutation cannot leave the pointer alone. That makes
+        // this O(1) and, more to the point, impossible for a new mutator to get
+        // wrong -- there is no counter to forget. A pointer that moved without the
+        // contents changing costs one redundant rebuild, which is the safe direction
+        // to be wrong in.
         Arc::ptr_eq(&self.selection, &other.selection)
-            && Arc::ptr_eq(&self.proxies, &other.proxies)
             && self.rows == other.rows
             && self.keyboard_active == other.keyboard_active
             && self.hovered_group == other.hovered_group
@@ -113,7 +109,6 @@ pub(in crate::features) struct ConnectionListSnapshot {
     /// scans the catalog. Twenty visible rows meant twenty scans per frame.
     pub(in crate::features::pages::connections) connections_by_id:
         Arc<HashMap<String, SavedConnection>>,
-    pub(in crate::features::pages::connections) proxies: Arc<Vec<ProxyConfig>>,
     pub(in crate::features::pages::connections) selection: Arc<HashSet<String>>,
     pub(in crate::features::pages::connections) expanded_groups: Arc<HashSet<String>>,
     pub(in crate::features::pages::connections) keyboard_active: Option<String>,
@@ -297,7 +292,7 @@ mod tests {
         AppContext as _, Entity, IntoElement, Modifiers, ParentElement as _, Render, ScrollDelta,
         ScrollWheelEvent, Styled as _, TestAppContext, VisualTestContext, div, point, px,
     };
-    use nyaterm_core::{AppRuntime, Group, ProxyConfig, RuntimeMode, SavedConnection, uuid};
+    use nyaterm_core::{AppRuntime, Group, RuntimeMode, SavedConnection, uuid};
     use nyaterm_ui::NyaInputEvent;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -692,27 +687,6 @@ mod tests {
                     .search_is_empty,
                 "the search subscription must publish the changed search state"
             );
-        });
-    }
-
-    /// Rows name their proxy in the detail tooltip, so a proxy edit has to reach
-    /// them even though nothing in the connection catalog moved.
-    #[test]
-    fn a_proxy_change_invalidates_the_rows_that_name_it() {
-        let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
-
-        vcx.update(|_, cx| {
-            app.update(cx, |app, cx| {
-                let before = app.connection_panel.read(cx).snapshot_key().cloned();
-                app.tunnel_state
-                    .commit_proxies(vec![ProxyConfig::default()]);
-                app.flush_connection_panel_snapshot(cx);
-                assert!(
-                    before != app.connection_panel.read(cx).snapshot_key().cloned(),
-                    "a proxy edit must move the panel key"
-                );
-            });
         });
     }
 

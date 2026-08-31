@@ -554,11 +554,25 @@ impl NyaTermApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let zone_key = zone.persistence_key();
+        let palette = self.theme_palette();
+        let drop_line = rgb(palette.primary);
+        let drop_wash = rgba((palette.primary << 8) | 0x16);
         div()
             .id(SharedString::from(format!("activity-zone-end-{zone_key}")))
             .w_full()
             .h(px(8.))
             .flex_none()
+            // Keep the border in the normal layout so entering a drop target
+            // only changes its color and never nudges the surrounding icons.
+            .border_t_2()
+            .border_color(rgba(0x00000000))
+            .drag_over::<ActivityBarDragPayload>(move |this, payload, _, _| {
+                if payload.entry_id.is_empty() {
+                    this
+                } else {
+                    this.border_color(drop_line).bg(drop_wash)
+                }
+            })
             .on_drop(
                 cx.listener(move |this, payload: &ActivityBarDragPayload, _, cx| {
                     if payload.entry_id.is_empty() {
@@ -659,6 +673,10 @@ impl NyaTermApp {
                         .child(tooltip.clone()),
                 )
             })
+            // Every icon represents the insertion slot immediately before it.
+            // A transparent border reserves the line's space outside a drag.
+            .border_t_2()
+            .border_color(rgba(0x00000000))
             .cursor_move()
             .on_drag(
                 ActivityBarDragPayload {
@@ -670,6 +688,17 @@ impl NyaTermApp {
                     cx.new(|_| ActivityBarDragPreview::new(payload.clone(), position))
                 },
             )
+            .drag_over::<ActivityBarDragPayload>({
+                let drop_entry_id = entry_id.clone();
+                move |this, payload, _, _| {
+                    if payload.entry_id.is_empty() || payload.entry_id == drop_entry_id {
+                        this
+                    } else {
+                        this.border_color(active_color)
+                            .bg(rgba((palette.primary << 8) | 0x16))
+                    }
+                }
+            })
             .on_drop({
                 let drop_zone = zone;
                 let drop_index = index;
