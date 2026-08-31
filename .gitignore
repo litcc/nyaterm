@@ -35,6 +35,7 @@ dist-ssr
 .claude
 .codex
 .trae
+.kiro
 
 # Also holds read-only copies of the sources that used to be vendored. Not part
 # of the build: those dependencies come from pinned fork revisions in Cargo.toml.
