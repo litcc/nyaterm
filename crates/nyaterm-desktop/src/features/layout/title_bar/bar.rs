@@ -9,15 +9,78 @@ use time::{OffsetDateTime, UtcOffset, Weekday, macros::format_description};
 
 use crate::features::{
     NyaTermApp, formatting::format_rate, formatting::format_uptime, formatting::short_id,
-    transfers::format_file_size, view_widgets::logo_mark, view_widgets::window_control_button,
+    icons::IconDef, icons::resolve_connection_icon, transfers::format_file_size,
+    view_widgets::connection_type_icon, view_widgets::logo_mark,
+    view_widgets::window_control_button,
 };
 use crate::models::HeaderStatusMode;
 
-use super::super::view_helpers::session_kind_icon_path;
-
 struct HeaderStatusContent {
-    icon_path: &'static str,
+    icon: Option<IconDef>,
     label: String,
+    parts: Vec<HeaderStatusPart>,
+    hardware: Option<HeaderHardwareStatus>,
+}
+
+struct HeaderStatusPart {
+    icon: IconDef,
+    text: String,
+    text_color: Option<u32>,
+}
+
+struct HeaderHardwareStatus {
+    mode: HeaderStatusMode,
+    cards: Vec<HeaderHardwareCard>,
+    hidden_count: usize,
+    page_count: usize,
+}
+
+struct HeaderHardwareCard {
+    index: String,
+    utilization_percent: Option<f64>,
+    memory_percent: Option<f64>,
+    memory_text: String,
+}
+
+impl HeaderStatusContent {
+    fn simple(icon: IconDef, label: String) -> Self {
+        Self {
+            icon: Some(icon),
+            label,
+            parts: Vec::new(),
+            hardware: None,
+        }
+    }
+
+    fn parts(label: String, parts: Vec<HeaderStatusPart>) -> Self {
+        Self {
+            icon: None,
+            label,
+            parts,
+            hardware: None,
+        }
+    }
+
+    fn hardware(
+        icon: IconDef,
+        label: String,
+        mode: HeaderStatusMode,
+        cards: Vec<HeaderHardwareCard>,
+        hidden_count: usize,
+        page_count: usize,
+    ) -> Self {
+        Self {
+            icon: Some(icon),
+            label,
+            parts: Vec::new(),
+            hardware: Some(HeaderHardwareStatus {
+                mode,
+                cards,
+                hidden_count,
+                page_count,
+            }),
+        }
+    }
 }
 
 impl NyaTermApp {
@@ -214,7 +277,6 @@ impl NyaTermApp {
             .into_iter()
             .map(|mode| {
                 nyaterm_ui::NyaMenuItem::action(t!(mode.i18n_key()))
-                    .icon(mode.icon_path())
                     .checked(selected == mode)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_header_status_mode(mode, cx);
@@ -224,9 +286,9 @@ impl NyaTermApp {
         items.extend([
             nyaterm_ui::NyaMenuItem::separator(),
             nyaterm_ui::NyaMenuItem::action(t!("headerStatus.hide"))
-                .icon("icons/close.svg")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.set_header_status_visible(false, cx);
+                .icon("icons/eye-off.svg")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_header_status_hide_confirm(window, cx);
                 })),
         ]);
 
@@ -255,14 +317,7 @@ impl NyaTermApp {
                             cx.notify();
                         }),
                     )
-                    .child(
-                        svg()
-                            .size(px(14.))
-                            .flex_none()
-                            .path(content.icon_path)
-                            .text_color(rgb(palette.text_muted)),
-                    )
-                    .child(div().min_w_0().overflow_hidden().child(content.label)),
+                    .child(self.header_status_body(content, cx)),
             )
             .child(
                 div()
@@ -287,151 +342,327 @@ impl NyaTermApp {
             )
     }
 
+    fn header_status_body(
+        &self,
+        content: HeaderStatusContent,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let palette = self.theme_palette();
+        if let Some(hardware) = content.hardware {
+            let mut cards = div().min_w_0().flex().items_center().gap_2();
+            for card in hardware.cards {
+                let utilization = format_optional_percent(card.utilization_percent);
+                let utilization_color =
+                    pressure_color(card.utilization_percent).unwrap_or(palette.text_muted);
+                let memory_color =
+                    pressure_color(card.memory_percent).unwrap_or(palette.text_muted);
+                cards = cards.child(
+                    div()
+                        .w(px(92.))
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .font_family("monospace")
+                        .text_size(px(10.))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(div().w(px(14.)).text_right().child(card.index.clone()))
+                                .child(header_mini_progress(
+                                    card.utilization_percent,
+                                    palette.primary,
+                                    palette.border,
+                                ))
+                                .child(div().text_color(rgb(utilization_color)).child(utilization)),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(div().w(px(14.)))
+                                .child(header_mini_progress(
+                                    card.memory_percent,
+                                    palette.primary,
+                                    palette.border,
+                                ))
+                                .child(div().text_color(rgb(memory_color)).child(card.memory_text)),
+                        ),
+                );
+            }
+            if hardware.page_count > 1 {
+                let previous_mode = hardware.mode;
+                let next_mode = hardware.mode;
+                let hidden = hardware.hidden_count;
+                cards = cards.child(
+                    div()
+                        .flex_none()
+                        .flex()
+                        .flex_col()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(palette.border))
+                        .child(
+                            div()
+                                .id(format!(
+                                    "header-hardware-prev-{}",
+                                    hardware.mode.persistence_id()
+                                ))
+                                .size(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .hover(|this| this.bg(rgb(palette.hover)))
+                                .child(svg().size(px(10.)).path("icons/chevron-up.svg"))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.cycle_header_hardware_page(previous_mode, -1, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .id(format!(
+                                    "header-hardware-next-{}-{hidden}",
+                                    hardware.mode.persistence_id()
+                                ))
+                                .size(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor_pointer()
+                                .border_t_1()
+                                .border_color(rgb(palette.border))
+                                .hover(|this| this.bg(rgb(palette.hover)))
+                                .child(svg().size(px(10.)).path("icons/chevron-down.svg"))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.cycle_header_hardware_page(next_mode, 1, cx);
+                                })),
+                        ),
+                );
+            }
+            return div()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(connection_type_icon(
+                    palette,
+                    content.icon.expect("hardware status icon"),
+                    false,
+                    14.,
+                ))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(px(11.))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(match hardware.mode {
+                            HeaderStatusMode::Gpu => "GPU",
+                            HeaderStatusMode::Npu => "NPU",
+                            _ => "",
+                        }),
+                )
+                .child(cards)
+                .into_any_element();
+        }
+
+        if !content.parts.is_empty() {
+            let mut row = div().min_w_0().flex().items_center().gap_1();
+            for (index, part) in content.parts.into_iter().enumerate() {
+                if index > 0 {
+                    row = row.child(
+                        div()
+                            .px(px(2.))
+                            .text_color(rgb(palette.text_dimmed))
+                            .child("-"),
+                    );
+                }
+                row = row.child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(connection_type_icon(palette, part.icon, false, 13.))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .text_color(rgb(part.text_color.unwrap_or(palette.text_muted)))
+                                .child(part.text),
+                        ),
+                );
+            }
+            return row.into_any_element();
+        }
+
+        div()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2()
+            .when_some(content.icon, |this, icon| {
+                this.child(connection_type_icon(palette, icon, false, 14.))
+            })
+            .child(div().min_w_0().overflow_hidden().child(content.label))
+            .into_any_element()
+    }
+
     fn header_status_content(&self) -> HeaderStatusContent {
         let mode = HeaderStatusMode::from_setting(&self.settings.summary().ui_header_status_mode);
         match mode {
-            HeaderStatusMode::Session => HeaderStatusContent {
-                icon_path: self.title_context_icon().unwrap_or(mode.icon_path()),
-                label: self.title_context_label(),
-            },
-            HeaderStatusMode::DateTime => HeaderStatusContent {
-                icon_path: mode.icon_path(),
-                label: format_header_datetime(local_now(), &self.settings.summary().language),
-            },
+            HeaderStatusMode::Session => HeaderStatusContent::simple(
+                self.title_context_icon()
+                    .unwrap_or_else(|| header_status_mode_icon(mode)),
+                self.title_context_label(),
+            ),
+            HeaderStatusMode::DateTime => HeaderStatusContent::simple(
+                header_status_mode_icon(mode),
+                format_header_datetime(local_now(), &self.settings.summary().language),
+            ),
             HeaderStatusMode::Resources | HeaderStatusMode::Host => {
-                let label = self
-                    .remote_stats_header_label(mode)
-                    .unwrap_or_else(|| self.remote_stats_header_fallback());
-                HeaderStatusContent {
-                    icon_path: mode.icon_path(),
-                    label,
-                }
+                self.remote_stats_header_content(mode)
             }
-            HeaderStatusMode::Gpu => HeaderStatusContent {
-                icon_path: mode.icon_path(),
-                label: self.gpu_header_label(),
-            },
-            HeaderStatusMode::Npu => HeaderStatusContent {
-                icon_path: mode.icon_path(),
-                label: self.npu_header_label(),
-            },
+            HeaderStatusMode::Gpu => self.gpu_header_content(),
+            HeaderStatusMode::Npu => self.npu_header_content(),
         }
     }
 
-    fn gpu_header_label(&self) -> String {
+    fn gpu_header_content(&self) -> HeaderStatusContent {
+        let icon = header_status_mode_icon(HeaderStatusMode::Gpu);
+        let fallback = |label| HeaderStatusContent::simple(icon, label);
         if self.session.active_ssh_config().is_none() {
-            return t!("panel.resourceMonitorNoSession").to_string();
+            return fallback(t!("gpuMonitor.noSession").to_string());
         }
         if !self.settings.summary().ui_show_gpu_monitor {
-            return t!("panel.gpuMonitorDisabled").to_string();
+            return fallback(t!("panel.gpuMonitorDisabled").to_string());
         }
         let gpu = self.remote_ops.gpu_presentation();
-        if let Some(overview) = gpu.data {
-            if !overview.available {
-                return "NVIDIA GPU unavailable".to_string();
-            }
-            let used = overview
-                .gpus
-                .iter()
-                .map(|gpu| gpu.memory_used_mb)
-                .sum::<u64>();
-            let total = overview
-                .gpus
-                .iter()
-                .map(|gpu| gpu.memory_total_mb)
-                .sum::<u64>();
-            let avg_util = average_optional_percent(
-                overview
-                    .gpus
-                    .iter()
-                    .filter_map(|gpu| gpu.utilization_gpu_percent),
-            );
-            return format!(
-                "GPU {} · {:.0}% · {}/{} MiB",
-                overview.gpus.len(),
-                avg_util,
-                used,
-                total
-            );
+        let Some(overview) = gpu.data else {
+            return fallback(if gpu.pending || gpu.consecutive_refresh_failures == 0 {
+                t!("common.loading").to_string()
+            } else {
+                gpu.status
+            });
+        };
+        if !overview.available {
+            return fallback(t!("gpuMonitor.unavailable").to_string());
         }
-        if gpu.pending {
-            t!("common.loading").to_string()
-        } else if gpu.consecutive_refresh_failures > 0 {
-            gpu.status
-        } else {
-            t!("common.loading").to_string()
+        if overview.gpus.is_empty() {
+            return fallback(t!("gpuMonitor.noGpus").to_string());
         }
+
+        let mut cards = overview
+            .gpus
+            .iter()
+            .map(|gpu| HeaderHardwareCard {
+                index: gpu.index.to_string(),
+                utilization_percent: gpu.utilization_gpu_percent,
+                memory_percent: percent_from_parts(gpu.memory_used_mb, gpu.memory_total_mb),
+                memory_text: format_memory_mb_compact(gpu.memory_used_mb, gpu.memory_total_mb),
+            })
+            .collect::<Vec<_>>();
+        cards.sort_by_key(|card| card.index.parse::<u32>().unwrap_or(u32::MAX));
+        self.paginate_header_hardware(HeaderStatusMode::Gpu, icon, cards)
     }
 
-    fn npu_header_label(&self) -> String {
+    fn npu_header_content(&self) -> HeaderStatusContent {
+        let icon = header_status_mode_icon(HeaderStatusMode::Npu);
+        let fallback = |label| HeaderStatusContent::simple(icon, label);
         if self.session.active_ssh_config().is_none() {
-            return t!("panel.resourceMonitorNoSession").to_string();
+            return fallback(t!("ascendNpuMonitor.noSession").to_string());
         }
         if !self.settings.summary().ui_show_ascend_npu_monitor {
-            return t!("panel.npuMonitorDisabled").to_string();
+            return fallback(t!("panel.npuMonitorDisabled").to_string());
         }
         let npu = self.remote_ops.npu_presentation();
-        if let Some(overview) = npu.data {
-            if !overview.available {
-                return "Ascend NPU unavailable".to_string();
-            }
-            let used = overview
-                .npus
-                .iter()
-                .map(|npu| npu.memory_used_mb)
-                .sum::<u64>();
-            let total = overview
-                .npus
-                .iter()
-                .map(|npu| npu.memory_total_mb)
-                .sum::<u64>();
-            let avg_util = average_optional_percent(
-                overview
-                    .npus
-                    .iter()
-                    .filter_map(|npu| npu.utilization_aicore_percent),
-            );
-            return format!(
-                "NPU {} · {:.0}% · {}/{} MiB",
-                overview.npus.len(),
-                avg_util,
-                used,
-                total
-            );
+        let Some(overview) = npu.data else {
+            return fallback(if npu.pending || npu.consecutive_refresh_failures == 0 {
+                t!("common.loading").to_string()
+            } else {
+                npu.status
+            });
+        };
+        if !overview.available {
+            return fallback(t!("ascendNpuMonitor.unavailable").to_string());
         }
-        if npu.pending {
-            t!("common.loading").to_string()
-        } else if npu.consecutive_refresh_failures > 0 {
-            npu.status
-        } else {
-            t!("common.loading").to_string()
+        if overview.npus.is_empty() {
+            return fallback(t!("ascendNpuMonitor.noNpus").to_string());
         }
+
+        let mut cards = overview
+            .npus
+            .iter()
+            .map(|npu| {
+                let total = npu.hbm_total_mb.unwrap_or(npu.memory_total_mb);
+                let used = npu.hbm_used_mb.unwrap_or(npu.memory_used_mb);
+                HeaderHardwareCard {
+                    index: npu.index.to_string(),
+                    utilization_percent: npu.utilization_aicore_percent,
+                    memory_percent: percent_from_parts(used, total),
+                    memory_text: format_memory_mb_compact(used, total),
+                }
+            })
+            .collect::<Vec<_>>();
+        cards.sort_by_key(|card| card.index.parse::<u32>().unwrap_or(u32::MAX));
+        self.paginate_header_hardware(HeaderStatusMode::Npu, icon, cards)
     }
 
-    fn remote_stats_header_label(&self, mode: HeaderStatusMode) -> Option<String> {
+    fn remote_stats_header_content(&self, mode: HeaderStatusMode) -> HeaderStatusContent {
+        let fallback = || {
+            HeaderStatusContent::simple(
+                header_status_mode_icon(mode),
+                self.remote_stats_header_fallback(),
+            )
+        };
         if self.session.active_ssh_config().is_none()
             || !self.settings.summary().ui_show_remote_stats
         {
-            return None;
+            return fallback();
         }
         let stats_state = self.remote_ops.stats_presentation();
-        let stats = stats_state.data.as_ref()?;
+        let Some(stats) = stats_state.data.as_ref() else {
+            return fallback();
+        };
         if mode == HeaderStatusMode::Host {
             let hostname = stats.system.hostname.trim();
-            return Some(format!(
-                "{} - {}/{} - {}",
-                if hostname.is_empty() {
-                    "remote host"
-                } else {
-                    hostname
-                },
-                stats.system.os,
-                stats.system.arch,
-                format_uptime(stats.system.uptime_sec),
-            ));
+            let hostname = if hostname.is_empty() {
+                "remote host"
+            } else {
+                hostname
+            };
+            let system = format!("{}/{}", stats.system.os, stats.system.arch);
+            let uptime = format_uptime(stats.system.uptime_sec);
+            let label = format!("{hostname} - {system} - {uptime}");
+            return HeaderStatusContent::parts(
+                label,
+                vec![
+                    HeaderStatusPart {
+                        icon: IconDef::mono("icons/conn/server.svg", 0x38bdf8),
+                        text: hostname.to_string(),
+                        text_color: None,
+                    },
+                    HeaderStatusPart {
+                        icon: IconDef::mono("icons/workspace.svg", 0xa78bfa),
+                        text: system,
+                        text_color: None,
+                    },
+                    HeaderStatusPart {
+                        icon: IconDef::mono("icons/clock.svg", 0x34d399),
+                        text: uptime,
+                        text_color: None,
+                    },
+                ],
+            );
         }
 
         let memory_total = stats.memory.used.saturating_add(stats.memory.available);
+        let memory_percent = percent_from_parts(stats.memory.used, memory_total);
         let tx = stats
             .networks
             .iter()
@@ -442,14 +673,112 @@ impl NyaTermApp {
             .iter()
             .map(|network| network.rx_bytes_per_sec.max(0.))
             .sum::<f64>();
-        Some(format!(
-            "CPU {:.0}% - RAM {}/{} - TX {} - RX {}",
-            stats.cpu.usage.clamp(0., 100.),
+        let cpu_text = format!("CPU {:.0}%", stats.cpu.usage.clamp(0., 100.));
+        let memory_text = format!(
+            "RAM {}/{}",
             format_file_size(Some(stats.memory.used)),
-            format_file_size(Some(memory_total)),
-            format_rate(tx),
-            format_rate(rx),
-        ))
+            format_file_size(Some(memory_total))
+        );
+        let tx_text = format_rate(tx);
+        let rx_text = format_rate(rx);
+        let label = format!("{cpu_text} - {memory_text} - NET ↑ {tx_text} ↓ {rx_text}");
+        HeaderStatusContent::parts(
+            label,
+            vec![
+                HeaderStatusPart {
+                    icon: IconDef::mono("icons/resources.svg", 0x38bdf8),
+                    text: cpu_text,
+                    text_color: pressure_color(Some(stats.cpu.usage)),
+                },
+                HeaderStatusPart {
+                    icon: IconDef::mono("icons/processes.svg", 0xa78bfa),
+                    text: memory_text,
+                    text_color: pressure_color(memory_percent),
+                },
+                HeaderStatusPart {
+                    icon: IconDef::mono("icons/fe/upload.svg", 0xf59e0b),
+                    text: tx_text,
+                    text_color: None,
+                },
+                HeaderStatusPart {
+                    icon: IconDef::mono("icons/fe/download.svg", 0x34d399),
+                    text: rx_text,
+                    text_color: None,
+                },
+            ],
+        )
+    }
+
+    fn paginate_header_hardware(
+        &self,
+        mode: HeaderStatusMode,
+        icon: IconDef,
+        cards: Vec<HeaderHardwareCard>,
+    ) -> HeaderStatusContent {
+        let limit = hardware_card_limit(self.shell.viewport_size().0).max(1);
+        let total = cards.len();
+        let page_count = total.div_ceil(limit).max(1);
+        let page = self
+            .shell
+            .header_status_hardware_page(mode)
+            .min(page_count.saturating_sub(1));
+        let start = page * limit;
+        let visible = cards
+            .into_iter()
+            .skip(start)
+            .take(limit)
+            .collect::<Vec<_>>();
+        let hidden_count = total.saturating_sub(visible.len());
+        let label = visible
+            .iter()
+            .map(|card| {
+                format!(
+                    "{} {} · {} · {}",
+                    if mode == HeaderStatusMode::Gpu {
+                        "GPU"
+                    } else {
+                        "NPU"
+                    },
+                    card.index,
+                    format_optional_percent(card.utilization_percent),
+                    card.memory_text
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        HeaderStatusContent::hardware(icon, label, mode, visible, hidden_count, page_count)
+    }
+
+    fn cycle_header_hardware_page(
+        &mut self,
+        mode: HeaderStatusMode,
+        delta: i32,
+        cx: &mut Context<Self>,
+    ) {
+        let total = match mode {
+            HeaderStatusMode::Gpu => self
+                .remote_ops
+                .gpu_presentation()
+                .data
+                .map_or(0, |overview| overview.gpus.len()),
+            HeaderStatusMode::Npu => self
+                .remote_ops
+                .npu_presentation()
+                .data
+                .map_or(0, |overview| overview.npus.len()),
+            _ => 0,
+        };
+        let page_count = total
+            .div_ceil(hardware_card_limit(self.shell.viewport_size().0).max(1))
+            .max(1);
+        let current = self.shell.header_status_hardware_page(mode) % page_count;
+        let next = if delta < 0 {
+            (current + page_count - 1) % page_count
+        } else {
+            (current + 1) % page_count
+        };
+        self.shell.set_header_status_hardware_page(mode, next);
+        cx.notify();
     }
 
     fn remote_stats_header_fallback(&self) -> String {
@@ -490,6 +819,27 @@ impl NyaTermApp {
         self.persist_header_status_settings();
         self.ensure_header_status_clock(cx);
         cx.notify();
+    }
+
+    pub(in crate::features) fn open_header_status_hide_confirm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_confirm_dialog(
+            (
+                t!("headerStatus.hideConfirmTitle").to_string(),
+                t!("headerStatus.hideConfirmDesc").to_string(),
+                t!("headerStatus.hideConfirmAction").to_string(),
+                false,
+                |app, _, cx| {
+                    app.set_header_status_visible(false, cx);
+                    true
+                },
+            ),
+            window,
+            cx,
+        );
     }
 
     /// Both header-status setters funnel through here, so this is the one place the
@@ -569,31 +919,138 @@ impl NyaTermApp {
         "NyaTerm".to_string()
     }
 
-    fn title_context_icon(&self) -> Option<&'static str> {
+    fn title_context_icon(&self) -> Option<IconDef> {
         if self.session.start_has_active_pending() {
-            return Some("icons/conn/connect.svg");
+            return Some(IconDef::mono("icons/conn/connect.svg", 0x60a5fa));
         }
         if self.session.start_has_active_failed() {
-            return Some("icons/session/disconnect.svg");
+            return Some(IconDef::mono("icons/session/disconnect.svg", 0xf87171));
         }
-        if let Some(session_id) = self.session.active_id() {
-            return self
+        if let Some(session_id) = self.session.active_id()
+            && let Some(session) = self.session.session_info(session_id)
+        {
+            let icon_key = self
                 .session
-                .session_info(session_id)
-                .map(|session| session_kind_icon_path(session.kind));
+                .metadata(session_id)
+                .and_then(|metadata| metadata.source_connection_id.as_deref())
+                .and_then(|connection_id| self.connection_state.connection_by_id(connection_id))
+                .and_then(|connection| connection.icon.as_deref())
+                .filter(|icon| !icon.trim().is_empty());
+            return Some(session_header_icon(session.kind, icon_key));
         }
         if self.session.start_has_pending() {
-            return Some("icons/conn/connect.svg");
+            return Some(IconDef::mono("icons/conn/connect.svg", 0x60a5fa));
         }
         if self.session.start_has_failed() || self.shell.last_connect_failure_name().is_some() {
-            return Some("icons/session/disconnect.svg");
+            return Some(IconDef::mono("icons/session/disconnect.svg", 0xf87171));
         }
         None
     }
 }
 
+fn pressure_color(value: Option<f64>) -> Option<u32> {
+    match value {
+        Some(value) if value >= 90. => Some(0xf87171),
+        Some(value) if value >= 75. => Some(0xf59e0b),
+        _ => None,
+    }
+}
+
+fn percent_from_parts(used: u64, total: u64) -> Option<f64> {
+    (total > 0).then(|| (used as f64 / total as f64 * 100.).clamp(0., 100.))
+}
+
+fn format_optional_percent(value: Option<f64>) -> String {
+    value.map_or_else(
+        || "--".to_string(),
+        |value| format!("{:.0}%", value.clamp(0., 100.)),
+    )
+}
+
+fn format_memory_mb_value(value: u64) -> String {
+    if value >= 1024 {
+        let gib = value as f64 / 1024.;
+        if gib < 10. && gib.fract() >= 0.05 {
+            format!("{gib:.1}G")
+        } else {
+            format!("{gib:.0}G")
+        }
+    } else {
+        format!("{value}M")
+    }
+}
+
+fn format_memory_mb_compact(used: u64, total: u64) -> String {
+    if total == 0 {
+        "-".to_string()
+    } else {
+        format!(
+            "{}/{}",
+            format_memory_mb_value(used),
+            format_memory_mb_value(total)
+        )
+    }
+}
+
+fn hardware_card_limit(width: f32) -> usize {
+    if width >= 1180. {
+        4
+    } else if width >= 920. {
+        3
+    } else if width >= 700. {
+        2
+    } else {
+        1
+    }
+}
+
+fn header_mini_progress(value: Option<f64>, primary: u32, background: u32) -> impl IntoElement {
+    let width = value.unwrap_or(0.).clamp(0., 100.) * 0.3;
+    let color = pressure_color(value).unwrap_or(primary);
+    div()
+        .w(px(30.))
+        .h(px(4.))
+        .flex_none()
+        .overflow_hidden()
+        .rounded_full()
+        .bg(rgb(background))
+        .child(
+            div()
+                .w(px(width as f32))
+                .h_full()
+                .rounded_full()
+                .bg(rgb(color)),
+        )
+}
+
 fn current_unix_minute() -> i64 {
     OffsetDateTime::now_utc().unix_timestamp().div_euclid(60)
+}
+
+fn session_kind_label(kind: SessionKind) -> &'static str {
+    match kind {
+        SessionKind::LocalPty => "Local",
+        SessionKind::Ssh | SessionKind::RawTcp => "SSH",
+        SessionKind::Telnet => "Telnet",
+        SessionKind::Serial => "Serial",
+        SessionKind::Rdp => "RDP",
+        SessionKind::Vnc => "VNC",
+    }
+}
+
+fn session_header_icon(kind: SessionKind, icon_key: Option<&str>) -> IconDef {
+    resolve_connection_icon(icon_key, session_kind_label(kind))
+}
+
+fn header_status_mode_icon(mode: HeaderStatusMode) -> IconDef {
+    match mode {
+        HeaderStatusMode::Session => IconDef::mono("icons/sessions.svg", 0x94a3b8),
+        HeaderStatusMode::Resources => IconDef::mono("icons/resources.svg", 0x38bdf8),
+        HeaderStatusMode::Host => IconDef::mono("icons/conn/server.svg", 0x38bdf8),
+        HeaderStatusMode::DateTime => IconDef::mono("icons/clock.svg", 0x34d399),
+        HeaderStatusMode::Gpu => IconDef::mono("icons/gpu.svg", 0x76b900),
+        HeaderStatusMode::Npu => IconDef::mono("icons/npu.svg", 0xe60012),
+    }
 }
 
 fn local_now() -> OffsetDateTime {
@@ -623,16 +1080,6 @@ fn format_header_datetime(datetime: OffsetDateTime, language: &str) -> String {
     .into_owned()
 }
 
-fn average_optional_percent(values: impl Iterator<Item = f64>) -> f64 {
-    let mut total = 0.;
-    let mut count = 0.;
-    for value in values {
-        total += value.clamp(0., 100.);
-        count += 1.;
-    }
-    if count > 0. { total / count } else { 0. }
-}
-
 fn localized_weekday(weekday: Weekday, locale: &str) -> String {
     let key = match weekday {
         Weekday::Monday => "titleBar.weekday.monday",
@@ -648,9 +1095,79 @@ fn localized_weekday(weekday: Weekday, locale: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use nyaterm_transport::SessionKind;
     use time::{Date, Month, Time, UtcOffset};
 
-    use super::{format_header_datetime, localized_weekday};
+    use crate::models::HeaderStatusMode;
+
+    use super::{
+        format_header_datetime, format_memory_mb_compact, hardware_card_limit,
+        header_status_mode_icon, localized_weekday, percent_from_parts, pressure_color,
+        session_header_icon,
+    };
+
+    #[test]
+    fn header_status_modes_follow_tauri_radio_order() {
+        assert_eq!(
+            HeaderStatusMode::ALL.map(HeaderStatusMode::persistence_id),
+            ["session", "resources", "host", "datetime", "gpu", "npu"]
+        );
+    }
+
+    #[test]
+    fn status_modes_use_semantic_clock_and_accelerator_icons() {
+        assert_eq!(
+            header_status_mode_icon(HeaderStatusMode::DateTime).path,
+            "icons/clock.svg"
+        );
+        assert_eq!(
+            header_status_mode_icon(HeaderStatusMode::Gpu).path,
+            "icons/gpu.svg"
+        );
+        assert_eq!(
+            header_status_mode_icon(HeaderStatusMode::Npu).path,
+            "icons/npu.svg"
+        );
+    }
+
+    #[test]
+    fn session_header_prefers_saved_icon_and_falls_back_by_kind() {
+        let saved = session_header_icon(SessionKind::Ssh, Some("ubuntu"));
+        let default_ssh = session_header_icon(SessionKind::Ssh, None);
+        assert_ne!(saved, default_ssh);
+        assert_eq!(saved.path, "color/os/ubuntu.svg");
+        assert_eq!(
+            session_header_icon(SessionKind::Ssh, Some("missing-icon")),
+            default_ssh
+        );
+        assert_eq!(
+            session_header_icon(SessionKind::LocalPty, None).path,
+            "icons/conn/terminal.svg"
+        );
+        assert_eq!(
+            session_header_icon(SessionKind::Telnet, None).path,
+            "icons/conn/telnet.svg"
+        );
+        assert_eq!(
+            session_header_icon(SessionKind::Serial, None).path,
+            "icons/conn/serial.svg"
+        );
+    }
+
+    #[test]
+    fn structured_status_formatting_matches_tauri_thresholds() {
+        assert_eq!(pressure_color(Some(74.9)), None);
+        assert_eq!(pressure_color(Some(75.)), Some(0xf59e0b));
+        assert_eq!(pressure_color(Some(90.)), Some(0xf87171));
+        assert_eq!(percent_from_parts(1, 4), Some(25.));
+        assert_eq!(percent_from_parts(1, 0), None);
+        assert_eq!(format_memory_mb_compact(1536, 4096), "1.5G/4G");
+        assert_eq!(format_memory_mb_compact(0, 0), "-");
+        assert_eq!(hardware_card_limit(699.), 1);
+        assert_eq!(hardware_card_limit(700.), 2);
+        assert_eq!(hardware_card_limit(920.), 3);
+        assert_eq!(hardware_card_limit(1180.), 4);
+    }
 
     #[test]
     fn formats_header_datetime_for_supported_languages() {

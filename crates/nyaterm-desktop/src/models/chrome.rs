@@ -16,9 +16,9 @@ impl HeaderStatusMode {
         Self::Session,
         Self::Resources,
         Self::Host,
+        Self::DateTime,
         Self::Gpu,
         Self::Npu,
-        Self::DateTime,
     ];
 
     pub(crate) fn from_setting(value: &str) -> Self {
@@ -54,17 +54,6 @@ impl HeaderStatusMode {
         }
     }
 
-    pub(crate) const fn icon_path(self) -> &'static str {
-        match self {
-            Self::Session => "icons/sessions.svg",
-            Self::Resources => "icons/resources.svg",
-            Self::Host => "icons/conn/server.svg",
-            Self::Gpu => "icons/resources.svg",
-            Self::Npu => "icons/resources.svg",
-            Self::DateTime => "icons/history.svg",
-        }
-    }
-
     pub(crate) const fn needs_remote_stats(self) -> bool {
         matches!(self, Self::Resources | Self::Host)
     }
@@ -73,12 +62,16 @@ impl HeaderStatusMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HeaderStatusState {
     pub(crate) rendered_minute: i64,
+    pub(crate) gpu_page: usize,
+    pub(crate) npu_page: usize,
 }
 
 impl Default for HeaderStatusState {
     fn default() -> Self {
         Self {
             rendered_minute: -1,
+            gpu_page: 0,
+            npu_page: 0,
         }
     }
 }

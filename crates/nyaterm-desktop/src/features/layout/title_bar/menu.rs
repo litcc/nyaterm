@@ -390,8 +390,8 @@ impl NyaTermApp {
         let mut items = vec![
             NyaMenuItem::action(t!("headerStatus.hidden"))
                 .checked(!visible)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.set_header_status_visible(false, cx);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.open_header_status_hide_confirm(window, cx);
                 })),
         ];
         items.extend(HeaderStatusMode::ALL.into_iter().map(|mode| {

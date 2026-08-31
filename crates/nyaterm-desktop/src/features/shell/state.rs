@@ -15,8 +15,8 @@ use super::super::app_state::SettingsDraftSnapshot;
 use super::runtime_state::ShellRuntimeState;
 use crate::models::{
     ActivityBarContextMenuState, ActivityBarLayoutState, BottomPanelMode, BottomPanelResizeState,
-    HeaderStatusState, MainMode, NavItem, PanelOpenMode, PanelResizeSide, PanelResizeState,
-    PanelSide, PanelStackResizeState, RightFocus, SettingsTab, WorkspacePaneNode,
+    HeaderStatusMode, HeaderStatusState, MainMode, NavItem, PanelOpenMode, PanelResizeSide,
+    PanelResizeState, PanelSide, PanelStackResizeState, RightFocus, SettingsTab, WorkspacePaneNode,
     WorkspaceSplitResizeState, WorkspaceSplitState,
 };
 
@@ -615,6 +615,26 @@ impl ShellFeatureState {
 
     pub(in crate::features) fn set_header_status_rendered_minute(&mut self, minute: i64) {
         self.chrome.header_status.rendered_minute = minute;
+    }
+
+    pub(in crate::features) fn header_status_hardware_page(&self, mode: HeaderStatusMode) -> usize {
+        match mode {
+            HeaderStatusMode::Gpu => self.chrome.header_status.gpu_page,
+            HeaderStatusMode::Npu => self.chrome.header_status.npu_page,
+            _ => 0,
+        }
+    }
+
+    pub(in crate::features) fn set_header_status_hardware_page(
+        &mut self,
+        mode: HeaderStatusMode,
+        page: usize,
+    ) {
+        match mode {
+            HeaderStatusMode::Gpu => self.chrome.header_status.gpu_page = page,
+            HeaderStatusMode::Npu => self.chrome.header_status.npu_page = page,
+            _ => {}
+        }
     }
 
     pub(in crate::features) fn open_tabs_menu_is_open(&self) -> bool {

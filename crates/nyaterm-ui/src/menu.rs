@@ -301,7 +301,7 @@ pub struct NyaDropdownMenu {
     min_width: Option<Pixels>,
     max_width: Option<Pixels>,
     max_height: Option<Pixels>,
-    scrollable: bool,
+    scrollable: Option<bool>,
     items: DropdownItemsBuilder,
     on_trigger: Option<MenuClickHandler>,
 }
@@ -327,7 +327,7 @@ impl NyaDropdownMenu {
             min_width: None,
             max_width: None,
             max_height: None,
-            scrollable: false,
+            scrollable: None,
             items: Rc::new(|_, _| Vec::new()),
             on_trigger: None,
         }
@@ -384,7 +384,7 @@ impl NyaDropdownMenu {
     }
 
     pub fn scrollable(mut self, scrollable: bool) -> Self {
-        self.scrollable = scrollable;
+        self.scrollable = Some(scrollable);
         self
     }
 
@@ -440,19 +440,14 @@ impl RenderOnce for NyaDropdownMenu {
         let min_width = self.min_width;
         let max_width = self.max_width;
         let max_height = self.max_height;
-        let force_scrollable = self.scrollable;
+        let scrollable = self.scrollable;
         trigger.disabled(self.disabled).dropdown_menu_with_anchor(
             self.anchor.component_anchor(),
             move |menu, window, cx| {
                 let items = items_builder(window, cx);
-                // A long flat menu should scroll rather than overflow the window.
-                // Submenus cannot render inside a scrolling popup, so auto-enable
-                // only when no item opens one; an explicit scrollable(true) wins.
-                let scrollable =
-                    force_scrollable || items.iter().all(|item| item.children().is_none());
                 let menu = style_nya_popup_menu(menu, min_width, max_width)
                     .when_some(max_height, |menu, height| menu.max_h(height))
-                    .scrollable(scrollable);
+                    .scrollable(popup_menu_should_scroll(&items, scrollable));
                 items
                     .iter()
                     .fold(menu, |menu, item| item.append_to(menu, window, cx))
@@ -532,8 +527,13 @@ where
     }
 }
 
-fn context_menu_should_scroll(items: &[NyaMenuItem]) -> bool {
-    items.len() > 20 && items.iter().all(|item| item.children().is_none())
+const AUTO_SCROLL_ITEM_THRESHOLD: usize = 20;
+
+fn popup_menu_should_scroll(items: &[NyaMenuItem], override_value: Option<bool>) -> bool {
+    override_value.unwrap_or_else(|| {
+        items.len() > AUTO_SCROLL_ITEM_THRESHOLD
+            && items.iter().all(|item| item.children().is_none())
+    })
 }
 
 impl<E> RenderOnce for NyaContextMenu<E>
@@ -553,7 +553,7 @@ where
                 // PopupMenu paints a vertical scrollbar whenever `scrollable` is
                 // true, even when every item fits. Keep short context menus clean;
                 // only long flat menus need the bounded scrolling behavior.
-                let menu = menu.scrollable(context_menu_should_scroll(&items));
+                let menu = menu.scrollable(popup_menu_should_scroll(&items, None));
                 items
                     .iter()
                     .fold(menu, |menu, item| item.append_to(menu, window, cx))
@@ -572,7 +572,7 @@ mod tests {
     };
 
     use super::{
-        NyaContextMenu, NyaMenuItem, NyaMenuItemKind, context_menu_should_scroll,
+        NyaContextMenu, NyaMenuItem, NyaMenuItemKind, popup_menu_should_scroll,
         resolved_menu_widths,
     };
 
@@ -670,21 +670,24 @@ mod tests {
     }
 
     #[test]
-    fn context_menu_scrolls_only_for_long_flat_item_lists() {
+    fn popup_menus_scroll_only_for_long_flat_item_lists() {
         let short = vec![NyaMenuItem::action("Open"), NyaMenuItem::action("Delete")];
-        assert!(!context_menu_should_scroll(&short));
+        assert!(!popup_menu_should_scroll(&short, None));
 
         let long = (0..21)
             .map(|index| NyaMenuItem::action(format!("Item {index}")))
             .collect::<Vec<_>>();
-        assert!(context_menu_should_scroll(&long));
+        assert!(popup_menu_should_scroll(&long, None));
 
-        let mut long_with_submenu = long;
+        let mut long_with_submenu = long.clone();
         long_with_submenu.push(NyaMenuItem::submenu(
             "Move",
             vec![NyaMenuItem::action("Group")],
         ));
-        assert!(!context_menu_should_scroll(&long_with_submenu));
+        assert!(!popup_menu_should_scroll(&long_with_submenu, None));
+
+        assert!(popup_menu_should_scroll(&short, Some(true)));
+        assert!(!popup_menu_should_scroll(&long, Some(false)));
     }
 
     #[test]
