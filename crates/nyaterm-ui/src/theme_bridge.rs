@@ -115,7 +115,7 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
     component_theme.colors.description_list_label_foreground = color(palette.text_muted);
     component_theme.colors.drag_border = color(palette.focus_ring);
     component_theme.colors.drop_target = color(palette.hover);
-    component_theme.colors.popover = color(palette.surface_elevated);
+    component_theme.colors.popover = color(palette.surface);
     component_theme.colors.popover_foreground = color(palette.text);
     component_theme.colors.progress_bar = color(palette.primary);
     component_theme.colors.sidebar = color(palette.surface);
@@ -249,7 +249,7 @@ mod tests {
             apply_component_theme(palette, cx);
 
             let tokens = &Theme::global(cx).tokens;
-            assert_eq!(tokens.popover.color, color(palette.surface_elevated));
+            assert_eq!(tokens.popover.color, color(palette.surface));
             assert_eq!(tokens.popover_foreground.color, color(palette.text));
             assert_eq!(tokens.button.color, color(palette.surface_elevated));
             assert_eq!(tokens.list_hover.color, color(palette.hover));
