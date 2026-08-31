@@ -721,7 +721,7 @@ mod tests {
     }
 
     fn test_app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
-        let root = PathBuf::from(std::env::temp_dir()).join(format!(
+        let root: PathBuf = std::env::temp_dir().join(format!(
             "nyaterm-notes-panel-{}-{}",
             std::process::id(),
             uuid()
