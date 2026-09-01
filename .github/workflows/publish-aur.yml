@@ -119,6 +119,7 @@ jobs:
             grep -q './opt/nyaterm/nyaterm' <<< "${contents}"
             grep -q './opt/nyaterm/nyaterm-rdp-helper' <<< "${contents}"
             grep -q './opt/nyaterm/nyaterm-vnc-helper' <<< "${contents}"
+            grep -q './opt/nyaterm/nyaterm-mcp' <<< "${contents}"
           done
           {
             echo "license_sha=$(sha256sum packages/LICENSE | awk '{print $1}')"
@@ -197,6 +198,7 @@ jobs:
           grep -q 'opt/nyaterm/nyaterm$' < <(bsdtar -tf aur/*.pkg.tar.zst)
           grep -q 'opt/nyaterm/nyaterm-rdp-helper$' < <(bsdtar -tf aur/*.pkg.tar.zst)
           grep -q 'opt/nyaterm/nyaterm-vnc-helper$' < <(bsdtar -tf aur/*.pkg.tar.zst)
+          grep -q 'opt/nyaterm/nyaterm-mcp$' < <(bsdtar -tf aur/*.pkg.tar.zst)
 
       - name: Commit and push AUR update
         if: steps.release.outputs.publish == 'true'

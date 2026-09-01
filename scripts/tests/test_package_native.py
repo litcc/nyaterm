@@ -95,6 +95,7 @@ class PackageNativeTests(unittest.TestCase):
 
     def test_helper_binaries_resolve_beside_the_application(self) -> None:
         self.assertIn("nyaterm-rdp-helper", package_native.HELPER_BINS)
+        self.assertIn("nyaterm-mcp", package_native.HELPER_BINS)
         with mock.patch.dict("os.environ", {}, clear=True):
             linux = package_native.helper_binary_paths("x86_64-unknown-linux-gnu")
             windows = package_native.helper_binary_paths("aarch64-pc-windows-msvc")

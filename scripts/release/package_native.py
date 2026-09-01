@@ -28,7 +28,7 @@ APP_BIN = "nyaterm"
 # Helper processes the application spawns at runtime. `resolve_helper_path()`
 # in nyaterm-remote-desktop only looks beside the running executable, so each
 # of these must be packaged next to the application binary in every format.
-HELPER_BINS = ("nyaterm-rdp-helper", "nyaterm-vnc-helper")
+HELPER_BINS = ("nyaterm-rdp-helper", "nyaterm-vnc-helper", "nyaterm-mcp")
 MACOS_IDENTIFIER = "com.kang.nyaterm"
 LINUX_PACKAGE = "nyaterm"
 URL_SCHEME = "nyaterm"
