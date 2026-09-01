@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use gpui::{
     AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, rgb, rgba,
-    svg, uniform_list,
+    uniform_list,
 };
 use nyaterm_core::{RuntimeMode, truncate_preview};
 use nyaterm_transport::SessionInfo;
@@ -165,27 +165,7 @@ impl NyaTermApp {
                     .bg(self.shell_transparent_color(palette.section_header))
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .h(px(28.))
-                            .flex_1()
-                            .min_w_0()
-                            .rounded_md()
-                            .bg(self.shell_surface_color(palette.hover))
-                            .px_2()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                svg()
-                                    .size(px(14.))
-                                    .flex_none()
-                                    .path("icons/fe/search.svg")
-                                    .text_color(rgb(palette.text_dimmed)),
-                            )
-                            .child(div().min_w_0().flex_1().child(search_input)),
-                    ),
+                    .child(div().min_w_0().flex_1().child(search_input)),
             )
             .child(
                 div()

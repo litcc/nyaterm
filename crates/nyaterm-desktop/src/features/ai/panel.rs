@@ -222,15 +222,6 @@ impl AiPanel {
             .overflow_hidden()
             .bg(snapshot.chrome.transparent_surface)
             .relative()
-            .when(snapshot.history_open, |this| {
-                this.child(self.ai_history_popover(&snapshot, cx))
-            })
-            .when(snapshot.execution_menu_open, |this| {
-                this.child(self.ai_execution_mode_menu(&snapshot, cx))
-            })
-            .when_some(snapshot.message_menu.clone(), |this, menu| {
-                this.child(self.ai_message_context_menu_overlay(&snapshot, menu, cx))
-            })
             .when_some(snapshot.detected_error.clone(), |this, detected| {
                 this.child(self.ai_detected_error_banner(&snapshot, detected, cx))
             })
@@ -316,6 +307,18 @@ impl AiPanel {
                         )
                     }),
             )
+            // Absolute popovers must paint after the transcript and composer;
+            // later siblings otherwise cover an open menu even though its
+            // position is correct.
+            .when(snapshot.history_open, |this| {
+                this.child(self.ai_history_popover(&snapshot, cx))
+            })
+            .when(snapshot.execution_menu_open, |this| {
+                this.child(self.ai_execution_mode_menu(&snapshot, cx))
+            })
+            .when_some(snapshot.message_menu.clone(), |this, menu| {
+                this.child(self.ai_message_context_menu_overlay(&snapshot, menu, cx))
+            })
             .into_any_element()
     }
 
@@ -687,6 +690,7 @@ impl AiPanel {
                     .text_color(rgb(palette.text_muted))
                     .overflow_hidden()
                     .cursor_pointer()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .hover(move |this| {
                         this.border_color(rgb(palette.link))
                             .text_color(rgb(palette.text))
@@ -736,9 +740,13 @@ impl AiPanel {
         let palette = snapshot.chrome.palette;
         let mut menu = div()
             .absolute()
-            .left_0()
+            // The selector shares its row with the mode switch and send
+            // button. Expanding from its left edge made the fixed-width menu
+            // cross the side-panel boundary; anchoring the trailing edges
+            // keeps the popup inside the panel at its normal width.
+            .right_0()
             .bottom(px(34.))
-            .w(px(320.))
+            .w(px(260.))
             .max_h(px(280.))
             .overflow_hidden()
             .rounded_md()
@@ -749,7 +757,7 @@ impl AiPanel {
             .p_1()
             .flex()
             .flex_col()
-            .on_mouse_down(MouseButton::Left, |_, _, _| {});
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         if snapshot.enabled_models.is_empty() {
             return menu
                 .child(
@@ -1711,7 +1719,7 @@ impl AiPanel {
             .py_1()
             .flex()
             .flex_col()
-            .on_mouse_down(MouseButton::Left, |_, _, _| {})
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .px_3()
@@ -2102,7 +2110,7 @@ impl AiPanel {
             .flex()
             .flex_col()
             .overflow_hidden()
-            .on_mouse_down(MouseButton::Left, |_, _, _| {})
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .when_some(search_input, |this, search_input| {
                 this.child(
                     div()

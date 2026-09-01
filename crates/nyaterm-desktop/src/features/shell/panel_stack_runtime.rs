@@ -835,6 +835,10 @@ impl NyaTermApp {
                         .flex()
                         .items_center()
                         .gap_1()
+                        // Header triggers are part of their open popover. Keep
+                        // their mouse-down away from the root outside-click
+                        // handler so a second click can toggle the menu closed.
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(header_svg_icon_button(
                             palette,
                             "ai-header-execution-mode-toggle",

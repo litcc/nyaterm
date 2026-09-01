@@ -1724,6 +1724,13 @@ impl AiFeatureState {
         self.panel.execution_menu_open = false;
         self.chat.message_menu = None;
     }
+
+    pub(in crate::features) fn transient_menus_are_open(&self) -> bool {
+        self.history.open
+            || self.discovery.menu_open
+            || self.panel.execution_menu_open
+            || self.chat.message_menu.is_some()
+    }
 }
 
 impl AiChatState {

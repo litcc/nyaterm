@@ -324,7 +324,9 @@ fn transient_ai_menus_are_mutually_exclusive() {
     let cx = TestAppContext::single();
     let mut state = state(&cx);
 
+    assert!(!state.transient_menus_are_open());
     assert!(state.toggle_execution_menu());
+    assert!(state.transient_menus_are_open());
     assert!(state.toggle_discovery_menu(3));
     assert!(!state.panel_execution_menu_is_open());
     assert!(state.discovery_menu_is_open());
@@ -339,6 +341,9 @@ fn transient_ai_menus_are_mutually_exclusive() {
     });
     assert!(!state.history_is_open());
     assert!(state.chat_message_menu().is_some());
+
+    state.close_transient_menus();
+    assert!(!state.transient_menus_are_open());
 }
 
 #[test]
