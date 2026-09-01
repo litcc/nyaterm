@@ -124,6 +124,7 @@ impl NyaTermApp {
                         inserted_to_terminal: false,
                         executed: false,
                         blocked: false,
+                        ..Default::default()
                     })
                     .map(|_| label)
             }),

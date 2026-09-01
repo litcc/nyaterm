@@ -8,24 +8,34 @@ use thiserror::Error;
 use crate::{SecretString, cloud_sync::MASKED_SECRET_VALUE};
 
 mod agent;
+mod claude_code;
+mod codex;
+mod diagnostics;
 mod providers;
+mod responses;
 mod risk;
 mod settings;
+mod targets;
 
 pub use self::agent::*;
+pub use self::claude_code::*;
+pub use self::codex::*;
+pub use self::diagnostics::*;
 use self::providers::promote_reasoning_to_text;
 pub use self::providers::*;
+pub use self::responses::*;
 use self::risk::max_risk;
 pub use self::risk::*;
 pub use self::settings::*;
 use self::settings::{
-    default_active_profile_id, default_agent_smart_auto_execute_max_risk,
-    default_context_line_limit, default_history_turns, default_language,
+    default_active_profile_id, default_agent_smart_auto_execute_max_risk, default_claude_runtime,
+    default_codex_runtime, default_context_line_limit, default_history_turns, default_language,
     default_max_ai_file_size_bytes, default_max_output_commands, default_mode,
     default_model_source, default_provider_profiles, default_request_user_agent,
     default_safety_mode, default_schema_version, default_terminal_output_lines, default_timeout_ms,
-    default_true, provider_kind_key,
+    default_tool_integration_mode, default_true, provider_kind_key,
 };
+pub use self::targets::*;
 
 pub const AI_REQUEST_USER_AGENT_DEFAULT: &str =
     "codex-tui/0.125.0 (Ubuntu 22.4.0; x86_64) xterm-256color (codex-tui; 0.125.0)";
@@ -49,11 +59,136 @@ pub enum AiProviderKind {
     OpenaiCompatible,
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiApiFormat {
+    #[default]
+    ChatCompletions,
+    Responses,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiBackendKind {
+    #[default]
+    Genai,
+    Codex,
+    ClaudeCode,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiAgentKind {
+    #[default]
+    Nyaterm,
+    Codex,
+    ClaudeCode,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiPermissionMode {
+    Observer,
+    #[default]
+    Confirm,
+    Auto,
+    FullAccess,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalMcpSessionScope {
+    #[default]
+    CurrentWindow,
+    AllSessions,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExternalMcpSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
+    #[serde(default)]
+    pub session_scope: ExternalMcpSessionScope,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AiMode {
     Ask,
     Agent,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AiReasoningEffort {
+    #[default]
+    Auto,
+    None,
+    Low,
+    Medium,
+    High,
+    XHigh,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AiSessionScopeType {
+    Terminal,
+    Workspace,
+    Global,
+    #[default]
+    Unbound,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSessionScope {
+    #[serde(default)]
+    pub r#type: AiSessionScopeType,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub connection_ids: Vec<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTerminalTarget {
+    pub terminal_session_id: String,
+    #[serde(default)]
+    pub connection_id: Option<String>,
+    pub label: String,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    pub session_type: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTargetContext {
+    #[serde(default)]
+    pub target: Option<AiTerminalTarget>,
+    #[serde(default)]
+    pub context: AiContext,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAttachment {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -101,6 +236,8 @@ pub struct AiModelConfigItem {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub backend: AiBackendKind,
+    #[serde(default)]
     pub provider_kind: Option<AiProviderKind>,
     #[serde(default)]
     pub credential_id: Option<String>,
@@ -118,11 +255,91 @@ pub struct AiProviderCredential {
     pub name: String,
     pub provider_kind: AiProviderKind,
     #[serde(default)]
+    pub api_format: AiApiFormat,
+    #[serde(default)]
     pub base_url: Option<String>,
     #[serde(default)]
     pub api_key: Option<SecretString>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexThreadMode {
+    #[default]
+    Persistent,
+    Ephemeral,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CodexIntegrationSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    #[serde(default = "default_codex_runtime")]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub config_directory: Option<String>,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
+    #[serde(default = "default_tool_integration_mode")]
+    pub tool_integration_mode: Option<String>,
+    #[serde(default)]
+    pub thread_mode: CodexThreadMode,
+    #[serde(default)]
+    pub remote_terminal_agent_enabled: bool,
+}
+
+impl Default for CodexIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            executable_path: None,
+            runtime: default_codex_runtime(),
+            default_model: None,
+            config_directory: None,
+            permission_mode: AiPermissionMode::Confirm,
+            tool_integration_mode: default_tool_integration_mode(),
+            thread_mode: CodexThreadMode::Persistent,
+            remote_terminal_agent_enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClaudeCodeIntegrationSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub executable_path: Option<String>,
+    #[serde(default = "default_claude_runtime")]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub config_directory: Option<String>,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
+    #[serde(default = "default_tool_integration_mode")]
+    pub tool_integration_mode: Option<String>,
+}
+
+impl Default for ClaudeCodeIntegrationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            executable_path: None,
+            runtime: default_claude_runtime(),
+            default_model: None,
+            config_directory: None,
+            permission_mode: AiPermissionMode::Confirm,
+            tool_integration_mode: default_tool_integration_mode(),
+        }
+    }
 }
 
 impl std::fmt::Debug for AiProviderProfile {
@@ -147,6 +364,7 @@ impl std::fmt::Debug for AiProviderCredential {
             .field("id", &self.id)
             .field("name", &self.name)
             .field("provider_kind", &self.provider_kind)
+            .field("api_format", &self.api_format)
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
             .field("enabled", &self.enabled)
@@ -188,6 +406,12 @@ pub struct AiSettings {
     #[serde(default = "default_mode")]
     pub default_mode: AiMode,
     #[serde(default)]
+    pub default_agent_kind: AiAgentKind,
+    #[serde(default)]
+    pub external_agent_permission_mode: AiPermissionMode,
+    #[serde(default)]
+    pub default_reasoning_effort: AiReasoningEffort,
+    #[serde(default)]
     pub default_model_id: Option<String>,
     #[serde(default)]
     pub models: Vec<AiModelConfigItem>,
@@ -211,6 +435,12 @@ pub struct AiSettings {
     pub agent_command_execution_mode: AgentCommandExecutionMode,
     #[serde(default = "default_agent_smart_auto_execute_max_risk")]
     pub agent_smart_auto_execute_max_risk: RiskLevel,
+    #[serde(default)]
+    pub codex: CodexIntegrationSettings,
+    #[serde(default)]
+    pub claude_code: ClaudeCodeIntegrationSettings,
+    #[serde(default)]
+    pub external_mcp: ExternalMcpSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -231,6 +461,10 @@ pub struct AiCommandCard {
     pub category: Option<String>,
     #[serde(default)]
     pub references: Vec<String>,
+    #[serde(default)]
+    pub target_terminal_session_id: Option<String>,
+    #[serde(default)]
+    pub target: Option<AiTerminalTarget>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -246,10 +480,29 @@ pub enum AiMessageRole {
 pub struct AiSession {
     pub id: String,
     #[serde(default)]
+    pub agent_kind: AiAgentKind,
+    #[serde(default)]
+    pub scope: AiSessionScope,
+    #[serde(default)]
     pub connection_id: Option<String>,
     pub title: String,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub external_session_id: Option<String>,
+    #[serde(default)]
+    pub backend_metadata: Option<AiSessionBackendMetadata>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSessionBackendMetadata {
+    #[serde(default)]
+    pub backend: AiBackendKind,
+    #[serde(default)]
+    pub external_thread_id: Option<String>,
+    #[serde(default)]
+    pub codex_terminal_tools_version: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -274,7 +527,7 @@ pub struct AiHistoryFile {
     pub messages: Vec<AiMessage>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AiAuditLog {
     pub id: String,
@@ -293,10 +546,28 @@ pub struct AiAuditLog {
     pub executed: bool,
     #[serde(default)]
     pub blocked: bool,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub client: Option<String>,
+    #[serde(default)]
+    pub capability: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub permission_mode: Option<AiPermissionMode>,
+    #[serde(default)]
+    pub approval_decision: Option<String>,
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppendAiAuditRequest {
     #[serde(default)]
@@ -314,6 +585,24 @@ pub struct AppendAiAuditRequest {
     pub executed: bool,
     #[serde(default)]
     pub blocked: bool,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub client: Option<String>,
+    #[serde(default)]
+    pub capability: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub permission_mode: Option<AiPermissionMode>,
+    #[serde(default)]
+    pub approval_decision: Option<String>,
+    #[serde(default)]
+    pub success: Option<bool>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -394,12 +683,28 @@ pub struct AiChatRequest {
     pub connection_id: Option<String>,
     #[serde(default)]
     pub terminal_session_id: Option<String>,
+    #[serde(default)]
+    pub owner_scope: AiSessionScope,
+    #[serde(default)]
+    pub targets: Vec<AiTerminalTarget>,
+    #[serde(default)]
+    pub target_contexts: Vec<AiTargetContext>,
     #[serde(default = "default_mode")]
     pub mode: AiMode,
+    #[serde(default)]
+    pub agent_kind: AiAgentKind,
+    #[serde(default)]
+    pub permission_mode: AiPermissionMode,
     #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
     pub model_name: Option<String>,
+    #[serde(default)]
+    pub default_target_session_id: Option<String>,
+    #[serde(default)]
+    pub existing_external_session_id: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<AiAttachment>,
     pub action: AiAction,
     pub user_input: String,
     #[serde(default)]
@@ -431,7 +736,9 @@ pub struct AiModelOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAiModel {
     pub model_name: String,
+    pub backend: AiBackendKind,
     pub provider_kind: AiProviderKind,
+    pub api_format: AiApiFormat,
     pub credential: Option<AiProviderCredential>,
 }
 
@@ -475,6 +782,8 @@ pub struct AgentLlmResponse {
     pub action: String,
     #[serde(default)]
     pub command: Option<String>,
+    #[serde(default)]
+    pub target_terminal_session_id: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_risk_level")]
     pub risk_level: Option<RiskLevel>,
     #[serde(default)]
@@ -529,6 +838,8 @@ pub enum AiModelError {
     InvalidModelsJson(String),
     #[error("invalid AI chat JSON: {0}")]
     InvalidChatJson(String),
+    #[error("Responses API error: {0}")]
+    ResponsesError(String),
     #[error("AI chat response did not include assistant content")]
     MissingChatContent,
 }
@@ -673,11 +984,17 @@ pub fn resolve_request_model(
         .ok_or_else(|| AiModelError::MissingProvider {
             model: selected_model.name.clone(),
         })?;
+    let api_format = credential
+        .as_ref()
+        .map(|credential| credential.api_format.clone())
+        .unwrap_or_default();
     validate_model_credential(&provider_kind, credential.as_ref())?;
 
     Ok(ResolvedAiModel {
         model_name: selected_model.name.clone(),
+        backend: selected_model.backend.clone(),
         provider_kind,
+        api_format,
         credential,
     })
 }
@@ -993,6 +1310,7 @@ fn request_user_prompt(request: &AiChatRequest, settings: &AiSettings) -> String
 
 pub fn build_prompt(request: &AiChatRequest, settings: &AiSettings) -> String {
     let ctx = &request.context;
+    let user_input = user_input_with_target_contexts(request);
     if resolve_prompt_language(&request.options.language) == PromptLanguage::ZhCn {
         let action = match request.action {
             AiAction::GenerateCommand => "根据自然语言需求生成 1 到 2 条 Shell 命令",
@@ -1032,7 +1350,7 @@ pub fn build_prompt(request: &AiChatRequest, settings: &AiSettings) -> String {
 - 优先生成只读诊断命令
 - 如果信息不足，请给出验证命令
 - 必须返回 JSON 对象，不要返回 Markdown"#,
-            user_input = request.user_input,
+            user_input = user_input,
             connection_name = ctx.connection_name.as_deref().unwrap_or("-"),
             host = ctx.host.as_deref().unwrap_or("-"),
             port = ctx
@@ -1105,7 +1423,7 @@ Requirements:
 - Prefer read-only diagnostic commands first.
 - If information is insufficient, provide verification commands.
 - Return a JSON object only. Do not return Markdown."#,
-            user_input = request.user_input,
+            user_input = user_input,
             connection_name = ctx.connection_name.as_deref().unwrap_or("-"),
             host = ctx.host.as_deref().unwrap_or("-"),
             port = ctx

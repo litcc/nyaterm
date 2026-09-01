@@ -19,6 +19,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 keyring.workspace = true
 md5.workspace = true
 nyaterm-core.workspace = true
+nyaterm-mcp-protocol.workspace = true
 nyaterm-otp.workspace = true
 nyaterm-remote-desktop.workspace = true
 nyaterm-store.workspace = true
@@ -35,6 +36,8 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 time.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tokio-util = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 uuid.workspace = true
 zed_reqwest.workspace = true
@@ -47,8 +50,12 @@ gpui = { workspace = true, features = ["test-support"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
     "Win32_System_DataExchange",
     "Win32_System_Ole",
+    "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }

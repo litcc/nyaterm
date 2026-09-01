@@ -25,6 +25,7 @@ use crate::features::commands::{
     quick_command_sort_mode_from_setting, quick_command_view_mode_from_setting,
 };
 use crate::features::connections::{ConnectionFeatureFocus, ConnectionFeatureState};
+use crate::features::mcp::McpHostFeatureState;
 use crate::features::notes::{NotesFeatureState, NotesPanel};
 use crate::features::pages::connections::panel::ConnectionPanel;
 use crate::features::pages::settings::panel::SettingsPanel;
@@ -118,6 +119,7 @@ impl NyaTermApp {
         let recording = RecordingFeatureState::new(settings.recording_memory_limit_bytes as usize);
         let recording_writer = recording.writer();
         let (ai_model_draft, ai_base_url_draft) = ai_active_profile_drafts(&ai_settings);
+        let mcp = McpHostFeatureState::new(&ai_settings.external_mcp);
         let left_panel_width = settings.ui_left_panel_width as f32;
         let right_panel_width = settings.ui_right_panel_width as f32;
         let transfer_panel_height = settings.ui_transfer_height as f32;
@@ -282,6 +284,7 @@ impl NyaTermApp {
                 },
             ),
             ai_panel,
+            mcp,
             transfer: TransferFeatureState::new(
                 ".".to_string(),
                 String::new(),

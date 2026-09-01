@@ -13,6 +13,7 @@ use super::{
 fn provider_debug_output_redacts_api_keys() {
     let secret = "nya-ai-key-never-log";
     let credential = AiProviderCredential {
+        api_format: Default::default(),
         id: "credential-1".to_string(),
         name: "Test".to_string(),
         provider_kind: AiProviderKind::Openai,
@@ -45,6 +46,10 @@ fn trims_ai_history_to_session_and_message_limits() {
             session_idx % 60
         );
         history.sessions.push(AiSession {
+            agent_kind: Default::default(),
+            scope: Default::default(),
+            external_session_id: None,
+            backend_metadata: None,
             id: session_id.clone(),
             connection_id: None,
             title: session_id.clone(),
@@ -107,6 +112,7 @@ fn trims_ai_audit_to_latest_entries() {
             executed: false,
             blocked: false,
             created_at: format!("2026-04-28T00:00:{:02}Z", index % 60),
+            ..Default::default()
         });
     }
 
@@ -284,6 +290,14 @@ fn user_agent_and_deepseek_mapping_match_legacy() {
 
 pub(super) fn sample_ai_request(language: &str) -> AiChatRequest {
     AiChatRequest {
+        owner_scope: Default::default(),
+        targets: Vec::new(),
+        target_contexts: Vec::new(),
+        agent_kind: Default::default(),
+        permission_mode: Default::default(),
+        default_target_session_id: None,
+        existing_external_session_id: None,
+        attachments: Vec::new(),
         stream_id: None,
         session_id: Some("session-1".to_string()),
         connection_id: Some("connection-1".to_string()),

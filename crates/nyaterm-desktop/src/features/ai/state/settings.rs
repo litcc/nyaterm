@@ -4,14 +4,15 @@ use std::collections::{HashMap, HashSet};
 
 use gpui::FocusHandle;
 use nyaterm_core::{
-    AgentCommandExecutionMode, AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelDiscovery,
-    AiModelSource, AiProviderCredential, AiProviderKind, AiSettings, RiskLevel,
-    ai_model_id_for_credential, ai_model_id_for_provider, merge_model_discoveries, now_rfc3339,
+    AgentCommandExecutionMode, AiAgentKind, AiCustomActionConfig, AiMode, AiModelConfigItem,
+    AiModelDiscovery, AiModelSource, AiPermissionMode, AiProviderCredential, AiProviderKind,
+    AiSettings, CodexThreadMode, ExternalMcpSessionScope, RiskLevel, ai_model_id_for_credential,
+    ai_model_id_for_provider, merge_model_discoveries, now_rfc3339,
 };
 
 use crate::models::{AiActionEditorField, AiActionListKind};
 
-use super::{AiFeatureState, AiSettingsMutation, AiSettingsState};
+use super::{AiFeatureState, AiFullAccessSetting, AiSettingsMutation, AiSettingsState};
 
 fn is_builtin_ai_provider_id(id: &str) -> bool {
     matches!(
@@ -65,6 +66,7 @@ fn seed_builtin_ai_models_for_provider(settings: &mut AiSettings, provider_kind:
             continue;
         }
         settings.models.push(AiModelConfigItem {
+            backend: Default::default(),
             id: model_id,
             name: (*name).to_string(),
             provider_kind: Some(provider_kind.clone()),
@@ -83,6 +85,87 @@ impl AiFeatureState {
 
     pub(in crate::features) fn settings_config_cloned(&self) -> AiSettings {
         self.settings.config.clone()
+    }
+
+    pub(in crate::features) fn set_settings_default_agent(&mut self, kind: AiAgentKind) {
+        self.settings.config.default_agent_kind = kind;
+    }
+
+    pub(in crate::features) fn request_settings_permission_mode(
+        &mut self,
+        setting: AiFullAccessSetting,
+        mode: AiPermissionMode,
+    ) -> bool {
+        if mode == AiPermissionMode::FullAccess {
+            self.settings.pending_full_access = Some(setting);
+            return false;
+        }
+        self.settings.pending_full_access = None;
+        self.apply_settings_permission_mode(setting, mode);
+        true
+    }
+
+    pub(in crate::features) fn pending_full_access_setting(&self) -> Option<AiFullAccessSetting> {
+        self.settings.pending_full_access
+    }
+
+    pub(in crate::features) fn cancel_settings_full_access(&mut self) {
+        self.settings.pending_full_access = None;
+    }
+
+    pub(in crate::features) fn confirm_settings_full_access(
+        &mut self,
+    ) -> Option<AiFullAccessSetting> {
+        let setting = self.settings.pending_full_access.take()?;
+        self.apply_settings_permission_mode(setting, AiPermissionMode::FullAccess);
+        Some(setting)
+    }
+
+    fn apply_settings_permission_mode(
+        &mut self,
+        setting: AiFullAccessSetting,
+        mode: AiPermissionMode,
+    ) {
+        match setting {
+            AiFullAccessSetting::ExternalAgent => {
+                self.settings.config.external_agent_permission_mode = mode
+            }
+            AiFullAccessSetting::Codex => self.settings.config.codex.permission_mode = mode,
+            AiFullAccessSetting::ClaudeCode => {
+                self.settings.config.claude_code.permission_mode = mode
+            }
+            AiFullAccessSetting::McpHost => {
+                self.settings.config.external_mcp.permission_mode = mode
+            }
+        }
+    }
+
+    pub(in crate::features) fn toggle_settings_codex_enabled(&mut self) {
+        self.settings.config.codex.enabled = !self.settings.config.codex.enabled;
+    }
+
+    pub(in crate::features) fn toggle_settings_codex_mcp_integration(&mut self) {
+        toggle_mcp_integration(&mut self.settings.config.codex.tool_integration_mode);
+    }
+
+    pub(in crate::features) fn toggle_settings_claude_enabled(&mut self) {
+        self.settings.config.claude_code.enabled = !self.settings.config.claude_code.enabled;
+    }
+
+    pub(in crate::features) fn toggle_settings_claude_mcp_integration(&mut self) {
+        toggle_mcp_integration(&mut self.settings.config.claude_code.tool_integration_mode);
+    }
+
+    pub(in crate::features) fn toggle_settings_mcp_enabled(&mut self) {
+        self.settings.config.external_mcp.enabled = !self.settings.config.external_mcp.enabled;
+    }
+
+    pub(in crate::features) fn set_settings_codex_thread_mode(&mut self, mode: CodexThreadMode) {
+        self.settings.config.codex.thread_mode = mode;
+    }
+
+    pub(in crate::features) fn set_settings_mcp_scope(&mut self, scope: ExternalMcpSessionScope) {
+        self.settings.config.external_mcp.session_scope = scope;
     }
 
     pub(in crate::features) fn settings_enabled(&self) -> bool {
@@ -136,6 +219,7 @@ impl AiFeatureState {
 
         if let Some(kind) = active_kind.clone() {
             let credential = AiProviderCredential {
+                api_format: Default::default(),
                 id: active_id.clone(),
                 name: active_name,
                 provider_kind: kind.clone(),
@@ -187,6 +271,7 @@ impl AiFeatureState {
                     model.enabled = true;
                 } else {
                     next.models.push(AiModelConfigItem {
+                        backend: Default::default(),
                         id: model_id.clone(),
                         name: active_model,
                         provider_kind: Some(kind),
@@ -562,6 +647,7 @@ impl AiFeatureState {
         self.settings.config.models.insert(
             0,
             AiModelConfigItem {
+                backend: Default::default(),
                 id: model_id.clone(),
                 name: name.clone(),
                 provider_kind: Some(credential.provider_kind),
@@ -785,6 +871,7 @@ impl AiFeatureState {
         self.settings.config.provider_credentials.insert(
             0,
             AiProviderCredential {
+                api_format: Default::default(),
                 id: id.clone(),
                 name: String::new(),
                 provider_kind: AiProviderKind::OpenaiCompatible,
@@ -959,6 +1046,7 @@ impl AiFeatureState {
                 model.last_seen_at = last_seen_at.clone();
             } else {
                 self.settings.config.models.push(AiModelConfigItem {
+                    backend: Default::default(),
                     id: discovery.id.clone(),
                     name: discovery.name.clone(),
                     provider_kind: discovery.provider_kind.clone(),
@@ -970,6 +1058,14 @@ impl AiFeatureState {
             }
         }
         discoveries.len()
+    }
+}
+
+fn toggle_mcp_integration(mode: &mut Option<String>) {
+    if mode.as_deref() == Some("nyaterm_mcp") {
+        *mode = None;
+    } else {
+        *mode = Some("nyaterm_mcp".to_string());
     }
 }
 

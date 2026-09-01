@@ -687,11 +687,12 @@ impl ConnectionStore {
         let merged = merge_masked_ai_settings(&current, next);
         let encrypted = self.encrypt_ai_settings(merged.clone())?;
         let mut value = self.load_settings_value()?;
-        set_nested_json_value(
-            &mut value,
-            &[SETTINGS_AI_FIELD],
-            serde_json::to_value(encrypted)?,
-        );
+        let mut encrypted_value = serde_json::to_value(encrypted)?;
+        if let Some(current_value) = value.get(SETTINGS_AI_FIELD) {
+            merge_unknown_json(current_value, &mut encrypted_value);
+        }
+        drop_deprecated_ai_fields(&mut encrypted_value);
+        set_nested_json_value(&mut value, &[SETTINGS_AI_FIELD], encrypted_value);
         self.save_settings_value(&value)?;
         Ok(merged)
     }
@@ -1047,6 +1048,44 @@ impl ConnectionStore {
                     .map_err(StorageError::from)
             })
             .collect()
+    }
+}
+
+fn merge_unknown_json(current: &serde_json::Value, next: &mut serde_json::Value) {
+    match (current, next) {
+        (serde_json::Value::Object(current), serde_json::Value::Object(next)) => {
+            for (key, current_value) in current {
+                if let Some(next_value) = next.get_mut(key) {
+                    merge_unknown_json(current_value, next_value);
+                } else {
+                    next.insert(key.clone(), current_value.clone());
+                }
+            }
+        }
+        (serde_json::Value::Array(current), serde_json::Value::Array(next)) => {
+            for next_item in next {
+                let Some(id) = next_item.get("id").and_then(serde_json::Value::as_str) else {
+                    continue;
+                };
+                if let Some(current_item) = current
+                    .iter()
+                    .find(|item| item.get("id").and_then(serde_json::Value::as_str) == Some(id))
+                {
+                    merge_unknown_json(current_item, next_item);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn drop_deprecated_ai_fields(value: &mut serde_json::Value) {
+    if let Some(external_mcp) = value
+        .get_mut("external_mcp")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        external_mcp.remove("server_mode");
+        external_mcp.remove("idle_timeout_minutes");
     }
 }
 

@@ -1,8 +1,9 @@
 [workspace]
-# The application spawns both helpers at runtime and looks for them beside its own
-# executable, so a bare `cargo build` must produce all three binaries.
+# The application spawns three helpers at runtime and looks for them beside its own
+# executable, so a bare `cargo build` must produce all four binaries.
 default-members = [
     "crates/nyaterm-app",
+    "crates/nyaterm-mcp",
     "crates/nyaterm-rdp-helper",
     "crates/nyaterm-vnc-helper",
 ]
@@ -10,6 +11,8 @@ members = [
     "crates/nyaterm-app",
     "crates/nyaterm-core",
     "crates/nyaterm-desktop",
+    "crates/nyaterm-mcp",
+    "crates/nyaterm-mcp-protocol",
     "crates/nyaterm-otp",
     "crates/nyaterm-rdp-helper",
     "crates/nyaterm-remote-desktop",
@@ -71,6 +74,7 @@ keyring = { version = "3.6", features = [
 log = "0.4.11"
 md5 = "0.8"
 nyaterm-core = { path = "crates/nyaterm-core" }
+nyaterm-mcp-protocol = { path = "crates/nyaterm-mcp-protocol" }
 nyaterm-desktop = { path = "crates/nyaterm-desktop" }
 nyaterm-otp = { path = "crates/nyaterm-otp" }
 nyaterm-remote-desktop = { path = "crates/nyaterm-remote-desktop" }
@@ -85,12 +89,14 @@ quick-xml = "0.40"
 rand = { version = "0.10", features = ["thread_rng"] }
 redb = "4.1.0"
 regex = "1.11.1"
+rmcp = "=3.1.4"
 rustls = { version = "0.23.43", default-features = false, features = ["aws_lc_rs", "std"] }
 russh = { git = "https://github.com/nyakang/russh", rev = "cf257f67d88bdb1bb30f7419b494aa4b990448c7", features = ["des", "dsa"] }
 russh-sftp = { git = "https://github.com/nyakang/russh-sftp", rev = "90e4c8d19f88802bfdbd21ce5bfe46050219e0d9" }
 rusty-leveldb = "4.0"
 rust-embed = { version = "8.11", features = ["include-exclude", "debug-embed"] }
 rust-i18n = "4.2"
+schemars = "=1.2.2"
 serialport = { version = "4", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -100,6 +106,7 @@ signature = "3.0.0-rc.10"
 thiserror = "2"
 time = { version = "0.3.47", features = ["formatting", "local-offset", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util"] }
+tokio-util = "=0.7.19"
 tokio-socks = "0.5.2"
 tracing = "0.1"
 tracing-appender = "0.2.4"

@@ -2,6 +2,7 @@ pub mod activation;
 pub mod agent_capture;
 pub mod ai;
 pub mod assets;
+pub mod capabilities;
 pub mod cloud_sync;
 pub mod command_search;
 pub mod command_suggestion_suppression;
@@ -54,31 +55,37 @@ pub use agent_capture::{
 pub use ai::{
     AI_AUDIT_MAX_LOGS, AI_HISTORY_MAX_MESSAGES, AI_HISTORY_MAX_SESSIONS,
     AI_REQUEST_USER_AGENT_DEFAULT, AgentApprovalDecision, AgentCommandExecutionMode,
-    AgentCommandRiskAssessment, AgentLlmResponse, AiAction, AiAuditFile, AiAuditLog,
-    AiChatCompletion, AiChatRequest, AiChatStreamDelta, AiCommandCard, AiContext,
-    AiCustomActionConfig, AiHistoryFile, AiMessage, AiMessageRole, AiMode, AiModelConfigItem,
-    AiModelDiscovery, AiModelError, AiModelOutput, AiModelSource, AiProviderCredential,
-    AiProviderKind, AiProviderProfile, AiRequestOptions, AiSession, AiSettings, AiToolCall,
-    AiToolCallDelta, AppendAiAuditRequest, CommandObservation, ResolvedAiModel, RiskLevel,
+    AgentCommandRiskAssessment, AgentLlmResponse, AiAction, AiAgentKind, AiApiFormat, AiAttachment,
+    AiAuditFile, AiAuditLog, AiBackendKind, AiChatCompletion, AiChatRequest, AiChatStreamDelta,
+    AiCommandCard, AiContext, AiCustomActionConfig, AiHistoryFile, AiMessage, AiMessageRole,
+    AiMode, AiModelConfigItem, AiModelDiscovery, AiModelError, AiModelOutput, AiModelSource,
+    AiPermissionMode, AiProviderCredential, AiProviderKind, AiProviderProfile, AiReasoningEffort,
+    AiRequestContractError, AiRequestOptions, AiSession, AiSessionBackendMetadata, AiSessionScope,
+    AiSessionScopeType, AiSettings, AiTargetContext, AiTerminalTarget, AiToolCall, AiToolCallDelta,
+    AppendAiAuditRequest, ClaudeCodeIntegrationSettings, CodexIntegrationSettings, CodexThreadMode,
+    CommandObservation, ExternalMcpSessionScope, ExternalMcpSettings, ResolvedAiModel, RiskLevel,
     agent_response_action, agent_system_prompt, ai_model_id_for_credential,
     ai_model_id_for_provider, ai_settings_has_secret, anthropic_messages_url,
-    assess_agent_command_risk, assess_local_command_risk, build_agent_prompt,
-    build_anthropic_chat_request_body, build_anthropic_chat_request_body_with_stream,
-    build_gemini_chat_request_body, build_observation_message,
-    build_openai_compatible_chat_request_body,
-    build_openai_compatible_chat_request_body_with_stream, build_prompt,
-    decide_agent_command_execution, effective_ai_request_user_agent, extract_json_object,
-    extract_text_from_assistant, gemini_generate_content_url, gemini_stream_generate_content_url,
-    genai_model_name, infer_provider_kind_from_model_id, mask_ai_settings,
-    merge_masked_ai_settings, merge_model_discoveries, normalize_ai_settings, now_rfc3339,
-    openai_compatible_chat_completions_url, openai_compatible_models_url, parse_agent_model_output,
-    parse_agent_tool_call, parse_anthropic_chat_response, parse_anthropic_stream_chunk,
-    parse_gemini_chat_response, parse_gemini_stream_chunk, parse_model_output,
-    parse_openai_compatible_chat_response, parse_openai_compatible_models_response,
-    parse_openai_compatible_stream_chunk, parse_risk_level_label, redact_context,
-    redact_sensitive_text, resolve_model_credential, resolve_request_model, risk_label,
+    assess_agent_command_risk, assess_local_command_risk, bind_command_card_targets,
+    build_agent_prompt, build_anthropic_chat_request_body,
+    build_anthropic_chat_request_body_with_stream, build_gemini_chat_request_body,
+    build_observation_message, build_openai_compatible_chat_request_body,
+    build_openai_compatible_chat_request_body_with_stream, build_openai_responses_request_body,
+    build_prompt, decide_agent_command_execution, effective_ai_request_user_agent,
+    extract_json_object, extract_text_from_assistant, gemini_generate_content_url,
+    gemini_stream_generate_content_url, genai_model_name, infer_provider_kind_from_model_id,
+    mask_ai_settings, merge_masked_ai_settings, merge_model_discoveries, normalize_ai_settings,
+    now_rfc3339, openai_compatible_chat_completions_url, openai_compatible_models_url,
+    openai_responses_url, parse_agent_model_output, parse_agent_tool_call,
+    parse_anthropic_chat_response, parse_anthropic_stream_chunk, parse_gemini_chat_response,
+    parse_gemini_stream_chunk, parse_model_output, parse_openai_compatible_chat_response,
+    parse_openai_compatible_models_response, parse_openai_compatible_stream_chunk,
+    parse_openai_responses_response, parse_openai_responses_stream_chunk, parse_risk_level_label,
+    redact_context, redact_sensitive_text, resolve_ai_terminal_target, resolve_model_credential,
+    resolve_request_model, responses_reasoning_effort, risk_label, sanitize_ai_diagnostic,
     system_prompt, trim_ai_audit, trim_ai_history, trim_optional_to_option, trim_string_to_option,
-    truncate_preview, uuid, validate_model_credential,
+    truncate_preview, uses_responses_api, uuid, validate_ai_request_contract,
+    validate_model_credential,
 };
 pub use assets::{
     ASSET_ROOT_SEGMENT_KEY, AssetAcceleratorSnapshot, AssetDiskSnapshot, AssetDisplayLabels,
@@ -94,6 +101,13 @@ pub use assets::{
     get_asset_connection_time_ms, get_disk_total_bytes, group_path_label, has_gpu, has_npu,
     is_linux_asset, is_ungrouped_connection, is_windows_asset, normalize_asset_sort_state,
     parse_asset_view_mode, parse_start_workspace_mode, records_in_group, sort_asset_records,
+};
+pub use capabilities::{
+    CapabilityAccess, CapabilityDefinition, CapabilityScope, CapabilityScopeError,
+    CapabilityScopeSnapshot, CapabilitySession, DEFAULT_OUTPUT_ENTRY_LIMIT,
+    DEFAULT_OUTPUT_STORE_LIMIT, DEFAULT_OUTPUT_TTL, MAX_OUTPUT_CHUNK_BYTES, OutputChunk,
+    OutputStore, OutputStoreConfig, OutputStoreError, PolicyDecision, ProtectedOutput,
+    RiskAssessment, SftpRiskOperation, assess_command_risk, assess_sftp_risk, decide_policy,
 };
 pub use cloud_sync::{
     AliyunDriveSyncSettings, CLOUD_SYNC_HISTORY_DOMAIN, CLOUD_SYNC_HISTORY_EVENT,

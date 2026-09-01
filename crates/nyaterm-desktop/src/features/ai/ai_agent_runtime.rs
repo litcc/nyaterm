@@ -64,7 +64,11 @@ impl NyaTermApp {
         let store = self.store_blocking_client();
         let write_lock = self.ai.history_audit_write_lock();
         let request = AppendAiAuditRequest {
-            connection_id: self.ai_effective_target_session_id(),
+            connection_id: card.target_terminal_session_id.clone().or_else(|| {
+                card.target
+                    .as_ref()
+                    .map(|target| target.terminal_session_id.clone())
+            }),
             action: if execute {
                 "ai.command_card_run".to_string()
             } else {
@@ -76,6 +80,7 @@ impl NyaTermApp {
             inserted_to_terminal,
             executed: execute,
             blocked: false,
+            ..Default::default()
         };
         let task = self.blocking_jobs.submit_task("ai-audit-save", move |_| {
             let _guard = write_lock
@@ -108,12 +113,16 @@ impl NyaTermApp {
     pub(in crate::features) fn begin_ai_agent_observation(
         &mut self,
         command: &str,
+        terminal_session_id: &str,
         cx: &mut Context<Self>,
     ) -> Result<Option<String>, String> {
         let before = self.ai_header_presentation();
-        let Some(terminal_session_id) = self.ai_effective_target_session_id() else {
-            return Ok(None);
-        };
+        let terminal_session_id = terminal_session_id.to_string();
+        if self.session.session_info(&terminal_session_id).is_none()
+            || self.session.is_disconnected(&terminal_session_id)
+        {
+            return Err("AI Agent target terminal is unavailable".to_string());
+        }
         let max_steps = self.ai.settings_max_agent_steps();
         let (task_prompt, step_index) = match self.ai.begin_agent_step(max_steps) {
             Ok(step) => step,
@@ -129,7 +138,7 @@ impl NyaTermApp {
             .agent_step_timeout_ms
             .map(Duration::from_millis)
             .unwrap_or(AGENT_DEFAULT_STEP_TIMEOUT);
-        let profile = self.active_ai_execution_profile();
+        let profile = self.ai_execution_profile_for_session(&terminal_session_id);
         if profile == AiExecutionProfile::Disabled {
             return Err("AI Agent command execution is disabled for this session".to_string());
         }
@@ -145,9 +154,13 @@ impl NyaTermApp {
         let output_start_len = self
             .terminal_buffer_text_for_session(&terminal_session_id)
             .len();
+        let available_target_ids = self.ai_effective_target_session_ids();
+        let available_targets = self.ai_terminal_targets_for_sessions(&available_target_ids);
         self.ai.set_agent_loop(AiAgentLoopState {
             ai_session_id: self.ai.chat_session_id().to_string(),
-            terminal_session_id,
+            terminal_session_id: terminal_session_id.clone(),
+            available_targets,
+            default_target_session_id: Some(terminal_session_id),
             task_prompt,
             command: command.trim().to_string(),
             marker_id,
@@ -181,14 +194,11 @@ impl NyaTermApp {
     pub(in crate::features) fn begin_ai_agent_background_execution(
         &mut self,
         command: &str,
+        terminal_session_id: &str,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
         let before = self.ai_header_presentation();
-        let Some(terminal_session_id) = self.ai_effective_target_session_id() else {
-            return Err(
-                "Start a terminal session before using AI Agent background execution".to_string(),
-            );
-        };
+        let terminal_session_id = terminal_session_id.to_string();
         let session = self
             .session
             .session_info(&terminal_session_id)
@@ -243,9 +253,13 @@ impl NyaTermApp {
         let output_start_len = self
             .terminal_buffer_text_for_session(&terminal_session_id)
             .len();
+        let available_target_ids = self.ai_effective_target_session_ids();
+        let available_targets = self.ai_terminal_targets_for_sessions(&available_target_ids);
         let state = AiAgentLoopState {
             ai_session_id: self.ai.chat_session_id().to_string(),
-            terminal_session_id,
+            terminal_session_id: terminal_session_id.clone(),
+            available_targets,
+            default_target_session_id: Some(terminal_session_id),
             task_prompt,
             command: command.trim().to_string(),
             marker_id: None,
@@ -499,13 +513,18 @@ impl NyaTermApp {
         true
     }
 
-    fn active_ai_execution_profile(&self) -> AiExecutionProfile {
-        if self.session.active_ai_execution_profile() != AiExecutionProfile::Auto {
-            return self.session.active_ai_execution_profile();
-        }
-        let Some(session_id) = self.session.active_id() else {
-            return AiExecutionProfile::SendOnly;
+    fn ai_execution_profile_for_session(&self, session_id: &str) -> AiExecutionProfile {
+        let configured = if self.session.active_id() == Some(session_id) {
+            self.session.active_ai_execution_profile()
+        } else {
+            self.session
+                .metadata(session_id)
+                .map(|metadata| metadata.ai_execution_profile)
+                .unwrap_or(AiExecutionProfile::SendOnly)
         };
+        if configured != AiExecutionProfile::Auto {
+            return configured;
+        }
         self.session
             .session_info(session_id)
             .filter(|_| !self.session.is_disconnected(session_id))
@@ -537,20 +556,43 @@ impl NyaTermApp {
         );
         let settings = self.ai.settings_config_cloned();
         let terminal_session_id = state.terminal_session_id.clone();
+        let context = self.ai_terminal_context_for_session(Some(&terminal_session_id));
+        let targets = state.available_targets.clone();
+        let target_contexts = targets
+            .iter()
+            .cloned()
+            .map(|target| nyaterm_core::AiTargetContext {
+                context: self.ai_terminal_context_for_session(Some(&target.terminal_session_id)),
+                target: Some(target),
+            })
+            .collect();
         let request = AiChatRequest {
             stream_id: None,
             session_id: Some(state.ai_session_id.clone()),
             connection_id: Some(terminal_session_id.clone()),
             terminal_session_id: Some(terminal_session_id.clone()),
+            owner_scope: nyaterm_core::AiSessionScope {
+                r#type: nyaterm_core::AiSessionScopeType::Terminal,
+                target_id: Some(terminal_session_id.clone()),
+                connection_ids: Vec::new(),
+                label: self.session.display_name(&terminal_session_id),
+            },
+            targets,
+            target_contexts,
             mode: AiMode::Agent,
+            agent_kind: settings.default_agent_kind.clone(),
+            permission_mode: settings.external_agent_permission_mode.clone(),
             model_id: settings.default_model_id.clone(),
             model_name: None,
+            default_target_session_id: state.default_target_session_id.clone(),
+            existing_external_session_id: None,
+            attachments: Vec::new(),
             action: AiAction::GenerateCommand,
             user_input: format!(
                 "Continue the same Agent task.\n\nOriginal task:\n{}\n\n{}",
                 state.task_prompt, observation_message
             ),
-            context: self.ai_terminal_context_for_session(Some(&terminal_session_id)),
+            context,
             options: Default::default(),
         };
         let store = self.store_blocking_client();
@@ -566,7 +608,15 @@ impl NyaTermApp {
                     let result = if scheduler_cancel.is_cancelled() {
                         Err("AI Agent continuation cancelled".to_string())
                     } else {
-                        run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id)
+                        run_ai_ask_job(
+                            store,
+                            settings,
+                            request,
+                            None,
+                            Some(tx.clone()),
+                            cancel,
+                            job_id,
+                        )
                     };
                     let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
                         job_id,

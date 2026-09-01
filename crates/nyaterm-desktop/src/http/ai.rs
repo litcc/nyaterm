@@ -7,13 +7,15 @@ use nyaterm_core::{
     AiProviderCredential, AiProviderKind, AiSettings, AiToolCall, anthropic_messages_url,
     build_anthropic_chat_request_body, build_anthropic_chat_request_body_with_stream,
     build_gemini_chat_request_body, build_openai_compatible_chat_request_body,
-    build_openai_compatible_chat_request_body_with_stream, effective_ai_request_user_agent,
-    gemini_generate_content_url, gemini_stream_generate_content_url,
-    openai_compatible_chat_completions_url, openai_compatible_models_url,
-    parse_anthropic_chat_response, parse_anthropic_stream_chunk, parse_gemini_chat_response,
-    parse_gemini_stream_chunk, parse_openai_compatible_chat_response,
-    parse_openai_compatible_models_response, parse_openai_compatible_stream_chunk,
-    resolve_request_model,
+    build_openai_compatible_chat_request_body_with_stream, build_openai_responses_request_body,
+    effective_ai_request_user_agent, gemini_generate_content_url,
+    gemini_stream_generate_content_url, openai_compatible_chat_completions_url,
+    openai_compatible_models_url, openai_responses_url, parse_anthropic_chat_response,
+    parse_anthropic_stream_chunk, parse_gemini_chat_response, parse_gemini_stream_chunk,
+    parse_openai_compatible_chat_response, parse_openai_compatible_models_response,
+    parse_openai_compatible_stream_chunk, parse_openai_responses_response,
+    parse_openai_responses_stream_chunk, resolve_request_model, uses_responses_api,
+    validate_ai_request_contract,
 };
 use zed_reqwest::StatusCode;
 
@@ -66,6 +68,7 @@ pub fn complete_native_chat(
     request: &AiChatRequest,
     history: &[AiMessage],
 ) -> Result<AiChatCompletion, String> {
+    validate_ai_request_contract(request, settings).map_err(|error| error.to_string())?;
     let resolved_model =
         resolve_request_model(settings, request).map_err(|error| error.to_string())?;
     let credential = resolved_model
@@ -77,6 +80,17 @@ pub fn complete_native_chat(
         .user_agent(effective_ai_request_user_agent(settings))
         .build()
         .map_err(map_ai_http_error)?;
+
+    if uses_responses_api(&resolved_model) {
+        return complete_openai_responses_chat(
+            &client,
+            credential,
+            settings,
+            request,
+            history,
+            &resolved_model,
+        );
+    }
 
     match resolved_model.provider_kind {
         AiProviderKind::Anthropic => complete_anthropic_chat(
@@ -112,6 +126,7 @@ pub fn stream_native_chat(
     history: &[AiMessage],
     on_delta: impl FnMut(AiChatStreamDelta),
 ) -> Result<AiChatCompletion, String> {
+    validate_ai_request_contract(request, settings).map_err(|error| error.to_string())?;
     let resolved_model =
         resolve_request_model(settings, request).map_err(|error| error.to_string())?;
     let credential = resolved_model
@@ -123,6 +138,18 @@ pub fn stream_native_chat(
         .user_agent(effective_ai_request_user_agent(settings))
         .build()
         .map_err(map_ai_http_error)?;
+
+    if uses_responses_api(&resolved_model) {
+        return stream_openai_responses_chat(
+            &client,
+            credential,
+            settings,
+            request,
+            history,
+            &resolved_model,
+            on_delta,
+        );
+    }
 
     match resolved_model.provider_kind {
         AiProviderKind::Anthropic => stream_anthropic_chat(
@@ -153,6 +180,73 @@ pub fn stream_native_chat(
             on_delta,
         ),
     }
+}
+
+fn complete_openai_responses_chat(
+    client: &zed_reqwest::blocking::Client,
+    credential: &AiProviderCredential,
+    settings: &AiSettings,
+    request: &AiChatRequest,
+    history: &[AiMessage],
+    resolved_model: &nyaterm_core::ResolvedAiModel,
+) -> Result<AiChatCompletion, String> {
+    let url = openai_responses_url(resolved_model).map_err(|error| error.to_string())?;
+    let body =
+        build_openai_responses_request_body(resolved_model, request, settings, history, false);
+    let mut http_request = client.post(url).json(&body);
+    if let Some(api_key) = credential
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        http_request = http_request.bearer_auth(api_key);
+    }
+    let response = http_request.send().map_err(map_ai_http_error)?;
+    let status = response.status();
+    let response_body = response.text().map_err(map_ai_http_error)?;
+    if !status.is_success() {
+        return Err(format!(
+            "Responses API endpoint returned {}: {}",
+            status_label(status),
+            response_body.trim()
+        ));
+    }
+    parse_openai_responses_response(&response_body).map_err(|error| error.to_string())
+}
+
+fn stream_openai_responses_chat(
+    client: &zed_reqwest::blocking::Client,
+    credential: &AiProviderCredential,
+    settings: &AiSettings,
+    request: &AiChatRequest,
+    history: &[AiMessage],
+    resolved_model: &nyaterm_core::ResolvedAiModel,
+    on_delta: impl FnMut(AiChatStreamDelta),
+) -> Result<AiChatCompletion, String> {
+    let url = openai_responses_url(resolved_model).map_err(|error| error.to_string())?;
+    let body =
+        build_openai_responses_request_body(resolved_model, request, settings, history, true);
+    let mut http_request = client.post(url).json(&body);
+    if let Some(api_key) = credential
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        http_request = http_request.bearer_auth(api_key);
+    }
+    let response = http_request.send().map_err(map_ai_http_error)?;
+    let status = response.status();
+    if !status.is_success() {
+        let response_body = response.text().map_err(map_ai_http_error)?;
+        return Err(format!(
+            "Responses API stream endpoint returned {}: {}",
+            status_label(status),
+            response_body.trim()
+        ));
+    }
+    read_sse_chat_stream(response, parse_openai_responses_stream_chunk, on_delta)
 }
 
 fn complete_openai_compatible_chat(
@@ -613,4 +707,166 @@ fn status_label(status: StatusCode) -> String {
         .canonical_reason()
         .map(|reason| format!("{status} {reason}"))
         .unwrap_or_else(|| status.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read as _, Write as _};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+
+    use nyaterm_core::{
+        AiApiFormat, AiBackendKind, AiMode, AiModelConfigItem, AiModelSource, AiProviderCredential,
+        AiProviderKind, AiReasoningEffort, AiSettings,
+    };
+
+    use super::{complete_native_chat, stream_native_chat};
+
+    fn responses_settings(base_url: String) -> AiSettings {
+        let credential = AiProviderCredential {
+            id: "mock-responses".to_string(),
+            name: "Mock Responses".to_string(),
+            provider_kind: AiProviderKind::OpenaiCompatible,
+            api_format: AiApiFormat::Responses,
+            base_url: Some(base_url),
+            api_key: Some("mock-fixture-key".to_string().into()),
+            enabled: true,
+        };
+        let model = AiModelConfigItem {
+            id: "mock-responses:gpt-test".to_string(),
+            name: "gpt-test".to_string(),
+            backend: AiBackendKind::Genai,
+            provider_kind: Some(AiProviderKind::OpenaiCompatible),
+            credential_id: Some(credential.id.clone()),
+            enabled: true,
+            source: AiModelSource::Manual,
+            last_seen_at: None,
+        };
+        AiSettings {
+            default_model_id: Some(model.id.clone()),
+            models: vec![model],
+            provider_credentials: vec![credential],
+            default_reasoning_effort: AiReasoningEffort::High,
+            ..AiSettings::default()
+        }
+    }
+
+    fn request() -> nyaterm_core::AiChatRequest {
+        nyaterm_core::AiChatRequest {
+            owner_scope: Default::default(),
+            targets: Vec::new(),
+            target_contexts: Vec::new(),
+            agent_kind: Default::default(),
+            permission_mode: Default::default(),
+            default_target_session_id: None,
+            existing_external_session_id: None,
+            attachments: Vec::new(),
+            stream_id: Some("stream-mock".to_string()),
+            session_id: Some("session-mock".to_string()),
+            connection_id: None,
+            terminal_session_id: None,
+            mode: AiMode::Ask,
+            model_id: Some("mock-responses:gpt-test".to_string()),
+            model_name: None,
+            action: nyaterm_core::AiAction::GenerateCommand,
+            user_input: "show disk usage".to_string(),
+            context: Default::default(),
+            options: Default::default(),
+        }
+    }
+
+    fn mock_server(
+        response_body: String,
+        content_type: &'static str,
+    ) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let address = listener.local_addr().expect("mock address");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let request = read_http_request(&mut stream);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+                response_body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+            request
+        });
+        (format!("http://{address}/v1"), handle)
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        let mut bytes = Vec::new();
+        let mut chunk = [0_u8; 2048];
+        let mut expected_len = None;
+        loop {
+            let count = stream.read(&mut chunk).expect("read request");
+            if count == 0 {
+                break;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(header_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                let header_end = header_end + 4;
+                let headers = String::from_utf8_lossy(&bytes[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or_default();
+                expected_len = Some(header_end + content_length);
+            }
+            if expected_len.is_some_and(|expected| bytes.len() >= expected) {
+                break;
+            }
+        }
+        String::from_utf8(bytes).expect("UTF-8 HTTP request")
+    }
+
+    #[test]
+    fn complete_native_chat_routes_responses_format_to_responses_endpoint() {
+        let response = r#"{"output":[{"type":"reasoning","summary":[{"text":"read only"}]},{"type":"message","content":[{"type":"output_text","text":"Use df -h"}]}]}"#;
+        let (base_url, server) = mock_server(response.to_string(), "application/json");
+        let completion = complete_native_chat(&responses_settings(base_url), &request(), &[])
+            .expect("Responses completion");
+        let raw_request = server.join().expect("mock server");
+
+        assert_eq!(completion.text, "Use df -h");
+        assert_eq!(completion.reasoning_content.as_deref(), Some("read only"));
+        assert!(raw_request.starts_with("POST /v1/responses HTTP/1.1"));
+        assert!(raw_request.contains("\"store\":false"));
+        assert!(raw_request.contains("\"reasoning\":{\"effort\":\"high\"}"));
+    }
+
+    #[test]
+    fn stream_native_chat_folds_responses_sse_and_function_arguments() {
+        let response = concat!(
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call-1\",\"name\":\"execute_command\",\"arguments\":\"\"}}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":1,\"delta\":\"{\\\"command\\\":\\\"df -h\\\"}\"}\n\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"inspect\"}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n"
+        );
+        let (base_url, server) = mock_server(response.to_string(), "text/event-stream");
+        let mut deltas = Vec::new();
+        let completion =
+            stream_native_chat(&responses_settings(base_url), &request(), &[], |delta| {
+                deltas.push(delta)
+            })
+            .expect("Responses stream");
+        let raw_request = server.join().expect("mock server");
+
+        assert_eq!(completion.text, "done");
+        assert_eq!(completion.reasoning_content.as_deref(), Some("inspect"));
+        assert_eq!(completion.tool_calls.len(), 1);
+        assert_eq!(completion.tool_calls[0].name, "execute_command");
+        assert_eq!(completion.tool_calls[0].arguments["command"], "df -h");
+        assert!(deltas.iter().any(|delta| delta.done));
+        assert!(raw_request.starts_with("POST /v1/responses HTTP/1.1"));
+        assert!(raw_request.contains("\"stream\":true"));
+    }
 }

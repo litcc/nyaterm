@@ -14,7 +14,10 @@ impl NyaTermApp {
         self.ai.apply_settings_input(field, text);
         // The user-agent is a live setting rather than a draft, so it is saved
         // as it is typed the way it always was.
-        if field == AiInputField::RequestUserAgent {
+        if !matches!(
+            field,
+            AiInputField::Model | AiInputField::BaseUrl | AiInputField::ApiKey
+        ) {
             self.persist_ai_settings_now(cx);
         } else {
             cx.notify();

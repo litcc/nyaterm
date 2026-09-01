@@ -195,6 +195,8 @@ pub(in crate::features) struct AiChatJobOutput {
 pub(in crate::features) struct AiAgentLoopState {
     pub(in crate::features) ai_session_id: String,
     pub(in crate::features) terminal_session_id: String,
+    pub(in crate::features) available_targets: Vec<nyaterm_core::AiTerminalTarget>,
+    pub(in crate::features) default_target_session_id: Option<String>,
     pub(in crate::features) task_prompt: String,
     pub(in crate::features) command: String,
     pub(in crate::features) marker_id: Option<String>,

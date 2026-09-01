@@ -89,6 +89,30 @@ fn pending_settings_preserve_masked_secret_until_a_new_draft_exists() {
 }
 
 #[test]
+fn external_agent_mcp_integration_toggles_fail_closed_setting() {
+    let cx = TestAppContext::single();
+    let mut state = state(&cx);
+
+    state.toggle_settings_codex_mcp_integration();
+    state.toggle_settings_claude_mcp_integration();
+    let disabled = state.pending_settings();
+    assert_eq!(disabled.codex.tool_integration_mode, None);
+    assert_eq!(disabled.claude_code.tool_integration_mode, None);
+
+    state.toggle_settings_codex_mcp_integration();
+    state.toggle_settings_claude_mcp_integration();
+    let enabled = state.pending_settings();
+    assert_eq!(
+        enabled.codex.tool_integration_mode.as_deref(),
+        Some("nyaterm_mcp")
+    );
+    assert_eq!(
+        enabled.claude_code.tool_integration_mode.as_deref(),
+        Some("nyaterm_mcp")
+    );
+}
+
+#[test]
 fn ai_settings_persistence_ignores_old_completion_and_retries_latest_snapshot() {
     let cx = TestAppContext::single();
     let mut state = state(&cx);
@@ -130,6 +154,7 @@ fn model_catalog_mutations_keep_default_model_valid() {
     let fallback = "openai:model-b".to_string();
     state.settings.config.models = vec![
         AiModelConfigItem {
+            backend: Default::default(),
             id: first.clone(),
             name: "model-a".to_string(),
             provider_kind: Some(AiProviderKind::Openai),
@@ -139,6 +164,7 @@ fn model_catalog_mutations_keep_default_model_valid() {
             last_seen_at: None,
         },
         AiModelConfigItem {
+            backend: Default::default(),
             id: fallback.clone(),
             name: "model-b".to_string(),
             provider_kind: Some(AiProviderKind::Openai),
@@ -162,6 +188,7 @@ fn model_catalog_mutations_keep_default_model_valid() {
         .config
         .provider_credentials
         .push(AiProviderCredential {
+            api_format: Default::default(),
             id: "custom".to_string(),
             name: "Custom".to_string(),
             provider_kind: AiProviderKind::OpenaiCompatible,
@@ -215,6 +242,7 @@ fn credential_catalog_changes_preserve_an_absent_default_model() {
     let mut state = state(&cx);
     state.settings.config.default_model_id = None;
     state.settings.config.models.push(AiModelConfigItem {
+        backend: Default::default(),
         id: "openai:model-a".to_string(),
         name: "model-a".to_string(),
         provider_kind: Some(AiProviderKind::Openai),
@@ -235,6 +263,7 @@ fn credential_catalog_changes_preserve_an_absent_default_model() {
         .config
         .provider_credentials
         .push(AiProviderCredential {
+            api_format: Default::default(),
             id: "custom".to_string(),
             name: "Custom".to_string(),
             provider_kind: AiProviderKind::OpenaiCompatible,
@@ -317,6 +346,10 @@ fn history_and_auto_execution_confirmations_transition_on_the_owner() {
     let cx = TestAppContext::single();
     let mut state = state(&cx);
     state.history.sessions.push(AiSession {
+        agent_kind: Default::default(),
+        scope: Default::default(),
+        external_session_id: None,
+        backend_metadata: None,
         id: "history".to_string(),
         connection_id: None,
         title: "History".to_string(),
@@ -386,10 +419,14 @@ fn history_completion_updates_history_and_chat_atomically() {
     let mut state = state(&cx);
     state.history.sessions = vec![AiSession {
         id: "session-a".to_string(),
+        agent_kind: Default::default(),
+        scope: Default::default(),
         connection_id: None,
         title: "Session A".to_string(),
         created_at: String::new(),
         updated_at: String::new(),
+        external_session_id: None,
+        backend_metadata: None,
     }];
     state.chat.messages.push(Arc::new(AiMessage {
         id: "assistant-a".to_string(),
@@ -412,6 +449,10 @@ fn history_completion_updates_history_and_chat_atomically() {
 
     state.settings.config.default_mode = AiMode::Agent;
     state.history.sessions.push(AiSession {
+        agent_kind: Default::default(),
+        scope: Default::default(),
+        external_session_id: None,
+        backend_metadata: None,
         id: state.chat_session_id().to_string(),
         connection_id: None,
         title: "Current".to_string(),
@@ -609,6 +650,8 @@ fn background_completion_distinguishes_foreign_and_matched_stale_jobs() {
     let launch = state.begin_chat_job();
     let now = Instant::now();
     let loop_state = AiAgentLoopState {
+        available_targets: Vec::new(),
+        default_target_session_id: None,
         ai_session_id: "session-a".to_string(),
         terminal_session_id: "terminal-a".to_string(),
         task_prompt: "inspect".to_string(),
@@ -650,6 +693,8 @@ fn agent_step_limit_and_observation_poll_stay_on_the_owner() {
 
     let now = Instant::now();
     state.set_agent_loop(AiAgentLoopState {
+        available_targets: Vec::new(),
+        default_target_session_id: None,
         ai_session_id: "session-a".to_string(),
         terminal_session_id: "terminal-a".to_string(),
         task_prompt: "inspect".to_string(),

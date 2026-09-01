@@ -121,6 +121,12 @@ pub(crate) enum AiInputField {
     BaseUrl,
     ApiKey,
     RequestUserAgent,
+    CodexExecutable,
+    CodexDefaultModel,
+    CodexConfigDirectory,
+    ClaudeExecutable,
+    ClaudeDefaultModel,
+    ClaudeConfigDirectory,
 }
 
 impl CloudSyncInputField {
@@ -217,11 +223,17 @@ impl CloudSyncInputField {
 
 impl AiInputField {
     /// Every variant, so a text-input id can be mapped back to its field.
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Model,
         Self::BaseUrl,
         Self::ApiKey,
         Self::RequestUserAgent,
+        Self::CodexExecutable,
+        Self::CodexDefaultModel,
+        Self::CodexConfigDirectory,
+        Self::ClaudeExecutable,
+        Self::ClaudeDefaultModel,
+        Self::ClaudeConfigDirectory,
     ];
 
     /// The stable part of this field's text-input id.
@@ -231,6 +243,12 @@ impl AiInputField {
             Self::BaseUrl => "base-url",
             Self::ApiKey => "api-key",
             Self::RequestUserAgent => "request-user-agent",
+            Self::CodexExecutable => "codex-executable",
+            Self::CodexDefaultModel => "codex-default-model",
+            Self::CodexConfigDirectory => "codex-config-directory",
+            Self::ClaudeExecutable => "claude-executable",
+            Self::ClaudeDefaultModel => "claude-default-model",
+            Self::ClaudeConfigDirectory => "claude-config-directory",
         }
     }
 

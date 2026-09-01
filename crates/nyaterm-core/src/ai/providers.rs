@@ -10,10 +10,10 @@ use super::agent::{agent_anthropic_tools, agent_gemini_tools, agent_openai_tools
 use super::{
     AiChatCompletion, AiChatRequest, AiChatStreamDelta, AiCommandCard, AiMessage, AiMessageRole,
     AiMode, AiModelDiscovery, AiModelError, AiModelOutput, AiModelSource, AiProviderCredential,
-    AiSettings, AiToolCall, AiToolCallDelta, ResolvedAiModel, ai_model_id_for_credential,
-    chat_history_for_request, extract_json_object, extract_text_from_assistant,
-    extract_think_block, genai_model_name, request_system_prompt, request_user_prompt,
-    trim_optional_to_option, trim_string_to_option,
+    AiProviderKind, AiSettings, AiToolCall, AiToolCallDelta, ResolvedAiModel,
+    ai_model_id_for_credential, chat_history_for_request, extract_json_object,
+    extract_text_from_assistant, extract_think_block, genai_model_name, request_system_prompt,
+    request_user_prompt, trim_optional_to_option, trim_string_to_option,
 };
 
 pub fn openai_compatible_models_url(base_url: &str) -> Result<String, AiModelError> {
@@ -154,6 +154,14 @@ pub fn build_openai_compatible_chat_request_body_with_stream(
         "messages": messages,
         "stream": stream,
     });
+    if matches!(
+        resolved_model.provider_kind,
+        AiProviderKind::Openai | AiProviderKind::OpenaiCompatible | AiProviderKind::Xai
+    ) && let Some(effort) =
+        super::responses::responses_reasoning_effort(&settings.default_reasoning_effort)
+    {
+        body["reasoning_effort"] = serde_json::json!(effort);
+    }
     if request.mode == AiMode::Agent {
         body["tools"] = agent_openai_tools();
         body["tool_choice"] = serde_json::json!("required");
@@ -565,7 +573,7 @@ pub fn parse_gemini_chat_response(body: &str) -> Result<AiChatCompletion, AiMode
     })
 }
 
-fn join_api_base_url(base_url: &str, path: &str) -> Result<String, AiModelError> {
+pub(super) fn join_api_base_url(base_url: &str, path: &str) -> Result<String, AiModelError> {
     let trimmed = base_url.trim();
     if trimmed.is_empty() {
         return Err(AiModelError::InvalidBaseUrl {
@@ -903,6 +911,7 @@ mod tests {
     #[test]
     fn parses_and_deduplicates_openai_compatible_model_discovery() {
         let credential = AiProviderCredential {
+            api_format: Default::default(),
             id: "custom".to_string(),
             name: "Custom".to_string(),
             provider_kind: AiProviderKind::OpenaiCompatible,
@@ -934,9 +943,12 @@ mod tests {
         };
         let request = sample_ai_request("en");
         let resolved = ResolvedAiModel {
+            backend: Default::default(),
+            api_format: Default::default(),
             model_name: "deepseek-chat-none".to_string(),
             provider_kind: AiProviderKind::Deepseek,
             credential: Some(AiProviderCredential {
+                api_format: Default::default(),
                 id: "deepseek".to_string(),
                 name: "DeepSeek".to_string(),
                 provider_kind: AiProviderKind::Deepseek,
@@ -996,6 +1008,8 @@ mod tests {
         let mut request = sample_ai_request("en");
         request.mode = AiMode::Agent;
         let resolved = ResolvedAiModel {
+            backend: Default::default(),
+            api_format: Default::default(),
             model_name: "gpt-4o-mini".to_string(),
             provider_kind: AiProviderKind::Openai,
             credential: None,
@@ -1102,9 +1116,12 @@ mod tests {
         };
         let request = sample_ai_request("en");
         let resolved = ResolvedAiModel {
+            backend: Default::default(),
+            api_format: Default::default(),
             model_name: "claude-3-haiku-20240307".to_string(),
             provider_kind: AiProviderKind::Anthropic,
             credential: Some(AiProviderCredential {
+                api_format: Default::default(),
                 id: "anthropic".to_string(),
                 name: "Anthropic".to_string(),
                 provider_kind: AiProviderKind::Anthropic,

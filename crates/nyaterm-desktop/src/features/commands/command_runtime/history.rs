@@ -122,11 +122,40 @@ impl NyaTermApp {
         execute: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(target_session_id) = self.ai_effective_target_session_id() else {
-            self.ai
-                .set_panel_status("Start a terminal session before using an AI command");
-            self.defer_ai_panel_snapshot_flush(cx);
-            return;
+        let available_targets = self.ai_effective_target_session_ids();
+        let declared_target = card
+            .target_terminal_session_id
+            .as_deref()
+            .or_else(|| {
+                card.target
+                    .as_ref()
+                    .map(|target| target.terminal_session_id.as_str())
+            })
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let target_session_id = match declared_target {
+            Some(id) if available_targets.iter().any(|available| available == id) => id.to_string(),
+            Some(id) => {
+                self.ai.set_panel_status(format!(
+                    "AI command target '{id}' is unavailable or outside the current scope"
+                ));
+                self.defer_ai_panel_snapshot_flush(cx);
+                return;
+            }
+            None if available_targets.len() == 1 => available_targets[0].clone(),
+            None if available_targets.len() > 1 => {
+                self.ai.set_panel_status(
+                    "AI command must select a target terminal when multiple targets are available",
+                );
+                self.defer_ai_panel_snapshot_flush(cx);
+                return;
+            }
+            None => {
+                self.ai
+                    .set_panel_status("Start a terminal session before using an AI command");
+                self.defer_ai_panel_snapshot_flush(cx);
+                return;
+            }
         };
         let mut command = card.command.trim().to_string();
         if command.is_empty() {
@@ -136,7 +165,7 @@ impl NyaTermApp {
         }
         let should_continue_agent = execute && is_agent_command_card(&card);
         if should_continue_agent && self.ai.settings_config().agent_background_execution_enabled {
-            match self.begin_ai_agent_background_execution(&card.command, cx) {
+            match self.begin_ai_agent_background_execution(&card.command, &target_session_id, cx) {
                 Ok(()) => {
                     self.record_ai_command_card_audit(&card, true, false, cx);
                     self.defer_ai_panel_snapshot_flush(cx);
@@ -159,7 +188,7 @@ impl NyaTermApp {
             command.push('\r');
         }
         let input_bytes = if should_continue_agent {
-            match self.begin_ai_agent_observation(&card.command, cx) {
+            match self.begin_ai_agent_observation(&card.command, &target_session_id, cx) {
                 Ok(Some(wrapped_command)) => wrapped_command.into_bytes(),
                 Ok(None) => command.clone().into_bytes(),
                 Err(error) => {

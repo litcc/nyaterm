@@ -8,11 +8,16 @@
 use std::collections::HashSet;
 
 use super::{
-    AI_REQUEST_USER_AGENT_DEFAULT, AgentCommandExecutionMode, AiCustomActionConfig, AiMode,
-    AiModelConfigItem, AiModelSource, AiProviderCredential, AiProviderKind, AiProviderProfile,
-    AiSettings, MASKED_SECRET_VALUE, RiskLevel, ai_model_id_for_credential,
-    ai_model_id_for_provider,
+    AI_REQUEST_USER_AGENT_DEFAULT, AgentCommandExecutionMode, AiAgentKind, AiApiFormat,
+    AiBackendKind, AiCustomActionConfig, AiMode, AiModelConfigItem, AiModelSource,
+    AiPermissionMode, AiProviderCredential, AiProviderKind, AiProviderProfile, AiReasoningEffort,
+    AiSettings, ClaudeCodeIntegrationSettings, CodexIntegrationSettings, ExternalMcpSettings,
+    MASKED_SECRET_VALUE, RiskLevel, ai_model_id_for_credential, ai_model_id_for_provider,
 };
+
+const OLLAMA_PROVIDER_ID: &str = "ollama";
+const OLLAMA_DEFAULT_BASE_URL: &str = "http://localhost:11434/";
+const OLLAMA_LEGACY_DEFAULT_BASE_URL: &str = "http://localhost:11434/v1/";
 
 pub fn mask_ai_settings(mut settings: AiSettings) -> AiSettings {
     for profile in &mut settings.provider_profiles {
@@ -56,12 +61,23 @@ pub fn normalize_ai_settings(settings: &mut AiSettings) -> bool {
     if settings.provider_profiles.is_empty() {
         settings.provider_profiles = default_provider_profiles();
     }
+    for profile in &mut settings.provider_profiles {
+        if is_builtin_ollama_provider(&profile.id, &profile.provider_kind) {
+            migrate_legacy_ollama_base_url(&mut profile.base_url);
+        }
+    }
+
     if settings.provider_credentials.is_empty() {
         settings.provider_credentials = settings
             .provider_profiles
             .iter()
             .map(credential_from_profile)
             .collect();
+    }
+    for credential in &mut settings.provider_credentials {
+        if is_builtin_ollama_provider(&credential.id, &credential.provider_kind) {
+            migrate_legacy_ollama_base_url(&mut credential.base_url);
+        }
     }
 
     if settings.models.is_empty() {
@@ -94,8 +110,14 @@ pub fn normalize_ai_settings(settings: &mut AiSettings) -> bool {
     }
 
     for model in &mut settings.models {
+        if model.backend == AiBackendKind::Codex {
+            model.provider_kind = None;
+            model.credential_id = None;
+        }
         if model.id.trim().is_empty() {
-            model.id = if let Some(credential_id) = model.credential_id.as_deref() {
+            model.id = if model.backend == AiBackendKind::Codex {
+                format!("codex:{}", model.name)
+            } else if let Some(credential_id) = model.credential_id.as_deref() {
                 ai_model_id_for_credential(credential_id, &model.name)
             } else if let Some(kind) = &model.provider_kind {
                 ai_model_id_for_provider(kind, &model.name)
@@ -167,6 +189,9 @@ impl Default for AiSettings {
             active_profile_id: default_active_profile_id(),
             provider_profiles: default_provider_profiles(),
             default_mode: default_mode(),
+            default_agent_kind: AiAgentKind::Nyaterm,
+            external_agent_permission_mode: AiPermissionMode::Confirm,
+            default_reasoning_effort: AiReasoningEffort::Auto,
             default_model_id,
             models,
             provider_credentials: default_provider_credentials(),
@@ -179,12 +204,27 @@ impl Default for AiSettings {
             agent_background_execution_enabled: false,
             agent_command_execution_mode: AgentCommandExecutionMode::ConfirmEach,
             agent_smart_auto_execute_max_risk: default_agent_smart_auto_execute_max_risk(),
+            codex: CodexIntegrationSettings::default(),
+            claude_code: ClaudeCodeIntegrationSettings::default(),
+            external_mcp: ExternalMcpSettings::default(),
         }
     }
 }
 
 pub(super) fn default_schema_version() -> u32 {
-    3
+    6
+}
+
+pub(super) fn default_codex_runtime() -> Option<String> {
+    Some("app_server".to_string())
+}
+
+pub(super) fn default_claude_runtime() -> Option<String> {
+    Some("stream_json_cli".to_string())
+}
+
+pub(super) fn default_tool_integration_mode() -> Option<String> {
+    Some("nyaterm_mcp".to_string())
 }
 
 pub(super) fn default_true() -> bool {
@@ -270,7 +310,7 @@ pub(super) fn default_provider_profiles() -> Vec<AiProviderProfile> {
             name: "Ollama".to_string(),
             provider_kind: AiProviderKind::Ollama,
             model: "llama3-7b".to_string(),
-            base_url: Some("http://localhost:11434/v1/".to_string()),
+            base_url: Some(OLLAMA_DEFAULT_BASE_URL.to_string()),
             api_key: None,
             enabled: false,
         },
@@ -395,6 +435,7 @@ fn credential_from_profile(profile: &AiProviderProfile) -> AiProviderCredential 
         id: profile.id.clone(),
         name: profile.name.clone(),
         provider_kind: profile.provider_kind.clone(),
+        api_format: AiApiFormat::ChatCompletions,
         base_url: profile.base_url.clone(),
         api_key: profile.api_key.clone(),
         enabled: profile.enabled,
@@ -421,6 +462,7 @@ fn model_from_profile(profile: &AiProviderProfile) -> Option<AiModelConfigItem> 
     Some(AiModelConfigItem {
         id,
         name: name.to_string(),
+        backend: AiBackendKind::Genai,
         provider_kind: Some(profile.provider_kind.clone()),
         credential_id: is_manual.then(|| profile.id.clone()),
         enabled: profile.enabled,
@@ -431,6 +473,16 @@ fn model_from_profile(profile: &AiProviderProfile) -> Option<AiModelConfigItem> 
         },
         last_seen_at: None,
     })
+}
+
+fn is_builtin_ollama_provider(id: &str, provider_kind: &AiProviderKind) -> bool {
+    id == OLLAMA_PROVIDER_ID && provider_kind == &AiProviderKind::Ollama
+}
+
+fn migrate_legacy_ollama_base_url(base_url: &mut Option<String>) {
+    if base_url.as_deref() == Some(OLLAMA_LEGACY_DEFAULT_BASE_URL) {
+        *base_url = Some(OLLAMA_DEFAULT_BASE_URL.to_string());
+    }
 }
 
 fn mask_secret(value: Option<crate::SecretString>) -> Option<crate::SecretString> {
@@ -503,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_migrates_legacy_profiles_to_v3_settings() {
+    fn normalize_migrates_legacy_profiles_to_v6_settings() {
         let mut settings = AiSettings {
             schema_version: 2,
             provider_credentials: vec![],
@@ -518,7 +570,7 @@ mod tests {
         settings.provider_profiles[3].enabled = true;
 
         assert!(normalize_ai_settings(&mut settings));
-        assert_eq!(settings.schema_version, 3);
+        assert_eq!(settings.schema_version, 6);
         assert!(!settings.provider_credentials.is_empty());
         assert!(
             settings

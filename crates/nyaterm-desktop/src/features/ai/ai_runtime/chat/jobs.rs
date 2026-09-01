@@ -1,6 +1,9 @@
 use futures::StreamExt as _;
 use gpui::{Context, KeyDownEvent};
-use nyaterm_core::{AiAction, AiChatRequest, AiContext, AiMode};
+use nyaterm_core::{
+    AiAction, AiAgentKind, AiChatRequest, AiContext, AiMode, AiSessionScope, AiSessionScopeType,
+    AiTargetContext, AiTerminalTarget,
+};
 use nyaterm_transport::SessionInfo;
 
 use crate::features::{
@@ -47,15 +50,24 @@ impl NyaTermApp {
             self.defer_ai_panel_snapshot_flush(cx);
             return;
         }
-        let Some(model_id) = self.ai_selected_model_id() else {
-            self.ai
-                .reject_chat_start("Enable an AI model before sending", true);
-            self.defer_ai_panel_snapshot_flush(cx);
-            return;
-        };
-
         let settings = self.ai.settings_config_cloned();
         let mode = settings.default_mode.clone();
+        let agent_kind = if mode == AiMode::Agent {
+            settings.default_agent_kind.clone()
+        } else {
+            AiAgentKind::Nyaterm
+        };
+        let model_id = if agent_kind == AiAgentKind::Nyaterm {
+            let Some(model_id) = self.ai_selected_model_id() else {
+                self.ai
+                    .reject_chat_start("Enable an AI model before sending", true);
+                self.defer_ai_panel_snapshot_flush(cx);
+                return;
+            };
+            Some(model_id)
+        } else {
+            None
+        };
         let target_session_ids = self.ai_effective_target_session_ids();
         let target_session_id = target_session_ids.first().cloned();
         if mode == AiMode::Agent && target_session_id.is_none() {
@@ -73,6 +85,25 @@ impl NyaTermApp {
             .as_ref()
             .map(|request| request.context.clone())
             .unwrap_or_else(|| self.ai_terminal_context_for_sessions(&target_session_ids));
+        let targets = self.ai_terminal_targets_for_sessions(&target_session_ids);
+        let target_contexts = targets
+            .iter()
+            .cloned()
+            .map(|target| AiTargetContext {
+                context: self.ai_terminal_context_for_session(Some(&target.terminal_session_id)),
+                target: Some(target),
+            })
+            .collect::<Vec<_>>();
+        let owner_scope = target_session_id
+            .as_ref()
+            .map(|id| AiSessionScope {
+                r#type: AiSessionScopeType::Terminal,
+                target_id: Some(id.clone()),
+                connection_ids: Vec::new(),
+                label: self.session.display_name(id),
+            })
+            .unwrap_or_default();
+
         let source_label = prepared_request
             .as_ref()
             .map(|request| request.source_label.clone());
@@ -82,13 +113,61 @@ impl NyaTermApp {
             session_id: Some(session_id.clone()),
             connection_id: target_session_id.clone(),
             terminal_session_id: target_session_id.clone(),
+            owner_scope,
+            targets,
+            target_contexts,
             mode: mode.clone(),
-            model_id: Some(model_id),
+            agent_kind,
+            permission_mode: settings.external_agent_permission_mode.clone(),
+            model_id,
             model_name: None,
+            default_target_session_id: target_session_id.clone(),
+            existing_external_session_id: None,
+            attachments: Vec::new(),
             action,
             user_input: request_prompt.clone(),
             context,
             options: Default::default(),
+        };
+        let external_agent = matches!(
+            request.agent_kind,
+            AiAgentKind::Codex | AiAgentKind::ClaudeCode
+        );
+        let tool_integration_enabled = match request.agent_kind {
+            AiAgentKind::Codex => {
+                settings.codex.tool_integration_mode.as_deref() == Some("nyaterm_mcp")
+            }
+            AiAgentKind::ClaudeCode => {
+                settings.claude_code.tool_integration_mode.as_deref() == Some("nyaterm_mcp")
+            }
+            AiAgentKind::Nyaterm => true,
+        };
+        if external_agent && !tool_integration_enabled {
+            self.ai.reject_chat_start(
+                "External agents require strict NyaTerm MCP tool integration",
+                true,
+            );
+            self.defer_ai_panel_snapshot_flush(cx);
+            return;
+        }
+        let mcp_credential = if external_agent {
+            match self.create_ephemeral_mcp_credential(
+                target_session_ids.clone(),
+                target_session_id.clone(),
+                request.permission_mode.clone(),
+            ) {
+                Ok(credential) => Some(credential),
+                Err(error) => {
+                    self.ai.reject_chat_start(
+                        format!("Could not create external Agent MCP credential: {error}"),
+                        true,
+                    );
+                    self.defer_ai_panel_snapshot_flush(cx);
+                    return;
+                }
+            }
+        } else {
+            None
         };
         let before = self.ai_header_presentation();
         let store = self.store_blocking_client();
@@ -107,7 +186,15 @@ impl NyaTermApp {
                 let result = if scheduler_cancel.is_cancelled() {
                     Err("AI chat cancelled".to_string())
                 } else {
-                    run_ai_ask_job(store, settings, request, Some(tx.clone()), cancel, job_id)
+                    run_ai_ask_job(
+                        store,
+                        settings,
+                        request,
+                        mcp_credential,
+                        Some(tx.clone()),
+                        cancel,
+                        job_id,
+                    )
                 };
                 let _ = tx.unbounded_send(AiChatWorkerEvent::Finished(AiChatJobResult {
                     job_id,
@@ -269,10 +356,6 @@ impl NyaTermApp {
         self.defer_ai_panel_snapshot_flush(cx);
     }
 
-    pub(in crate::features) fn ai_effective_target_session_id(&self) -> Option<String> {
-        self.ai_effective_target_session_ids().into_iter().next()
-    }
-
     pub(in crate::features) fn ai_effective_target_session_ids(&self) -> Vec<String> {
         let mut session_ids = Vec::new();
         for session_id in self.ai.chat_target_session_ids() {
@@ -369,6 +452,30 @@ impl NyaTermApp {
                 .collect::<Vec<_>>()
                 .join("\n"),
         }
+    }
+
+    pub(in crate::features) fn ai_terminal_targets_for_sessions(
+        &self,
+        session_ids: &[String],
+    ) -> Vec<AiTerminalTarget> {
+        session_ids
+            .iter()
+            .filter_map(|session_id| {
+                let info = self.session.session_info(session_id)?;
+                let context = self.ai_terminal_context_for_session(Some(session_id));
+                Some(AiTerminalTarget {
+                    terminal_session_id: session_id.clone(),
+                    connection_id: None,
+                    label: self
+                        .session
+                        .display_name(session_id)
+                        .unwrap_or_else(|| compact_id(session_id)),
+                    host: context.host,
+                    username: context.username,
+                    session_type: session_kind_label(info.kind).to_string(),
+                })
+            })
+            .collect()
     }
 
     pub(in crate::features) fn ai_mention_candidates(&self) -> Vec<SessionInfo> {

@@ -150,6 +150,10 @@ impl NyaTermApp {
     ) {
         let options = self.prepare_session_start_options(options);
         let Some(placement) = options.tab_placement else {
+            self.complete_mcp_session_open_failure(
+                &connection.id,
+                "could not reserve a tab position",
+            );
             self.shell.set_status(format!(
                 "{} could not reserve a tab position",
                 connection.name
@@ -162,6 +166,10 @@ impl NyaTermApp {
             .session
             .start_reserve_saved_connection(&connection.id, placement)
         {
+            self.complete_mcp_session_open_failure(
+                &connection.id,
+                "connection is already starting",
+            );
             self.shell
                 .set_status(format!("{} is already connecting", connection.name));
             self.shell.show_workspace();
@@ -185,6 +193,10 @@ impl NyaTermApp {
                             .password
                             .filter(|password| !password.trim().is_empty()),
                         Ok(None) => {
+                            this.complete_mcp_session_open_failure(
+                                &connection_id,
+                                "saved password was not found",
+                            );
                             this.session
                                 .start_release_saved_connection(&connection_id);
                             this.shell.set_status(format!(
@@ -194,6 +206,10 @@ impl NyaTermApp {
                             return;
                         }
                         Err(error) => {
+                            this.complete_mcp_session_open_failure(
+                                &connection_id,
+                                &format!("could not load saved password: {error}"),
+                            );
                             this.session
                                 .start_release_saved_connection(&connection_id);
                             this.shell.set_status(format!(
@@ -204,6 +220,10 @@ impl NyaTermApp {
                         }
                     };
                     let Some(password) = password else {
+                        this.complete_mcp_session_open_failure(
+                            &connection_id,
+                            "saved password is empty or locked",
+                        );
                         this.session
                             .start_release_saved_connection(&connection_id);
                         this.shell.set_status(format!(

@@ -77,6 +77,15 @@ struct AiSettingsState {
     persistence_in_flight: Option<u64>,
     persistence_pending: Option<AiSettings>,
     persistence_dirty: bool,
+    pending_full_access: Option<AiFullAccessSetting>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::features) enum AiFullAccessSetting {
+    ExternalAgent,
+    Codex,
+    ClaudeCode,
+    McpHost,
 }
 
 pub(in crate::features) struct AiSettingsPersistenceCompletion {
@@ -195,6 +204,10 @@ struct AiPanelState {
     panel_refresh_requested: bool,
 }
 
+fn non_empty(value: String) -> Option<String> {
+    (!value.trim().is_empty()).then(|| value.trim().to_string())
+}
+
 impl AiFeatureState {
     pub(in crate::features) fn new(init: AiFeatureInit, focus: AiFeatureFocus) -> Self {
         let AiFeatureInit {
@@ -227,6 +240,7 @@ impl AiFeatureState {
                 persistence_in_flight: None,
                 persistence_pending: None,
                 persistence_dirty: false,
+                pending_full_access: None,
             },
             chat: AiChatState {
                 tx: chat_tx,
@@ -1631,6 +1645,24 @@ impl AiFeatureState {
             AiInputField::BaseUrl => self.settings.base_url_draft = text,
             AiInputField::ApiKey => self.settings.secret_draft = text.into(),
             AiInputField::RequestUserAgent => self.settings.config.request_user_agent = text,
+            AiInputField::CodexExecutable => {
+                self.settings.config.codex.executable_path = non_empty(text)
+            }
+            AiInputField::CodexDefaultModel => {
+                self.settings.config.codex.default_model = non_empty(text)
+            }
+            AiInputField::CodexConfigDirectory => {
+                self.settings.config.codex.config_directory = non_empty(text)
+            }
+            AiInputField::ClaudeExecutable => {
+                self.settings.config.claude_code.executable_path = non_empty(text)
+            }
+            AiInputField::ClaudeDefaultModel => {
+                self.settings.config.claude_code.default_model = non_empty(text)
+            }
+            AiInputField::ClaudeConfigDirectory => {
+                self.settings.config.claude_code.config_directory = non_empty(text)
+            }
         }
         self.panel.status = "AI settings edited".to_string();
     }

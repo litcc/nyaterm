@@ -13,6 +13,7 @@ crypto_secretbox.workspace = true
 dirs.workspace = true
 encoding_rs.workspace = true
 futures.workspace = true
+nyaterm-mcp-protocol.workspace = true
 hex.workspace = true
 hmac.workspace = true
 md5.workspace = true

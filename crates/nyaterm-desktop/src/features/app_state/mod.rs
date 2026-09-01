@@ -5,6 +5,7 @@ use super::ai::{AiFeatureState, AiPanel};
 use super::assets::StartWorkspaceFeatureState;
 use super::commands::CommandFeatureState;
 use super::connections::ConnectionFeatureState;
+use super::mcp::McpHostFeatureState;
 use super::notes::{NotesCatalogEvent, NotesFeatureState, NotesPanel};
 use super::pages::connections::panel::ConnectionPanel;
 use super::pages::remote::RemotePanels;
@@ -61,6 +62,7 @@ pub struct NyaTermApp {
     pub(in crate::features) security: SecurityFeatureState,
     pub(in crate::features) settings: SettingsFeatureState,
     pub(in crate::features) ai: AiFeatureState,
+    pub(in crate::features) mcp: McpHostFeatureState,
     pub(in crate::features) ai_panel: gpui::Entity<AiPanel>,
     pub(in crate::features) terminal: TerminalFeatureState,
     pub(in crate::features) send_command: SendCommandFeatureState,

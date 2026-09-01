@@ -619,7 +619,7 @@ impl NyaTermApp {
                     SessionRuntimeMetadata {
                         ssh_config,
                         ssh_multiplex_key,
-                        source_connection_id,
+                        source_connection_id: source_connection_id.clone(),
                         ai_execution_profile,
                         launch_config,
                         disconnected: false,
@@ -627,6 +627,9 @@ impl NyaTermApp {
                     tab_placement,
                     fallback_insert_index,
                 );
+                if let Some(connection_id) = source_connection_id.as_deref() {
+                    self.complete_mcp_session_open_success(connection_id, session_id.clone());
+                }
                 if let Some(custom_name) = pending
                     .as_ref()
                     .and_then(|pending| pending.custom_name.clone())
@@ -739,6 +742,9 @@ impl NyaTermApp {
                 }
             }
             Err(error) => {
+                let source_connection_id = pending
+                    .as_ref()
+                    .and_then(|pending| pending.source_connection_id.clone());
                 let reconnect_session_id = pending
                     .as_ref()
                     .and_then(|pending| pending.reconnect_session_id.clone());
@@ -752,6 +758,9 @@ impl NyaTermApp {
                     was_active_pending,
                     reconnect_session_exists,
                 );
+                if let Some(connection_id) = source_connection_id.as_deref() {
+                    self.complete_mcp_session_open_failure(connection_id, &error);
+                }
                 if !reconnect_failure {
                     self.shell
                         .set_last_connect_failure(connection_name.clone(), error.clone());

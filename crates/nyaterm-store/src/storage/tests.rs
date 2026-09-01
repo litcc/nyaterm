@@ -3056,11 +3056,97 @@ fn ai_settings_loads_and_normalizes_legacy_embedded_settings() {
     store.save_settings_value(&raw).expect("save raw settings");
 
     let loaded = store.load_ai_settings().expect("load ai");
-    assert_eq!(loaded.schema_version, 3);
+    assert_eq!(loaded.schema_version, 6);
     assert_eq!(loaded.active_profile_id, "ollama");
     assert_eq!(loaded.default_model_id.as_deref(), Some("ollama:llama3"));
     assert!(!loaded.provider_credentials.is_empty());
     assert!(!loaded.terminal_ai_actions.is_empty());
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn ai_settings_v6_preserves_unknown_fields_and_drops_explicitly_deprecated_fields() {
+    let dir = unique_temp_dir("ai-settings-v6-unknown");
+    let store = ConnectionStore::open(&dir).expect("store");
+    let mut raw = default_settings_value();
+    set_nested_json_value(
+        &mut raw,
+        &["ai"],
+        serde_json::json!({
+            "schema_version": 5,
+            "enabled": true,
+            "future_top_level": { "flag": true },
+            "active_profile_id": "ollama",
+            "provider_profiles": [{
+                "id": "ollama",
+                "name": "Ollama",
+                "provider_kind": "ollama",
+                "model": "llama3",
+                "base_url": "http://localhost:11434/v1/",
+                "enabled": true,
+                "future_profile_field": "preserved"
+            }],
+            "provider_credentials": [{
+                "id": "ollama",
+                "name": "Ollama",
+                "provider_kind": "ollama",
+                "base_url": "http://localhost:11434/v1/",
+                "enabled": true,
+                "future_credential_field": 42
+            }],
+            "models": [{
+                "id": "ollama:llama3",
+                "name": "llama3",
+                "provider_kind": "ollama",
+                "enabled": true,
+                "source": "rust-genai",
+                "future_model_field": [1, 2, 3]
+            }],
+            "external_mcp": {
+                "enabled": true,
+                "permission_mode": "confirm",
+                "session_scope": "current_window",
+                "server_mode": "temporary",
+                "idle_timeout_minutes": 10,
+                "future_mcp_field": "preserved"
+            }
+        }),
+    );
+    store.save_settings_value(&raw).expect("seed settings");
+
+    let loaded = store.load_ai_settings().expect("load settings");
+    assert_eq!(loaded.schema_version, 6);
+    assert_eq!(
+        loaded.provider_profiles[0].base_url.as_deref(),
+        Some("http://localhost:11434/")
+    );
+    assert_eq!(
+        loaded.provider_credentials[0].base_url.as_deref(),
+        Some("http://localhost:11434/")
+    );
+    store
+        .save_ai_settings(loaded)
+        .expect("save normalized settings");
+
+    let saved = store
+        .read_json_table::<serde_json::Value>(SETTINGS_TABLE, SETTINGS_DEFAULT)
+        .expect("read raw settings")
+        .expect("raw settings");
+    let ai = &saved["ai"];
+    assert_eq!(ai["future_top_level"]["flag"], true);
+    assert_eq!(
+        ai["provider_profiles"][0]["future_profile_field"],
+        "preserved"
+    );
+    assert_eq!(ai["provider_credentials"][0]["future_credential_field"], 42);
+    assert_eq!(
+        ai["models"][0]["future_model_field"],
+        serde_json::json!([1, 2, 3])
+    );
+    assert_eq!(ai["external_mcp"]["future_mcp_field"], "preserved");
+    assert!(ai["external_mcp"].get("server_mode").is_none());
+    assert!(ai["external_mcp"].get("idle_timeout_minutes").is_none());
 
     std::fs::remove_dir_all(dir).ok();
 }
