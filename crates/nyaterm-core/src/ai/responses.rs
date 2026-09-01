@@ -375,7 +375,11 @@ fn completed_tool_calls(response: &serde_json::Value) -> Result<Vec<AiToolCall>,
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        AiApiFormat, AiMode, AiModelError, AiProviderKind, AiReasoningEffort, AiSettings,
+        ResolvedAiModel, build_openai_responses_request_body, openai_responses_url,
+        parse_openai_responses_response, parse_openai_responses_stream_chunk,
+    };
     use crate::ai::{AiBackendKind, AiProviderCredential};
 
     fn resolved_model(base_url: Option<&str>) -> ResolvedAiModel {

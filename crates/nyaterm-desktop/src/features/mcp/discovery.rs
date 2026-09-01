@@ -150,7 +150,9 @@ fn default_config_dir_from(executable: &Path, home: Option<&Path>) -> anyhow::Re
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{DiscoveryStore, default_config_dir_from};
+    #[cfg(windows)]
+    use nyaterm_mcp_protocol::DiscoveryDocument;
 
     #[test]
     fn stale_discovery_can_be_removed_repeatedly() {

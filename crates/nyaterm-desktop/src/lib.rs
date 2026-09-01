@@ -1,12 +1,14 @@
 //! GPUI presentation crate for NyaTerm.
 
 mod action_links;
+mod external_process;
 mod i18n;
 mod send_command;
 mod shortcuts;
 mod temporary_ssh_link;
 #[cfg(test)]
 mod test_support;
+mod thread_owner;
 
 pub mod app_shell;
 pub mod blocking_jobs;

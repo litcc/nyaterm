@@ -556,7 +556,10 @@ pub(crate) fn risk(level: RiskLevel, reason: &str, auto_executable: bool) -> Ris
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        AiPermissionMode, CapabilityAccess, PolicyDecision, RiskLevel, assess_command_risk,
+        decide_policy, risk,
+    };
 
     #[test]
     fn permission_matrix_is_conservative() {

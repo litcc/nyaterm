@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -14,10 +14,10 @@ use nyaterm_core::ai::{
 use nyaterm_core::{AiChatRequest, AiSettings, CodexThreadMode};
 use serde_json::Value;
 
+use crate::external_process::ExternalAgentChild;
 use crate::features::mcp::McpEphemeralCredential;
 use crate::features::runtime_jobs::AiChatWorkerEvent;
 
-use super::external_process::ExternalAgentChild;
 use super::helper_resolver::resolve_mcp_helper;
 
 #[derive(Debug)]
@@ -38,7 +38,11 @@ pub(in crate::features) fn run_codex_app_server(
     session_id: &str,
     mcp_credential: McpEphemeralCredential,
 ) -> Result<CodexRunResult, String> {
+    if !settings.codex.enabled {
+        return Err("Codex integration is disabled".to_string());
+    }
     let mcp_environment = mcp_credential.environment();
+    let mcp_helper = resolve_mcp_helper()?;
     let result = run_codex_app_server_with_environment(
         settings,
         request,
@@ -48,6 +52,7 @@ pub(in crate::features) fn run_codex_app_server(
         job_id,
         session_id,
         mcp_environment,
+        &mcp_helper,
     );
     drop(mcp_credential);
     result
@@ -63,11 +68,11 @@ fn run_codex_app_server_with_environment(
     job_id: u64,
     session_id: &str,
     mcp_environment: std::collections::HashMap<String, String>,
+    mcp_helper: &std::path::Path,
 ) -> Result<CodexRunResult, String> {
     if !settings.codex.enabled {
         return Err("Codex integration is disabled".to_string());
     }
-    let mcp_helper = resolve_mcp_helper()?;
     let executable = settings
         .codex
         .executable_path
@@ -97,26 +102,14 @@ fn run_codex_app_server_with_environment(
         .take_stderr()
         .ok_or_else(|| "Codex app-server stderr is unavailable".to_string())?;
     let mut writer = BufWriter::new(stdin);
-    let (line_tx, line_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if line_tx
-                .send(line.map_err(|error| error.to_string()))
-                .is_err()
-            {
-                break;
-            }
-        }
-    });
-    std::thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+    let line_rx = child
+        .capture_output("nyaterm-codex", stdout, stderr, |line| {
             let sanitized = sanitize_codex_log_line(&line);
             if !sanitized.trim().is_empty() {
                 tracing::debug!(target: "codex_app_server", message = %sanitized);
             }
-        }
-    });
+        })
+        .map_err(|error| format!("failed to read Codex app-server output: {error}"))?;
 
     run_protocol(
         settings,
@@ -127,7 +120,7 @@ fn run_codex_app_server_with_environment(
         job_id,
         session_id,
         &mcp_environment,
-        &mcp_helper,
+        mcp_helper,
         child.child_mut(),
         &mut writer,
         &line_rx,
@@ -359,7 +352,13 @@ fn hide_window(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use nyaterm_core::{AiChatRequest, AiSettings};
+
+    use super::{looks_like_command_plan, run_codex_app_server_with_environment};
 
     #[test]
     fn rejects_command_plan_fallback() {
@@ -383,6 +382,7 @@ mod tests {
             1,
             "chat-1",
             fixture_mcp_environment(),
+            &script,
         )
         .expect("fake Codex completion");
         assert_eq!(first.thread_id, "thread-fixture");
@@ -398,6 +398,7 @@ mod tests {
             2,
             "chat-1",
             fixture_mcp_environment(),
+            &script,
         )
         .expect("fake Codex resume");
         assert_eq!(resumed.thread_id, "thread-existing");
@@ -407,21 +408,24 @@ mod tests {
         let (settings, request) = fixture_request(&hanging_script);
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_worker = cancel.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(150));
-            cancel_worker.store(true, Ordering::Relaxed);
+        let error = std::thread::scope(|scope| {
+            scope.spawn(move || {
+                std::thread::sleep(Duration::from_millis(150));
+                cancel_worker.store(true, Ordering::Relaxed);
+            });
+            run_codex_app_server_with_environment(
+                &settings,
+                &request,
+                None,
+                None,
+                &cancel,
+                3,
+                "chat-1",
+                fixture_mcp_environment(),
+                &hanging_script,
+            )
+            .unwrap_err()
         });
-        let error = run_codex_app_server_with_environment(
-            &settings,
-            &request,
-            None,
-            None,
-            &cancel,
-            3,
-            "chat-1",
-            fixture_mcp_environment(),
-        )
-        .unwrap_err();
         assert!(error.contains("cancelled"));
         let _ = std::fs::remove_dir_all(hanging_script.parent().unwrap());
     }

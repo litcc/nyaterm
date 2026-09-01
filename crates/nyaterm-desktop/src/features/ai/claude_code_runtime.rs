@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -11,10 +11,10 @@ use nyaterm_core::ai::{
 };
 use nyaterm_core::{AiChatRequest, AiSettings};
 
+use crate::external_process::ExternalAgentChild;
 use crate::features::mcp::McpEphemeralCredential;
 use crate::features::runtime_jobs::AiChatWorkerEvent;
 
-use super::external_process::ExternalAgentChild;
 use super::helper_resolver::resolve_mcp_helper;
 
 #[derive(Debug)]
@@ -34,7 +34,11 @@ pub(in crate::features) fn run_claude_code(
     mcp_credential: McpEphemeralCredential,
     mut on_session_id: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<ClaudeCodeRunResult, String> {
+    if !settings.claude_code.enabled {
+        return Err("Claude Code integration is disabled".to_string());
+    }
     let environment = mcp_credential.environment();
+    let mcp_helper = resolve_mcp_helper()?;
     let result = run_claude_code_with_environment(
         settings,
         request,
@@ -43,6 +47,7 @@ pub(in crate::features) fn run_claude_code(
         job_id,
         session_id,
         environment,
+        &mcp_helper,
         &mut on_session_id,
     );
     drop(mcp_credential);
@@ -58,6 +63,7 @@ fn run_claude_code_with_environment(
     job_id: u64,
     session_id: &str,
     mcp_environment: std::collections::HashMap<String, String>,
+    mcp_helper: &std::path::Path,
     on_session_id: &mut dyn FnMut(&str) -> Result<(), String>,
 ) -> Result<ClaudeCodeRunResult, String> {
     if !settings.claude_code.enabled {
@@ -70,7 +76,6 @@ fn run_claude_code_with_environment(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("claude");
-    let mcp_helper = resolve_mcp_helper()?;
     let mcp_config = serde_json::json!({
         "mcpServers": {
             "nyaterm": {
@@ -109,25 +114,14 @@ fn run_claude_code_with_environment(
     let stderr = child
         .take_stderr()
         .ok_or_else(|| "Claude Code stderr is unavailable".to_string())?;
-    let (line_tx, line_rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            if line_tx
-                .send(line.map_err(|error| error.to_string()))
-                .is_err()
-            {
-                break;
-            }
-        }
-    });
-    std::thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+    let line_rx = child
+        .capture_output("nyaterm-claude-code", stdout, stderr, |line| {
             let sanitized = sanitize_claude_code_log_line(&line);
             if !sanitized.trim().is_empty() {
                 tracing::debug!(target: "claude_code", message = %sanitized);
             }
-        }
-    });
+        })
+        .map_err(|error| format!("failed to read Claude Code output: {error}"))?;
 
     let mut parser = ClaudeCodeStreamParser::default();
     let mut content = String::new();
@@ -217,9 +211,15 @@ fn hide_window(_command: &mut Command) {}
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_core::{AiAction, AiAgentKind, AiMode, AiPermissionMode};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
-    use super::*;
+    use nyaterm_core::{
+        AiAction, AiAgentKind, AiChatRequest, AiMode, AiPermissionMode, AiSettings,
+    };
+
+    use super::run_claude_code_with_environment;
 
     #[test]
     fn fake_claude_cli_streams_resumes_and_cancels() {
@@ -234,6 +234,7 @@ mod tests {
             1,
             "chat-1",
             fixture_mcp_environment(),
+            &script,
             &mut |_| Ok(()),
         )
         .expect("fake Claude completion");
@@ -248,21 +249,24 @@ mod tests {
         let (settings, request) = fixture_request(&hanging);
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_worker = cancel.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(150));
-            cancel_worker.store(true, Ordering::Relaxed);
+        let error = std::thread::scope(|scope| {
+            scope.spawn(move || {
+                std::thread::sleep(Duration::from_millis(150));
+                cancel_worker.store(true, Ordering::Relaxed);
+            });
+            run_claude_code_with_environment(
+                &settings,
+                &request,
+                None,
+                &cancel,
+                2,
+                "chat-1",
+                fixture_mcp_environment(),
+                &hanging,
+                &mut |_| Ok(()),
+            )
+            .unwrap_err()
         });
-        let error = run_claude_code_with_environment(
-            &settings,
-            &request,
-            None,
-            &cancel,
-            2,
-            "chat-1",
-            fixture_mcp_environment(),
-            &mut |_| Ok(()),
-        )
-        .unwrap_err();
         assert!(error.contains("cancelled"));
         let _ = std::fs::remove_dir_all(hanging.parent().unwrap());
     }

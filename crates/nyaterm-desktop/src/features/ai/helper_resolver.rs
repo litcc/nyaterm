@@ -83,7 +83,7 @@ fn helper_missing_error() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::resolve_mcp_helper_from;
 
     #[test]
     fn resolver_prefers_sibling_and_does_not_expose_override_paths_on_failure() {

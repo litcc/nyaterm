@@ -147,13 +147,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_mcp_protocol::{MCP_TOOL_REGISTRY, RpcRequest, RpcResponse};
+    use nyaterm_mcp_protocol::{MCP_TOOL_REGISTRY, RpcRequest, RpcResponse, tool};
+    use rmcp::ServiceExt;
+    use serde_json::{Value, json};
     use tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf},
         net::TcpListener,
     };
 
-    use super::*;
+    use super::{BridgeEndpoint, NyaTermMcp, build_tools};
 
     #[test]
     fn listed_tool_annotations_come_from_the_shared_registry() {

@@ -259,7 +259,11 @@ fn resolve_card_target(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        AiChatRequest, AiCommandCard, AiRequestContractError, AiSessionScope, AiSessionScopeType,
+        AiSettings, AiTerminalTarget, bind_command_card_targets, resolve_ai_terminal_target,
+        user_input_with_target_contexts, validate_ai_request_contract,
+    };
     use crate::ai::{AiAttachment, AiMode, AiTargetContext};
 
     fn target(id: &str) -> AiTerminalTarget {

@@ -133,7 +133,9 @@ fn dynamic_snapshot<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashSet;
+
+    use super::{CapabilityScope, CapabilityScopeError, CapabilitySession};
 
     fn session(id: &str, owner: &str, live: bool) -> CapabilitySession {
         CapabilitySession {

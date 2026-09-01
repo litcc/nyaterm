@@ -197,7 +197,10 @@ fn extract_message_text(value: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        AiChatRequest, AiPermissionMode, AiSettings, ClaudeCodeStreamEvent, ClaudeCodeStreamParser,
+        build_claude_code_invocation, sanitize_claude_code_log_line,
+    };
     use crate::{AiAction, AiAgentKind, AiMode};
 
     fn request() -> AiChatRequest {

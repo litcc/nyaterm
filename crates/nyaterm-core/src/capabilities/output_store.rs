@@ -227,7 +227,9 @@ fn boundary_at_or_before_bytes(bytes: &[u8], index: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::time::Duration;
+
+    use super::{OutputStore, OutputStoreConfig, OutputStoreError};
 
     fn config(entry_limit: usize, total_limit: usize) -> OutputStoreConfig {
         OutputStoreConfig {

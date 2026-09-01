@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use futures::channel::mpsc::UnboundedSender;
@@ -19,6 +19,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
+
+use crate::thread_owner::spawn_joinable;
 
 use super::discovery::DiscoveryStore;
 
@@ -84,7 +86,7 @@ impl std::fmt::Debug for McpHostEndpoint {
 pub(in crate::features) struct McpHostRuntime {
     endpoint: McpHostEndpoint,
     shutdown: Arc<AtomicBool>,
-    thread: Option<thread::JoinHandle<()>>,
+    thread: Option<JoinHandle<()>>,
     discovery: Option<DiscoveryStore>,
 }
 
@@ -120,26 +122,24 @@ impl McpHostRuntime {
         }));
         let shutdown = Arc::new(AtomicBool::new(false));
         let thread_shutdown = shutdown.clone();
-        let thread = thread::Builder::new()
-            .name("nyaterm-mcp-host".to_string())
-            .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(runtime) => runtime,
-                    Err(error) => {
-                        tracing::error!(error = %error, "failed to create MCP Host runtime");
-                        return;
-                    }
-                };
-                runtime.block_on(run_listener(
-                    listener,
-                    credential,
-                    requests,
-                    thread_shutdown,
-                ));
-            })?;
+        let thread = spawn_joinable("nyaterm-mcp-host", move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::error!(error = %error, "failed to create MCP Host runtime");
+                    return;
+                }
+            };
+            runtime.block_on(run_listener(
+                listener,
+                credential,
+                requests,
+                thread_shutdown,
+            ));
+        })?;
         Ok(Self {
             endpoint: McpHostEndpoint {
                 port,
@@ -583,14 +583,19 @@ fn permission_mode_name(mode: &AiPermissionMode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use futures::StreamExt;
-    use nyaterm_core::AiPermissionMode;
-    use nyaterm_mcp_protocol::PROTOCOL_VERSION;
+    use nyaterm_core::{AiPermissionMode, CapabilityScope};
+    use nyaterm_mcp_protocol::{
+        AuthParams, MAX_INLINE_OUTPUT_BYTES, MAX_RPC_LINE_BYTES, PROTOCOL_VERSION, RpcRequest,
+        RpcResponse,
+    };
+    use serde_json::json;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpStream;
 
-    use super::*;
+    use super::{McpHostEndpoint, McpHostEvent, McpHostRuntime, rpc_failure};
 
     async fn rpc(
         reader: &mut tokio::io::Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,

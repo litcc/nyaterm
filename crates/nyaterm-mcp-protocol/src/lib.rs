@@ -807,7 +807,9 @@ fn contract_error<T>(name: &str, message: &str) -> Result<T, ToolContractError> 
 mod tests {
     use std::collections::HashSet;
 
-    use super::*;
+    use super::{
+        CapabilityAccess, MCP_TOOL_REGISTRY, definition_for_capability, definition_for_tool,
+    };
 
     #[test]
     fn registry_is_unique_and_annotations_match_access() {
@@ -849,7 +851,11 @@ mod tests {
 
 #[cfg(test)]
 mod contract_tests {
-    use super::*;
+    use super::{
+        MAX_INLINE_OUTPUT_BYTES, MAX_RPC_LINE_BYTES, MAX_TEXT_READ_BYTES, MAX_TEXT_WRITE_BYTES,
+        MCP_TOOL_REGISTRY, RpcError, RpcResponse, tool, validate_tool_arguments,
+        validate_tool_result,
+    };
 
     #[test]
     fn registry_contains_exactly_the_required_sixteen_tools_and_limits() {

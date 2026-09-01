@@ -7,7 +7,6 @@ mod ai_jobs;
 mod ai_runtime;
 mod claude_code_runtime;
 mod codex_runtime;
-mod external_process;
 mod helper_resolver;
 mod panel;
 mod state;

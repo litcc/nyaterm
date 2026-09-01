@@ -380,12 +380,16 @@ fn bridge_error(code: &str, message: &str) -> RpcError {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use serde_json::json;
-    use tokio::net::TcpListener;
+    use nyaterm_mcp_protocol::{RpcRequest, RpcResponse};
+    use serde_json::{Value, json};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_util::sync::CancellationToken;
 
-    use super::*;
+    use super::{BridgeClient, BridgeEndpoint};
 
     async fn request(
         lines: &mut tokio::io::Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
@@ -590,13 +594,16 @@ mod tests {
 #[cfg(test)]
 mod bridge_security_tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
-    use serde_json::json;
+    use nyaterm_mcp_protocol::{MAX_RPC_LINE_BYTES, RpcRequest, RpcResponse};
+    use serde_json::{Value, json};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::{Notify, oneshot};
+    use tokio_util::sync::CancellationToken;
 
-    use super::*;
+    use super::{BridgeClient, BridgeEndpoint, read_rpc_line};
 
     async fn next_request(
         lines: &mut tokio::io::Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,

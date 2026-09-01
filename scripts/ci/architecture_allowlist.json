@@ -4,6 +4,7 @@
   "desktop_thread_builder": [
     {"path": "crates/nyaterm-desktop/src/blocking_jobs.rs", "max_count": 1, "reason": "BlockingJobScheduler owns and joins its bounded worker pool."},
     {"path": "crates/nyaterm-desktop/src/lib.rs", "max_count": 1, "reason": "The one-shot i18n preload worker is joined before preload_i18n returns."},
+    {"path": "crates/nyaterm-desktop/src/thread_owner.rs", "max_count": 1, "reason": "The central named-thread factory returns join handles to explicit lifecycle owners."},
     {"path": "crates/nyaterm-desktop/src/models/connections.rs", "max_count": 1, "reason": "CredentialAutofillMatchPipeline owns, stops, and joins its matcher worker."},
     {"path": "crates/nyaterm-desktop/src/models/recording.rs", "max_count": 1, "reason": "RecordingWritePipeline owns, stops, and joins its writer worker."},
     {"path": "crates/nyaterm-desktop/src/models/session_event_bridge.rs", "max_count": 1, "reason": "SessionEventBridge owns, signals, and joins its bridge worker."},

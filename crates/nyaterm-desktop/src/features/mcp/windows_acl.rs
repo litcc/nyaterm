@@ -285,7 +285,7 @@ pub(super) fn assert_current_user_only(path: &Path, directory: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{assert_current_user_only, set_current_user_only};
 
     #[test]
     fn applies_current_user_only_acl_to_directory_and_file() {

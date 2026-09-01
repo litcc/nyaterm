@@ -247,7 +247,12 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashMap;
+
+    use super::{
+        CodexMcpConfig, CodexServerEvent, codex_thread_start_request, parse_codex_server_line,
+        sanitize_codex_log_line,
+    };
 
     #[test]
     fn parses_codex_deltas_completion_and_errors() {

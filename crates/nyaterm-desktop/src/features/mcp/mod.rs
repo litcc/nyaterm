@@ -1751,9 +1751,20 @@ fn truncate_summary(value: &str, max_chars: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use nyaterm_core::{AiPermissionMode, CapabilityAccess};
+    use std::collections::HashMap;
 
-    use super::*;
+    use nyaterm_core::{
+        AiPermissionMode, CapabilityAccess, CapabilityScope, ConnectionType, Group, PolicyDecision,
+        decide_policy,
+    };
+    use nyaterm_mcp_protocol::{RpcError, tool};
+    use serde_json::Value;
+
+    use super::server::{McpHostRequest, rpc_failure};
+    use super::{
+        McpApprovalDecision, McpApprovalOutcome, McpApprovalRequest, McpHostFeatureState,
+        PendingMcpApproval, connection_group_path, connection_type_name, mcp_grant_key,
+    };
 
     #[test]
     fn connection_group_paths_are_cycle_safe_and_graphical_connections_are_excluded() {

@@ -163,7 +163,7 @@ fn is_dangerous_mode(mode: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{RiskLevel, SftpRiskOperation, assess_sftp_risk};
 
     #[test]
     fn assesses_remote_filesystem_mutations_dynamically() {
