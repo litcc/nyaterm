@@ -18,10 +18,6 @@ type ContextMenuItemsBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<NyaMenuIt
 const NYA_MENU_WIDTH: f32 = 220.;
 const NYA_SUBMENU_OVERLAP: f32 = 8.;
 
-fn menu_has_submenu(items: &[NyaMenuItem]) -> bool {
-    items.iter().any(|item| item.children().is_some())
-}
-
 /// `PopupMenu` chooses a submenu's side from the parent menu's `max_width` and
 /// origin. Its probe does not include the parent menu's own width, so an exact
 /// 220px parent opened near the right edge can still choose the right side and
@@ -30,14 +26,17 @@ fn menu_has_submenu(items: &[NyaMenuItem]) -> bool {
 /// width, while the component sees enough reserved space to flip the child.
 fn submenu_direction_probe_width(
     items: &[NyaMenuItem],
+    parent_min_width: Option<Pixels>,
     pointer_x: Pixels,
     window_width: Pixels,
 ) -> Option<Pixels> {
-    if !menu_has_submenu(items) {
-        return None;
-    }
-
-    let parent_and_child = px(NYA_MENU_WIDTH * 2. - NYA_SUBMENU_OVERLAP);
+    let child_width = items
+        .iter()
+        .filter_map(|item| item.children().map(|_| item.submenu_min_width))
+        .map(|width| width.unwrap_or(px(NYA_MENU_WIDTH)))
+        .max_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))?;
+    let parent_width = parent_min_width.unwrap_or(px(NYA_MENU_WIDTH));
+    let parent_and_child = parent_width + child_width - px(NYA_SUBMENU_OVERLAP);
     (pointer_x + parent_and_child > window_width).then_some(parent_and_child)
 }
 
@@ -119,6 +118,10 @@ pub struct NyaMenuItem {
     disabled: bool,
     checked: bool,
     danger: bool,
+    label_indent: Option<Pixels>,
+    submenu_min_width: Option<Pixels>,
+    submenu_max_height: Option<Pixels>,
+    submenu_scrollable: Option<bool>,
     on_click: Option<MenuClickHandler>,
 }
 
@@ -133,6 +136,10 @@ impl NyaMenuItem {
             disabled: false,
             checked: false,
             danger: false,
+            label_indent: None,
+            submenu_min_width: None,
+            submenu_max_height: None,
+            submenu_scrollable: None,
             on_click: None,
         }
     }
@@ -188,6 +195,26 @@ impl NyaMenuItem {
         self
     }
 
+    pub fn label_indent(mut self, indent: Pixels) -> Self {
+        self.label_indent = Some(indent);
+        self
+    }
+
+    pub fn submenu_min_width(mut self, width: Pixels) -> Self {
+        self.submenu_min_width = Some(width);
+        self
+    }
+
+    pub fn submenu_max_height(mut self, height: Pixels) -> Self {
+        self.submenu_max_height = Some(height);
+        self
+    }
+
+    pub fn submenu_scrollable(mut self, scrollable: bool) -> Self {
+        self.submenu_scrollable = Some(scrollable);
+        self
+    }
+
     pub fn on_click(
         mut self,
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -226,6 +253,18 @@ impl NyaMenuItem {
         self.icon_color
     }
 
+    #[doc(hidden)]
+    pub fn test_submenu_layout(
+        &self,
+    ) -> (Option<Pixels>, Option<Pixels>, Option<bool>, Option<Pixels>) {
+        (
+            self.submenu_min_width,
+            self.submenu_max_height,
+            self.submenu_scrollable,
+            self.label_indent,
+        )
+    }
+
     pub(crate) fn append_to(
         &self,
         menu: PopupMenu,
@@ -238,14 +277,18 @@ impl NyaMenuItem {
             NyaMenuItemKind::Action => menu.item(self.popup_item(cx)),
             NyaMenuItemKind::Submenu(items) => {
                 let items = items.clone();
+                let min_width = self.submenu_min_width;
+                let max_height = self.submenu_max_height;
+                let scrollable = self.submenu_scrollable;
                 menu.submenu_with_icon(
                     self.component_icon(cx),
                     self.label.clone(),
                     window,
                     cx,
                     move |menu, window, cx| {
-                        let menu = style_nya_popup_menu(menu, None, None)
-                            .scrollable(popup_menu_should_scroll(&items, None));
+                        let menu = style_nya_popup_menu(menu, min_width, None)
+                            .when_some(max_height, |menu, height| menu.max_h(height))
+                            .scrollable(popup_menu_should_scroll(&items, scrollable));
                         items
                             .iter()
                             .fold(menu, |menu, item| item.append_to(menu, window, cx))
@@ -256,10 +299,11 @@ impl NyaMenuItem {
     }
 
     fn popup_item(&self, cx: &App) -> PopupMenuItem {
-        let mut item = if self.danger || self.shortcut.is_some() {
+        let mut item = if self.danger || self.shortcut.is_some() || self.label_indent.is_some() {
             let label = self.label.clone();
             let shortcut = self.shortcut.clone();
             let danger = self.danger;
+            let label_indent = self.label_indent;
             PopupMenuItem::element(move |_, cx| {
                 div()
                     .flex_1()
@@ -272,7 +316,13 @@ impl NyaMenuItem {
                     } else {
                         cx.theme().foreground
                     })
-                    .child(div().min_w_0().flex_1().child(label.clone()))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .when_some(label_indent, |this, indent| this.pl(indent))
+                            .child(label.clone()),
+                    )
                     .when_some(shortcut.clone(), |this, shortcut| {
                         this.child(
                             div()
@@ -577,6 +627,7 @@ where
                 let items = items_builder(window, cx);
                 let direction_probe_width = submenu_direction_probe_width(
                     &items,
+                    min_width,
                     window.mouse_position().x,
                     window.bounds().size.width,
                 );
@@ -765,16 +816,46 @@ mod tests {
         // Matches the reported narrow-window geometry: the menu opens around
         // x=48 in a 381px content area, where two 220px menus cannot fit right.
         assert_eq!(
-            submenu_direction_probe_width(&items, px(48.), px(381.)),
+            submenu_direction_probe_width(&items, None, px(48.), px(381.)),
             Some(px(432.))
         );
         assert_eq!(
-            submenu_direction_probe_width(&items, px(48.), px(900.)),
+            submenu_direction_probe_width(&items, None, px(48.), px(900.)),
             None
         );
         assert_eq!(
-            submenu_direction_probe_width(&[NyaMenuItem::action("Open")], px(360.), px(381.)),
+            submenu_direction_probe_width(&[NyaMenuItem::action("Open")], None, px(360.), px(381.)),
             None
+        );
+    }
+
+    #[test]
+    fn context_submenu_uses_configured_parent_and_child_widths() {
+        let items = vec![
+            NyaMenuItem::submenu(
+                "Move",
+                vec![NyaMenuItem::action("Folder").label_indent(px(10.))],
+            )
+            .submenu_min_width(px(176.))
+            .submenu_max_height(px(288.))
+            .submenu_scrollable(true),
+        ];
+
+        assert_eq!(
+            submenu_direction_probe_width(&items, Some(px(160.)), px(48.), px(381.)),
+            None
+        );
+        assert_eq!(
+            submenu_direction_probe_width(&items, Some(px(160.)), px(48.), px(370.)),
+            Some(px(328.))
+        );
+        assert_eq!(
+            items[0].test_submenu_layout(),
+            (Some(px(176.)), Some(px(288.)), Some(true), None)
+        );
+        assert_eq!(
+            items[0].children().expect("submenu")[0].test_submenu_layout(),
+            (None, None, None, Some(px(10.)))
         );
     }
 

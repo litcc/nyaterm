@@ -640,6 +640,27 @@ mod tests {
     }
 
     #[test]
+    fn moved_nodes_append_and_target_folders_can_be_expanded() {
+        let mut state = NotesFeatureState::new();
+        state.folders = vec![folder("root", None, 2), folder("child", Some("root"), 4)];
+        state.notes = vec![
+            note("root-note", None, 7),
+            note("child-note", Some("root"), 9),
+        ];
+
+        assert_eq!(state.next_sort_order(None), 8);
+        assert_eq!(state.next_sort_order(Some("root")), 10);
+        assert!(state.set_folder_expanded("root", true));
+        assert!(
+            state
+                .ui_state()
+                .expanded_folder_ids
+                .contains(&"root".into())
+        );
+        assert!(!state.set_folder_expanded("root", true));
+    }
+
+    #[test]
     fn catalog_revisions_are_keyed_by_note_id() {
         let mut state = NotesFeatureState::new();
         let mut first = note("first", None, 0);

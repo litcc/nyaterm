@@ -1,4 +1,4 @@
-use gpui::{Context, ParentElement as _, Window, div};
+use gpui::{Context, ParentElement as _, Window, div, prelude::*};
 use nyaterm_core::{NoteDocument, NoteNodeKind, NoteSummary};
 use nyaterm_store::{StoreDomain, store_request};
 use nyaterm_ui::{NyaConfirmDialog, NyaDialogFooter, NyaDialogWindowExt as _};
@@ -117,7 +117,11 @@ impl NyaTermApp {
         self.create_note_in_folder(None, cx);
     }
 
-    fn create_note_in_folder(&mut self, parent_id: Option<String>, cx: &mut Context<Self>) {
+    pub(in crate::features) fn create_note_in_folder(
+        &mut self,
+        parent_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let default_title = self
             .notes
             .unique_name_for_parent(parent_id.as_deref(), &rust_i18n::t!("notes.newNote"));
@@ -165,7 +169,11 @@ impl NyaTermApp {
         self.create_note_folder_in_folder(None, cx);
     }
 
-    fn create_note_folder_in_folder(&mut self, parent_id: Option<String>, cx: &mut Context<Self>) {
+    pub(in crate::features) fn create_note_folder_in_folder(
+        &mut self,
+        parent_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let default_name = self
             .notes
             .unique_name_for_parent(parent_id.as_deref(), &rust_i18n::t!("notes.newFolder"));
@@ -205,10 +213,11 @@ impl NyaTermApp {
             })
     }
 
-    pub(in crate::features) fn delete_selected_note_node(&mut self, cx: &mut Context<Self>) {
-        let Some(node_id) = self.notes.selected_node_id().map(str::to_string) else {
-            return;
-        };
+    pub(in crate::features) fn delete_note_node(
+        &mut self,
+        node_id: String,
+        cx: &mut Context<Self>,
+    ) {
         let Some((kind, _, _)) = self.notes.node(&node_id) else {
             return;
         };
@@ -242,6 +251,15 @@ impl NyaTermApp {
         let Some(node_id) = self.notes.selected_node_id().map(str::to_string) else {
             return;
         };
+        self.request_delete_note_node(node_id, window, cx);
+    }
+
+    pub(in crate::features) fn request_delete_note_node(
+        &mut self,
+        node_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((kind, _, name)) = self.notes.node(&node_id) else {
             return;
         };
@@ -261,9 +279,14 @@ impl NyaTermApp {
         let app = cx.weak_entity();
         window.open_nya_dialog(cx, move |dialog, _, _| {
             let confirm_app = app.clone();
+            let confirm_node_id = node_id.clone();
             NyaConfirmDialog::new(
                 dialog
-                    .title(rust_i18n::t!("notes.deleteTitle").to_string())
+                    .title(
+                        div()
+                            .debug_selector(|| "notes-delete-dialog-title".to_string())
+                            .child(rust_i18n::t!("notes.deleteTitle").to_string()),
+                    )
                     .width(420.),
                 NyaDialogFooter::new(
                     rust_i18n::t!("common.cancel").to_string(),
@@ -271,10 +294,16 @@ impl NyaTermApp {
                 )
                 .danger(),
             )
-            .content(div().child(message.clone()))
+            .content(
+                div()
+                    .debug_selector(|| "notes-delete-dialog-content".to_string())
+                    .child(message.clone()),
+            )
             .on_confirm(move |_, _, cx| {
                 confirm_app
-                    .update(cx, |app, cx| app.delete_selected_note_node(cx))
+                    .update(cx, |app, cx| {
+                        app.delete_note_node(confirm_node_id.clone(), cx)
+                    })
                     .is_ok()
             })
             .on_cancel(|_, _, _| true)
@@ -336,18 +365,24 @@ impl NyaTermApp {
             return;
         };
         let sort_order = self.notes.next_sort_order(target_parent_id.as_deref());
+        let expanded_parent_id = target_parent_id.clone();
         self.submit_store_request(
             0,
             store_request(StoreDomain::Notes, move |store| {
                 store.move_note_node(kind, &node_id, target_parent_id, sort_order)
             }),
-            |app, event, cx| match event.outcome {
+            move |app, event, cx| match event.outcome {
                 Ok(change) => {
                     let note_version = change
                         .note
                         .as_ref()
                         .map(|note| (note.id.clone(), note.revision));
                     app.notes.apply_node_change(change);
+                    if let Some(parent_id) = expanded_parent_id.as_deref()
+                        && app.notes.set_folder_expanded(parent_id, true)
+                    {
+                        app.persist_notes_ui_state(cx);
+                    }
                     if let Some((id, revision)) = note_version {
                         cx.emit(NotesCatalogEvent::NoteUpserted { id, revision });
                     }
