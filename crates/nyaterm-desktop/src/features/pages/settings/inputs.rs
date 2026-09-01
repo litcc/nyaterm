@@ -73,19 +73,43 @@ impl NyaTermApp {
         self.request_settings_panel_refresh(cx);
     }
 
-    /// The AI General tab draws exactly one registry text input.
-    ///
-    /// `AiInputField` has four variants, but `Model`, `BaseUrl` and `ApiKey` are edited
-    /// through the credential rows on the Models tab, not here.
+    /// The AI General tab owns the request and external-agent registry inputs.
     pub(in crate::features) fn ensure_ai_settings_inputs(&mut self, cx: &mut Context<Self>) {
-        let field = AiInputField::RequestUserAgent;
-        let value = self.ai.settings_config().request_user_agent.clone();
-        self.ensure_text_input(
-            format!("ai.input.{}", field.input_key()),
-            &value,
-            TextInputSetup::default(),
-            cx,
-        );
+        let settings = self.ai.settings_config().clone();
+        for (field, value) in [
+            (AiInputField::RequestUserAgent, settings.request_user_agent),
+            (
+                AiInputField::CodexExecutable,
+                settings.codex.executable_path.unwrap_or_default(),
+            ),
+            (
+                AiInputField::CodexDefaultModel,
+                settings.codex.default_model.unwrap_or_default(),
+            ),
+            (
+                AiInputField::CodexConfigDirectory,
+                settings.codex.config_directory.unwrap_or_default(),
+            ),
+            (
+                AiInputField::ClaudeExecutable,
+                settings.claude_code.executable_path.unwrap_or_default(),
+            ),
+            (
+                AiInputField::ClaudeDefaultModel,
+                settings.claude_code.default_model.unwrap_or_default(),
+            ),
+            (
+                AiInputField::ClaudeConfigDirectory,
+                settings.claude_code.config_directory.unwrap_or_default(),
+            ),
+        ] {
+            self.ensure_text_input(
+                format!("ai.input.{}", field.input_key()),
+                &value,
+                TextInputSetup::default(),
+                cx,
+            );
+        }
     }
 
     /// Masking comes from `TranslateInputField::is_secret` rather than a list repeated

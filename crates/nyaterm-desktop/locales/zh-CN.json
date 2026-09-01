@@ -58,6 +58,66 @@
     "actionName": "功能名称",
     "actionPrompt": "功能提示词",
     "activeProfile": "当前配置档",
+    "agent": {
+      "claudeCode": "Claude Code",
+      "codex": "Codex",
+      "mcpIntegration": "NyaTerm MCP 工具集成",
+      "mcpOnly": "终端和远程文件仅可通过 NyaTerm MCP 访问。",
+      "nyaterm": "NyaTerm Agent"
+    },
+    "claude": {
+      "title": "Claude Code"
+    },
+    "codex": {
+      "ephemeral": "临时线程",
+      "persistent": "持久线程",
+      "threadMode": "线程模式",
+      "title": "Codex"
+    },
+    "configDirectory": "配置目录",
+    "defaultAgent": "默认 Agent",
+    "defaultModel": "默认模型（可选）",
+    "executable": "可执行文件路径（可选）",
+    "externalAgents": "外部 Agent",
+    "externalAgentsDesc": "Codex 和 Claude Code 作为受守卫的子进程运行，仅能通过带作用域的 MCP 凭据访问终端。",
+    "externalPermission": "外部 Agent 权限",
+    "fullAccess": {
+      "confirmMessage": "Full Access 可在不逐次确认的情况下执行高风险及破坏性操作，但永远不会启用 bypassPermissions。仅在理解风险后继续。",
+      "confirmTitle": "启用 Full Access？",
+      "warning": "高风险：一个或多个 AI/MCP 集成当前启用了 Full Access。破坏性操作仍会进入审计历史，但可能不再弹出确认。"
+    },
+    "mcp": {
+      "allSessions": "全部会话",
+      "allowOnce": "仅允许一次",
+      "allowSession": "本次会话允许",
+      "approvalTitle": "MCP 能力审批",
+      "capability": "能力",
+      "client": "客户端",
+      "currentWindow": "当前窗口",
+      "deny": "拒绝",
+      "desc": "公共 Host discovery 可独立关闭；正在运行的外部 Agent 仍可使用带作用域的内部 Host。",
+      "destructiveWarning": "破坏性请求：永远不提供会话级授权。",
+      "disabled": "公共 Host 已关闭",
+      "helperAvailable": "MCP helper 可用",
+      "helperMissing": "MCP helper 缺失；请重新安装 NyaTerm 或构建 nyaterm-mcp",
+      "helperStatus": "Helper 状态",
+      "parameters": "参数摘要",
+      "risk": "风险",
+      "running": "公共 Host 运行中",
+      "sessionScope": "会话范围",
+      "status": "Host 状态",
+      "target": "目标",
+      "title": "NyaTerm MCP Host",
+      "unavailable": "公共 Host 不可用"
+    },
+    "permission": {
+      "auto": "自动",
+      "confirm": "逐次确认",
+      "desc": "选择 Full Access 时必须单独进行高风险确认。",
+      "fullAccess": "Full Access",
+      "observer": "只读观察",
+      "title": "权限模式"
+    },
     "agentApproveExecute": "执行",
     "agentAwaitingApproval": "等待确认执行…",
     "agentCommandExecutionMode": "命令执行策略",

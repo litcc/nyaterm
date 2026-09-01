@@ -10,13 +10,17 @@ use gpui::{
     App, AppContext, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, Styled as _, Subscription, Window, div, px,
 };
-use nyaterm_core::{ExistingFileBehavior, RecordingMode, RecordingRotationPolicy, RiskLevel};
+use nyaterm_core::{
+    AiAgentKind, AiPermissionMode, CodexThreadMode, ExistingFileBehavior, ExternalMcpSessionScope,
+    RecordingMode, RecordingRotationPolicy, RiskLevel,
+};
 use nyaterm_transport::SftpDuplicatePolicy;
 use nyaterm_ui::{
     NYA_FORM_CONTROL_HEIGHT_PX, NyaSelect, NyaSelectEvent, NyaSelectOption, NyaSelectState,
 };
 
 use super::NyaTermApp;
+use super::ai::AiFullAccessSetting;
 use crate::features::shell::TabMouseActionTarget;
 use crate::models::{ConnectionEditorSelect, HeaderStatusMode};
 use crate::send_command::{
@@ -28,6 +32,16 @@ pub(in crate::features) const FOLLOW_UI_THEME_VALUE: &str = "__nya_follow_ui_the
 pub(in crate::features) const NO_SELECTION_VALUE: &str = "__nya_no_selection__";
 pub(in crate::features) const PENDING_CONNECTION_GROUP_VALUE: &str =
     "__nya_pending_connection_group__";
+
+fn ai_permission_mode(value: &str) -> Option<AiPermissionMode> {
+    match value {
+        "observer" => Some(AiPermissionMode::Observer),
+        "confirm" => Some(AiPermissionMode::Confirm),
+        "auto" => Some(AiPermissionMode::Auto),
+        "full_access" => Some(AiPermissionMode::FullAccess),
+        _ => None,
+    }
+}
 
 #[derive(Default)]
 pub(in crate::features) struct SelectRegistry {
@@ -374,6 +388,50 @@ impl NyaTermApp {
                     self.update_ai_smart_auto_execute_max_risk(risk, cx);
                 }
             }
+            "ai-default-agent" => {
+                let kind = match value {
+                    "codex" => AiAgentKind::Codex,
+                    "claude_code" => AiAgentKind::ClaudeCode,
+                    _ => AiAgentKind::Nyaterm,
+                };
+                self.set_ai_default_agent(kind, cx);
+            }
+            "ai-external-permission" => {
+                if let Some(mode) = ai_permission_mode(value) {
+                    self.request_ai_permission_mode(AiFullAccessSetting::ExternalAgent, mode, cx);
+                }
+            }
+            "ai-codex-permission" => {
+                if let Some(mode) = ai_permission_mode(value) {
+                    self.request_ai_permission_mode(AiFullAccessSetting::Codex, mode, cx);
+                }
+            }
+            "ai-claude-permission" => {
+                if let Some(mode) = ai_permission_mode(value) {
+                    self.request_ai_permission_mode(AiFullAccessSetting::ClaudeCode, mode, cx);
+                }
+            }
+            "ai-mcp-permission" => {
+                if let Some(mode) = ai_permission_mode(value) {
+                    self.request_ai_permission_mode(AiFullAccessSetting::McpHost, mode, cx);
+                }
+            }
+            "ai-codex-thread-mode" => self.set_ai_codex_thread_mode(
+                if value == "ephemeral" {
+                    CodexThreadMode::Ephemeral
+                } else {
+                    CodexThreadMode::Persistent
+                },
+                cx,
+            ),
+            "ai-mcp-session-scope" => self.set_ai_mcp_scope(
+                if value == "all_sessions" {
+                    ExternalMcpSessionScope::AllSessions
+                } else {
+                    ExternalMcpSessionScope::CurrentWindow
+                },
+                cx,
+            ),
             id if id.starts_with("quick-command.variable.") => {
                 if let Some(index) = id
                     .strip_prefix("quick-command.variable.")

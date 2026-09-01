@@ -576,6 +576,26 @@ impl SettingsPanel {
         })
     }
 
+    pub(in crate::features::pages::settings) fn mcp_host_status(
+        &self,
+        cx: &Context<Self>,
+    ) -> crate::features::mcp::McpHostStatus {
+        self.app
+            .upgrade()
+            .map(|app| app.read(cx).mcp_host_status())
+            .unwrap_or(crate::features::mcp::McpHostStatus::Unavailable)
+    }
+
+    pub(in crate::features::pages::settings) fn mcp_helper_status(
+        &self,
+        cx: &Context<Self>,
+    ) -> crate::features::ai::McpHelperStatus {
+        self.app
+            .upgrade()
+            .map(|app| app.read(cx).mcp_helper_status())
+            .unwrap_or(crate::features::ai::McpHelperStatus::Missing)
+    }
+
     pub(in crate::features::pages::settings) fn form_select_control<I>(
         &mut self,
         id: I,
@@ -1928,7 +1948,12 @@ forward_app_action!(
     run_provider_cloud_sync_test,
     start_github_gist_auth,
     toggle_ai_allow_save_command,
+    toggle_ai_claude_enabled,
+    toggle_ai_claude_mcp_integration,
+    toggle_ai_codex_enabled,
+    toggle_ai_codex_mcp_integration,
     toggle_ai_enabled,
+    toggle_ai_mcp_enabled,
     toggle_ai_record_history,
     toggle_ai_redaction,
     toggle_alt_as_meta,

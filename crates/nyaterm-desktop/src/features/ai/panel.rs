@@ -7,8 +7,8 @@ use gpui::{
     MouseDownEvent, Rgba, SharedString, WeakEntity, Window, div, prelude::*, px, rgb, rgba, svg,
 };
 use nyaterm_core::{
-    AgentCommandExecutionMode, AiAction, AiCommandCard, AiMessage, AiMessageRole, AiMode,
-    AiModelConfigItem, AiSession, truncate_preview,
+    AgentCommandExecutionMode, AiAction, AiAgentKind, AiCommandCard, AiMessage, AiMessageRole,
+    AiMode, AiModelConfigItem, AiSession, truncate_preview,
 };
 use nyaterm_ui::{NyaInputShell, NyaScrollable, NyaSearchInput};
 
@@ -78,6 +78,8 @@ pub(in crate::features) struct AiPanelSnapshot {
     pub enabled: bool,
     pub agent_mode: bool,
     pub running: bool,
+    pub agent_kind: AiAgentKind,
+    pub external_agent: bool,
     pub selected_model_id: Option<String>,
     pub selected_model_exists: bool,
     pub model_label: String,
@@ -210,7 +212,7 @@ impl AiPanel {
         let composer_disabled = snapshot.running || !snapshot.enabled;
         let send_disabled = !snapshot.running
             && (!snapshot.enabled
-                || !snapshot.selected_model_exists
+                || (!snapshot.external_agent && !snapshot.selected_model_exists)
                 || snapshot.prompt_draft.trim().is_empty());
 
         div()
@@ -292,11 +294,16 @@ impl AiPanel {
                                     .items_center()
                                     .gap_2()
                                     .child(self.ai_mode_switch(&snapshot, cx))
-                                    .child(self.ai_model_selector(
-                                        &snapshot,
-                                        model_search_input,
-                                        cx,
-                                    )),
+                                    .when(snapshot.external_agent, |this| {
+                                        this.child(ai_agent_status_badge(&snapshot))
+                                    })
+                                    .when(!snapshot.external_agent, |this| {
+                                        this.child(self.ai_model_selector(
+                                            &snapshot,
+                                            model_search_input,
+                                            cx,
+                                        ))
+                                    }),
                             )
                             .child(ai_send_button(palette, snapshot.running, send_disabled, cx)),
                     )
@@ -2041,13 +2048,27 @@ impl AiPanel {
                                     .text_color(rgb(palette.text))
                                     .overflow_hidden()
                                     .cursor_pointer()
-                                    .child(truncate_preview(&session.title, 36))
+                                    .child(truncate_preview(&session.title, 28))
                                     .on_click(cx.listener(move |panel, _, _, cx| {
                                         let session_id = session_id.clone();
                                         panel.with_app(cx, move |app, cx| {
                                             app.load_ai_session_messages(session_id, cx);
                                         });
                                     })),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(9.))
+                                    .text_color(rgb(palette.text_dimmed))
+                                    .child(format!(
+                                        "{}{}",
+                                        agent_kind_label(&session.agent_kind),
+                                        if session.external_session_id.is_some() {
+                                            " · resume"
+                                        } else {
+                                            ""
+                                        }
+                                    )),
                             )
                             .child(svg_icon_button(
                                 format!("ai-session-delete-{}", session.id),
@@ -2422,6 +2443,8 @@ impl NyaTermApp {
         let enabled = self.ai.settings_config().enabled;
         let agent_mode = self.ai.settings_config().default_mode == AiMode::Agent;
         let running = self.ai.chat_or_agent_is_running();
+        let agent_kind = self.ai.settings_config().default_agent_kind.clone();
+        let external_agent = agent_mode && agent_kind != AiAgentKind::Nyaterm;
         let selected_model_id = self.ai_selected_model_id();
         let enabled_models: Arc<[AiModelConfigItem]> = self.ai_enabled_models().into();
         let selected_model_exists = selected_model_id
@@ -2529,6 +2552,8 @@ impl NyaTermApp {
             enabled,
             agent_mode,
             running,
+            agent_kind,
+            external_agent,
             selected_model_id,
             selected_model_exists,
             model_label,
@@ -2583,6 +2608,38 @@ impl NyaTermApp {
                 .agent_background_execution_enabled,
         }
     }
+}
+
+fn agent_kind_label(kind: &AiAgentKind) -> &'static str {
+    match kind {
+        AiAgentKind::Nyaterm => "NyaTerm",
+        AiAgentKind::Codex => "Codex",
+        AiAgentKind::ClaudeCode => "Claude",
+    }
+}
+
+fn ai_agent_status_badge(snapshot: &AiPanelSnapshot) -> impl IntoElement {
+    let palette = snapshot.chrome.palette;
+    div()
+        .h(px(28.))
+        .px_2()
+        .flex()
+        .items_center()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.input))
+        .text_size(px(10.))
+        .text_color(rgb(if snapshot.running {
+            palette.success
+        } else {
+            palette.text_muted
+        }))
+        .child(format!(
+            "{} · {}MCP-only",
+            agent_kind_label(&snapshot.agent_kind),
+            if snapshot.running { "running · " } else { "" }
+        ))
 }
 
 #[cfg(test)]
@@ -2896,6 +2953,7 @@ mod tests {
             let settings = AiSettings {
                 models: vec![
                     AiModelConfigItem {
+                        backend: Default::default(),
                         id: "openai:model-a".to_string(),
                         name: "Model A".to_string(),
                         provider_kind: Some(AiProviderKind::Openai),
@@ -2905,6 +2963,7 @@ mod tests {
                         last_seen_at: None,
                     },
                     AiModelConfigItem {
+                        backend: Default::default(),
                         id: "openai:model-b".to_string(),
                         name: "Model B".to_string(),
                         provider_kind: Some(AiProviderKind::Openai),

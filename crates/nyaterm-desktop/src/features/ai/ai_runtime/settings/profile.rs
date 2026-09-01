@@ -1,7 +1,11 @@
 use gpui::Context;
-use nyaterm_core::{AgentCommandExecutionMode, AiMode, RiskLevel};
+use nyaterm_core::{
+    AgentCommandExecutionMode, AiAgentKind, AiMode, AiPermissionMode, CodexThreadMode,
+    ExternalMcpSessionScope, RiskLevel,
+};
 
 use crate::features::NyaTermApp;
+use crate::features::ai::AiFullAccessSetting;
 
 impl NyaTermApp {
     pub(in crate::features) fn toggle_ai_enabled(&mut self, cx: &mut Context<Self>) {
@@ -94,5 +98,104 @@ impl NyaTermApp {
     ) {
         self.ai.set_settings_smart_auto_execute_max_risk(risk);
         self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn set_ai_default_agent(
+        &mut self,
+        kind: AiAgentKind,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai.set_settings_default_agent(kind);
+        self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn request_ai_permission_mode(
+        &mut self,
+        setting: AiFullAccessSetting,
+        mode: AiPermissionMode,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ai.request_settings_permission_mode(setting, mode) {
+            self.persist_ai_settings_now(cx);
+            if setting == AiFullAccessSetting::McpHost {
+                self.reconfigure_mcp_host_and_report();
+            }
+        }
+        cx.notify();
+    }
+
+    pub(in crate::features) fn pending_ai_full_access(&self) -> Option<AiFullAccessSetting> {
+        self.ai.pending_full_access_setting()
+    }
+
+    pub(in crate::features) fn cancel_ai_full_access(&mut self, cx: &mut Context<Self>) {
+        self.ai.cancel_settings_full_access();
+        cx.notify();
+    }
+
+    pub(in crate::features) fn confirm_ai_full_access(&mut self, cx: &mut Context<Self>) {
+        let Some(setting) = self.ai.confirm_settings_full_access() else {
+            return;
+        };
+        self.persist_ai_settings_now(cx);
+        if setting == AiFullAccessSetting::McpHost {
+            self.reconfigure_mcp_host_and_report();
+        }
+        cx.notify();
+    }
+
+    pub(in crate::features) fn toggle_ai_codex_enabled(&mut self, cx: &mut Context<Self>) {
+        self.ai.toggle_settings_codex_enabled();
+        self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn toggle_ai_codex_mcp_integration(&mut self, cx: &mut Context<Self>) {
+        self.ai.toggle_settings_codex_mcp_integration();
+        self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn toggle_ai_claude_enabled(&mut self, cx: &mut Context<Self>) {
+        self.ai.toggle_settings_claude_enabled();
+        self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn toggle_ai_claude_mcp_integration(&mut self, cx: &mut Context<Self>) {
+        self.ai.toggle_settings_claude_mcp_integration();
+        self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn toggle_ai_mcp_enabled(&mut self, cx: &mut Context<Self>) {
+        self.ai.toggle_settings_mcp_enabled();
+        self.persist_ai_settings_now(cx);
+        self.reconfigure_mcp_host_and_report();
+        cx.notify();
+    }
+
+    pub(in crate::features) fn set_ai_codex_thread_mode(
+        &mut self,
+        mode: CodexThreadMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai.set_settings_codex_thread_mode(mode);
+        self.persist_ai_settings_now(cx);
+    }
+
+    pub(in crate::features) fn set_ai_mcp_scope(
+        &mut self,
+        scope: ExternalMcpSessionScope,
+        cx: &mut Context<Self>,
+    ) {
+        self.ai.set_settings_mcp_scope(scope);
+        self.persist_ai_settings_now(cx);
+        self.reconfigure_mcp_host_and_report();
+        cx.notify();
+    }
+
+    fn reconfigure_mcp_host_and_report(&mut self) {
+        if let Err(error) = self.reconfigure_mcp_host() {
+            tracing::warn!(error = %error, "MCP Host reconfiguration failed");
+            self.ai
+                .set_panel_status("MCP Host could not be started with the new settings");
+        }
     }
 }

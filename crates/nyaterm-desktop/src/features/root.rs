@@ -2,12 +2,15 @@ use std::time::{Duration, Instant};
 
 use crate::models::{MainMode, NavItem, PanelResizeSide, PanelSide};
 use gpui::{
-    AnyElement, Context, Div, IntoElement, KeyDownEvent, MouseButton, MouseMoveEvent, MouseUpEvent,
-    NavigationDirection, ObjectFit, Render, SharedString, Stateful, Window, canvas, deferred, div,
-    img, prelude::*, px, rgb, rgba, svg,
+    AnyElement, App, ClickEvent, Context, Div, IntoElement, KeyDownEvent, MouseButton,
+    MouseMoveEvent, MouseUpEvent, NavigationDirection, ObjectFit, Render, SharedString, Stateful,
+    Window, canvas, deferred, div, img, prelude::*, px, rgb, rgba, svg,
 };
+use rust_i18n::t;
 
 use super::NyaTermApp;
+use super::ai::AiFullAccessSetting;
+use super::mcp::{McpApprovalDecision, McpApprovalRequest};
 use super::terminal::{FULL_SHELL_PAINT_COUNT, terminal_surface_paint_count};
 use super::view_widgets::{
     full_window_input_layer, full_window_overlay_layer, modal_scrim_is_drawn, passive_overlay_layer,
@@ -106,6 +109,7 @@ impl NyaTermApp {
         self.start_transfer_event_drain(cx);
         self.start_ai_chat_event_drain(cx);
         self.start_ai_discovery_event_drain(cx);
+        self.start_mcp_host_request_drain(cx);
         self.start_recording_event_drain(cx);
         self.start_session_start_event_drain(cx);
         self.start_credential_autofill_match_drain(cx);
@@ -636,6 +640,8 @@ impl NyaTermApp {
         let transfer_editor_open = self.transfer.editor_inline_overlay_is_open();
         let transfer_external_sync_open = self.active_external_editor_sync_prompt().is_some();
         let ssh_auth_prompt_open = self.session.prompt_has_active_ssh_auth();
+        let full_access_confirmation = self.pending_ai_full_access();
+        let mcp_approval = self.mcp_pending_approval_requests().into_iter().next();
 
         content
             .when(overlay.tab_actions_open, |this| {
@@ -772,6 +778,18 @@ impl NyaTermApp {
                     self.activity_bar_context_menu_overlay(cx),
                 ))
             })
+            .when_some(full_access_confirmation, |this, setting| {
+                this.child(full_window_overlay_layer(
+                    "ai-full-access-confirmation-layer",
+                    self.ai_full_access_confirmation_overlay(setting, cx),
+                ))
+            })
+            .when_some(mcp_approval, |this, request| {
+                this.child(full_window_overlay_layer(
+                    "mcp-approval-input-layer",
+                    self.mcp_approval_overlay(request, cx),
+                ))
+            })
             // Below the lock screen on purpose: both layers share
             // `APP_OVERLAY_PRIORITY`, so insertion order decides, and a layer
             // painted above the lock screen would swallow the pointer input the
@@ -797,6 +815,202 @@ impl NyaTermApp {
                     .with_priority(SSH_AUTH_PROMPT_PRIORITY),
                 )
             })
+    }
+
+    fn ai_full_access_confirmation_overlay(
+        &mut self,
+        setting: AiFullAccessSetting,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let palette = self.theme_palette();
+        let target = match setting {
+            AiFullAccessSetting::ExternalAgent => t!("ai.externalPermission"),
+            AiFullAccessSetting::Codex => t!("ai.codex.title"),
+            AiFullAccessSetting::ClaudeCode => t!("ai.claude.title"),
+            AiFullAccessSetting::McpHost => t!("ai.mcp.title"),
+        };
+        div()
+            .id("ai-full-access-confirmation")
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x00000080))
+            .on_click(cx.listener(|this, _, _, cx| this.cancel_ai_full_access(cx)))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.cancel_ai_full_access(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .id("ai-full-access-confirmation-card")
+                    .w(px(440.))
+                    .p_5()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(palette.danger))
+                    .bg(rgb(palette.surface))
+                    .shadow_lg()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .text_size(px(16.))
+                            .text_color(rgb(palette.danger))
+                            .child(t!("ai.fullAccess.confirmTitle")),
+                    )
+                    .child(format!(
+                        "{}\n\n{}",
+                        target,
+                        t!("ai.fullAccess.confirmMessage")
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(overlay_button(
+                                "ai-full-access-cancel",
+                                t!("common.cancel"),
+                                palette,
+                                false,
+                                cx.listener(|this, _, _, cx| this.cancel_ai_full_access(cx)),
+                            ))
+                            .child(overlay_button(
+                                "ai-full-access-confirm",
+                                t!("common.confirm"),
+                                palette,
+                                true,
+                                cx.listener(|this, _, _, cx| this.confirm_ai_full_access(cx)),
+                            )),
+                    ),
+            )
+    }
+
+    fn mcp_approval_overlay(
+        &mut self,
+        request: McpApprovalRequest,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let palette = self.theme_palette();
+        let deny_id = request.request_id.clone();
+        let once_id = request.request_id.clone();
+        let session_id = request.request_id.clone();
+        let backdrop_id = request.request_id.clone();
+        let escape_id = request.request_id.clone();
+        div()
+            .id("mcp-approval-overlay")
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x00000080))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.respond_to_mcp_approval(&backdrop_id, McpApprovalDecision::Deny, cx)
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" {
+                    this.respond_to_mcp_approval(&escape_id, McpApprovalDecision::Deny, cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .id("mcp-approval-card")
+                    .w(px(520.))
+                    .p_5()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(if request.destructive {
+                        palette.danger
+                    } else {
+                        palette.warning
+                    }))
+                    .bg(rgb(palette.surface))
+                    .shadow_lg()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .text_size(px(16.))
+                            .text_color(rgb(if request.destructive {
+                                palette.danger
+                            } else {
+                                palette.warning
+                            }))
+                            .child(t!("ai.mcp.approvalTitle")),
+                    )
+                    .child(mcp_detail_row(t!("ai.mcp.client"), request.client))
+                    .child(mcp_detail_row(t!("ai.mcp.capability"), request.capability))
+                    .when_some(request.target, |this, target| {
+                        this.child(mcp_detail_row(t!("ai.mcp.target"), target))
+                    })
+                    .child(mcp_detail_row(
+                        t!("ai.mcp.parameters"),
+                        request.parameter_summary,
+                    ))
+                    .child(mcp_detail_row(t!("ai.mcp.risk"), request.risk_level))
+                    .when(request.destructive, |this| {
+                        this.child(
+                            div()
+                                .text_color(rgb(palette.danger))
+                                .child(t!("ai.mcp.destructiveWarning")),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(overlay_button(
+                                "mcp-approval-deny",
+                                t!("ai.mcp.deny"),
+                                palette,
+                                true,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.respond_to_mcp_approval(
+                                        &deny_id,
+                                        McpApprovalDecision::Deny,
+                                        cx,
+                                    )
+                                }),
+                            ))
+                            .child(overlay_button(
+                                "mcp-approval-once",
+                                t!("ai.mcp.allowOnce"),
+                                palette,
+                                false,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.respond_to_mcp_approval(
+                                        &once_id,
+                                        McpApprovalDecision::AllowOnce,
+                                        cx,
+                                    )
+                                }),
+                            ))
+                            .when(!request.destructive, |this| {
+                                this.child(overlay_button(
+                                    "mcp-approval-session",
+                                    t!("ai.mcp.allowSession"),
+                                    palette,
+                                    false,
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.respond_to_mcp_approval(
+                                            &session_id,
+                                            McpApprovalDecision::AllowSession,
+                                            cx,
+                                        )
+                                    }),
+                                ))
+                            }),
+                    ),
+            )
     }
 
     fn reconcile_root_pointer_interactions(
@@ -991,6 +1205,52 @@ impl Render for NyaTermApp {
         }
         output
     }
+}
+
+fn overlay_button(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    palette: ThemePalette,
+    danger: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .px_3()
+        .py_2()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(if danger {
+            palette.danger
+        } else {
+            palette.border
+        }))
+        .bg(rgb(if danger {
+            palette.danger
+        } else {
+            palette.surface_elevated
+        }))
+        .text_color(rgb(if danger { 0xffffff } else { palette.text }))
+        .cursor_pointer()
+        .hover(|this| this.opacity(0.85))
+        .on_click(on_click)
+        .child(label.into())
+}
+
+fn mcp_detail_row(
+    label: impl Into<SharedString>,
+    value: impl Into<SharedString>,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .gap_2()
+        .child(
+            div()
+                .w(px(112.))
+                .text_color(rgba(0xffffff88))
+                .child(label.into()),
+        )
+        .child(div().flex_1().min_w_0().child(value.into()))
 }
 
 #[cfg(test)]
