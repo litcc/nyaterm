@@ -17,6 +17,7 @@ type ContextMenuItemsBuilder = Rc<dyn Fn(&mut Window, &mut App) -> Vec<NyaMenuIt
 
 const NYA_MENU_WIDTH: f32 = 220.;
 const NYA_SUBMENU_OVERLAP: f32 = 8.;
+const NYA_MENU_ICON_OPTICAL_OFFSET_Y: f32 = 1.;
 
 /// `PopupMenu` chooses a submenu's side from the parent menu's `max_width` and
 /// origin. Its probe does not include the parent menu's own width, so an exact
@@ -356,11 +357,16 @@ impl NyaMenuItem {
             return None;
         };
 
-        Some(if let Some(color) = self.icon_color {
+        let icon = if let Some(color) = self.icon_color {
             icon.text_color(rgb(color))
         } else {
             icon.text_color(cx.theme().muted_foreground)
-        })
+        };
+
+        // GPUI centers the icon box against the text line box, but the visible
+        // glyphs in our UI fonts sit slightly below that line box's midpoint.
+        // Offset the icon ink without changing layout so the two look centered.
+        Some(icon.relative().top(px(NYA_MENU_ICON_OPTICAL_OFFSET_Y)))
     }
 }
 
