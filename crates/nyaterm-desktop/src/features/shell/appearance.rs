@@ -37,6 +37,7 @@ impl NyaTermApp {
         };
         crate::shortcuts::rebuild_keymap(&settings.keybindings, cx);
         self.settings.replace_summary(settings);
+        self.sync_component_theme(cx);
         if terminal_font_changed {
             // External loading or settings-save completion may replace font settings;
             // clear the runtime override and paint caches so the next frame cannot use
@@ -54,7 +55,12 @@ impl NyaTermApp {
     }
 
     pub(in crate::features) fn sync_component_theme(&self, cx: &mut App) {
-        apply_component_theme(self.theme_palette(), cx);
+        apply_component_theme(
+            self.theme_palette(),
+            self.gpui_ui_font().font(),
+            px(self.settings.summary().ui_font_size.clamp(12, 24) as f32),
+            cx,
+        );
     }
 
     pub(in crate::features) fn gpui_terminal_font(&self) -> ResolvedAppearanceFont {
@@ -285,6 +291,7 @@ impl NyaTermApp {
                 if !this.settings.finish_font_options_load(generation, snapshot) {
                     return;
                 }
+                this.sync_component_theme(cx);
                 let refresh_terminal_metrics = this
                     .terminal
                     .terminal_font_metrics_need_catalog_refresh(generation);
@@ -634,6 +641,7 @@ impl NyaTermApp {
         if !self.settings.set_ui_font_family(family.to_string()) {
             return;
         }
+        self.sync_component_theme(cx);
         self.save_appearance_settings(cx);
     }
 
@@ -730,6 +738,7 @@ impl NyaTermApp {
         if !self.settings.set_ui_font_size(size.clamp(12, 24)) {
             return;
         }
+        self.sync_component_theme(cx);
         self.save_appearance_settings(cx);
     }
 

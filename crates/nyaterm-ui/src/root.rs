@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use crate::input_focus::schedule_nya_input_blur_on_outside_pointer_down;
+use crate::theme_bridge::component_typography;
 
 /// The base deferred priority at the component level.
 ///
@@ -38,8 +39,11 @@ impl NyaRootContent {
 
 impl Render for NyaRootContent {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let typography = component_typography(cx);
         div()
             .size_full()
+            .font(typography.font)
+            .text_size(typography.font_size)
             .capture_any_mouse_down(|event, window, cx| {
                 schedule_nya_input_blur_on_outside_pointer_down(event.button, window, cx);
             })
@@ -82,9 +86,10 @@ mod tests {
     use std::time::Duration;
 
     use gpui::{
-        AppContext as _, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
-        ParentElement as _, Render, StatefulInteractiveElement as _, Styled as _, TestAppContext,
-        VisualTestContext, Window, div, point, px,
+        App, AppContext as _, Context, FontFallbacks, InteractiveElement as _, IntoElement,
+        Modifiers, MouseButton, ParentElement as _, Render, RenderOnce,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, VisualTestContext, Window,
+        div, font, point, px,
     };
 
     use crate::{
@@ -93,6 +98,22 @@ mod tests {
     };
 
     struct RootContentFixture;
+
+    #[derive(IntoElement)]
+    struct TypographyCapture {
+        captured: Rc<RefCell<Option<(gpui::Font, gpui::Pixels)>>>,
+    }
+
+    impl RenderOnce for TypographyCapture {
+        fn render(self, window: &mut Window, _: &mut App) -> impl IntoElement {
+            let text_style = window.text_style();
+            self.captured.replace(Some((
+                text_style.font(),
+                text_style.font_size.to_pixels(window.rem_size()),
+            )));
+            div().child("Typography capture")
+        }
+    }
 
     impl Render for RootContentFixture {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -266,6 +287,43 @@ mod tests {
         draw(cx);
 
         assert!(cx.debug_bounds("nya-dialog-content").is_some());
+    }
+
+    #[gpui::test]
+    fn dialog_layer_inherits_the_application_font_fallbacks_and_size(cx: &mut TestAppContext) {
+        let mut ui_font = font("Noto Sans");
+        ui_font.fallbacks = Some(FontFallbacks::from_fonts(vec![
+            "Microsoft YaHei UI".to_string(),
+            "Segoe UI".to_string(),
+        ]));
+        cx.update(|cx| {
+            crate::apply_component_theme(
+                crate::theme::theme_palette("github-dark"),
+                ui_font.clone(),
+                px(19.),
+                cx,
+            );
+        });
+
+        let captured = Rc::new(RefCell::new(None));
+        let view = cx.new(|_| RootContentFixture);
+        let (_, cx) = cx.add_window_view(move |window, cx| nya_root(view, window, cx));
+        cx.update(|window, cx| {
+            let captured = captured.clone();
+            window.open_nya_dialog(cx, move |dialog, _, _| {
+                dialog.title("Typography").content(TypographyCapture {
+                    captured: captured.clone(),
+                })
+            });
+            window.draw(cx).clear(cx);
+        });
+
+        let (rendered_font, rendered_size) = captured
+            .borrow()
+            .clone()
+            .expect("dialog content should capture its inherited text style");
+        assert_eq!(rendered_font, ui_font);
+        assert_eq!(rendered_size, px(19.));
     }
 
     #[gpui::test]

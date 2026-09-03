@@ -549,6 +549,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn canceling_a_draft_restores_ui_typography_source() {
+        let mut cx = TestAppContext::single();
+        let app = app(&mut cx);
+
+        cx.update_entity(&app, |app, cx| {
+            app.sync_component_theme(cx);
+            let original_family = app.gpui_ui_font().family;
+            let original_size = app.settings.summary().ui_font_size;
+
+            app.begin_settings_draft(cx);
+            app.update_ui_font_family("Noto Sans", cx);
+            app.set_ui_font_size_from_input(20, cx);
+
+            assert_eq!(app.gpui_ui_font().family, "Noto Sans");
+            assert_eq!(app.settings.summary().ui_font_size, 20);
+
+            app.cancel_settings(cx);
+
+            assert_eq!(app.gpui_ui_font().family, original_family);
+            assert_eq!(app.settings.summary().ui_font_size, original_size);
+        });
+    }
+
     /// And must write a header status turned back on from hidden.
     ///
     /// This is the direction the bug was reported in: the header reads as "hidden"

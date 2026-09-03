@@ -766,7 +766,14 @@ mod hover_card_tests {
 
     #[gpui::test]
     fn connection_hover_card_stays_open_and_copy_button_works(cx: &mut TestAppContext) {
-        cx.update(|cx| apply_component_theme(theme_palette("github-dark"), cx));
+        cx.update(|cx| {
+            apply_component_theme(
+                theme_palette("github-dark"),
+                gpui::font("Inter"),
+                gpui::px(16.),
+                cx,
+            )
+        });
         let (_, cx) = cx.add_window_view(|_, _| HoverCardHarness);
         cx.update(|window, cx| window.draw(cx).clear(cx));
 

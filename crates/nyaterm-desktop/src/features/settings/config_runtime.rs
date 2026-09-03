@@ -622,7 +622,6 @@ impl NyaTermApp {
             |this, event, cx| match event.outcome {
                 Ok(snapshot) => {
                     this.apply_store_refresh(snapshot, cx);
-                    this.sync_component_theme(cx);
                     cx.notify();
                 }
                 Err(error) => {

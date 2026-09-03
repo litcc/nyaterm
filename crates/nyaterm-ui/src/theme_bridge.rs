@@ -1,10 +1,33 @@
 //! Bridge from NyaTerm's persisted theme palette to gpui-component's theme.
 
-use gpui::{App, Hsla, hsla, rgb, transparent_black};
+use gpui::{App, Font, Global, Hsla, Pixels, font, hsla, px, rgb, transparent_black};
 use gpui_component::scroll::ScrollbarMode;
 use gpui_component::{Theme, ThemeMode, ThemeTokens};
 
 use crate::theme::ThemePalette;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ComponentTypography {
+    pub(crate) font: Font,
+    pub(crate) font_size: Pixels,
+}
+
+impl Default for ComponentTypography {
+    fn default() -> Self {
+        Self {
+            font: font(".SystemUIFont"),
+            font_size: px(16.),
+        }
+    }
+}
+
+impl Global for ComponentTypography {}
+
+pub(crate) fn component_typography(cx: &App) -> ComponentTypography {
+    cx.try_global::<ComponentTypography>()
+        .cloned()
+        .unwrap_or_default()
+}
 
 fn color(rgb_value: u32) -> Hsla {
     rgb(rgb_value).into()
@@ -33,7 +56,12 @@ fn theme_mode(palette: ThemePalette) -> ThemeMode {
     }
 }
 
-pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
+pub fn apply_component_theme(
+    palette: ThemePalette,
+    ui_font: Font,
+    ui_font_size: Pixels,
+    cx: &mut App,
+) {
     if !cx.has_global::<Theme>() {
         gpui_component::init(cx);
     }
@@ -43,8 +71,16 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
         Theme::change(mode, None, cx);
     }
 
+    let ui_font_family = ui_font.family.clone();
+    cx.set_global(ComponentTypography {
+        font: ui_font,
+        font_size: ui_font_size,
+    });
+
     let component_theme = Theme::global_mut(cx);
     component_theme.mode = mode;
+    component_theme.font_family = ui_font_family;
+    component_theme.font_size = ui_font_size;
     component_theme.colors.background = color(palette.bg);
     component_theme.colors.foreground = color(palette.text);
     component_theme.colors.muted = color(palette.surface_elevated);
@@ -192,12 +228,18 @@ pub fn apply_component_theme(palette: ThemePalette, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
+    use gpui::{FontFallbacks, TestAppContext, font, px};
     use gpui_component::scroll::ScrollbarMode;
     use gpui_component::{Theme, ThemeMode};
 
-    use super::{apply_component_theme, color};
+    use super::{
+        apply_component_theme as apply_component_theme_with_typography, color, component_typography,
+    };
     use crate::theme::theme_palette;
+
+    fn apply_component_theme(palette: crate::theme::ThemePalette, cx: &mut gpui::App) {
+        apply_component_theme_with_typography(palette, font("Inter"), px(16.), cx);
+    }
 
     #[test]
     fn applying_component_theme_initializes_missing_component_theme() {
@@ -209,6 +251,42 @@ mod tests {
             apply_component_theme(theme_palette("github-dark"), cx);
 
             assert!(cx.has_global::<Theme>());
+        });
+    }
+
+    #[test]
+    fn component_typography_follows_the_application_font_and_size() {
+        let cx = TestAppContext::single();
+
+        cx.update(|cx| {
+            let mut ui_font = font("Noto Sans");
+            ui_font.fallbacks = Some(FontFallbacks::from_fonts(vec![
+                "Microsoft YaHei UI".to_string(),
+                "Segoe UI".to_string(),
+            ]));
+
+            apply_component_theme_with_typography(
+                theme_palette("github-dark"),
+                ui_font.clone(),
+                px(19.),
+                cx,
+            );
+
+            let theme = Theme::global(cx);
+            assert_eq!(theme.font_family, ui_font.family);
+            assert_eq!(theme.font_size, px(19.));
+            assert_eq!(
+                gpui_base::Theme::global(cx).tokens.typography.sans,
+                ui_font.family
+            );
+            assert_eq!(
+                gpui_base::Theme::global(cx).tokens.typography.md.size,
+                px(19.)
+            );
+
+            let typography = component_typography(cx);
+            assert_eq!(typography.font, ui_font);
+            assert_eq!(typography.font_size, px(19.));
         });
     }
 
