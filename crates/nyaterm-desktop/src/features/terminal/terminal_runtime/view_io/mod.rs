@@ -205,6 +205,13 @@ fn terminal_cursor_visible_for_display_offset(
         && (!blink_enabled || cursor_blink_on)
 }
 
+fn terminal_cursor_position_changed(
+    previous: Option<(usize, usize)>,
+    current: Option<(usize, usize)>,
+) -> bool {
+    current.is_some() && previous != current
+}
+
 #[cfg(test)]
 fn terminal_snapshot_with_newer_edge_row(
     base: std::sync::Arc<TerminalSnapshot>,
@@ -886,10 +893,17 @@ impl NyaTermApp {
         if session_id.is_empty() {
             return;
         }
+        let is_active = self.session.active_id() == Some(session_id);
         let paint_started_at = Instant::now();
         self.ensure_paint_theme_caches();
         let surface = self.ensure_terminal_surface(session_id, cx);
-        let is_active = self.session.active_id() == Some(session_id);
+        // Read only the lightweight row/column pair for the active surface; no
+        // snapshot is cloned, and inactive surfaces do not need this check.
+        let previous_cursor_position = if is_active {
+            surface.read(cx).cursor_position()
+        } else {
+            None
+        };
         let is_visible = self.terminal_session_has_visible_surface(session_id);
         let presentation = TerminalPresentation::resolve(is_active, is_visible);
         let work_policy = TerminalWorkPolicy::for_presentation(presentation);
@@ -1093,6 +1107,17 @@ impl NyaTermApp {
             });
             return;
         };
+        let current_cursor_position = (snapshot.display_offset == 0
+            && snapshot.cursor.row != usize::MAX)
+            .then_some((snapshot.cursor.row, snapshot.cursor.col));
+        if is_active
+            && display_offset == 0
+            && terminal_cursor_position_changed(previous_cursor_position, current_cursor_position)
+        {
+            // Full-screen programs such as Vim must show the new position even
+            // when the previous frame was in the hidden blink phase.
+            self.shell.reset_cursor_blink_phase();
+        }
         let cursor_row = snapshot.cursor.row;
         let remote_cursor_visible = snapshot.cursor.visible
             && snapshot.cursor.shape != nyaterm_terminal::CursorShape::Hidden

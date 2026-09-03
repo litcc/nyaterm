@@ -103,16 +103,12 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::time::Duration;
 
     use gpui::{AppContext as _, TestAppContext};
-    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
-    use nyaterm_transport::LocalSessionConfig;
 
-    use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
-    use crate::features::NyaTermApp;
-    use crate::models::{SessionLaunchConfig, SessionRuntimeMetadata};
+    use crate::features::test_support::app_with_visible_local_session;
+    use crate::test_support::TestConfigDir;
 
     use super::{
         CURSOR_BLINK_INTERVAL, cursor_blink_clock_should_run, cursor_blink_phase_may_advance,
@@ -120,61 +116,11 @@ mod tests {
 
     const SESSION_ID: &str = "cursor-blink-session";
 
-    fn unique_test_dir() -> PathBuf {
-        // A uuid rather than a clock reading: these tests run in parallel and
-        // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
-        // which would share one config dir and so one settings database.
-        std::env::temp_dir().join(format!(
-            "nyaterm-cursor-blink-{}-{}",
-            std::process::id(),
-            uuid()
-        ))
-    }
-
-    /// One visible local session with the blink setting on.
-    fn app_with_blinking_caret(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
-        let root = unique_test_dir();
-        let runtime = AppRuntime::from_parts_for_test(
-            RuntimeMode::Portable,
-            root.clone(),
-            root.join("config"),
-            root.join("logs"),
-            root.join("cache"),
-            None,
-        );
-        let stores = UiStoreHandles {
-            startup_restore: cx.new(|_| StartupRestoreStore::default()),
-            overlays: cx.new(|_| OverlayStore::default()),
-        };
-        let app = cx.new(|cx| NyaTermApp::new(runtime, stores, cx));
-        cx.update_entity(&app, |app, _| {
-            let mut summary = app.settings.summary().clone();
-            summary.cursor_blink = true;
-            app.settings.replace_summary(summary);
-            app.session.register_session_metadata(
-                SESSION_ID,
-                SessionRuntimeMetadata {
-                    ssh_config: None,
-                    ssh_multiplex_key: None,
-                    source_connection_id: None,
-                    ai_execution_profile: AiExecutionProfile::Posix,
-                    launch_config: SessionLaunchConfig::Local(LocalSessionConfig {
-                        name: "Local session".to_string(),
-                        ..LocalSessionConfig::default()
-                    }),
-                    disconnected: false,
-                },
-            );
-            app.session.select_active_session(SESSION_ID);
-            app.terminal
-                .seed_session_view(SESSION_ID.to_string(), String::new(), "UTF-8");
-            app.shell.show_workspace();
-            assert!(
-                !app.visible_terminal_session_ids().is_empty(),
-                "the fixture must have a visible session or the clock will not run"
-            );
-        });
-        app
+    fn app_with_blinking_caret(
+        cx: &mut TestAppContext,
+        root: &TestConfigDir,
+    ) -> gpui::Entity<crate::features::NyaTermApp> {
+        app_with_visible_local_session(cx, root.path(), SESSION_ID)
     }
 
     /// The bug Phase 0 could only paper over: the caret's half-period must be the
@@ -185,8 +131,9 @@ mod tests {
     /// schedule -- a 500ms tick, say -- fails one of these two.
     #[test]
     fn the_caret_toggles_exactly_one_interval_apart() {
+        let root = TestConfigDir::new("nyaterm-cursor-blink");
         let mut cx = TestAppContext::single();
-        let app = app_with_blinking_caret(&mut cx);
+        let app = app_with_blinking_caret(&mut cx, &root);
         cx.update_entity(&app, |app, cx| {
             app.ensure_cursor_blink_clock(cx);
             assert!(app.shell.cursor_blink_on(), "the caret starts visible");
@@ -224,8 +171,9 @@ mod tests {
     /// can only be the clock re-arming itself.
     #[test]
     fn the_clock_keeps_its_own_cadence_with_no_runtime_tick() {
+        let root = TestConfigDir::new("nyaterm-cursor-blink");
         let mut cx = TestAppContext::single();
-        let app = app_with_blinking_caret(&mut cx);
+        let app = app_with_blinking_caret(&mut cx, &root);
         cx.update_entity(&app, |app, cx| app.ensure_cursor_blink_clock(cx));
 
         for expected_on in [false, true, false, true] {
@@ -240,8 +188,9 @@ mod tests {
     /// Turning the setting off leaves the caret visible rather than stranded hidden.
     #[test]
     fn the_clock_stops_and_leaves_the_caret_visible() {
+        let root = TestConfigDir::new("nyaterm-cursor-blink");
         let mut cx = TestAppContext::single();
-        let app = app_with_blinking_caret(&mut cx);
+        let app = app_with_blinking_caret(&mut cx, &root);
         cx.update_entity(&app, |app, cx| app.ensure_cursor_blink_clock(cx));
 
         // Toggle into the hidden half of the cycle first, so a stop that forgot to
@@ -266,6 +215,20 @@ mod tests {
                 !app.shell.cursor_blink_clock_is_armed(),
                 "and it must actually stop rather than spin at 530ms forever"
             );
+        });
+    }
+
+    #[test]
+    fn resetting_cursor_blink_phase_makes_hidden_caret_visible() {
+        let root = TestConfigDir::new("nyaterm-cursor-blink");
+        let mut cx = TestAppContext::single();
+        let app = app_with_blinking_caret(&mut cx, &root);
+
+        cx.update_entity(&app, |app, _| {
+            app.shell.set_cursor_blink_on(false);
+            assert!(app.shell.reset_cursor_blink_phase());
+            assert!(app.shell.cursor_blink_on());
+            assert!(!app.shell.reset_cursor_blink_phase());
         });
     }
 

@@ -291,6 +291,12 @@ impl ShellFeatureState {
         self.runtime.cursor_blink_on = !self.runtime.cursor_blink_on;
     }
 
+    /// Restore the visible blink phase after cursor movement so the new position
+    /// cannot remain hidden.
+    pub(in crate::features) fn reset_cursor_blink_phase(&mut self) -> bool {
+        self.set_cursor_blink_on(true)
+    }
+
     /// Force the caret's blink phase. Returns whether it changed.
     pub(in crate::features) fn set_cursor_blink_on(&mut self, on: bool) -> bool {
         let changed = self.runtime.cursor_blink_on != on;

@@ -397,6 +397,20 @@ impl TerminalSurface {
         self.snapshot.is_some()
     }
 
+    /// Return the surface's committed live cursor position; scrolled snapshots
+    /// do not have a paintable cursor.
+    pub(in crate::features) fn cursor_position(&self) -> Option<(usize, usize)> {
+        self.snapshot.as_ref().and_then(|snapshot| {
+            (snapshot.display_offset == 0 && snapshot.cursor.row != usize::MAX)
+                .then_some((snapshot.cursor.row, snapshot.cursor.col))
+        })
+    }
+
+    #[cfg(test)]
+    pub(in crate::features) fn cursor_is_shown(&self) -> bool {
+        self.show_cursor
+    }
+
     pub(in crate::features) fn painted_hit_test_state(
         &self,
     ) -> Option<(TerminalPaintedHitTestGeometry, Arc<TerminalSnapshot>)> {

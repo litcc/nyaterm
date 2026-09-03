@@ -1,24 +1,28 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{KeyDownEvent, MouseButton};
+use gpui::{AppContext as _, KeyDownEvent, MouseButton, TestAppContext};
 use nyaterm_terminal::TerminalScreen;
 
 use crate::features::terminal::terminal_surface_entity::terminal_snapshot_anchor_row_for_display_offset;
+use crate::features::test_support::app_with_visible_local_session;
 use crate::models::{
     TerminalBufferCellPos, TerminalFrameActionLinks, TerminalSelection, TerminalViewState,
 };
 use crate::terminal::{TerminalBufferMatch, TerminalKeyMode};
+use crate::test_support::TestConfigDir;
 
 use super::{
     TERMINAL_INPUT_LATENCY_WINDOW, TERMINAL_USER_SCROLL_ACTIVE_WINDOW,
-    lost_mouse_report_release_button, terminal_cursor_visible_for_display_offset,
-    terminal_input_latency_active, terminal_key_bytes_for_mode_and_settings,
-    terminal_keyword_highlight_updates_allowed, terminal_live_action_link_enrichment_allowed,
-    terminal_mouse_report_button, terminal_paint_snapshot_for_view,
-    terminal_paint_window_snapshot_for_view, terminal_retained_snapshot_matches_view,
-    terminal_scroll_retained_window_extra_rows, terminal_scroll_snapshot_request_offset,
-    terminal_scroll_text_first_decorations, terminal_selection_for_session,
-    terminal_session_write_failure_log, terminal_should_defer_key_text_to_input_handler_for_state,
+    lost_mouse_report_release_button, terminal_cursor_position_changed,
+    terminal_cursor_visible_for_display_offset, terminal_input_latency_active,
+    terminal_key_bytes_for_mode_and_settings, terminal_keyword_highlight_updates_allowed,
+    terminal_live_action_link_enrichment_allowed, terminal_mouse_report_button,
+    terminal_paint_snapshot_for_view, terminal_paint_window_snapshot_for_view,
+    terminal_retained_snapshot_matches_view, terminal_scroll_retained_window_extra_rows,
+    terminal_scroll_snapshot_request_offset, terminal_scroll_text_first_decorations,
+    terminal_selection_for_session, terminal_session_write_failure_log,
+    terminal_should_defer_key_text_to_input_handler_for_state,
     terminal_should_track_command_suggestion_input, terminal_snapshot_covers_display_offset,
     terminal_snapshot_with_newer_edge_row, terminal_snapshot_with_retained_scroll_window,
     terminal_status_changed, terminal_user_scroll_active, terminal_visual_display_offset,
@@ -96,6 +100,8 @@ fn terminal_output_lines(count: usize) -> String {
         .map(|index| format!("line {index:03}\n"))
         .collect::<String>()
 }
+
+const CURSOR_POSITION_SESSION_ID: &str = "cursor-position-session";
 
 #[test]
 fn terminal_paint_snapshot_waits_without_authoritative_scrollback_snapshot() {
@@ -295,6 +301,52 @@ fn terminal_cursor_visibility_uses_display_offset_not_raw_scroll_offset() {
     assert!(!terminal_cursor_visible_for_display_offset(
         true, false, 0, true, true, false
     ));
+}
+
+#[test]
+fn terminal_cursor_position_change_is_detected_for_a_new_live_position() {
+    assert!(terminal_cursor_position_changed(Some((4, 7)), Some((4, 8)),));
+}
+
+#[test]
+fn moving_the_live_cursor_resets_a_hidden_blink_phase_before_paint() {
+    let root = TestConfigDir::new("nyaterm-cursor-position");
+    let mut cx = TestAppContext::single();
+    let app = app_with_visible_local_session(&mut cx, root.path(), CURSOR_POSITION_SESSION_ID);
+
+    cx.update_entity(&app, |app, cx| {
+        let mut screen = TerminalScreen::default();
+        screen.advance_decoded_text("prompt");
+        let old_snapshot = Arc::new(screen.snapshot());
+        screen.advance(b"\x1b[1C");
+        let new_snapshot = Arc::new(screen.snapshot());
+
+        app.terminal
+            .view
+            .views
+            .get_mut(CURSOR_POSITION_SESSION_ID)
+            .expect("fixture session view should exist")
+            .frame_snapshot = Some(old_snapshot);
+        app.sync_terminal_surface_paint(CURSOR_POSITION_SESSION_ID, cx);
+
+        app.shell.set_cursor_blink_on(false);
+        app.terminal
+            .view
+            .views
+            .get_mut(CURSOR_POSITION_SESSION_ID)
+            .expect("fixture session view should exist")
+            .frame_snapshot = Some(new_snapshot);
+        app.sync_terminal_surface_paint(CURSOR_POSITION_SESSION_ID, cx);
+
+        assert!(app.shell.cursor_blink_on());
+        let surface = app
+            .terminal
+            .view
+            .surfaces
+            .get(CURSOR_POSITION_SESSION_ID)
+            .expect("fixture terminal surface should exist");
+        assert!(surface.read(cx).cursor_is_shown());
+    });
 }
 
 #[test]
