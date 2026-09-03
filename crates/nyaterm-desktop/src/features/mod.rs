@@ -26,6 +26,8 @@ mod shell;
 mod sync;
 mod sync_input;
 mod terminal;
+#[cfg(test)]
+mod test_support;
 mod text_inputs;
 mod transfers;
 mod translation;
