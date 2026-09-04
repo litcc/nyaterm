@@ -58,7 +58,7 @@ pub(crate) fn schedule_nya_input_blur_on_outside_pointer_down(
             .pending_outside_pointer_down
             == Some(token);
         if pending && nya_input_is_focused(window, cx) {
-            window.blur();
+            window.blur(cx);
         }
         let registry = cx.default_global::<NyaInputFocusRegistry>();
         if registry.pending_outside_pointer_down == Some(token) {
