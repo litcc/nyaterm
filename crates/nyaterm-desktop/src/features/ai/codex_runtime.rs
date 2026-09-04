@@ -486,9 +486,11 @@ mod tests {
                 "echo {\"method\":\"turn/completed\",\"params\":{\"turn\":{\"id\":\"turn-fixture\",\"status\":\"completed\",\"items\":[{\"type\":\"agentMessage\",\"text\":\"final answer\"}]}}}\r\n"
             }
         );
+        // Keep the Unix fixture alive until each client message arrives; exiting after eager
+        // responses races the client's writes and intermittently turns them into EPIPE.
         #[cfg(not(windows))]
         let content = format!(
-            "#!/bin/sh\necho '{{\"id\":1,\"result\":{{}}}}'\necho '{{\"id\":2,\"result\":{{\"thread\":{{\"id\":\"thread-fixture\"}}}}}}'\necho '{{\"id\":3,\"result\":{{\"turn\":{{\"id\":\"turn-fixture\"}}}}}}'\necho '{{\"method\":\"item/reasoning/delta\",\"params\":{{\"turnId\":\"turn-fixture\",\"delta\":\"thinking\"}}}}'\necho '{{\"method\":\"item/agentMessage/delta\",\"params\":{{\"turnId\":\"turn-fixture\",\"delta\":\"partial\"}}}}'\n{}",
+            "#!/bin/sh\nIFS= read -r request || exit 1\necho '{{\"id\":1,\"result\":{{}}}}'\nIFS= read -r notification || exit 1\nIFS= read -r request || exit 1\necho '{{\"id\":2,\"result\":{{\"thread\":{{\"id\":\"thread-fixture\"}}}}}}'\nIFS= read -r request || exit 1\necho '{{\"id\":3,\"result\":{{\"turn\":{{\"id\":\"turn-fixture\"}}}}}}'\necho '{{\"method\":\"item/reasoning/delta\",\"params\":{{\"turnId\":\"turn-fixture\",\"delta\":\"thinking\"}}}}'\necho '{{\"method\":\"item/agentMessage/delta\",\"params\":{{\"turnId\":\"turn-fixture\",\"delta\":\"partial\"}}}}'\n{}",
             if hang {
                 "while :; do :; done\n"
             } else {
