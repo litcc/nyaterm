@@ -740,17 +740,18 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::Path;
 
     use gpui::{
         AppContext as _, Entity, IntoElement, Modifiers, MouseButton, ParentElement, Render,
         Styled, TestAppContext, VisualTestContext, div,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::{ActivityBarContextTarget, PanelSide};
+    use crate::test_support::TestConfigDir;
 
     struct AppHost {
         app: Entity<NyaTermApp>,
@@ -785,19 +786,10 @@ mod tests {
         }
     }
 
-    fn unique_test_dir() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "nyaterm-activity-bar-view-{}-{}",
-            std::process::id(),
-            uuid()
-        ))
-    }
-
-    fn test_app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
-        let root = unique_test_dir();
+    fn test_app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -848,9 +840,11 @@ mod tests {
         assert_eq!(super::activity_bar_submenu_height(4), 130.);
     }
 
-    #[gpui::test]
-    fn right_click_keeps_entry_target_and_blank_space_uses_bar_target(cx: &mut TestAppContext) {
-        let app = test_app(cx);
+    #[test]
+    fn right_click_keeps_entry_target_and_blank_space_uses_bar_target() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar-view");
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| app.sync_component_theme(cx));
         let host_app = app.clone();
         let (_, cx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
@@ -895,9 +889,11 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn bar_menu_hidden_items_opener_tracks_current_side_recovery(cx: &mut TestAppContext) {
-        let app = test_app(cx);
+    #[test]
+    fn bar_menu_hidden_items_opener_tracks_current_side_recovery() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar-view");
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| app.sync_component_theme(cx));
         let host_app = app.clone();
         let (_, cx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
@@ -945,8 +941,9 @@ mod tests {
 
     #[test]
     fn hidden_recovery_is_side_scoped_and_availability_filtered() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar-view");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.hide_activity_entry("fileExplorer".to_string(), cx);
             app.hide_activity_entry("aiAssistant".to_string(), cx);

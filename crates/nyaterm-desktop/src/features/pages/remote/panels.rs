@@ -691,15 +691,18 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use gpui::{
         AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, div,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use super::{RemoteMonitorKind, RemoteMonitorPanel};
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
+    use crate::test_support::TestConfigDir;
 
     const ALL_KINDS: [RemoteMonitorKind; 5] = [
         RemoteMonitorKind::Stats,
@@ -709,18 +712,13 @@ mod tests {
         RemoteMonitorKind::Docker,
     ];
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-remote-panels-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -756,8 +754,9 @@ mod tests {
     /// rather than one view with a mode flag.
     #[test]
     fn every_kind_gets_its_own_entity() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, _| {
             let mut ids = ALL_KINDS
                 .iter()
@@ -779,8 +778,9 @@ mod tests {
     /// caches the root chrome used to prime first.
     #[test]
     fn all_five_panels_paint_as_child_views() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| app.sync_component_theme(cx));
         let panels = cx.update_entity(&app, |app, _| {
             ALL_KINDS
@@ -841,8 +841,9 @@ mod tests {
     /// Open `panel`, paint the whole app, and report which of the GPU and process
     /// panel entities painted.
     fn painted_remote_panels(panel: crate::models::NavItem) -> (bool, bool) {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             let mut summary = app.settings.summary().clone();
@@ -921,8 +922,9 @@ mod tests {
     /// The state the app spends nearly all of its life in: nothing polls.
     #[test]
     fn nothing_polls_without_a_panel_or_a_session() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| app.sync_remote_panel_demand(cx));
         assert_eq!(polling(&app, &mut cx), Vec::new());
     }
@@ -933,8 +935,9 @@ mod tests {
     /// open with no session still costs nothing.
     #[test]
     fn an_open_panel_polls_and_its_neighbours_do_not() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             let mut summary = app.settings.summary().clone();
             summary.ui_show_gpu_monitor = true;
@@ -963,8 +966,9 @@ mod tests {
     /// cancels the loop -- so there is no flag that can disagree with reality.
     #[test]
     fn closing_a_panel_drops_its_clock() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         activate_ssh_session(&app, &mut cx);
         cx.update_entity(&app, |app, cx| {
             let mut summary = app.settings.summary().clone();
@@ -996,8 +1000,9 @@ mod tests {
     /// but "does anything want this".
     #[test]
     fn the_header_keeps_a_metric_polling_with_its_panel_closed() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         activate_ssh_session(&app, &mut cx);
         cx.update_entity(&app, |app, cx| {
             let mut summary = app.settings.summary().clone();
@@ -1032,8 +1037,9 @@ mod tests {
     /// not poll.
     #[test]
     fn a_panel_disabled_in_settings_does_not_poll() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         activate_ssh_session(&app, &mut cx);
         cx.update_entity(&app, |app, cx| {
             let mut summary = app.settings.summary().clone();
@@ -1056,8 +1062,9 @@ mod tests {
     /// arming is all that is being asserted.
     #[test]
     fn a_paint_arms_the_clock_for_an_open_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-remote-panels");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         activate_ssh_session(&app, &mut cx);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
@@ -1099,11 +1106,13 @@ mod tests {
 
 #[cfg(test)]
 mod isolation_tests {
+    use std::path::Path;
+
     use gpui::{
         AppContext as _, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
         VisualTestContext, div,
     };
-    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AiExecutionProfile, AppRuntime, RuntimeMode};
     use nyaterm_transport::{LocalSessionConfig, RemoteGpuOverview, RemoteStats, SshSessionConfig};
     use nyaterm_ui::NyaInputEvent;
 
@@ -1111,19 +1120,15 @@ mod isolation_tests {
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::{DockerTab, NavItem, SessionLaunchConfig, SessionRuntimeMetadata};
+    use crate::test_support::TestConfigDir;
 
-    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> gpui::Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and Windows'
         // ~15ms clock granularity lets a nanosecond timestamp repeat, which would share
         // one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-panel-isolation-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -1166,8 +1171,11 @@ mod isolation_tests {
     }
 
     /// Open the three panels on an SSH session and paint until things settle.
-    fn hosted(cx: &mut TestAppContext) -> (gpui::Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (gpui::Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             let mut summary = app.settings.summary().clone();
@@ -1216,8 +1224,9 @@ mod isolation_tests {
     /// current parent sizing, content mask and text style, this fails.
     #[test]
     fn an_unrelated_app_notify_does_not_re_render_the_snapshot_panels() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| paints(&app, cx));
         assert!(
@@ -1249,8 +1258,9 @@ mod isolation_tests {
     /// freshness.
     #[test]
     fn a_stats_mutation_reaches_its_panel_without_an_extra_root_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         let revision = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
@@ -1279,8 +1289,9 @@ mod isolation_tests {
     /// A panel interaction must not flush while its own entity is leased by GPUI.
     #[test]
     fn a_panel_interaction_flushes_after_its_lease_is_released() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let panel = vcx.update(|_, cx| {
             app.read(cx)
                 .remote_panels
@@ -1314,8 +1325,9 @@ mod isolation_tests {
     /// A GPU mutation must not re-render Stats or NPU.
     #[test]
     fn a_gpu_mutation_does_not_re_render_stats_or_npu() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| paints(&app, cx));
         vcx.update(|window, cx| {
@@ -1348,8 +1360,9 @@ mod isolation_tests {
     /// direction of coupling. No app render is involved.
     #[test]
     fn typing_in_the_gpu_search_invalidates_only_that_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         // The GPU panel has to be the one on screen for its search field to be built.
         vcx.update(|window, cx| {
             app.update(cx, |app, cx| {
@@ -1386,8 +1399,9 @@ mod isolation_tests {
     /// A remote search subscription must publish its panel snapshot after the input event.
     #[test]
     fn remote_search_input_reaches_its_snapshot_after_the_subscription_runs() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         vcx.update(|window, cx| {
             app.update(cx, |app, cx| {
                 app.open_or_toggle_panel(NavItem::GpuMonitor, cx);
@@ -1440,10 +1454,11 @@ mod isolation_tests {
     }
 
     /// Open the Processes panel on an SSH session and settle.
-    fn hosted_processes(
-        cx: &mut TestAppContext,
-    ) -> (gpui::Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted_processes<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (gpui::Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             let mut summary = app.settings.summary().clone();
@@ -1505,8 +1520,9 @@ mod isolation_tests {
     /// An `app.notify()` that changed nothing in the process pane must not re-render it.
     #[test]
     fn an_unrelated_app_notify_does_not_re_render_processes() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_processes(&mut cx);
+        let (app, vcx) = hosted_processes(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| process_paints(&app, cx));
         assert!(
@@ -1530,8 +1546,9 @@ mod isolation_tests {
     /// A process mutation reaches its panel before anything draws.
     #[test]
     fn a_process_mutation_reaches_its_panel_without_an_extra_root_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_processes(&mut cx);
+        let (app, vcx) = hosted_processes(&mut cx, test_dir.path());
 
         let revision = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
@@ -1557,8 +1574,9 @@ mod isolation_tests {
     /// A sibling pane's data must not re-render Processes.
     #[test]
     fn a_stats_mutation_does_not_re_render_processes() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_processes(&mut cx);
+        let (app, vcx) = hosted_processes(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| process_paints(&app, cx));
         vcx.update(|window, cx| {
@@ -1579,8 +1597,9 @@ mod isolation_tests {
     /// Search, sort and the nice field each re-render only the Processes panel.
     #[test]
     fn process_interactions_update_only_the_process_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_processes(&mut cx);
+        let (app, vcx) = hosted_processes(&mut cx, test_dir.path());
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 app.remote_ops
@@ -1631,8 +1650,9 @@ mod isolation_tests {
     /// snapshot follows -- the width is part of the key, so no pane revision has to move.
     #[test]
     fn narrowing_the_panel_falls_back_to_cpu_sort_in_the_snapshot() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_processes(&mut cx);
+        let (app, vcx) = hosted_processes(&mut cx, test_dir.path());
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 app.remote_ops
@@ -1676,8 +1696,9 @@ mod isolation_tests {
     /// renders carries the clamped value.
     #[test]
     fn a_shorter_list_clamps_the_offset_in_the_snapshot() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_processes(&mut cx);
+        let (app, vcx) = hosted_processes(&mut cx, test_dir.path());
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 app.remote_ops
@@ -1700,10 +1721,11 @@ mod isolation_tests {
     }
 
     /// Open the Docker panel on an SSH session, with an overview, and settle.
-    fn hosted_docker(
-        cx: &mut TestAppContext,
-    ) -> (gpui::Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted_docker<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (gpui::Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             let mut summary = app.settings.summary().clone();
@@ -1780,8 +1802,9 @@ mod isolation_tests {
     /// An `app.notify()` that changed nothing in the Docker pane must not re-render it.
     #[test]
     fn an_unrelated_app_notify_does_not_re_render_docker() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_docker(&mut cx);
+        let (app, vcx) = hosted_docker(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| docker_paints(&app, cx));
         assert!(
@@ -1805,8 +1828,9 @@ mod isolation_tests {
     /// A Docker mutation reaches its panel before anything draws.
     #[test]
     fn a_docker_mutation_reaches_its_panel_without_an_extra_root_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_docker(&mut cx);
+        let (app, vcx) = hosted_docker(&mut cx, test_dir.path());
 
         let revision = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
@@ -1831,8 +1855,9 @@ mod isolation_tests {
     /// A sibling pane's data must not re-render Docker.
     #[test]
     fn a_stats_mutation_does_not_re_render_docker() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_docker(&mut cx);
+        let (app, vcx) = hosted_docker(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| docker_paints(&app, cx));
         vcx.update(|window, cx| {
@@ -1853,8 +1878,9 @@ mod isolation_tests {
     /// Search, tab, menus and compose expansion each re-render only Docker.
     #[test]
     fn docker_interactions_update_only_the_docker_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_docker(&mut cx);
+        let (app, vcx) = hosted_docker(&mut cx, test_dir.path());
 
         for (label, mutate) in [
             (
@@ -1902,8 +1928,9 @@ mod isolation_tests {
     /// support shows Containers even with Compose stored as the tab.
     #[test]
     fn the_compose_tab_falls_back_in_the_snapshot() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_docker(&mut cx);
+        let (app, vcx) = hosted_docker(&mut cx, test_dir.path());
 
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
@@ -1932,8 +1959,9 @@ mod isolation_tests {
     /// A shorter resource list clamps the stored offset, so the next wheel event steps.
     #[test]
     fn a_shorter_docker_resource_list_clamps_the_offset() {
+        let test_dir = TestConfigDir::new("nyaterm-panel-isolation");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted_docker(&mut cx);
+        let (app, vcx) = hosted_docker(&mut cx, test_dir.path());
 
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {

@@ -1,9 +1,9 @@
+use std::path::Path;
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use gpui::TestAppContext;
-use nyaterm_core::{AiExecutionProfile, uuid};
-use nyaterm_store::{StoreConfig, StoreRuntime};
+use nyaterm_core::AiExecutionProfile;
 use nyaterm_transport::{
     LocalSessionConfig, RemoteFileBackendPreference, RemoteFileBackendPreferenceStore,
     SessionEvent, SessionKind, SessionManager, SshAgentPrompt, SshAgentPromptPhase,
@@ -18,6 +18,7 @@ use crate::models::{
     TabActionsSubmenu, TerminalFramePipeline, WorkspaceSplitDirection,
 };
 use crate::temporary_ssh_link::TemporaryLinkProtocol;
+use crate::test_support::{TestConfigDir, blocking_test_store};
 
 use super::{
     CredentialPromptState, FailedSessionStart, HostKeyPromptRequest,
@@ -48,26 +49,16 @@ fn pending(name: &str) -> PendingSessionStart {
     }
 }
 
-fn test_otp_provider() -> Arc<NativeOtpProvider> {
-    let config_dir = std::env::temp_dir().join(format!(
-        "nyaterm-session-state-test-{}-{}",
-        std::process::id(),
-        uuid()
-    ));
-    let store = StoreRuntime::spawn(StoreConfig {
-        config_dir,
-        portable_key_path: None,
-    })
-    .expect("spawn test store")
-    .blocking_client();
+fn test_otp_provider(root: &Path) -> Arc<NativeOtpProvider> {
+    let store = blocking_test_store(root);
     Arc::new(NativeOtpProvider::new(store))
 }
 
-fn prompt_state(cx: &TestAppContext) -> SessionPromptState {
-    SessionPromptState::new(test_otp_provider(), cx.update(|cx| cx.focus_handle()))
+fn prompt_state(cx: &TestAppContext, root: &Path) -> SessionPromptState {
+    SessionPromptState::new(test_otp_provider(root), cx.update(|cx| cx.focus_handle()))
 }
 
-fn session_state(cx: &TestAppContext) -> SessionFeatureState {
+fn session_state(cx: &TestAppContext, root: &Path) -> SessionFeatureState {
     let manager = Arc::new(SessionManager::new());
     let event_bridge = SessionEventBridge::spawn(
         Arc::clone(&manager),
@@ -79,7 +70,7 @@ fn session_state(cx: &TestAppContext) -> SessionFeatureState {
     SessionFeatureState::new(
         manager,
         event_bridge,
-        test_otp_provider(),
+        test_otp_provider(root),
         SessionFeatureFocus {
             credential: focus(),
             tab_actions: focus(),
@@ -148,8 +139,9 @@ fn credential_prompt_state(id: &str) -> CredentialPromptState {
 /// explicitly. Without this the second prompt of a pair never appears.
 #[test]
 fn resolving_a_prompt_wakes_the_activation_pass() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
     let mut wake_rx = prompts
         .take_wake_receiver()
         .expect("the state holds its receiver until the drain starts");
@@ -182,8 +174,9 @@ fn resolving_a_prompt_wakes_the_activation_pass() {
 
 #[test]
 fn credential_prompt_owner_isolates_input_and_clears_focus_on_take() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
 
     prompts.activate_credential(credential_prompt_state("credential-1"));
     assert!(prompts.credential_focus_is_pending());
@@ -208,8 +201,9 @@ fn credential_prompt_owner_isolates_input_and_clears_focus_on_take() {
 
 #[test]
 fn mismatched_host_key_resolution_preserves_active_prompt() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
     let (response_tx, _response_rx) = mpsc::channel();
     prompts.active_host_key_prompt = Some(HostKeyPromptRequest {
         id: "host-key-1".to_string(),
@@ -240,8 +234,9 @@ fn mismatched_host_key_resolution_preserves_active_prompt() {
 
 #[test]
 fn mismatched_agent_resolution_preserves_active_prompt() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
     let broker = prompts.agent_broker();
     let session = broker
         .begin_prompt(&SshAgentPrompt {
@@ -292,8 +287,9 @@ fn mismatched_agent_resolution_preserves_active_prompt() {
 /// for up to that period.
 #[test]
 fn totp_clock_sleeps_to_the_next_step_boundary() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
     prompts.activate_keyboard_interactive(totp_prompt_for_test(30));
 
     // 30s period: one second past a boundary leaves 29 to wait, and the last second
@@ -310,8 +306,9 @@ fn totp_clock_sleeps_to_the_next_step_boundary() {
 /// No prompt showing a TOTP code means no clock at all.
 #[test]
 fn no_totp_clock_without_a_code_on_screen() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
     assert_eq!(prompts.keyboard_totp_seconds_to_next_step(31), None);
 
     // A keyboard-interactive prompt that is not TOTP must not run one either.
@@ -357,8 +354,9 @@ fn totp_prompt_for_test(period: u64) -> KeyboardInteractivePromptState {
 
 #[test]
 fn otp_missing_entry_preserves_manual_timing_but_clears_refresh_timing() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut prompts = prompt_state(&cx);
+    let mut prompts = prompt_state(&cx, test_dir.path());
     let (response_tx, _response_rx) = mpsc::channel();
     prompts.activate_keyboard_interactive(KeyboardInteractivePromptState {
         id: "keyboard-1".to_string(),
@@ -420,6 +418,7 @@ fn otp_missing_entry_preserves_manual_timing_but_clears_refresh_timing() {
 
 #[test]
 fn session_state_owns_live_runtime_and_initializes_transient_state() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
     let focus = || cx.update(|cx| cx.focus_handle());
     let manager = Arc::new(SessionManager::new());
@@ -429,7 +428,7 @@ fn session_state_owns_live_runtime_and_initializes_transient_state() {
         "utf-8".to_string(),
         10_000,
     );
-    let otp_provider = test_otp_provider();
+    let otp_provider = test_otp_provider(test_dir.path());
     let mut sessions = SessionFeatureState::new(
         Arc::clone(&manager),
         event_bridge,
@@ -592,8 +591,9 @@ fn session_state_owns_live_runtime_and_initializes_transient_state() {
 
 #[test]
 fn session_catalog_registration_and_reordering_stay_synchronized() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     sessions.register_session_metadata("session-a", session_metadata("first", None));
     sessions.register_session_metadata("session-b", session_metadata("second", None));
@@ -622,8 +622,9 @@ fn session_catalog_registration_and_reordering_stay_synchronized() {
 
 #[test]
 fn session_catalog_inserts_out_of_order_completions_at_reserved_positions() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     let mut starts = SessionStartFeatureState::new();
     let session_a = starts.allocate_tab_placement(0);
     let session_b = starts.allocate_tab_placement(1);
@@ -657,8 +658,9 @@ fn session_catalog_inserts_out_of_order_completions_at_reserved_positions() {
 
 #[test]
 fn session_catalog_keeps_existing_tabs_before_reserved_appends() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     let mut starts = SessionStartFeatureState::new();
     sessions.register_session_metadata("session-x", session_metadata("existing", None));
     let session_a = starts.allocate_tab_placement(1);
@@ -685,8 +687,9 @@ fn session_catalog_keeps_existing_tabs_before_reserved_appends() {
 
 #[test]
 fn session_catalog_owns_presentation_and_active_history_queries() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     let mut metadata = session_metadata("fallback", None);
     let ssh = SshSessionConfig {
         name: "catalog name".to_string(),
@@ -753,8 +756,9 @@ fn session_catalog_owns_presentation_and_active_history_queries() {
 
 #[test]
 fn active_session_selection_derives_configuration_from_the_catalog() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     let mut metadata = session_metadata("first", None);
     metadata.ssh_config = Some(SshSessionConfig::default());
     metadata.ai_execution_profile = AiExecutionProfile::Auto;
@@ -799,8 +803,9 @@ fn active_session_selection_derives_configuration_from_the_catalog() {
 
 #[test]
 fn session_disconnect_transition_is_idempotent_and_reports_multiplex_owner() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     assert!(sessions.mark_session_disconnected("missing").is_none());
     sessions.register_session_metadata("session-a", session_metadata("first", Some("multiplex-a")));
@@ -830,8 +835,9 @@ fn session_disconnect_transition_is_idempotent_and_reports_multiplex_owner() {
 
 #[test]
 fn remote_file_service_requires_live_multiplex_for_session_scoped_ssh() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     let config = SshSessionConfig {
         name: "ssh".to_string(),
         host: "example.test".to_string(),
@@ -855,8 +861,9 @@ fn remote_file_service_requires_live_multiplex_for_session_scoped_ssh() {
 
 #[test]
 fn reconnect_presentation_migration_preserves_destination_overrides() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     sessions.set_custom_name("old".to_string(), "old name".to_string());
     sessions.set_custom_name("new".to_string(), "new name".to_string());
@@ -889,8 +896,9 @@ fn reconnect_presentation_migration_preserves_destination_overrides() {
 
 #[test]
 fn removing_session_catalog_clears_all_session_scoped_entries() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     let mut metadata = session_metadata("first", Some("multiplex-a"));
     metadata.ssh_config = Some(SshSessionConfig::default());
@@ -936,8 +944,9 @@ fn removing_session_catalog_clears_all_session_scoped_entries() {
 
 #[test]
 fn closing_the_active_session_hands_over_to_the_most_recent_visit() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     sessions.register_session_metadata("session-a", session_metadata("first", None));
     sessions.register_session_metadata("session-b", session_metadata("second", None));
@@ -978,8 +987,9 @@ fn closing_the_active_session_hands_over_to_the_most_recent_visit() {
 
 #[test]
 fn session_handover_falls_back_to_tab_order_without_activation_history() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     sessions.register_session_metadata("session-a", session_metadata("first", None));
     sessions.register_session_metadata("session-b", session_metadata("second", None));
@@ -998,8 +1008,9 @@ fn session_handover_falls_back_to_tab_order_without_activation_history() {
 
 #[test]
 fn tab_lock_and_drag_state_have_single_owner() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
 
     assert!(sessions.set_tab_locked("tab-a", true));
     assert!(sessions.tab_is_locked("tab-a"));
@@ -1021,8 +1032,9 @@ fn tab_lock_and_drag_state_have_single_owner() {
 
 #[test]
 fn closing_a_split_root_can_migrate_logical_tab_presentation() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     sessions.set_custom_name("root".to_string(), "logical tab".to_string());
     sessions.set_custom_name("survivor".to_string(), "pane".to_string());
     sessions.set_tab_color("root", Some(0x112233));
@@ -1040,8 +1052,9 @@ fn closing_a_split_root_can_migrate_logical_tab_presentation() {
 
 #[test]
 fn tab_group_reorder_moves_split_sessions_as_one_block() {
+    let test_dir = TestConfigDir::new("nyaterm-session-state-test");
     let cx = TestAppContext::single();
-    let mut sessions = session_state(&cx);
+    let mut sessions = session_state(&cx, test_dir.path());
     for id in ["a", "a-child", "b", "c", "c-child"] {
         sessions.register_session_metadata(id, session_metadata(id, None));
     }

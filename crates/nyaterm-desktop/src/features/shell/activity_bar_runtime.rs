@@ -627,28 +627,20 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::Path;
 
     use gpui::{AppContext as _, TestAppContext};
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::{ActivityBarZone, NavItem, PanelOpenMode, PanelSide};
+    use crate::test_support::TestConfigDir;
 
-    fn unique_test_dir() -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "nyaterm-activity-bar-{}-{}",
-            std::process::id(),
-            uuid()
-        ))
-    }
-
-    fn test_app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
-        let root = unique_test_dir();
+    fn test_app(cx: &mut TestAppContext, root: &Path) -> gpui::Entity<NyaTermApp> {
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -663,8 +655,9 @@ mod tests {
 
     #[test]
     fn hiding_an_active_panel_clears_its_side_and_removes_it_from_the_rail() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             // Open the left file explorer, then hide it from the rail.
             app.open_panel(NavItem::Transfers, cx);
@@ -693,8 +686,9 @@ mod tests {
 
     #[test]
     fn floating_panels_are_transient_per_side_and_independent_from_multi_open() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.open_panel(NavItem::Transfers, cx);
             app.set_panel_open_mode(PanelOpenMode::Floating, cx);
@@ -740,8 +734,9 @@ mod tests {
 
     #[test]
     fn normalization_migrates_aliases_and_inserts_notes_at_its_anchor() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, _cx| {
             app.shell.chrome.activity_bar_layout.left_top = vec![
                 "fileExplorer".to_string(),
@@ -775,8 +770,9 @@ mod tests {
 
     #[test]
     fn disabling_an_available_panel_closes_floating_state_without_hiding_its_slot() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             if !app.settings.summary().ui_show_gpu_monitor {
                 app.toggle_gpu_monitor_panel(cx);
@@ -796,8 +792,9 @@ mod tests {
 
     #[test]
     fn drop_indices_map_to_visible_insertion_slots_across_both_sides() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.shell.chrome.activity_bar_layout.left_top = vec![
                 "fileExplorer".to_string(),
@@ -839,8 +836,9 @@ mod tests {
 
     #[test]
     fn reset_activity_bar_layout_restores_defaults_and_collapses_sides() {
+        let test_dir = TestConfigDir::new("nyaterm-activity-bar");
         let mut cx = TestAppContext::single();
-        let app = test_app(&mut cx);
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.hide_activity_entry("aiAssistant".to_string(), cx);
             app.open_panel(NavItem::Transfers, cx);

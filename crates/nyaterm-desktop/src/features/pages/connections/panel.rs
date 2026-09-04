@@ -286,13 +286,14 @@ impl Render for ConnectionPanel {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::path::Path;
     use std::sync::Arc;
 
     use gpui::{
         AppContext as _, Entity, IntoElement, Modifiers, ParentElement as _, Render, ScrollDelta,
         ScrollWheelEvent, Styled as _, TestAppContext, VisualTestContext, div, point, px,
     };
-    use nyaterm_core::{AppRuntime, Group, RuntimeMode, SavedConnection, uuid};
+    use nyaterm_core::{AppRuntime, Group, RuntimeMode, SavedConnection};
     use nyaterm_ui::NyaInputEvent;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -301,19 +302,15 @@ mod tests {
         ConnectionDragKind, ConnectionDropPosition, ConnectionDropTarget,
     };
     use crate::models::NavItem;
+    use crate::test_support::TestConfigDir;
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-connection-panel-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -409,31 +406,34 @@ mod tests {
             .select_list_connection(id.to_string(), &visible, false, false);
     }
 
-    fn hosted(
-        cx: &mut TestAppContext,
+    fn hosted<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
         connections: Vec<SavedConnection>,
         groups: Vec<Group>,
-    ) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        hosted_with_layout(cx, connections, groups, 280., true)
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        hosted_with_layout(cx, root, connections, groups, 280., true)
     }
 
-    fn hosted_at_width(
-        cx: &mut TestAppContext,
+    fn hosted_at_width<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
         connections: Vec<SavedConnection>,
         groups: Vec<Group>,
         width: f32,
-    ) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        hosted_with_layout(cx, connections, groups, width, false)
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        hosted_with_layout(cx, root, connections, groups, width, false)
     }
 
-    fn hosted_with_layout(
-        cx: &mut TestAppContext,
+    fn hosted_with_layout<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
         connections: Vec<SavedConnection>,
         groups: Vec<Group>,
         width: f32,
         cached: bool,
-    ) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_or_toggle_panel(NavItem::Connections, cx);
@@ -477,8 +477,14 @@ mod tests {
     /// The point of the whole batch: the panel no longer rides the app's redraws.
     #[test]
     fn an_unrelated_app_notify_does_not_repaint_the_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let (app, vcx) = hosted(
+            &mut cx,
+            test_dir.path(),
+            vec![connection("a", "Alpha", None)],
+            Vec::new(),
+        );
 
         let before = vcx.update(|_, cx| paints(&app, cx));
         assert!(
@@ -499,8 +505,14 @@ mod tests {
     /// whatever paint happens to come next.
     #[test]
     fn a_catalog_replacement_reaches_the_snapshot_before_any_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let (app, vcx) = hosted(
+            &mut cx,
+            test_dir.path(),
+            vec![connection("a", "Alpha", None)],
+            Vec::new(),
+        );
 
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
@@ -526,9 +538,11 @@ mod tests {
     /// The bug the expansion guard used to have, driven through the real panel.
     #[test]
     fn a_catalog_move_under_an_unchanged_query_still_expands_the_new_match() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
         let (app, vcx) = hosted(
             &mut cx,
+            test_dir.path(),
             vec![connection("a", "prod-one", Some("g1"))],
             vec![group("g1", "One"), group("g2", "Two")],
         );
@@ -569,8 +583,14 @@ mod tests {
     /// key, so each has to move the panel key on its own.
     #[test]
     fn interaction_state_changes_reach_the_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let (app, vcx) = hosted(
+            &mut cx,
+            test_dir.path(),
+            vec![connection("a", "Alpha", None)],
+            Vec::new(),
+        );
 
         for (label, mutate) in [
             (
@@ -620,8 +640,14 @@ mod tests {
     /// re-entrant entity assertion is triggered.
     #[test]
     fn panel_interaction_flushes_after_its_lease_is_released() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let (app, vcx) = hosted(
+            &mut cx,
+            test_dir.path(),
+            vec![connection("a", "Alpha", None)],
+            Vec::new(),
+        );
         let panel = vcx.update(|_, cx| app.read(cx).connection_panel.clone());
 
         vcx.update(|_, cx| {
@@ -657,8 +683,14 @@ mod tests {
     /// the authoritative connection state.
     #[test]
     fn search_input_changes_reach_the_snapshot_after_the_subscription_runs() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx, vec![connection("a", "Alpha", None)], Vec::new());
+        let (app, vcx) = hosted(
+            &mut cx,
+            test_dir.path(),
+            vec![connection("a", "Alpha", None)],
+            Vec::new(),
+        );
         let search_field = vcx.update(|_, cx| app.read(cx).connection_state.list_search_field());
 
         vcx.update(|_, cx| {
@@ -694,11 +726,12 @@ mod tests {
     /// handful of rows the viewport can show.
     #[test]
     fn only_the_visible_range_is_materialised() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
         let connections = (0..500)
             .map(|index| connection(&format!("c{index}"), &format!("Host {index}"), None))
             .collect();
-        let (app, vcx) = hosted(&mut cx, connections, Vec::new());
+        let (app, vcx) = hosted(&mut cx, test_dir.path(), connections, Vec::new());
 
         let built = vcx.update(|_, cx| rows_built(&app, cx));
         assert!(
@@ -716,9 +749,11 @@ mod tests {
     /// mutation must allocate a new one.
     #[test]
     fn every_selection_mutation_moves_the_arc_while_a_snapshot_holds_it() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
         let (app, vcx) = hosted(
             &mut cx,
+            test_dir.path(),
             vec![
                 connection("a", "Alpha", None),
                 connection("b", "Beta", None),
@@ -803,10 +838,12 @@ mod tests {
 
     #[test]
     fn long_connection_actions_stay_at_minimum_panel_viewport_right_edge() {
+        let test_dir = TestConfigDir::new("nyaterm-connection-panel");
         let mut cx = TestAppContext::single();
         let long_name = "生产环境-一段非常长且必须完整显示的-connection-name-0123456789";
         let (app, vcx) = hosted_at_width(
             &mut cx,
+            test_dir.path(),
             vec![connection("long", long_name, None)],
             Vec::new(),
             160.,

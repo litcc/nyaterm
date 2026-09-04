@@ -899,18 +899,19 @@ fn note_context_menu_items(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, path::PathBuf, time::Duration};
+    use std::{collections::BTreeMap, path::Path, time::Duration};
 
     use gpui::{
         AppContext as _, Entity, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
         ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, div, point, px,
     };
     use nyaterm_core::{
-        AppRuntime, NoteFolder, NoteSummary, NoteTreePayload, NotesUiState, RuntimeMode, uuid,
+        AppRuntime, NoteFolder, NoteSummary, NoteTreePayload, NotesUiState, RuntimeMode,
     };
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
+    use crate::test_support::TestConfigDir;
     use nyaterm_ui::NyaDialogWindowExt as _;
 
     use super::{
@@ -933,15 +934,10 @@ mod tests {
         }
     }
 
-    fn test_app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
-        let root: PathBuf = std::env::temp_dir().join(format!(
-            "nyaterm-notes-panel-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
+    fn test_app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -1097,9 +1093,11 @@ mod tests {
         assert_eq!(note_row_drop_parent(&note, "note"), None);
     }
 
-    #[gpui::test]
-    fn context_menu_items_match_blank_folder_and_note_targets(cx: &mut TestAppContext) {
-        let app = test_app(cx);
+    #[test]
+    fn context_menu_items_match_blank_folder_and_note_targets() {
+        let test_dir = TestConfigDir::new("nyaterm-notes-panel");
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, _| {
             let generation = app.notes.begin_load().expect("begin notes load");
             assert!(app.notes.apply_load(
@@ -1200,9 +1198,11 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn loaded_tauri_note_tree_builds_visible_rows(cx: &mut TestAppContext) {
-        let app = test_app(cx);
+    #[test]
+    fn loaded_tauri_note_tree_builds_visible_rows() {
+        let test_dir = TestConfigDir::new("nyaterm-notes-panel");
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             let generation = app.notes.begin_load().expect("begin notes load");
@@ -1250,9 +1250,11 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn note_delete_dialog_controls_remain_clickable_after_context_menu(cx: &mut TestAppContext) {
-        let app = test_app(cx);
+    #[test]
+    fn note_delete_dialog_controls_remain_clickable_after_context_menu() {
+        let test_dir = TestConfigDir::new("nyaterm-notes-panel");
+        let mut cx = TestAppContext::single();
+        let app = test_app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             let generation = app.notes.begin_load().expect("begin notes load");

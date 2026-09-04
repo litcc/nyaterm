@@ -1202,14 +1202,14 @@ fn load_proxy_jump_config_with_context(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::sync::Arc;
 
     use nyaterm_core::{
         AiExecutionProfile, ConnectionAuth, ConnectionType, SavedConnection, SftpCwdFollowMode,
-        SftpSettings, SshAlgorithmMode, SshAlgorithmPreferences, SshProfile, SshTerminalType, uuid,
+        SftpSettings, SshAlgorithmMode, SshAlgorithmPreferences, SshProfile, SshTerminalType,
     };
-    use nyaterm_store::{StoreConfig, StoreDomain, StoreRuntime};
+    use nyaterm_store::StoreDomain;
     use nyaterm_transport::SshSessionProfile;
 
     use super::{
@@ -1221,25 +1221,14 @@ mod tests {
         session::AgentPromptBroker, session::CredentialPromptBroker, session::HostKeyPromptBroker,
         session::NativeOtpProvider,
     };
+    use crate::test_support::{TestConfigDir, blocking_test_store};
 
-    fn unique_temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "nyaterm-desktop-{name}-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
+    fn unique_temp_dir(name: &str) -> TestConfigDir {
+        TestConfigDir::new(&format!("nyaterm-desktop-{name}"))
     }
 
-    fn test_ssh_build_context(config_dir: PathBuf) -> SshSessionConfigBuildContext {
-        let store = StoreRuntime::spawn(StoreConfig {
-            config_dir: config_dir.clone(),
-            portable_key_path: None,
-        })
-        .expect("spawn test store")
-        .blocking_client();
+    fn test_ssh_build_context(root: &Path) -> SshSessionConfigBuildContext {
+        let store = blocking_test_store(root);
         SshSessionConfigBuildContext {
             store: store.clone(),
             host_key_policy: "accept".to_string(),
@@ -1257,7 +1246,7 @@ mod tests {
     #[test]
     fn ssh_password_loader_uses_decrypted_inline_password() {
         let dir = unique_temp_dir("ssh-inline-password");
-        let context = test_ssh_build_context(dir.clone());
+        let context = test_ssh_build_context(dir.path());
         let auth = ConnectionAuth {
             mode: "password".to_string(),
             password: Some("secret".to_string().into()),
@@ -1268,13 +1257,12 @@ mod tests {
         let password = load_ssh_connection_password_with_context(&context, &auth).unwrap();
 
         assert_eq!(password.as_deref(), Some("secret"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn ssh_password_loader_resolves_saved_password_id() {
         let dir = unique_temp_dir("ssh-password-id");
-        let context = test_ssh_build_context(dir.clone());
+        let context = test_ssh_build_context(dir.path());
         let password_id = context
             .store
             .request_fn(StoreDomain::Security, |store| {
@@ -1295,7 +1283,6 @@ mod tests {
         let password = load_ssh_connection_password_with_context(&context, &auth).unwrap();
 
         assert_eq!(password.as_deref(), Some("stored-secret"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1330,7 +1317,7 @@ mod tests {
     #[test]
     fn ssh_password_loader_rejects_locked_inline_password() {
         let dir = unique_temp_dir("ssh-locked-password");
-        let context = test_ssh_build_context(dir.clone());
+        let context = test_ssh_build_context(dir.path());
         let auth = ConnectionAuth {
             mode: "password".to_string(),
             password: Some("encrypted".to_string().into()),
@@ -1341,13 +1328,12 @@ mod tests {
         let error = load_ssh_connection_password_with_context(&context, &auth).unwrap_err();
 
         assert!(error.contains("locked"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn ssh_session_config_uses_context_keep_alive_interval() {
         let dir = unique_temp_dir("ssh-keepalive");
-        let mut context = test_ssh_build_context(dir.clone());
+        let mut context = test_ssh_build_context(dir.path());
         context.keep_alive_interval_secs = 45;
         let connection = SavedConnection {
             id: "conn-1".to_string(),
@@ -1390,13 +1376,12 @@ mod tests {
             build_ssh_session_config_with_context(&connection, &mut Vec::new(), &context).unwrap();
 
         assert_eq!(config.keep_alive_interval_secs, 45);
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn ssh_session_config_maps_encoding_algorithms_and_sftp_settings() {
         let dir = unique_temp_dir("ssh-mapping");
-        let mut context = test_ssh_build_context(dir.clone());
+        let mut context = test_ssh_build_context(dir.path());
         context.default_encoding = "GB18030".to_string();
         let mut connection = SavedConnection {
             id: "conn-1".to_string(),
@@ -1470,6 +1455,5 @@ mod tests {
         let explicit =
             build_ssh_session_config_with_context(&connection, &mut Vec::new(), &context).unwrap();
         assert_eq!(explicit.term, "ansi");
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

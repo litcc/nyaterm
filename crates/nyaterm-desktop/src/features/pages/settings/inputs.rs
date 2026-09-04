@@ -646,30 +646,28 @@ pub(in crate::features::pages::settings) const ALL_SETTINGS_TABS: [SettingsTab; 
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use gpui::{
         AppContext as _, Context, Entity, IntoElement, Render, TestAppContext, VisualTestContext,
         Window, div,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::{AiActionEditorField, AiActionListKind, NavItem, SettingsTab};
+    use crate::test_support::TestConfigDir;
 
     use super::ALL_SETTINGS_TABS;
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-settings-inputs-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -682,8 +680,8 @@ mod tests {
         cx.new(|cx| NyaTermApp::new(runtime, stores, cx))
     }
 
-    fn hosted(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
-        let app = app(cx);
+    fn hosted(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_page(NavItem::Settings, cx);
@@ -697,8 +695,9 @@ mod tests {
     /// tests; this pins the ownership boundary that render relies on.
     #[test]
     fn every_settings_tab_builds_its_inputs_and_snapshot_handles() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-inputs");
         let mut cx = TestAppContext::single();
-        let app = hosted(&mut cx);
+        let app = hosted(&mut cx, test_dir.path());
 
         for tab in ALL_SETTINGS_TABS {
             cx.update_entity(&app, |app, cx| {
@@ -747,8 +746,9 @@ mod tests {
     /// clean exit is the assertion that nothing but the app retains them.
     #[test]
     fn static_settings_inputs_outlive_the_page() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-inputs");
         let mut cx = TestAppContext::single();
-        let app = hosted(&mut cx);
+        let app = hosted(&mut cx, test_dir.path());
 
         cx.update_entity(&app, |app, cx| {
             app.ensure_settings_tab_inputs(SettingsTab::Security, cx);
@@ -843,8 +843,9 @@ mod tests {
     /// `debug_assert!` in a debug build).
     #[test]
     fn reveal_boundaries_build_the_inputs_their_rows_draw() {
+        let test_dir = TestConfigDir::new("nyaterm-settings-inputs");
         let mut cx = TestAppContext::single();
-        let app = hosted(&mut cx);
+        let app = hosted(&mut cx, test_dir.path());
         let (_, vcx) = cx.add_window_view(|_, _| BareHost);
         let vcx: &mut VisualTestContext = vcx;
 

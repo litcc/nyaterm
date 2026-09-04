@@ -101,29 +101,20 @@ impl CommandRuntimeState {
 #[cfg(test)]
 mod tests {
     use futures::StreamExt as _;
-    use nyaterm_store::{StoreConfig, StoreRuntime};
 
     use super::CommandRuntimeState;
     use crate::blocking_jobs::BlockingJobScheduler;
     use crate::features::{
         runtime_jobs::CommandPersistenceRequest, runtime_jobs::CommandPersistenceResult,
     };
+    use crate::test_support::{TestConfigDir, blocking_test_store};
 
     #[test]
     fn command_runtime_owns_pending_request_lifecycle() {
-        let config_dir = std::env::temp_dir().join(format!(
-            "nyaterm-command-runtime-test-{}-{}",
-            std::process::id(),
-            nyaterm_core::uuid()
-        ));
-        let store_runtime = StoreRuntime::spawn(StoreConfig {
-            config_dir,
-            portable_key_path: None,
-        })
-        .expect("spawn test store");
+        let test_dir = TestConfigDir::new("nyaterm-command-runtime-test");
+        let store = blocking_test_store(test_dir.path());
         let scheduler = BlockingJobScheduler::new();
-        let mut runtime =
-            CommandRuntimeState::new(store_runtime.blocking_client(), scheduler.clone());
+        let mut runtime = CommandRuntimeState::new(store, scheduler.clone());
 
         assert!(runtime.is_idle());
         assert!(runtime.queue(CommandPersistenceRequest::AppendHistory(vec![

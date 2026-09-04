@@ -2652,6 +2652,7 @@ fn ai_agent_status_badge(snapshot: &AiPanelSnapshot) -> impl IntoElement {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::Instant;
 
     use gpui::{
@@ -2660,22 +2661,18 @@ mod tests {
     };
     use nyaterm_core::{
         AgentCommandExecutionMode, AiMode, AiModelConfigItem, AiModelSource, AiProviderKind,
-        AiSettings, AppRuntime, RuntimeMode, uuid,
+        AiSettings, AppRuntime, RuntimeMode,
     };
     use nyaterm_ui::NyaInputEvent;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::{NyaTermApp, runtime_jobs::AiChatJobOutput};
+    use crate::test_support::TestConfigDir;
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-ai-panel-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -2735,8 +2732,11 @@ mod tests {
         }
     }
 
-    fn hosted(cx: &mut TestAppContext) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.flush_ai_panel_snapshot(cx);
@@ -2790,8 +2790,9 @@ mod tests {
 
     #[test]
     fn detected_terminal_error_refreshes_ai_panel_only() {
+        let test_dir = TestConfigDir::new("nyaterm-ai-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let before_snapshots = vcx.update(|_, cx| ai_snapshot_sets(&app, cx));
         let before_ai_paints = vcx.update(|_, cx| ai_paints(&app, cx));
         let before_connection_paints = vcx.update(|_, cx| connection_paints(&app, cx));
@@ -2839,8 +2840,9 @@ mod tests {
 
     #[test]
     fn repeated_ai_refresh_requests_coalesce() {
+        let test_dir = TestConfigDir::new("nyaterm-ai-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let before = vcx.update(|_, cx| ai_snapshot_sets(&app, cx));
 
         vcx.update(|_, cx| {
@@ -2892,8 +2894,9 @@ mod tests {
 
     #[test]
     fn ai_header_running_transition_notifies_root() {
+        let test_dir = TestConfigDir::new("nyaterm-ai-panel");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
 
@@ -2998,8 +3001,9 @@ mod tests {
 
     #[test]
     fn unrelated_app_notify_does_not_repaint_cached_ai_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-ai-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let before = vcx.update(|_, cx| ai_paints(&app, cx));
         assert!(
             before > 0,
@@ -3019,8 +3023,9 @@ mod tests {
 
     #[test]
     fn streaming_delta_repaints_ai_panel_without_repainting_sibling_panels() {
+        let test_dir = TestConfigDir::new("nyaterm-ai-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| {
             (
@@ -3061,8 +3066,9 @@ mod tests {
 
     #[test]
     fn prompt_subscription_refreshes_snapshot_before_next_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-ai-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let prompt_input = vcx.update(|_, cx| {
             app.read(cx)
                 .ai_panel

@@ -1019,17 +1019,17 @@ impl QuickCommandFeatureState {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc, sync::Arc};
+    use std::{cell::Cell, path::Path, rc::Rc, sync::Arc};
 
     use gpui::TestAppContext;
     use nyaterm_core::{QuickCommand, QuickCommandCategory};
-    use nyaterm_store::{StoreConfig, StoreRuntime};
 
     use crate::blocking_jobs::BlockingJobScheduler;
     use crate::models::{
         QuickCommandEditorState, QuickCommandImportPathPromptKind, QuickCommandSortMode,
         QuickCommandVariableDef, QuickCommandVariablePromptState, QuickCommandViewMode,
     };
+    use crate::test_support::{TestConfigDir, blocking_test_store};
 
     use super::{
         CommandCatalogState, CommandFeatureInit, CommandFeatureState, QuickCommandFeatureFocus,
@@ -1056,20 +1056,10 @@ mod tests {
         }
     }
 
-    fn command_state() -> CommandFeatureState {
+    fn command_state(root: &Path) -> CommandFeatureState {
         let cx = TestAppContext::single();
         let focus = || cx.update(|cx| cx.focus_handle());
-        let config_dir = std::env::temp_dir().join(format!(
-            "nyaterm-command-state-test-{}-{}",
-            std::process::id(),
-            nyaterm_core::uuid()
-        ));
-        let store = StoreRuntime::spawn(StoreConfig {
-            config_dir,
-            portable_key_path: None,
-        })
-        .expect("spawn test store")
-        .blocking_client();
+        let store = blocking_test_store(root);
         CommandFeatureState::new(CommandFeatureInit {
             commands: Vec::new(),
             categories: Vec::new(),
@@ -1116,7 +1106,8 @@ mod tests {
 
     #[test]
     fn quick_category_move_neighbor_is_none_at_each_end() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         state.replace_quick_command_catalog(
             Vec::new(),
             vec![
@@ -1145,7 +1136,8 @@ mod tests {
 
     #[test]
     fn move_quick_category_by_one_reorders_and_stops_at_the_ends() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         state.replace_quick_command_catalog(
             Vec::new(),
             vec![
@@ -1176,7 +1168,8 @@ mod tests {
 
     #[test]
     fn quick_ai_popover_toggles_and_closes() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
 
         state.toggle_quick_ai_popover();
         assert!(state.quick_ai_popover_is_open());
@@ -1187,7 +1180,8 @@ mod tests {
 
     #[test]
     fn quick_editor_picker_state_is_exclusive_and_resets_on_close() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         state.open_quick_editor(QuickCommandEditorState::blank());
 
         assert!(state.set_quick_editor_category_picker_open(true));
@@ -1217,7 +1211,8 @@ mod tests {
 
     #[test]
     fn quick_editor_category_search_and_new_category_drafts_are_separate() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         state.open_quick_editor(QuickCommandEditorState::blank());
 
         assert!(state.apply_quick_editor_category_search("linux".to_string()));
@@ -1233,7 +1228,8 @@ mod tests {
 
     #[test]
     fn category_deletion_clears_filter_and_matching_editor_category() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         state.open_quick_editor(QuickCommandEditorState::blank());
         assert!(state.set_quick_editor_category(Some("category-1".to_string()), String::new(),));
         state.select_quick_category("category-1".to_string());
@@ -1256,7 +1252,8 @@ mod tests {
 
     #[test]
     fn variable_values_are_synchronized_by_name_at_the_owner_boundary() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         state.request_quick_variable_prompt(QuickCommandVariablePromptState {
             command_id: "command-1".to_string(),
             label: "Command".to_string(),
@@ -1289,7 +1286,8 @@ mod tests {
 
     #[test]
     fn import_and_detached_editor_lifecycles_clear_pending_state_atomically() {
-        let mut state = command_state();
+        let test_dir = TestConfigDir::new("nyaterm-command-state-test");
+        let mut state = command_state(test_dir.path());
         assert!(state.request_quick_import_path(QuickCommandImportPathPromptKind::NyatermJson));
         assert!(!state.request_quick_import_path(QuickCommandImportPathPromptKind::XshellXts));
         state.finish_quick_import_path();

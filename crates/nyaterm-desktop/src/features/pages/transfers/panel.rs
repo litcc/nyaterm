@@ -267,6 +267,7 @@ impl Render for TransferPanel {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::Duration;
 
     use gpui::{
@@ -274,24 +275,20 @@ mod tests {
         MouseDownEvent, MouseUpEvent, ParentElement as _, Render, Styled as _, TestAppContext,
         VisualTestContext, div, px,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::NavItem;
+    use crate::test_support::TestConfigDir;
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-transfer-panel-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -329,8 +326,11 @@ mod tests {
         }
     }
 
-    fn hosted(cx: &mut TestAppContext) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_or_toggle_panel(NavItem::Transfers, cx);
@@ -357,8 +357,9 @@ mod tests {
     /// The point of the batch: the panel no longer rides the app's redraws.
     #[test]
     fn an_unrelated_app_notify_does_not_repaint_the_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         let before = vcx.update(|_, cx| paints(&app, cx));
         assert!(
@@ -382,8 +383,9 @@ mod tests {
     /// A flush reaches the panel inside its own transaction, not on the next paint.
     #[test]
     fn a_flush_reaches_the_snapshot_before_any_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
 
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
@@ -403,8 +405,9 @@ mod tests {
     /// so a large directory must still only materialise what the viewport shows.
     #[test]
     fn only_the_visible_range_is_materialised() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 let entries = (0..500)
@@ -432,8 +435,9 @@ mod tests {
     /// The cwd poll belongs to the panel, and dropping the panel cancels it.
     #[test]
     fn the_panel_owns_the_cwd_clock() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         vcx.update(|_, cx| {
             assert!(
                 app.read(cx).transfer_panel.read(cx).cwd_clock_is_armed(),
@@ -445,8 +449,9 @@ mod tests {
 
     #[test]
     fn opening_inline_rename_builds_the_input_before_snapshotting() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
 
         cx.update_entity(&app, |app, cx| {
             let entry = super::super::tests_support::browser_entry(7);
@@ -478,8 +483,9 @@ mod tests {
 
     #[test]
     fn inline_rename_is_compact_focused_selected_and_places_the_cursor_at_the_end() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let entry = super::super::tests_support::browser_entry(7);
         let old_path = entry.path.clone();
         let initial_name = entry.name.clone();
@@ -536,8 +542,9 @@ mod tests {
 
     #[test]
     fn selected_name_renames_immediately_and_the_input_preserves_double_click() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let entry = super::super::tests_support::browser_entry(7);
         let identity = entry.identity_key();
         let click = ClickEvent::Mouse(MouseClickEvent {
@@ -623,8 +630,9 @@ mod tests {
     /// this batch entered through the app and never held the panel lease.
     #[test]
     fn a_panel_callback_does_not_double_lease_the_panel() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-panel");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.sync_component_theme(cx);
             app.open_or_toggle_panel(NavItem::Transfers, cx);

@@ -1235,14 +1235,14 @@ fn transfer_navigation_job_is_stale(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::Duration;
 
     use gpui::{
         AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, div,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
     use nyaterm_transport::SftpTransferProgress;
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
@@ -1251,24 +1251,20 @@ mod tests {
         TransferJobEvent, TransferJobKind, TransferJobOutput, TransferJobResult, TransferJobState,
         TransferJobStatus,
     };
+    use crate::test_support::TestConfigDir;
 
     use super::{
         TRANSFER_UI_COALESCE_WINDOW, transfer_event_needs_browser_context,
         transfer_event_needs_ui_refresh, transfer_navigation_job_is_stale,
     };
 
-    fn app(cx: &mut TestAppContext) -> gpui::Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> gpui::Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-transfer-drain-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -1299,8 +1295,11 @@ mod tests {
         }
     }
 
-    fn hosted(cx: &mut TestAppContext) -> (Entity<NyaTermApp>, &mut VisualTestContext) {
-        let app = app(cx);
+    fn hosted<'a>(
+        cx: &'a mut TestAppContext,
+        root: &Path,
+    ) -> (Entity<NyaTermApp>, &'a mut VisualTestContext) {
+        let app = app(cx, root);
         let host_app = app.clone();
         let (_, vcx) = cx.add_window_view(move |_, _| AppHost { app: host_app });
         let vcx: &mut VisualTestContext = vcx;
@@ -1369,8 +1368,8 @@ mod tests {
     /// Returns (GPUI batches, events sent). The span is deliberately held constant
     /// while the producer count varies: that is the only way the batch count can be
     /// shown to track the window rather than the number of transfers.
-    fn stress(cx: &mut TestAppContext, producers: usize) -> (usize, usize) {
-        let (app, vcx) = hosted(cx);
+    fn stress(cx: &mut TestAppContext, root: &Path, producers: usize) -> (usize, usize) {
+        let (app, vcx) = hosted(cx, root);
         let sender = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 for index in 0..producers {
@@ -1420,9 +1419,11 @@ mod tests {
     /// eight straight into the batch count; the window is what stops it.
     #[test]
     fn the_ui_update_rate_does_not_scale_with_the_number_of_transfers() {
+        let one_dir = TestConfigDir::new("nyaterm-transfer-drain");
+        let many_dir = TestConfigDir::new("nyaterm-transfer-drain");
         let mut cx = TestAppContext::single();
-        let (one_batch, one_sent) = stress(&mut cx, 1);
-        let (many_batch, many_sent) = stress(&mut cx, 8);
+        let (one_batch, one_sent) = stress(&mut cx, one_dir.path(), 1);
+        let (many_batch, many_sent) = stress(&mut cx, many_dir.path(), 8);
 
         // The bound: a span of N windows cannot produce more than about N batches,
         // whatever the producer count. One batch of slack for the trailing flush.
@@ -1466,8 +1467,9 @@ mod tests {
     /// call site instead.
     #[test]
     fn the_batch_deadline_is_not_extended_by_later_events() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-drain");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let sender = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 app.transfer.enqueue_transfer_job(running_job("job-0"));
@@ -1513,8 +1515,9 @@ mod tests {
     /// coalesced batch would clone and re-sort the entire directory.
     #[test]
     fn a_progress_batch_does_not_recompute_the_browser_listing() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-drain");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let sender = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 app.transfer
@@ -1570,8 +1573,9 @@ mod tests {
     /// follow-up jobs and dialogs that depend on them.
     #[test]
     fn a_terminal_event_ends_the_batch_without_waiting_for_the_window() {
+        let test_dir = TestConfigDir::new("nyaterm-transfer-drain");
         let mut cx = TestAppContext::single();
-        let (app, vcx) = hosted(&mut cx);
+        let (app, vcx) = hosted(&mut cx, test_dir.path());
         let sender = vcx.update(|_, cx| {
             app.update(cx, |app, cx| {
                 app.transfer.enqueue_transfer_job(running_job("job-0"));

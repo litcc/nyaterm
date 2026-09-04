@@ -388,6 +388,8 @@ impl NyaTermApp {
                 proxies,
                 proxy_groups,
             )),
+            #[cfg(test)]
+            _test_config_dir: None,
         }
     }
 
@@ -412,6 +414,8 @@ impl NyaTermApp {
         stores: crate::entities::UiStoreHandles,
         cx: &mut Context<Self>,
     ) -> Self {
+        let test_config_dir =
+            crate::test_support::TestConfigDir::from_path(runtime.data_dir().to_path_buf());
         let store_runtime = StoreRuntime::spawn(StoreConfig {
             config_dir: runtime.config_dir().to_path_buf(),
             portable_key_path: runtime.portable_key_path().map(ToOwned::to_owned),
@@ -424,6 +428,9 @@ impl NyaTermApp {
             .expect("receive test bootstrap")
             .outcome
             .expect("load test bootstrap");
-        Self::from_bootstrap(runtime, stores, bootstrap, store_ui, store_blocking, cx)
+        let mut app =
+            Self::from_bootstrap(runtime, stores, bootstrap, store_ui, store_blocking, cx);
+        app._test_config_dir = Some(test_config_dir);
+        app
     }
 }

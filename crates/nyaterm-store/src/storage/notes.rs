@@ -971,7 +971,13 @@ fn invalid(message: impl Into<String>) -> StorageError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{
+        fs,
+        ops::Deref,
+        path::{Path, PathBuf},
+        thread,
+        time::{Duration, Instant},
+    };
 
     use redb::ReadableDatabase;
 
@@ -981,14 +987,77 @@ mod tests {
         NoteNodeKind, NotesSnapshot, NotesUiState, PORTABLE_OPAQUE_ENTITIES_TABLE, entity_key,
     };
 
-    fn temp_store() -> ConnectionStore {
-        let dir = std::env::temp_dir().join(format!(
-            "nyaterm-notes-test-{}-{}",
-            std::process::id(),
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&dir).expect("create temp directory");
-        ConnectionStore::open(&dir).expect("open store")
+    struct TempStore {
+        store: Option<ConnectionStore>,
+        dir: PathBuf,
+    }
+
+    impl TempStore {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "nyaterm-notes-test-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4()
+            ));
+            fs::create_dir_all(&dir).expect("create temp directory");
+            let store = ConnectionStore::open(&dir).expect("open store");
+            Self {
+                store: Some(store),
+                dir,
+            }
+        }
+
+        fn path(&self) -> &Path {
+            &self.dir
+        }
+    }
+
+    impl Deref for TempStore {
+        type Target = ConnectionStore;
+
+        fn deref(&self) -> &Self::Target {
+            self.store.as_ref().expect("temporary store is open")
+        }
+    }
+
+    impl Drop for TempStore {
+        fn drop(&mut self) {
+            drop(self.store.take());
+
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match fs::remove_dir_all(&self.dir) {
+                    Ok(()) if !self.dir.exists() => return,
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+                    Err(error) if Instant::now() >= deadline => {
+                        eprintln!(
+                            "failed to clean temporary notes store {}: {error}",
+                            self.dir.display()
+                        );
+                        return;
+                    }
+                    Err(_) => {}
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+        }
+    }
+
+    fn temp_store() -> TempStore {
+        TempStore::new()
+    }
+
+    #[test]
+    fn temporary_store_removes_database_directory_on_drop() {
+        let dir = {
+            let store = temp_store();
+            let dir = store.path().to_path_buf();
+            assert!(dir.join(super::super::DATABASE_FILE).is_file());
+            dir
+        };
+
+        assert!(!dir.exists());
     }
 
     #[test]

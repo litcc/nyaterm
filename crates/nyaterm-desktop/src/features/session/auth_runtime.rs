@@ -935,7 +935,6 @@ mod prompt_state_debug_tests {
         AgentPromptBroker, AgentPromptState, CredentialPromptState, KeyboardInteractivePromptState,
         NativeOtpProvider, TotpUseRecord, TransportSshAgentPromptRequest,
     };
-    use nyaterm_store::{StoreConfig, StoreRuntime};
     use nyaterm_transport::{
         SshAgentPrompt, SshAgentPromptAction, SshAgentPromptPhase, SshCredentialPrompt,
         SshCredentialPromptKind, SshCredentialPromptReason, SshKeyboardInteractivePrompt,
@@ -943,6 +942,8 @@ mod prompt_state_debug_tests {
     };
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
+
+    use crate::test_support::{TestConfigDir, blocking_test_store};
 
     fn agent_prompt() -> SshAgentPrompt {
         SshAgentPrompt {
@@ -1113,17 +1114,8 @@ mod prompt_state_debug_tests {
 
     #[test]
     fn native_otp_provider_debug_redacts_used_codes() {
-        let config_dir = std::env::temp_dir().join(format!(
-            "nyaterm-otp-debug-test-{}-{}",
-            std::process::id(),
-            nyaterm_core::uuid()
-        ));
-        let store = StoreRuntime::spawn(StoreConfig {
-            config_dir,
-            portable_key_path: None,
-        })
-        .expect("spawn test store")
-        .blocking_client();
+        let test_dir = TestConfigDir::new("nyaterm-otp-debug-test");
+        let store = blocking_test_store(test_dir.path());
         let provider = NativeOtpProvider::new(store);
         provider
             .used_totp_codes

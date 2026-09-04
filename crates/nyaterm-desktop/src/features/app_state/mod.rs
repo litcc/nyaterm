@@ -75,6 +75,10 @@ pub struct NyaTermApp {
     pub(in crate::features) sync_input: SyncInputFeatureState,
     pub(in crate::features) recording: RecordingFeatureState,
     pub(in crate::features) tunnel_state: TunnelFeatureState,
+    /// Last field by design: test cleanup must run after storage clients and
+    /// feature-owned background work have released their Windows file handles.
+    #[cfg(test)]
+    pub(in crate::features) _test_config_dir: Option<crate::test_support::TestConfigDir>,
 }
 
 impl gpui::EventEmitter<NotesCatalogEvent> for NyaTermApp {}

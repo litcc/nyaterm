@@ -73,30 +73,27 @@ impl NyaTermApp {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::Duration;
 
     use gpui::{
         AppContext as _, Entity, IntoElement, ParentElement as _, Render, Styled as _,
         TestAppContext, div,
     };
-    use nyaterm_core::{AppRuntime, RuntimeMode, uuid};
+    use nyaterm_core::{AppRuntime, RuntimeMode};
 
     use crate::entities::{OverlayStore, StartupRestoreStore, UiStoreHandles};
     use crate::features::NyaTermApp;
     use crate::models::NavItem;
+    use crate::test_support::TestConfigDir;
 
-    fn app(cx: &mut TestAppContext) -> Entity<NyaTermApp> {
+    fn app(cx: &mut TestAppContext, root: &Path) -> Entity<NyaTermApp> {
         // A uuid rather than a clock reading: these tests run in parallel and
         // Windows' ~15ms clock granularity lets a nanosecond timestamp repeat,
         // which would share one config dir and so one settings database.
-        let root = std::env::temp_dir().join(format!(
-            "nyaterm-cwd-clock-{}-{}",
-            std::process::id(),
-            uuid()
-        ));
         let runtime = AppRuntime::from_parts_for_test(
             RuntimeMode::Portable,
-            root.clone(),
+            root.to_path_buf(),
             root.join("config"),
             root.join("logs"),
             root.join("cache"),
@@ -132,8 +129,9 @@ mod tests {
     /// Nothing wants the poll, so the panel owns no task.
     #[test]
     fn a_closed_browser_owns_no_clock() {
+        let test_dir = TestConfigDir::new("nyaterm-cwd-clock");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             assert!(!app.transfer_cwd_sync_needs_polling());
             app.flush_transfer_panel_snapshot(cx);
@@ -148,8 +146,9 @@ mod tests {
     /// outlive the view that wanted it.
     #[test]
     fn opening_the_browser_gives_the_panel_a_clock_without_a_paint() {
+        let test_dir = TestConfigDir::new("nyaterm-cwd-clock");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.open_or_toggle_panel(NavItem::Transfers, cx);
         });
@@ -164,8 +163,9 @@ mod tests {
     /// Leaving the browser drops it, which cancels the poll.
     #[test]
     fn leaving_the_browser_drops_the_panel_clock() {
+        let test_dir = TestConfigDir::new("nyaterm-cwd-clock");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.open_or_toggle_panel(NavItem::Transfers, cx);
         });
@@ -187,8 +187,9 @@ mod tests {
     /// not showing the browser must not start polling a remote for its cwd.
     #[test]
     fn unrelated_root_paints_cannot_arm_the_clock() {
+        let test_dir = TestConfigDir::new("nyaterm-cwd-clock");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| app.sync_component_theme(cx));
 
         let host_app = app.clone();
@@ -216,8 +217,9 @@ mod tests {
     /// owns the cwd and every mutation of it.
     #[test]
     fn the_panel_clock_beats_through_the_app() {
+        let test_dir = TestConfigDir::new("nyaterm-cwd-clock");
         let mut cx = TestAppContext::single();
-        let app = app(&mut cx);
+        let app = app(&mut cx, test_dir.path());
         cx.update_entity(&app, |app, cx| {
             app.open_or_toggle_panel(NavItem::Transfers, cx);
         });
