@@ -145,24 +145,48 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
             .then(|| browser.search_field.clone())
             .flatten()
             .map(|field| {
+                let close = div()
+                    .id(SharedString::from("transfer-browser-clear-search"))
+                    .size(px(20.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded_sm()
+                    .text_size(px(12.))
+                    .text_color(rgb(palette.text_muted))
+                    .cursor_pointer()
+                    .hover(move |this| {
+                        this.bg(rgb(palette.surface_elevated))
+                            .text_color(rgb(palette.text))
+                    })
+                    .child(
+                        svg()
+                            .size(px(13.))
+                            .path("icons/window/close.svg")
+                            .text_color(rgb(palette.text_muted)),
+                    )
+                    .on_click(cx.listener(|panel, _, window, cx| {
+                        panel.with_app(cx, |this, cx| {
+                            this.clear_or_close_transfer_browser_search(window, cx);
+                        })
+                    }));
                 div()
                     .h_full()
                     .flex_1()
                     .min_w_0()
-                    .px_1()
                     .flex()
                     .items_center()
                     .child(
-                        NyaSearchInput::new("transfer-browser-search", &field).on_key_down(
-                            cx.listener(|panel, event: &KeyDownEvent, window, cx| {
+                        NyaSearchInput::new("transfer-browser-search", &field)
+                            .trailing(close)
+                            .on_key_down(cx.listener(|panel, event: &KeyDownEvent, window, cx| {
                                 panel.with_app(cx, |this, cx| {
                                     if event.keystroke.key == "escape" {
                                         cx.stop_propagation();
                                         this.clear_or_close_transfer_browser_search(window, cx);
                                     }
                                 })
-                            }),
-                        ),
+                            })),
                     )
                     .into_any_element()
             });
@@ -459,49 +483,9 @@ pub(in crate::features::pages::transfers) fn transfer_browser_view(
                                     .bottom(px(2.))
                                     .left(px(4.))
                                     .right(px(4.))
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(rgb(0x388bfd))
-                                    .bg(transparent_surface)
-                                    .px_1()
                                     .flex()
                                     .items_center()
-                                    .gap_1()
-                                    .child(
-                                        svg()
-                                            .size(px(16.))
-                                            .flex_none()
-                                            .path("icons/fe/search.svg")
-                                            .text_color(rgb(palette.link)),
-                                    )
-                                    .children(search_input)
-                                    .child(
-                                        div()
-                                            .id(SharedString::from("transfer-browser-clear-search"))
-                                            .size(px(20.))
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded_sm()
-                                            .text_size(px(12.))
-                                            .text_color(rgb(palette.text_muted))
-                                            .cursor_pointer()
-                                            .hover(|this| {
-                                                this.bg(rgb(palette.surface_elevated))
-                                                    .text_color(rgb(palette.text))
-                                            })
-                                            .child(
-                                                svg()
-                                                    .size(px(13.))
-                                                    .path("icons/window/close.svg")
-                                                    .text_color(rgb(palette.text_muted)),
-                                            )
-                                            .on_click(cx.listener(|panel, _, window, cx| panel.with_app(cx, |this, cx| {
-                                                this.clear_or_close_transfer_browser_search(
-                                                    window, cx,
-                                                );
-                                            }))),
-                                    ),
+                                    .children(search_input),
                             )
                         }),
                 )
