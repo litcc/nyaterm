@@ -9,7 +9,7 @@ use gpui::{
     px, relative, rgb, rgba, svg,
 };
 use nyaterm_core::SavedConnection;
-use nyaterm_ui::{NyaHoverCard, NyaIconButton, NyaInput};
+use nyaterm_ui::{NyaHoverCard, NyaIconButton, NyaInput, NyaPopoverAlign, NyaPopoverPlacement};
 use rust_i18n::t;
 
 use crate::features::{
@@ -691,6 +691,14 @@ pub(in crate::features::pages::connections) fn saved_connection_row(
                     ),
                 ConnectionDetailsHoverCard::new(connection.id.clone(), details_rows, palette),
             )
+            // Beside the row, vertically centred on it, matching Tauri's
+            // `side="right" align="center" sideOffset={6}`. A card below the row
+            // would cover the neighbouring connections. `Positioner::side`
+            // flips to the left when the panel is docked right, so this holds
+            // for either dock edge.
+            .placement(NyaPopoverPlacement::Right)
+            .align(NyaPopoverAlign::Center)
+            .offset(px(6.))
             .open_delay(Duration::from_millis(350))
             .close_delay(Duration::from_millis(120))
             .appearance(false),
@@ -727,10 +735,10 @@ mod hover_card_tests {
     use std::{sync::Arc, time::Duration};
 
     use gpui::{
-        Context, InteractiveElement as _, Modifiers, Render, Styled as _, TestAppContext, Window,
-        div, px,
+        Context, InteractiveElement as _, Modifiers, ParentElement as _, Render, Styled as _,
+        TestAppContext, Window, div, px,
     };
-    use nyaterm_ui::NyaHoverCard;
+    use nyaterm_ui::{NyaHoverCard, NyaPopoverAlign, NyaPopoverPlacement};
 
     use crate::theme::{apply_component_theme, theme_palette};
 
@@ -747,20 +755,32 @@ mod hover_card_tests {
                 multiline: false,
             }]
             .into();
-            NyaHoverCard::new(
-                "connection-details-hover-card-test",
-                div()
-                    .debug_selector(|| "connection-details-hover-card-trigger-test".into())
-                    .size(px(40.)),
-                ConnectionDetailsHoverCard::new(
-                    "test".to_string(),
-                    rows,
-                    theme_palette("github-dark"),
-                ),
-            )
-            .appearance(false)
-            .open_delay(Duration::from_millis(10))
-            .close_delay(Duration::from_millis(120))
+            // Left-aligned host, so the card has room on its preferred side and
+            // the assertions below read the un-flipped placement.
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_start()
+                .child(
+                    NyaHoverCard::new(
+                        "connection-details-hover-card-test",
+                        div()
+                            .debug_selector(|| "connection-details-hover-card-trigger-test".into())
+                            .size(px(40.)),
+                        ConnectionDetailsHoverCard::new(
+                            "test".to_string(),
+                            rows,
+                            theme_palette("github-dark"),
+                        ),
+                    )
+                    .placement(NyaPopoverPlacement::Right)
+                    .align(NyaPopoverAlign::Center)
+                    .offset(px(6.))
+                    .appearance(false)
+                    .open_delay(Duration::from_millis(10))
+                    .close_delay(Duration::from_millis(120)),
+                )
         }
     }
 
@@ -792,6 +812,11 @@ mod hover_card_tests {
         let content = cx
             .debug_bounds(content_selector)
             .expect("opened hover-card content");
+        // Beside the row, not under it: a card below would cover the
+        // neighbouring connections in the list.
+        assert_eq!(content.left(), trigger.right() + px(6.));
+        assert_eq!(content.center().y, trigger.center().y);
+
         cx.simulate_mouse_move(content.center(), None, Modifiers::default());
         cx.executor().advance_clock(Duration::from_millis(120));
         cx.run_until_parked();
