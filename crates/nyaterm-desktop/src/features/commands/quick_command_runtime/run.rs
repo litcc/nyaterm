@@ -5,7 +5,9 @@ use nyaterm_store::{StoreDomain, store_request};
 use crate::features::NyaTermApp;
 use crate::models::QuickCommandVariablePromptState;
 
-use super::helpers::{ai_command_card_category_name, unique_quick_command_category_id};
+use super::helpers::{
+    ai_command_card_category_name, unique_quick_command_category_id, validated_quick_command_text,
+};
 use super::variables::parse_quick_command_variables;
 
 impl NyaTermApp {
@@ -214,13 +216,12 @@ impl NyaTermApp {
             cx.notify();
             return;
         };
-        let command_text = command.command.trim().to_string();
-        if command_text.is_empty() {
+        let Some(command_text) = validated_quick_command_text(&command.command) else {
             self.shell
                 .set_status("quick command has no command text".to_string());
             cx.notify();
             return;
-        }
+        };
         let execute = quick_command_executes(&command);
         let variables = parse_quick_command_variables(&command_text);
         if !variables.is_empty() {
