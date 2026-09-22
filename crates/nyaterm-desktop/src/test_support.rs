@@ -107,6 +107,9 @@ pub(crate) fn spawn_webdav_healthy_server() -> (String, JoinHandle<()>) {
             }
         };
         stream
+            .set_nonblocking(false)
+            .expect("blocking accepted stream");
+        stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .expect("read timeout");
         let mut request = Vec::new();
