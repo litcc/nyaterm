@@ -12,6 +12,7 @@ RELEASE_SCRIPTS = Path(__file__).resolve().parents[1] / "release"
 sys.path.insert(0, str(RELEASE_SCRIPTS))
 
 import generate_release_metadata  # noqa: E402
+import verify_release_metadata  # noqa: E402
 
 
 class GenerateReleaseMetadataTests(unittest.TestCase):
@@ -41,8 +42,8 @@ class GenerateReleaseMetadataTests(unittest.TestCase):
             )
 
             self.assertEqual(len(downloads["platforms"]), 8)
-            self.assertEqual(len(updater["platforms"]), 8)
-            self.assertNotIn("windows-x86_64-portable", updater["platforms"])
+            self.assertEqual(len(updater["platforms"]), 10)
+            self.assertIn("windows-x86_64-portable", updater["platforms"])
             self.assertEqual(
                 downloads["platforms"]["darwin-aarch64"]["url"],
                 "https://downloads.nyaterm.app/releases/v2.0.0/"
@@ -138,6 +139,72 @@ class GenerateReleaseMetadataTests(unittest.TestCase):
             for manifest in (downloads, updater):
                 for platform in manifest["platforms"].values():
                     self.assertIn(f"/releases/v{version}/", platform["url"])
+
+    def test_rejects_noncanonical_release_base_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.make_release(directory)
+            for base_url in (
+                "http://downloads.nyaterm.app",
+                "https://download.nyaterm.app",
+                "https://downloads.nyaterm.app/releases",
+                "https://downloads.nyaterm.app?source=release",
+            ):
+                with self.subTest(base_url=base_url), self.assertRaisesRegex(
+                    ValueError, "canonical origin"
+                ):
+                    generate_release_metadata.generate(
+                        directory,
+                        version="2.0.0",
+                        tag="v2.0.0",
+                        base_url=base_url,
+                        notes="",
+                        pub_date="2026-09-22T00:00:00Z",
+                    )
+
+    def test_verifier_requires_exact_urls_complete_platforms_and_integrity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self.make_release(directory)
+            generate_release_metadata.generate(
+                directory,
+                version="2.0.0",
+                tag="v2.0.0",
+                base_url="https://downloads.nyaterm.app",
+                notes="",
+                pub_date="2026-09-22T00:00:00Z",
+            )
+            urls = verify_release_metadata.verify(
+                directory,
+                version="2.0.0",
+                tag="v2.0.0",
+                base_url="https://downloads.nyaterm.app",
+                check_assets=False,
+            )
+            expected_urls = {
+                template.format(version="2.0.0")
+                for template in (
+                    list(generate_release_metadata.DOWNLOAD_ARTIFACTS.values())
+                    + list(generate_release_metadata.UPDATER_ARTIFACTS.values())
+                )
+            }
+            self.assertEqual(len(urls), len(expected_urls))
+
+            latest_path = directory / "latest.json"
+            latest = json.loads(latest_path.read_text(encoding="utf-8"))
+            latest["platforms"]["windows-x86_64"]["url"] = (
+                "https://downloads.nyaterm.app/releases/releases/v2.0.0/"
+                "NyaTerm_2.0.0_windows_x64-setup.exe"
+            )
+            latest_path.write_text(json.dumps(latest), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "noncanonical"):
+                verify_release_metadata.verify(
+                    directory,
+                    version="2.0.0",
+                    tag="v2.0.0",
+                    base_url="https://downloads.nyaterm.app",
+                    check_assets=False,
+                )
 
 
 if __name__ == "__main__":

@@ -3021,6 +3021,7 @@
     "saveEditorsFirst": "업데이트 설치 전에 수정한 파일을 저장하거나 닫으세요.",
     "installFailed": "업데이트 설치 프로그램을 시작할 수 없습니다.",
     "installAndRestart": "설치 후 재시작",
+    "later": "나중에",
     "downloadFailed": "다운로드에 실패했습니다. 다시 시도하세요.",
     "downloadUpdate": "업데이트 다운로드",
 
@@ -3035,7 +3036,7 @@
     "openReleases": "릴리스 열기",
     "portableManualDesc": "포터블 에디션은 자동 업데이트할 수 없습니다. 최신 zip을 다운로드하고 NyaTerm을 닫은 뒤 파일을 교체하고 데이터 폴더를 유지하세요.",
     "portableManualTitle": "포터블 에디션 업데이트 가능",
-    "readyToRestart": "업데이트가 준비되었습니다. 완료하려면 재시작하세요.",
+    "readyToRestart": "업데이트를 다운로드했습니다. 설치할 준비가 되었습니다.",
     "releaseDate": "릴리스 날짜",
     "releaseNotes": "노트",
     "restartNow": "지금 재시작",

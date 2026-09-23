@@ -6205,6 +6205,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tray-icon",
+ "url",
  "uuid",
  "windows-sys 0.61.2",
  "zed-reqwest",
@@ -6366,6 +6367,7 @@ dependencies = [
  "gpui-kit",
  "ropey",
  "rust-i18n",
+ "url",
 ]
 
 [[package]]

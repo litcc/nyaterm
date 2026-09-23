@@ -3068,6 +3068,7 @@
     "saveEditorsFirst": "安装更新前请保存或关闭已修改的文件。",
     "installFailed": "无法启动更新安装程序。",
     "installAndRestart": "安装并重启",
+    "later": "稍后",
     "downloadFailed": "下载失败，请重试更新。",
     "downloadUpdate": "下载更新",
 
@@ -3082,7 +3083,7 @@
     "openReleases": "打开 Releases",
     "portableManualDesc": "便携版不支持自动更新。请下载最新便携版 zip，关闭 NyaTerm，替换程序文件，并保留 data 目录。",
     "portableManualTitle": "便携版发现新版本",
-    "readyToRestart": "更新已安装，重启以完成更新。",
+    "readyToRestart": "更新已下载，可以安装。",
     "releaseDate": "发布日期",
     "releaseNotes": "更新说明",
     "restartNow": "立即重启",

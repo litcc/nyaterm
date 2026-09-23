@@ -147,7 +147,6 @@ impl NyaTermApp {
         self.start_runtime_data_plane_drain(cx);
         self.start_tunnel_event_drain(cx);
         self.start_translation_event_drain(cx);
-        self.start_update_event_drain(cx);
         self.start_github_gist_auth_event_drain(cx);
         self.start_command_persistence_event_drain(cx);
         self.start_stats_event_drain(cx);

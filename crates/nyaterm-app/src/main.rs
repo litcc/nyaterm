@@ -14,6 +14,10 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 use single_instance::{SingleInstanceOutcome, acquire};
 
 fn main() -> anyhow::Result<()> {
+    if nyaterm_desktop::run_update_helper_if_requested() {
+        return Ok(());
+    }
+    nyaterm_desktop::schedule_update_cleanup();
     let runtime = AppRuntime::resolve().context("resolve nyaterm runtime")?;
     runtime
         .ensure_directories()

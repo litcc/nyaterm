@@ -3068,6 +3068,7 @@
     "saveEditorsFirst": "Save or close edited files before installing the update.",
     "installFailed": "Could not start the update installer.",
     "installAndRestart": "Install and restart",
+    "later": "Later",
     "downloadFailed": "Download failed. Retry the update.",
     "downloadUpdate": "Download update",
 
@@ -3082,7 +3083,7 @@
     "openReleases": "Open Releases",
     "portableManualDesc": "Portable edition cannot auto-update. Download the latest zip, close NyaTerm, replace files, and keep your data folder.",
     "portableManualTitle": "Update available for portable edition",
-    "readyToRestart": "Update installed. Restart to complete.",
+    "readyToRestart": "Update downloaded and ready to install.",
     "releaseDate": "Release Date",
     "releaseNotes": "Notes",
     "restartNow": "Restart Now",

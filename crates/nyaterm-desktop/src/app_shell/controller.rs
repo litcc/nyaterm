@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
+use futures::StreamExt as _;
 use gpui::{
     AnyWindowHandle, AppContext as _, Context, TitlebarOptions, WeakEntity, WindowOptions, point,
     px,
@@ -22,6 +23,7 @@ use super::{
     AppShell, AppShellStartup, GlobalStateMutation, ProcessStateStore, SessionHub,
     SharedStateDomain, SharedStateEvent,
 };
+use crate::features::update::{UpdateCheckKind, UpdateEvent, UpdateStore};
 use crate::features::{SystemTray, TraySnapshot, WorkspaceCloseSnapshot, show_tray_window};
 use crate::models::NavItem;
 
@@ -78,6 +80,7 @@ pub struct DesktopController {
     pending_bootstrap: Option<StoreTask<BootstrapSnapshot>>,
     bootstrap_in_flight: bool,
     process_state: Option<gpui::Entity<ProcessStateStore>>,
+    update_store: gpui::Entity<UpdateStore>,
     shared_refresh_generation: u64,
     applied_shared_refresh_generation: u64,
 }
@@ -106,6 +109,7 @@ impl DesktopController {
             pending_bootstrap,
             bootstrap_in_flight: false,
             process_state: None,
+            update_store: cx.new(|_| UpdateStore::new()),
             shared_refresh_generation: 0,
             applied_shared_refresh_generation: 0,
         }
@@ -151,8 +155,74 @@ impl DesktopController {
             }
         })
         .detach();
+        self.start_update_runtime(cx);
         self.start_tray(cx);
         Ok(())
+    }
+
+    fn start_update_runtime(&mut self, cx: &mut Context<Self>) {
+        if let Some(mut rx) = self
+            .update_store
+            .update(cx, |store, _| store.take_event_receiver())
+        {
+            let update_store = self.update_store.clone();
+            cx.spawn(async move |_, cx| {
+                while let Some(event) = rx.next().await {
+                    update_store.update(cx, |store, cx| {
+                        if store.apply_event(event) {
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
+
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_secs(3)).await;
+            let _ = this.update(cx, |controller, cx| {
+                if controller.process_quitting {
+                    return;
+                }
+                let should_start = controller
+                    .update_store
+                    .update(cx, |store, _| store.mark_startup_check_started());
+                if should_start {
+                    controller.start_update_check(UpdateCheckKind::Silent, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn start_update_check(&mut self, kind: UpdateCheckKind, cx: &mut Context<Self>) {
+        let Some((tx, generation)) = self.update_store.update(cx, |store, cx| {
+            let request = store.begin_check(kind);
+            if request.is_some() {
+                cx.notify();
+            }
+            request
+        }) else {
+            return;
+        };
+        let rejected_tx = tx.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("nyaterm-update-check".to_string())
+            .spawn(move || {
+                let result = crate::http::update::check_native_update();
+                let _ = tx.unbounded_send(UpdateEvent::Check {
+                    generation,
+                    kind,
+                    result,
+                });
+            })
+        {
+            let _ = rejected_tx.unbounded_send(UpdateEvent::Check {
+                generation,
+                kind,
+                result: Err(format!("could not start update check: {error}")),
+            });
+        }
     }
 
     fn launch_initial_bootstrap(&mut self, cx: &mut Context<Self>) {
@@ -493,6 +563,10 @@ impl DesktopController {
         let startup = self.startup.for_new_workspace(workspace_id, ui);
         self.open_workspace_with_startup(startup, request.activation, request.activate, cx)?;
         Ok(workspace_id)
+    }
+
+    pub(crate) fn update_store(&self) -> gpui::Entity<UpdateStore> {
+        self.update_store.clone()
     }
 
     fn workspace_ui_seed(

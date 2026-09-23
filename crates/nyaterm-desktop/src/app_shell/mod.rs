@@ -37,7 +37,7 @@ use rust_i18n::t;
 
 use crate::{
     entities::{OverlayStore, StartupRestoreStore, UiStoreHandles},
-    features::{AppLifecycleEvent, NyaTermApp, NyaTermStoreClients},
+    features::{AppLifecycleEvent, NyaTermApp, NyaTermProcessEntities, NyaTermStoreClients},
 };
 
 const SHUTDOWN_STATUS_DELAY: Duration = Duration::from_millis(200);
@@ -332,12 +332,13 @@ impl AppShell {
             startup_restore: self.startup_restore.clone(),
             overlays: self.overlays.clone(),
         };
+        let update_store = self.controller.read(cx).update_store();
         let app = cx.new(|cx| {
             let session_manager = self.session_hub.read(cx).manager();
             NyaTermApp::from_bootstrap(
                 self.runtime.clone(),
                 stores,
-                process_state,
+                NyaTermProcessEntities::new(process_state, update_store.clone()),
                 workspace_init,
                 NyaTermStoreClients::new(
                     store_runtime.ui_client(),
@@ -413,6 +414,12 @@ impl AppShell {
             });
         self._subscriptions.push(shutdown_subscription);
         self.app = Some(app);
+        let update_subscription = cx.observe(&update_store, |this, _, cx| {
+            if let Some(app) = this.app.clone() {
+                app.update(cx, |_, cx| cx.notify());
+            }
+        });
+        self._subscriptions.push(update_subscription);
         self.lifecycle = AppShellLifecycle::Ready;
         self.start_ready_app(window, cx);
         self.drain_pending_activations(cx);
@@ -633,10 +640,25 @@ impl AppShell {
         }
     }
 
-    fn quit_after_worker_shutdown(&mut self, cx: &mut Context<Self>) {
-        let controller = self.controller.downgrade();
+    fn quit_after_worker_shutdown(&mut self, launch_update: bool, cx: &mut Context<Self>) {
+        self.controller
+            .update(cx, |controller, cx| controller.shutdown_all_workspaces(cx));
+        if launch_update && let Some(app) = &self.app {
+            let update_result =
+                app.update(cx, |app, cx| app.launch_pending_update_after_shutdown(cx));
+            if let Err(error) = update_result {
+                if let Some(store_runtime) = &self.store_runtime {
+                    store_runtime.resume_after_failed_shutdown();
+                }
+                self.controller
+                    .update(cx, |controller, _| controller.cancel_process_quit());
+                self.lifecycle = AppShellLifecycle::FlushFailed(error.clone());
+                app.update(cx, |app, cx| app.report_close_save_failed(error, cx));
+                cx.notify();
+                return;
+            }
+        }
         cx.defer(move |cx| {
-            let _ = controller.update(cx, |controller, cx| controller.shutdown_all_workspaces(cx));
             cx.quit();
         });
     }
@@ -764,7 +786,7 @@ impl AppShell {
                     this.lifecycle = AppShellLifecycle::FlushFailed(error.to_string());
                     cx.notify();
                 } else {
-                    this.quit_after_worker_shutdown(cx);
+                    this.quit_after_worker_shutdown(true, cx);
                 }
             });
         })
@@ -963,7 +985,7 @@ impl AppShell {
                                     NyaButton::new("shutdown-force", "Force Quit")
                                         .variant(NyaButtonVariant::Danger)
                                         .on_click(cx.listener(|this, _, _, cx| {
-                                            this.quit_after_worker_shutdown(cx);
+                                            this.quit_after_worker_shutdown(false, cx);
                                         })),
                                 ),
                         ),

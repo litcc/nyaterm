@@ -371,7 +371,8 @@ impl NyaTermApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.update.install_requested = false;
+        self.update
+            .update(cx, |update, _| update.install_requested = false);
         self.session.dialog_cancel_close_all_sessions_confirm();
         self.shell
             .set_status("close all sessions cancelled".to_string());

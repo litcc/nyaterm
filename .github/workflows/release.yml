@@ -387,6 +387,8 @@ jobs:
             "dist-release/NyaTerm_${VERSION}_linux_x64.AppImage"
             "dist-release/NyaTerm_${VERSION}_windows_arm64-setup.exe"
             "dist-release/NyaTerm_${VERSION}_windows_x64-setup.exe"
+            "dist-release/NyaTerm_${VERSION}_windows_arm64_portable.zip"
+            "dist-release/NyaTerm_${VERSION}_windows_x64_portable.zip"
           )
           for file in "${files[@]}"; do
             npx --yes @tauri-apps/cli@2.10.0 signer sign --password "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" "${file}"
@@ -408,6 +410,9 @@ jobs:
           python3 scripts/release/generate_release_metadata.py \
             --dist dist-release --version "${VERSION}" --tag "${TAG}" \
             --base-url "${BASE_URL}" --notes-file release-notes.md --pub-date "${PUB_DATE}"
+          python3 scripts/release/verify_release_metadata.py \
+            --directory dist-release --version "${VERSION}" --tag "${TAG}" \
+            --base-url "${BASE_URL}"
           rm -- dist-release/*.sig
       - name: Create or update GitHub Release
         shell: bash
@@ -460,6 +465,10 @@ jobs:
             fi
           done
           aws --version
+          [[ "${BASE_URL}" == 'https://downloads.nyaterm.app' ]] || {
+            echo 'R2_PUBLIC_BASE_URL must be https://downloads.nyaterm.app' >&2
+            exit 1
+          }
       - name: Download GitHub release assets
         shell: bash
         env:
@@ -509,6 +518,9 @@ jobs:
               raise SystemExit(f"invalid release manifest: {sys.argv[1]}")
           PY
           done
+          python3 scripts/release/verify_release_metadata.py \
+            --directory "${verified}" --version "${VERSION}" --tag "${TAG}" \
+            --base-url "${BASE_URL}" --check-assets
       - name: Update stable channel manifests
         if: needs.release.outputs.prerelease == 'false'
         shell: bash
@@ -559,6 +571,13 @@ jobs:
               exit 1
             }
           done
+          public_dir="${RUNNER_TEMP}/public-stable"
+          mkdir "${public_dir}"
+          cp "${RUNNER_TEMP}/public-latest.json" "${public_dir}/latest.json"
+          cp "${RUNNER_TEMP}/public-downloads.json" "${public_dir}/downloads.json"
+          python3 scripts/release/verify_release_metadata.py \
+            --directory "${public_dir}" --version "${VERSION}" --tag "${TAG}" \
+            --base-url "${BASE_URL}" --check-assets
       - name: Verify public preview manifests
         if: needs.release.outputs.prerelease == 'true'
         shell: bash
@@ -589,3 +608,10 @@ jobs:
               exit 1
             }
           done
+          public_dir="${RUNNER_TEMP}/public-preview"
+          mkdir "${public_dir}"
+          cp "${RUNNER_TEMP}/public-preview-latest.json" "${public_dir}/latest.json"
+          cp "${RUNNER_TEMP}/public-preview-downloads.json" "${public_dir}/downloads.json"
+          python3 scripts/release/verify_release_metadata.py \
+            --directory "${public_dir}" --version "${VERSION}" --tag "${TAG}" \
+            --base-url "${BASE_URL}" --check-assets

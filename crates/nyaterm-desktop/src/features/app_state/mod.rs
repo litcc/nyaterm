@@ -26,7 +26,6 @@ use super::text_inputs::TextInputRegistry;
 use super::transfers::TransferFeatureState;
 use super::translation::TranslationFeatureState;
 use super::tunnels::TunnelFeatureState;
-use super::update::UpdateFeatureState;
 
 mod construct;
 mod store_runtime;
@@ -38,6 +37,23 @@ pub(in crate::features) use types::SettingsDraftSnapshot;
 pub(crate) struct NyaTermStoreClients {
     pub(crate) ui: StoreUiClient,
     pub(crate) blocking: StoreBlockingClient,
+}
+
+pub(crate) struct NyaTermProcessEntities {
+    pub(crate) process_state: gpui::Entity<crate::app_shell::ProcessStateStore>,
+    pub(crate) update: gpui::Entity<super::update::UpdateStore>,
+}
+
+impl NyaTermProcessEntities {
+    pub(crate) fn new(
+        process_state: gpui::Entity<crate::app_shell::ProcessStateStore>,
+        update: gpui::Entity<super::update::UpdateStore>,
+    ) -> Self {
+        Self {
+            process_state,
+            update,
+        }
+    }
 }
 
 impl NyaTermStoreClients {
@@ -85,7 +101,7 @@ pub struct NyaTermApp {
     pub(in crate::features) send_command: SendCommandFeatureState,
     pub(in crate::features) transfer: TransferFeatureState,
     pub(in crate::features) translation: TranslationFeatureState,
-    pub(in crate::features) update: UpdateFeatureState,
+    pub(in crate::features) update: gpui::Entity<super::update::UpdateStore>,
     pub(in crate::features) cloud_sync: CloudSyncFeatureState,
     pub(in crate::features) session: SessionFeatureState,
     pub(in crate::features) shell: ShellFeatureState,

@@ -3021,6 +3021,7 @@
     "saveEditorsFirst": "Enregistrez ou fermez les fichiers modifiés avant la mise à jour.",
     "installFailed": "Impossible de démarrer le programme de mise à jour.",
     "installAndRestart": "Installer et redémarrer",
+    "later": "Plus tard",
     "downloadFailed": "Échec du téléchargement. Réessayez.",
     "downloadUpdate": "Télécharger la mise à jour",
 
@@ -3035,7 +3036,7 @@
     "openReleases": "Ouvrir les versions",
     "portableManualDesc": "L'édition portable ne peut pas se mettre à jour automatiquement. Téléchargez le dernier zip, fermez NyaTerm, remplacez les fichiers et conservez votre dossier de données.",
     "portableManualTitle": "Mise à jour disponible pour l'édition portable",
-    "readyToRestart": "Mise à jour installée. Redémarrez pour terminer.",
+    "readyToRestart": "Mise à jour téléchargée et prête à être installée.",
     "releaseDate": "Date de publication",
     "releaseNotes": "Notes",
     "restartNow": "Redémarrer maintenant",

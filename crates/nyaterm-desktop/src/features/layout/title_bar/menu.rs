@@ -312,9 +312,10 @@ impl NyaTermApp {
     }
 
     fn title_help_menu_items(&self, cx: &mut Context<Self>) -> Vec<NyaMenuItem> {
-        let update_label = if self.update.is_pending() {
+        let update = self.update.read(cx);
+        let update_label = if update.is_pending() {
             t!("updater.checking")
-        } else if self.update.info().is_some_and(|info| info.available) {
+        } else if update.info().is_some_and(|info| info.available) {
             t!("updater.newVersionAvailable")
         } else {
             t!("menu.checkForUpdates")

@@ -15,7 +15,7 @@ use nyaterm_transport::{SessionManager, SftpDuplicatePolicy};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{NyaTermApp, NyaTermStoreClients};
+use super::{NyaTermApp, NyaTermProcessEntities, NyaTermStoreClients};
 use crate::features::ai::{
     AiFeatureFocus, AiFeatureInit, AiFeatureState, AiPanel, ai_active_profile_drafts,
 };
@@ -48,19 +48,22 @@ use crate::features::text_inputs::TextInputRegistry;
 use crate::features::transfers::{TransferFeatureFocus, TransferFeatureState};
 use crate::features::translation::TranslationFeatureState;
 use crate::features::tunnels::{TunnelCatalogState, TunnelFeatureState};
-use crate::features::update::UpdateFeatureState;
 use crate::models::panel_collapsed_from_persistence;
 use crate::terminal::INITIAL_TERMINAL_BANNER;
 impl NyaTermApp {
     pub(crate) fn from_bootstrap(
         runtime: AppRuntime,
         stores: crate::entities::UiStoreHandles,
-        process_state: gpui::Entity<crate::app_shell::ProcessStateStore>,
+        process_entities: NyaTermProcessEntities,
         workspace_init: crate::app_shell::WorkspaceInitSnapshot,
         store_clients: NyaTermStoreClients,
         session_manager: Arc<SessionManager>,
         cx: &mut Context<Self>,
     ) -> Self {
+        let NyaTermProcessEntities {
+            process_state,
+            update,
+        } = process_entities;
         nyaterm_core::warm_terminal_input_tracker();
         let NyaTermStoreClients {
             ui: store_ui,
@@ -347,7 +350,7 @@ impl NyaTermApp {
             remote_panels,
             remote_desktop: RemoteDesktopFeatureState::new(cx.focus_handle()),
             translation: TranslationFeatureState::new(translation_settings),
-            update: UpdateFeatureState::new(),
+            update,
             cloud_sync: CloudSyncFeatureState::new(
                 cloud_sync_settings,
                 cloud_sync_state,
@@ -465,10 +468,11 @@ impl NyaTermApp {
             .unwrap_or_default();
         let process_state = cx.new(|_| crate::app_shell::ProcessStateStore::new(bootstrap));
         let workspace_init = process_state.read(cx).workspace_init(workspace_id);
+        let update = cx.new(|_| crate::features::update::UpdateStore::new());
         let mut app = Self::from_bootstrap(
             runtime,
             stores,
-            process_state,
+            NyaTermProcessEntities::new(process_state, update),
             workspace_init,
             NyaTermStoreClients::new(store_ui, store_blocking),
             Arc::new(SessionManager::new()),

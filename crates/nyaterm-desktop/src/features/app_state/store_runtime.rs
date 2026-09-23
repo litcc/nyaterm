@@ -147,7 +147,6 @@ impl NyaTermApp {
     }
 
     pub(crate) fn shutdown_blocking_jobs(&mut self) {
-        self.update.download_cancel.cancel();
         self.remote_desktop.routes.clear();
         self.remote_desktop.prepared_routes.clear();
         self.shutdown_remote_desktop_workers();

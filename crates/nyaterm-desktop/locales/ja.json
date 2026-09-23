@@ -3030,6 +3030,7 @@
     "saveEditorsFirst": "更新をインストールする前に編集したファイルを保存または閉じてください。",
     "installFailed": "更新インストーラーを起動できませんでした。",
     "installAndRestart": "インストールして再起動",
+    "later": "後で",
     "downloadFailed": "ダウンロードに失敗しました。再試行してください。",
     "downloadUpdate": "更新をダウンロード",
 
@@ -3044,7 +3045,7 @@
     "openReleases": "リリースを開く",
     "portableManualDesc": "ポータブル版は自動更新できません。最新の zip をダウンロードし、NyaTerm を閉じてファイルを置き換え、データフォルダーは保持してください。",
     "portableManualTitle": "ポータブル版の更新が利用可能",
-    "readyToRestart": "更新をインストールしました。再起動して完了してください。",
+    "readyToRestart": "更新をダウンロードしました。インストールできます。",
     "releaseDate": "リリース日",
     "releaseNotes": "ノート",
     "restartNow": "今すぐ再起動",

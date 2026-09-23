@@ -10,6 +10,7 @@ pub mod document_syntax;
 mod hover_card;
 mod input;
 mod input_focus;
+mod markdown;
 mod menu;
 pub mod notification;
 mod number_input;
@@ -42,6 +43,7 @@ pub use hover_card::NyaHoverCard;
 pub use input::{
     NyaInput, NyaInputEvent, NyaInputShell, NyaInputState, NyaSearchInput, NyaTextArea,
 };
+pub use markdown::NyaMarkdown;
 pub use menu::{NyaContextMenu, NyaDropdownMenu, NyaMenuAnchor, NyaMenuItem};
 pub use number_input::{
     NyaNumberInput, NyaNumberInputEvent, NyaNumberInputOptions, NyaNumberInputState, NyaNumberStep,
